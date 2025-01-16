@@ -2,12 +2,12 @@ import logging
 import re
 from typing import List
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     Observation,
     FewShotExample,
@@ -39,7 +39,8 @@ class StringReplaceArgs(ActionArguments):
     * No changes will be made if old_str appears multiple times or cannot be found
     * Do not include line numbers in old_str or new_str - provide only the actual code content
     """
-
+    model_config = ConfigDict(title="StringReplace")
+    
     path: str = Field(..., description="Path to the file to edit")
     old_str: str = Field(
         ...,
@@ -81,8 +82,7 @@ class StringReplaceArgs(ActionArguments):
 
         return self
 
-    class Config:
-        title = "StringReplace"
+    
 
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
@@ -341,6 +341,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)
+
         context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section

@@ -12,6 +12,7 @@ class MessageHistoryType(Enum):
     SUMMARY = "summary"  # Generates one message with summarized history
     REACT = "react"
     MESSAGES_COMPACT = "messages_compact"
+    INSTRUCTION = "instruct"
 
     @classmethod
     def _missing_(cls, value: str):

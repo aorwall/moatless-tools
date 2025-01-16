@@ -1,7 +1,7 @@
 import logging
 from typing import Optional, Dict, Any, Callable, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from moatless.agent.agent import ActionAgent
 from moatless.artifacts.artifact import ArtifactChange, ArtifactHandler, Artifact
@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 class Chat(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     current_node: Optional[Node] = Field(
         None, description="The root node of the chat sequence."
     )
@@ -34,9 +36,6 @@ class Chat(BaseModel):
     persist_path: Optional[str] = Field(
         None, description="Path to persist the chat sequence."
     )
-
-    class Config:
-        arbitrary_types_allowed = True
 
     def send_message(
         self, message: str, attachments: Optional[List[Attachment]] = None

@@ -20,7 +20,6 @@ from moatless.file_context import FileContext
 from moatless.loop import AgenticLoop
 from moatless.node import Node
 from moatless.utils.file import is_test
-from moatless.completion.model import Usage
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +433,7 @@ def to_result(
             total_cost=total_usage.get_calculated_cost(model),
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
-            cached_tokens=total_usage.cached_tokens,
+            cached_tokens=total_usage.cache_read_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,

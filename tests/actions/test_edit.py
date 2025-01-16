@@ -2,11 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from moatless.actions.edit import ClaudeEditTool, EditActionArguments
-from moatless.actions.model import Observation
+from moatless.actions.claude_text_editor import ClaudeEditTool, EditActionArguments
+from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
 from moatless.repository import FileRepository
-from moatless.repository.repository import InMemRepository
 
 
 @pytest.fixture
@@ -19,7 +18,7 @@ def file_context(repo):
 
 
 @pytest.fixture
-def test_file(repo):
+def test_file(repo, file_context):
     file_path = Path(repo.repo_path) / "src" / "test.py"
     content = """def hello():
     print("Hello, World!")
@@ -30,12 +29,13 @@ def add(a, b):
 """
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
+    file_context.add_file("src/test.py", show_all_spans=True)
 
     return "/src/test.py"
 
 @pytest.fixture
-def edit_action(repository):
-    return ClaudeEditTool(repository=repository)
+def edit_action(repo):
+    return ClaudeEditTool(repository=repo)
 
 def test_view_command(edit_action, file_context, test_file):
     args = EditActionArguments(
@@ -89,7 +89,6 @@ def test_str_replace_command(edit_action, file_context, test_file):
         new_str='print("Hi, World!")'
     )
 
-    file_context.add_file(test_file, show_all_spans=True)
     result = edit_action.execute(args, file_context)
     assert isinstance(result, Observation)
     assert result.properties.get("diff")

@@ -8,10 +8,11 @@ from litellm.types.utils import ModelResponse
 
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.find_function import FindFunctionArgs
-from moatless.actions.model import ActionArguments
+from moatless.actions.schema import ActionArguments
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.completion.completion import CompletionModel, LLMResponseFormat, CompletionResponse
-from moatless.completion.model import Usage, Completion, StructuredOutput
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat, CompletionResponse
+from moatless.completion.model import Usage, Completion
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
 
 
@@ -130,7 +131,7 @@ Action Input: {"query": "2 + 2 = 4"}"""
             usage=Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30)
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -156,7 +157,7 @@ Action Input: {"query": "2 + 2 = 4"}"""
             assert result.completion == mock_response
 
     def test_litellm_react_completion_invalid_format(self):
-        class TestAction(StructuredOutput):
+        class TestAction(ResponseSchema):
             name = "test_action"
             query: str
 
@@ -167,7 +168,7 @@ Action Input: {"query": "2 + 2 = 4"}"""
             }
         }]
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -184,7 +185,7 @@ Action Input: {"query": "2 + 2 = 4"}"""
             assert "Missing Thought, Action or Action Input sections" in str(exc_info.value)
 
     def test_litellm_react_completion_invalid_action(self):
-        class TestAction(StructuredOutput):
+        class TestAction(ResponseSchema):
             name = "test_action"
             query: str
 
@@ -197,7 +198,7 @@ Action Input: {"query": "4"}"""
             }
         }]
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -214,7 +215,7 @@ Action Input: {"query": "4"}"""
             assert "Unknown action: unknown_action" in str(exc_info.value)
 
     def test_litellm_react_completion_with_none_value(self):
-        class TestAction(StructuredOutput):
+        class TestAction(ResponseSchema):
             name = "test_action"
             query: str
             optional_field: Optional[str] = None
@@ -228,7 +229,7 @@ Action Input: {"query": "test", "optional_field": None}"""
             model="gpt-3.5-turbo",
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -254,7 +255,7 @@ Action Input: {"path":"tests/queries/test_q.py","old_str":"        with self.ass
 
         mock_response = ModelResponse()
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -301,7 +302,7 @@ Action Input: {
         )
 
         # Create completion model instance with mocked text completion
-        completion_model = CompletionModel(
+        completion_model = BaseCompletionModel(
             model="test-model",
             response_format=LLMResponseFormat.REACT,
             action=[StringReplaceArgs]
@@ -350,7 +351,7 @@ Action Input: {"path": "sympy/printing/latex.py", "old_str": "r\"\\left\[\" + r\
         )
 
         # Create completion model instance with mocked text completion
-        completion_model = CompletionModel(
+        completion_model = BaseCompletionModel(
             model="test-model",
             response_format=LLMResponseFormat.REACT,
             action=[StringReplaceArgs]
@@ -381,7 +382,7 @@ Action Input: {"path": "sympy/printing/latex.py", "old_str": "r\"\\left\[\" + r\
         assert result.new_str == "        with self.assertRaisesMessage(TypeError, str(obj)):\n            q & obj\n\n        # Test for non-pickleable object in Q object\n        q1 = Q(x__in={}.keys())\n        q2 = Q(y__in={}.keys())\n        self.assertEqual(q1 | q2, Q(x__in=[], y__in=[]))"
 
     def test_serialization_deserialization(self):
-        model = CompletionModel(
+        model = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             max_tokens=1000,
@@ -391,7 +392,7 @@ Action Input: {"path": "sympy/printing/latex.py", "old_str": "r\"\\left\[\" + r\
         serialized = model.model_dump()
         assert serialized["response_format"] == "tool_call"
 
-        deserialized = CompletionModel.model_validate(serialized)
+        deserialized = BaseCompletionModel.model_validate(serialized)
         assert deserialized.response_format == LLMResponseFormat.TOOLS
 
         # Check if it's JSON serializable
@@ -420,7 +421,7 @@ Action Input:
             usage={"prompt_tokens": 10, "completion_tokens": 20}
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -467,7 +468,7 @@ DATABASES = {
             usage={"prompt_tokens": 15, "completion_tokens": 25}
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -507,7 +508,7 @@ Action Input:
             model="gpt-3.5-turbo",
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -541,7 +542,7 @@ Action Input:
             usage={"prompt_tokens": 10, "completion_tokens": 20}
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.REACT
@@ -584,7 +585,7 @@ Action Input:
             usage={"prompt_tokens": 10, "completion_tokens": 20}
         )
 
-        completion = CompletionModel(
+        completion = BaseCompletionModel(
             model="gpt-3.5-turbo",
             temperature=0.7,
             response_format=LLMResponseFormat.TOOLS

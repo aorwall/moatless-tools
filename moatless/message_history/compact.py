@@ -1,173 +1,32 @@
 import logging
-from typing import List, Any
+from typing import List
 
-from litellm.types.llms.openai import (
-    AllMessageValues,
-    ChatCompletionAssistantMessage,
-    ChatCompletionToolMessage,
-    ChatCompletionUserMessage,
-)
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import Field
 
-from moatless.actions.model import ActionArguments
 from moatless.actions.run_tests import RunTestsArgs
+from moatless.actions.schema import ActionArguments
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.actions.view_diff import ViewDiffArgs
+from moatless.completion.schema import (
+    ChatCompletionAssistantMessage,
+    ChatCompletionToolMessage,
+    ChatCompletionUserMessage, AllMessageValues, )
+from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
-from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
 
-class MessageHistoryGenerator(BaseModel):
-    message_history_type: MessageHistoryType = Field(
-        default=MessageHistoryType.MESSAGES,
-        description="Type of message history to generate",
-    )
-    include_file_context: bool = Field(
-        default=True, description="Whether to include file context in messages"
-    )
-    include_git_patch: bool = Field(
-        default=True, description="Whether to include git patch in messages"
-    )
-    include_root_node: bool = Field(default=True)
-    max_tokens: int = Field(
-        default=20000, description="Maximum number of tokens allowed in message history"
-    )
-    thoughts_in_action: bool = Field(
-        default=False,
-        description="Whether to include thoughts in the action or in the message",
-    )
-    enable_index_in_tool_call: bool = Field(
-        default=True, description="Whether to include index in the tool call"
+class CompactMessageHistoryGenerator(MessageHistoryGenerator):
+
+    message_cache: bool = Field(
+        default=False, description="Cache the message history if the LLM supports it"
     )
 
-    model_config = {
-        "ser_json_timedelta": "iso8601",
-        "ser_json_bytes": "base64",
-        "ser_json_inf_nan": "null",
-        "json_schema_serialization_defaults": True,
-        "json_encoders": None,  # Remove this as it's v1 syntax
-    }
+    def generate_messages(self, node: Node) -> List[AllMessageValues]:
+        previous_nodes = node.get_trajectory()
 
-    def __init__(self, **data: Any):
-        super().__init__(**data)
-
-    @field_serializer("message_history_type")
-    def serialize_message_history_type(
-        self, message_history_type: MessageHistoryType
-    ) -> str:
-        return message_history_type.value
-
-    def generate(self, node: "Node") -> List[AllMessageValues]:  # type: ignore
-        logger.debug(
-            f"Generating message history for Node{node.node_id}: {self.message_history_type}"
-        )
-        generators = {
-            MessageHistoryType.SUMMARY: self._generate_summary_history,
-            MessageHistoryType.REACT: self._generate_react_history,
-            MessageHistoryType.MESSAGES: self._generate_message_history,
-            MessageHistoryType.MESSAGES_COMPACT: self._generate_compact_message_history,
-        }
-        start_idx = 0 if self.include_root_node else 1
-        previous_nodes = node.get_trajectory()[start_idx:]
-        return generators[self.message_history_type](node, previous_nodes)
-
-    def _generate_message_history(
-        self, node: Node, previous_nodes: List["Node"]
-    ) -> List[dict[str, Any]]:
-        messages = []
-        tool_idx = 0
-        tokens = 0
-
-        for i, previous_node in enumerate(previous_nodes):
-            # Handle user message
-            if previous_node.user_message:
-                message_content = [{"type": "text", "text": previous_node.user_message}]
-
-                if previous_node.artifact_changes:
-                    for change in previous_node.artifact_changes:
-                        artifact = previous_node.workspace.get_artifact_by_id(
-                            change.artifact_id
-                        )
-                        if artifact:
-                            message = f"{artifact.type} artifact: {artifact.id}"
-                            message_content.append({"type": "text", "text": message})
-                            message_content.append(artifact.to_prompt_format())
-
-                messages.append(
-                    ChatCompletionUserMessage(role="user", content=message_content)
-                )
-                tokens += count_tokens(previous_node.user_message)
-
-            tool_calls = []
-            tool_responses = []
-
-            if previous_node.feedback_data:
-                messages.append(
-                    ChatCompletionUserMessage(
-                        role="user", content=previous_node.feedback_data.feedback
-                    )
-                )
-
-            if not previous_node.assistant_message and not previous_node.action_steps:
-                continue
-
-            for action_step in previous_node.action_steps:
-                tool_idx += 1
-                tool_call_id = f"tool_{tool_idx}"
-
-                exclude = None
-                if not self.thoughts_in_action:
-                    exclude = {"thoughts"}
-
-                tool_calls.append(
-                    {
-                        "id": tool_call_id,
-                        "type": "function",
-                        "function": {
-                            "name": action_step.action.name,
-                            "arguments": action_step.action.model_dump_json(
-                                exclude=exclude
-                            ),
-                        },
-                    }
-                )
-
-                tokens += count_tokens(
-                    action_step.action.model_dump_json(exclude=exclude)
-                )
-
-                tool_responses.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": action_step.observation.message,
-                    }
-                )
-
-                tokens += count_tokens(action_step.observation.message)
-
-            assistant_message = {"role": "assistant"}
-
-            if tool_calls:
-                assistant_message["tool_calls"] = tool_calls
-
-            if previous_node.assistant_message:
-                assistant_message["content"] = previous_node.assistant_message
-                tokens += count_tokens(previous_node.assistant_message)
-
-            messages.append(assistant_message)
-            messages.extend(tool_responses)
-
-        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
-
-        return messages
-
-    def _generate_compact_message_history(
-        self, node: Node, previous_nodes: List["Node"]
-    ) -> List[dict[str, Any]]:
         messages = [
             ChatCompletionUserMessage(role="user", content=node.get_root().message)
         ]
@@ -224,123 +83,6 @@ class MessageHistoryGenerator(BaseModel):
 
         return messages
 
-    def _generate_react_history(
-        self, node: "Node", previous_nodes: List["Node"]
-    ) -> List[AllMessageValues]:
-        messages = [
-            ChatCompletionUserMessage(role="user", content=node.get_root().message)
-        ]
-
-        if len(previous_nodes) <= 1:
-            return messages
-
-        node_messages = self.get_node_messages(node)
-
-        # Convert node messages to react format
-        for action, observation in node_messages:
-            # Add thought and action message
-            if self.thoughts_in_action:
-                thought = (
-                    f"Thought: {action.thoughts}" if hasattr(action, "thoughts") else ""
-                )
-            else:
-                thought = ""
-            action_str = f"Action: {action.name}"
-            action_input = action.format_args_for_llm()
-
-            if thought:
-                assistant_content = f"{thought}\n{action_str}"
-            else:
-                assistant_content = action_str
-
-            if action_input:
-                assistant_content += f"\n{action_input}"
-
-            messages.append(
-                ChatCompletionAssistantMessage(
-                    role="assistant", content=assistant_content
-                )
-            )
-            messages.append(
-                ChatCompletionUserMessage(
-                    role="user", content=f"Observation: {observation}"
-                )
-            )
-
-        tokens = count_tokens(
-            "".join([m["content"] for m in messages if m.get("content")])
-        )
-        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
-        return messages
-
-    def _generate_summary_history(
-        self, node: Node, previous_nodes: List[Node]
-    ) -> List[AllMessageValues]:
-        formatted_history: List[str] = []
-        counter = 0
-
-        if self.include_root_node:
-            content = node.get_root().message
-            if not previous_nodes:
-                return [ChatCompletionUserMessage(role="user", content=content)]
-        else:
-            content = ""
-            if not previous_nodes:
-                return []
-
-        for i, previous_node in enumerate(previous_nodes):
-            if previous_node.action:
-                counter += 1
-                formatted_state = f"\n\n## Step {counter}\n"
-                if previous_node.action.thoughts:
-                    formatted_state += f"Thoughts: {previous_node.action.thoughts}\n"
-                formatted_state += f"Action: {previous_node.action.name}\n"
-                formatted_state += previous_node.action.to_prompt()
-
-                if previous_node.observation:
-                    if (
-                        hasattr(previous_node.observation, "summary")
-                        and previous_node.observation.summary
-                        and i < len(previous_nodes) - 1
-                    ):
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.summary}"
-                        )
-                    else:
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.message}"
-                        )
-                else:
-                    logger.warning(f"No output found for Node{previous_node.node_id}")
-                    formatted_state += "\n\nObservation: No output found."
-
-                formatted_history.append(formatted_state)
-
-        # content += "\n\nBelow is the history of previously executed actions and their observations.\n"
-        content += "<history>\n"
-        content += "\n".join(formatted_history)
-        content += "\n</history>\n\n"
-
-        if self.include_file_context:
-            content += "\n\nThe following code has already been viewed:\n"
-            content += node.file_context.create_prompt(
-                show_span_ids=False,
-                show_line_numbers=True,
-                exclude_comments=False,
-                show_outcommented_code=True,
-                outcomment_code_comment="... rest of the code",
-            )
-
-        if self.include_git_patch:
-            git_patch = node.file_context.generate_git_patch()
-            if git_patch:
-                content += "\n\nThe current git diff is:\n"
-                content += "```diff\n"
-                content += git_patch
-                content += "\n```"
-
-        return [ChatCompletionUserMessage(role="user", content=content)]
-
     def get_node_messages(self, node: "Node") -> List[tuple[ActionArguments, str]]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
@@ -366,10 +108,10 @@ class MessageHistoryGenerator(BaseModel):
         if node.file_context.has_runtime and node.file_context.has_patch():
             if node.file_context.has_test_patch():
                 thoughts = (
-                    "<thoughts>Run the updated tests to verify the changes.</thoughts>"
+                    "Run the updated tests to verify the changes."
                 )
             else:
-                thoughts = "<thoughts>Before adding new test cases I run the existing tests to verify regressions.</thoughts>"
+                thoughts = "Before adding new test cases I run the existing tests to verify regressions."
 
             run_tests_args = RunTestsArgs(
                 thoughts=thoughts, test_files=list(node.file_context._test_files.keys())
@@ -399,7 +141,7 @@ class MessageHistoryGenerator(BaseModel):
             if previous_node.action_steps:
                 for i, action_step in enumerate(previous_node.action_steps):
                     # FIXME: Make consistent way of handling thoughts!
-                    if i == 0:
+                    if i == 0 and not action_step.action.thoughts:
                         action_step.action.thoughts = previous_node.assistant_message
 
                     if action_step.action.name == "ViewCode":
@@ -502,7 +244,7 @@ class MessageHistoryGenerator(BaseModel):
                             )
 
                         if code_spans:
-                            thought = f"<thoughts>Let's view the content in the updated files</thoughts>"
+                            thought = f"Let's view the content in the updated files"
                             args = ViewCodeArgs(files=code_spans, thoughts=thought)
                             current_messages.append((args, "\n\n".join(observations)))
 
@@ -511,7 +253,7 @@ class MessageHistoryGenerator(BaseModel):
                         patch = node.file_context.generate_git_patch()
                         if patch:
                             view_diff_args = ViewDiffArgs(
-                                thoughts="<thoughts>Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications.</thoughts>"
+                                thoughts="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
                             )
                             diff_tokens = count_tokens(patch) + count_tokens(
                                 view_diff_args.model_dump_json()
@@ -538,9 +280,9 @@ class MessageHistoryGenerator(BaseModel):
                             or current_test_status != last_test_status
                         ):
                             if node.file_context.has_test_patch():
-                                thoughts = "<thoughts>Run the updated tests to verify the changes.</thoughts>"
+                                thoughts = "Run the updated tests to verify the changes."
                             else:
-                                thoughts = "<thoughts>Before adding new test cases I run the existing tests to verify regressions.</thoughts>"
+                                thoughts = "Before adding new test cases I run the existing tests to verify regressions."
 
                             run_tests_args = RunTestsArgs(
                                 thoughts=thoughts,
@@ -572,3 +314,4 @@ class MessageHistoryGenerator(BaseModel):
 
         logger.info(f"Generated message history with {total_tokens} tokens")
         return node_messages
+

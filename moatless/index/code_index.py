@@ -11,7 +11,6 @@ from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.index.settings import IndexSettings
-from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
     SearchCodeHit,
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from llama_index.core import SimpleDirectoryReader
     from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
     from llama_index.core.storage.docstore import SimpleDocumentStore
+    from llama_index.core.storage import docstore
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ def default_vector_store(settings: IndexSettings):
         ) from e
 
     faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(settings.dimensions))
+    from moatless.index.simple_faiss import SimpleFaissVectorStore
     return SimpleFaissVectorStore(faiss_index)
 
 
@@ -917,6 +918,7 @@ class CodeIndex:
     def persist(self, persist_dir: str):
         self._vector_store.persist(persist_dir)
         self._docstore.persist(
+
             os.path.join(persist_dir, docstore.types.DEFAULT_PERSIST_FNAME)
         )
         self._settings.persist(persist_dir)

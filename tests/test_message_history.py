@@ -4,11 +4,11 @@ import pytest
 
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.finish import FinishArgs
-from moatless.actions.model import Observation, ActionArguments
+from moatless.actions.schema import Observation, ActionArguments
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.string_replace import StringReplaceArgs
 from moatless.actions.view_code import CodeSpan, ViewCodeArgs
-from moatless.completion.model import UserMessage, AssistantMessage
+from moatless.completion.schema import ChatCompletionAssistantMessage, ChatCompletionUserMessage
 from moatless.file_context import FileContext
 from moatless.message_history import MessageHistoryGenerator, MessageHistoryType
 from moatless.node import Node
@@ -102,17 +102,17 @@ def test_messages_history_type(test_tree):
         message_history_type=MessageHistoryType.MESSAGES,
         include_file_context=True
     )
-    messages = list(generator.generate(node2))
+    messages = list(generator.generate_messages(node2))
     
     # Verify initial message
     assert messages[0].content == "Initial task"
     # Verify action and observation messages
-    assert isinstance(messages[1], AssistantMessage)  # Action message
-    assert isinstance(messages[2], UserMessage)  # Observation message
+    assert isinstance(messages[1], ChatCompletionAssistantMessage)  # Action message
+    assert isinstance(messages[2], ChatCompletionUserMessage)  # Observation message
     assert "Added method1 to context" in messages[2].content
     
     # With file changes
-    messages = list(generator.generate(node3))
+    messages = list(generator.generate_messages(node3))
     assert len(messages) >= 5
     
     # Debug output
@@ -126,7 +126,7 @@ def test_messages_history_type(test_tree):
     modification_found = any(
         ("modified1" in (m.content or "")) or  # Check content
         (hasattr(m, 'tool_call') and  # Check tool call input
-         isinstance(m, AssistantMessage) and
+         isinstance(m, ChatCompletionAssistantMessage) and
          "modified1" in str(m.tool_call.input))  # Convert input to string to search
         for m in messages
     )
@@ -134,7 +134,7 @@ def test_messages_history_type(test_tree):
     assert modification_found, "Modified content not found in messages"
     
     # With multiple file contexts
-    messages = list(generator.generate(node4))
+    messages = list(generator.generate_messages(node4))
     assert len(messages) >= 7
     assert any("method3" in (m.content or "") for m in messages), "Method3 not found in messages"
 
@@ -147,7 +147,7 @@ def test_react_history_type(test_tree):
         message_history_type=MessageHistoryType.REACT,
         include_file_context=True
     )
-    messages = list(generator.generate(node3))  # Convert generator to list
+    messages = list(generator.generate_messages(node3))  # Convert generator to list
     
     # Verify ReAct format
     assert any("Thought:" in m.content for m in messages), "Missing Thought: in messages"
@@ -172,49 +172,49 @@ def test_react_history_file_updates(test_tree):
     )
     
     # Test messages up to node3
-    messages = generator.generate(node3)
+    messages = generator.generate_messages(node3)
     messages_list = list(messages)
 
     # Verify correct message sequence
-    assert isinstance(messages_list[0], UserMessage)  # Initial task
+    assert isinstance(messages_list[0], ChatCompletionUserMessage)  # Initial task
     
     # Find ViewCode sequence for file1.py
     view_code_index = None
     for i, msg in enumerate(messages_list[1:], 1):
-        if (isinstance(msg, AssistantMessage) and 
+        if (isinstance(msg, ChatCompletionAssistantMessage) and
             "Let's view the content in file1.py" in msg.content):
             view_code_index = i
             break
     
     assert view_code_index is not None, "ViewCode message for file1.py not found"
     # Verify ViewCode pair
-    assert isinstance(messages_list[view_code_index], AssistantMessage)
-    assert isinstance(messages_list[view_code_index + 1], UserMessage)
+    assert isinstance(messages_list[view_code_index], ChatCompletionAssistantMessage)
+    assert isinstance(messages_list[view_code_index + 1], ChatCompletionUserMessage)
     assert "file1.py" in messages_list[view_code_index].content
     assert 'return "original1"' in messages_list[view_code_index + 1].content
     
     # Remove the incorrect StringReplace check and instead verify the correct sequence
     # The last action should be viewing file2.py from node2
     last_action_index = len(messages_list) - 2  # Second to last message should be the last Assistant message
-    assert isinstance(messages_list[last_action_index], AssistantMessage)
+    assert isinstance(messages_list[last_action_index], ChatCompletionAssistantMessage)
     assert "Let's view the content in file2.py" in messages_list[last_action_index].content
-    assert isinstance(messages_list[last_action_index + 1], UserMessage)
+    assert isinstance(messages_list[last_action_index + 1], ChatCompletionUserMessage)
     assert 'return "original2"' in messages_list[last_action_index + 1].content
 
     # Test messages up to node4
-    messages = generator.generate(node4)
+    messages = generator.generate_messages(node4)
     messages_list = list(messages)
 
     # Find StringReplace action (should be present in node4's history)
     string_replace_index = None
     for i, msg in enumerate(messages_list):
-        if (isinstance(msg, AssistantMessage) and 
+        if (isinstance(msg, ChatCompletionAssistantMessage) and
             "Action: StringReplace" in msg.content):
             string_replace_index = i
             break
     
     assert string_replace_index is not None, "StringReplace action not found in node4's history"
-    assert isinstance(messages_list[string_replace_index + 1], UserMessage)
+    assert isinstance(messages_list[string_replace_index + 1], ChatCompletionUserMessage)
     assert "Modified method1" in messages_list[string_replace_index + 1].content
 
     # Verify method3 view is not in the history (it's the current node)
@@ -230,7 +230,7 @@ def test_summary_history_type(test_tree):
         message_history_type=MessageHistoryType.SUMMARY,
         include_file_context=True
     )
-    messages = generator.generate(node4)
+    messages = generator.generate_messages(node4)
     
     assert len(messages) == 1  # Summary should be a single message
     content = messages[0].content
@@ -248,18 +248,18 @@ def test_terminal_node_history(test_tree):
     generator = MessageHistoryGenerator(
         message_history_type=MessageHistoryType.REACT
     )
-    messages = list(generator.generate(node5))
+    messages = list(generator.generate_messages(node5))
     
     # Verify finish action content
     finish_action_found = any(
-        isinstance(m, AssistantMessage) and 
+        isinstance(m, ChatCompletionAssistantMessage) and
         ("Action: Finish" in (m.content or ""))  # Simplified check
         for m in messages
     )
     
     # Verify observation content
     finish_observation_found = any(
-        isinstance(m, UserMessage) and 
+        isinstance(m, ChatCompletionUserMessage) and
         "Task completed successfully" in (m.content or "")
         for m in messages
     )
@@ -274,7 +274,7 @@ def test_empty_history():
     root.message = "Initial task"
     
     generator = MessageHistoryGenerator()
-    messages = generator.generate(root)
+    messages = generator.generate_messages(root)
     
     assert len(messages) == 0
 
@@ -338,15 +338,15 @@ def test_react_history_max_tokens(test_tree):
     )
     
     # Get messages for node4 (which has the most history)
-    messages = list(generator.generate(node4))
+    messages = list(generator.generate_messages(node4))
     
     print(f"\n=== {len(messages)} Messages with token limit ===")
     for i, msg in enumerate(messages):
-        print(f"{i}. {'Assistant' if isinstance(msg, AssistantMessage) else 'User'}: {msg.content}")
+        print(f"{i}. {'Assistant' if isinstance(msg, ChatCompletionAssistantMessage) else 'User'}: {msg.content}")
     
     # Verify basics
     assert len(messages) > 0, "Should have at least some messages"
-    assert isinstance(messages[0], UserMessage), "Should start with initial task"
+    assert isinstance(messages[0], ChatCompletionUserMessage), "Should start with initial task"
     
     # Verify token count is under limit
     total_content = "".join([m.content for m in messages if m.content is not None])
@@ -356,8 +356,8 @@ def test_react_history_max_tokens(test_tree):
     # Verify messages are properly paired
     assert len(messages) % 2 == 1, "Messages should be in pairs plus initial message"
     for i in range(1, len(messages), 2):
-        assert isinstance(messages[i], AssistantMessage), f"Message {i} should be Assistant"
-        assert isinstance(messages[i + 1], UserMessage), f"Message {i + 1} should be User"
+        assert isinstance(messages[i], ChatCompletionAssistantMessage), f"Message {i} should be Assistant"
+        assert isinstance(messages[i + 1], ChatCompletionUserMessage), f"Message {i + 1} should be User"
     
     # Compare with unlimited history
     unlimited_generator = MessageHistoryGenerator(
@@ -365,11 +365,11 @@ def test_react_history_max_tokens(test_tree):
         include_file_context=True,
         max_tokens=10000
     )
-    unlimited_messages = list(unlimited_generator.generate(node4))
+    unlimited_messages = list(unlimited_generator.generate_messages(node4))
     
     print(f"\n=== {len(unlimited_messages)} Messages without token limit ===")
     for i, msg in enumerate(unlimited_messages):
-        print(f"{i}. {'Assistant' if isinstance(msg, AssistantMessage) else 'User'}: {msg.content}")
+        print(f"{i}. {'Assistant' if isinstance(msg, ChatCompletionAssistantMessage) else 'User'}: {msg.content}")
     
     assert len(unlimited_messages) > len(messages), "Limited messages should be shorter than unlimited"
     
@@ -420,16 +420,16 @@ def test_react_history_file_context_with_view_code_actions(repo):
         include_file_context=True
     )
     
-    messages = list(generator.generate(node3))
+    messages = list(generator.generate_messages(node3))
     
     print("\n=== Messages ===")
     for i, msg in enumerate(messages):
-        print(f"{i}. {'Assistant' if isinstance(msg, AssistantMessage) else 'User'}: {msg.content}")
+        print(f"{i}. {'Assistant' if isinstance(msg, ChatCompletionAssistantMessage) else 'User'}: {msg.content}")
     
     # Find all ViewCode actions
     viewcode_messages = [
         m for m in messages 
-        if isinstance(m, AssistantMessage) and 
+        if isinstance(m, ChatCompletionAssistantMessage) and
         isinstance(m.content, str) and
         "Action: ViewCode" in m.content
     ]
@@ -437,14 +437,14 @@ def test_react_history_file_context_with_view_code_actions(repo):
     # Find all file contents
     file_content_messages = [
         m for m in messages 
-        if isinstance(m, UserMessage) and 
+        if isinstance(m, ChatCompletionUserMessage) and
         'file1.py' in m.content
     ]
     
     # Find StringReplace action
     stringreplace_messages = [
         m for m in messages 
-        if isinstance(m, AssistantMessage) and 
+        if isinstance(m, ChatCompletionAssistantMessage) and
         "Action: StringReplace" in m.content
     ]
     

@@ -5,7 +5,7 @@ from typing import Any, List
 
 from pydantic import BaseModel
 
-from moatless.actions.model import ActionArguments
+from moatless.actions.schema import ActionArguments
 from moatless.node import Node, FeedbackData
 
 logger = logging.getLogger(__name__)

@@ -1,10 +1,11 @@
+#!/usr/bin/env python3
+"""Run evaluation using specified configuration."""
+
 import argparse
-import asyncio
 import json
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
@@ -12,7 +13,6 @@ import litellm
 from dotenv import load_dotenv
 from litellm import InMemoryCache
 
-import moatless.benchmark.evaluation_config as eval_config
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import (
     create_evaluation,
@@ -25,20 +25,31 @@ from moatless.benchmark.schema import (
     InstanceStatus,
     TreeSearchSettings,
 )
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
+from moatless.model_config import MODEL_CONFIGS
 from moatless.schema import MessageHistoryType
 
-# Load environment variables
-load_dotenv()
+# Default evaluation settings
+DEFAULT_CONFIG = {
+    # Dataset settings
+    "split": "lite_and_verified_solvable",
+    "instance_ids": None,
+    # Tree search settings
+    "max_iterations": 20,
+    "max_expansions": 1,
+    "max_cost": 1.0,
+    # Runner settings
+    "num_workers": 10,
+    # Evaluation settings
+    "evaluation_name": None,
+    "rerun_errors": False,
+}
 
-# Automatically get all uppercase configs from evaluation_config
+# Automatically get all model configs from model_config.py
 CONFIG_MAP = {
-    name.lower().replace("_config", ""): getattr(eval_config, name)
-    for name in dir(eval_config)
-    if name.isupper()
-    and name.endswith("_CONFIG")
-    and isinstance(getattr(eval_config, name), dict)
+    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config}
+    for model_name, config in MODEL_CONFIGS.items()
 }
 
 
@@ -144,15 +155,15 @@ class SimpleEvaluationMonitor:
             "\nModel Settings:",
             f"  Model: {settings.model.model}",
             f"  Temperature: {settings.model.temperature}",
-            f"  Response Format: {settings.model.response_format.value if settings.model.response_format else 'default'}",
-            f"  Thoughts in Action: {settings.model.thoughts_in_action}",
             "\nTree Search Settings:",
             f"  Max Iterations: {settings.max_iterations}",
             f"  Max Expansions: {settings.max_expansions}",
             f"  Max Cost: ${settings.max_cost}",
             "\nAgent Settings:",
-            f"  Message History: {settings.agent_settings.message_history_type.value}",
             f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
+            f"  Response Format: {settings.model.response_format.value if settings.model.response_format else 'default'}",
+            f"  Message History: {settings.agent_settings.message_history_type.value}",
+            f"  Thoughts in Action: {settings.model.thoughts_in_action}",
             f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
         ]
 
@@ -310,7 +321,7 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Rerun Errors", "rerun_errors"),
         ],
         "Environment Settings": [
-            ("Repository Dir", "REPO_DIR"),
+            ("Repository Dir", "MOATLESS_REPO_DIR"),
             ("Index Store Dir", "INDEX_STORE_DIR"),
             ("Index Store URL", "INDEX_STORE_URL"),
             ("Moatless Dir", "MOATLESS_DIR"),
@@ -333,6 +344,8 @@ def print_config(config: dict, console_logger: logging.Logger):
                 if isinstance(value, list) and len(value) > 3:
                     value = f"{value[:3]} ... ({len(value)} items)"
                 console_logger.info(f"{label:20}: {value}")
+            else:
+                console_logger.info(f"{label:20}: N/A")
 
     console_logger.info("\n" + "=" * 50 + "\n")
 
@@ -345,6 +358,11 @@ def run_evaluation(config: dict):
     if config.get("evaluation_name"):
         evaluation_name = config["evaluation_name"]
     else:
+        # Convert message_history string to enum if it's a string
+        message_history = config.get("message_history")
+        if isinstance(message_history, str):
+            message_history = MessageHistoryType(message_history)
+        
         # Create evaluation name using the same logic as run_evaluation.py
         evaluation_name = create_evaluation_name(
             model=config["model"],
@@ -355,9 +373,7 @@ def run_evaluation(config: dict):
             response_format=LLMResponseFormat(config["response_format"])
             if config.get("response_format")
             else None,
-            message_history=MessageHistoryType(config["message_history"])
-            if config.get("message_history")
-            else None,
+            message_history=message_history,
             thoughts_in_action=config.get("thoughts_in_action", False),
         )
 
@@ -397,23 +413,19 @@ def run_evaluation(config: dict):
     if not instance_ids:
         raise ValueError("No instance IDs provided")
 
-    model_settings = CompletionModel(
+    model_settings = BaseCompletionModel(
         model=config["model"],
-        temperature=0.0,
-        max_tokens=3000,
-        api_key=config.get("api_key"),
-        base_url=config.get("base_url"),
-        response_format=LLMResponseFormat(config["response_format"])
-        if config.get("response_format")
-        else None,
+        temperature=config.get("temperature", 0.0),
+        max_tokens=4000,
+        model_api_key=config.get("api_key"),
+        model_base_url=config.get("base_url"),
+        response_format=config.get("response_format"),
         thoughts_in_action=config.get("thoughts_in_action", False),
     )
 
     agent_settings = AgentSettings(
         completion_model=model_settings,
-        message_history_type=MessageHistoryType(config["message_history"])
-        if config.get("message_history")
-        else MessageHistoryType.MESSAGES,
+        message_history_type=config.get("message_history_type", MessageHistoryType.MESSAGES),
         system_prompt=None,
         thoughts_in_action=config.get("thoughts_in_action", False),
     )
@@ -442,6 +454,7 @@ def run_evaluation(config: dict):
     runner = EvaluationRunner(
         evaluation=evaluation,
         num_workers=config["num_workers"],
+        repo_base_dir=os.getenv("MOATLESS_REPO_DIR", "./repos"),
         use_testbed=True,
         rerun_errors=config.get("rerun_errors", False),
     )
@@ -473,16 +486,14 @@ def parse_args():
         description="Run evaluation with specified configuration"
     )
     
-    # Base config selection
+    # Model selection
     parser.add_argument(
-        "--config",
-        choices=list(CONFIG_MAP.keys()),
-        default="default",
-        help="Configuration preset to use",
+        "--model",
+        choices=list(MODEL_CONFIGS.keys()),
+        help="Model to evaluate (e.g., 'claude-3-5-sonnet-20241022')",
     )
     
     # Model settings
-    parser.add_argument("--model", help="Model to use (overrides config)")
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the model API")
     parser.add_argument("--response-format", choices=["tool_call", "react"], help="Response format for the model")
@@ -500,7 +511,7 @@ def parse_args():
     
     # Runner settings
     parser.add_argument("--num-workers", type=int, help="Number of workers (overrides config)")
-    parser.add_argument("--message-history", choices=["messages", "summary", "react"], help="Message history type")
+    parser.add_argument("--message-history", choices=["messages", "summary", "react", "messages_compact", "instruct"], help="Message history type")
     
     # Evaluation settings
     parser.add_argument("--evaluation-name", help="Name for this evaluation run (overrides config)")
@@ -511,21 +522,39 @@ def parse_args():
 
 def get_config_from_args(args):
     """Get configuration based on command line arguments"""
-    config = CONFIG_MAP[args.config].copy()
+    # Start with default config
+    config = DEFAULT_CONFIG.copy()
+
+    # If model specified, update with model config
+    if args.model:
+        if args.model not in MODEL_CONFIGS:
+            print(f"Error: Model '{args.model}' not found in supported models.")
+            print("\nAvailable models and their configurations:")
+            for model, cfg in MODEL_CONFIGS.items():
+                print(f"\n{model}:")
+                for key, value in cfg.items():
+                    print(f"  {key}: {value}")
+            sys.exit(1)
+        config.update(MODEL_CONFIGS[args.model])
+    else:
+        print("\nNo model specified. Available models and their configurations:")
+        for model, cfg in MODEL_CONFIGS.items():
+            print(f"\n{model}:")
+            for key, value in cfg.items():
+                print(f"  {key}: {value}")
+        sys.exit(1)
 
     # Override with command line arguments if provided
     if args.split:
         config["split"] = args.split
     if args.instance_ids:
         config["instance_ids"] = args.instance_ids
-    if args.model:
-        config["model"] = args.model
     if args.api_key:
         config["api_key"] = args.api_key
     if args.base_url:
         config["base_url"] = args.base_url
     if args.response_format:
-        config["response_format"] = args.response_format
+        config["response_format"] = LLMResponseFormat(args.response_format)
     if args.thoughts_in_action:
         config["thoughts_in_action"] = True
     if args.temperature is not None:
@@ -539,7 +568,7 @@ def get_config_from_args(args):
     if args.max_cost is not None:
         config["max_cost"] = args.max_cost
     if args.message_history:
-        config["message_history"] = args.message_history
+        config["message_history_type"] = MessageHistoryType(args.message_history)
     if args.evaluation_name:
         config["evaluation_name"] = args.evaluation_name
     if args.rerun_errors:
@@ -551,6 +580,7 @@ def get_config_from_args(args):
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_args()
+    load_dotenv()
 
     # Get configuration
     config = get_config_from_args(args)

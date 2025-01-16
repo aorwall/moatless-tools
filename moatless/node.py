@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any, Union
 
 from pydantic import BaseModel, Field
 
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import (

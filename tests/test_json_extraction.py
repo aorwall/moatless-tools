@@ -1,4 +1,5 @@
-from moatless.completion.model import extract_json_from_message
+from moatless.completion.schema import extract_json_from_message
+
 
 def test_extract_single_json_codeblock():
     message = """Some text before

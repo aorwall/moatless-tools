@@ -2,12 +2,12 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
-from moatless.actions.model import ActionArguments, Observation, FewShotExample
+from moatless.actions.schema import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -40,9 +40,8 @@ class InsertLinesArgs(ActionArguments):
         ..., description="Text content to insert at the specified line"
     )
 
-    class Config:
-        title = "InsertLines"
-
+    model_config = ConfigDict(title="InsertLines")
+    
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
 <insert_line>{self.insert_line}</insert_line>

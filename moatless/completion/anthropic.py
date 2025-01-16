@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, Union, List
+from typing import Union, List
 
 import anthropic
 import tenacity
@@ -11,30 +11,24 @@ from anthropic.types.beta import (
     BetaTextBlock,
 )
 from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
-from moatless.completion import CompletionModel
-from moatless.completion.completion import LLMResponseFormat, CompletionResponse
-from moatless.completion.model import Completion, StructuredOutput, Usage
+from moatless.completion import BaseCompletionModel, CompletionResponse
+from moatless.completion.model import Completion, Usage
+from moatless.completion.schema import AllMessageValues
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
-
-class AnthtropicCompletionModel(CompletionModel):
-    response_format: Optional[LLMResponseFormat] = Field(
-        LLMResponseFormat.TOOLS, description="The response format expected from the LLM"
-    )
-
-    @property
-    def supports_anthropic_computer_use(self):
-        return "claude-3-5-sonnet-20241022" in self.model
+# TODO: Add necessary functionality for Anthropic in other CompletionModel implementations and remove this
+class AnthtropicCompletionModel(BaseCompletionModel):
 
     def create_completion(
         self,
-        messages: List[dict],
+        messages: List[AllMessageValues],
         system_prompt: str,
-        response_model: List[type[StructuredOutput]] | type[StructuredOutput],
+        response_schema: List[type[ResponseSchema]] | type[ResponseSchema],
     ) -> CompletionResponse:
         # Convert Message objects to dictionaries if needed
         messages = [
@@ -48,14 +42,14 @@ class AnthtropicCompletionModel(CompletionModel):
         tool_choice = {"type": "any"}
 
         actions = []
-        if not response_model:
+        if not response_schema:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
         else:
-            if isinstance(response_model, list):
-                actions = response_model
-            elif response_model:
-                actions = [response_model]
+            if isinstance(response_schema, list):
+                actions = response_schema
+            elif response_schema:
+                actions = [response_schema]
 
             for action in actions:
                 if hasattr(action, "name") and action.name == "str_replace_editor":
@@ -242,6 +236,9 @@ def _inject_prompt_caching(
     """
 
     breakpoints_remaining = 3
+
+    # Add
+
     for message in reversed(messages):
         # message["role"] == "user" and
         if isinstance(content := message["content"], list):

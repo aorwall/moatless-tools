@@ -1,9 +1,9 @@
 import logging
 from typing import List, Type, ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments, FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
@@ -38,8 +38,7 @@ class FindClassArgs(SearchBaseArgs):
             )
         return self
 
-    class Config:
-        title = "FindClass"
+    model_config = ConfigDict(title="FindClass")
 
     def short_summary(self) -> str:
         param_str = f"class_name={self.class_name}"

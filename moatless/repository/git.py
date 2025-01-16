@@ -2,10 +2,10 @@ import logging
 import os
 from typing import Any, Dict, Optional, List
 
-from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field
 
-from moatless.completion.completion import CompletionModel
+from moatless.completion.base import BaseCompletionModel
+from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class GitRepository(FileRepository):
     repo_url: Optional[str] = Field(default=None, alias="git_repo_url")
     generate_commit_message: bool = Field(default=False)
-    completion: Optional[CompletionModel] = None
+    completion: Optional[BaseCompletionModel] = None
     current_commit: str = Field(default="")
     current_diff: Optional[str] = None
     initial_commit: str = Field(default="")

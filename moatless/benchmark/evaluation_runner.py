@@ -27,7 +27,7 @@ from moatless.benchmark.swebench import (
     create_index,
 )
 from moatless.benchmark.swebench.utils import instance_repo_path
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.benchmark.utils import get_moatless_instance, load_moatless_datasets
 from moatless.exceptions import RuntimeError
 from moatless.loop import AgenticLoop
 from moatless.runtime.testbed import TestbedEnvironment
@@ -112,6 +112,8 @@ class EvaluationRunner:
             f"Processing {len(instance_ids)} instances with {self.num_workers} workers. Rerun error {self.rerun_errors}"
         )
 
+        load_moatless_datasets()
+
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=self.num_workers
         ) as executor:
@@ -142,6 +144,7 @@ class EvaluationRunner:
 
     def evaluate_instance(self, instance_id: str):
         """Evaluate a single instance."""
+        logger.info(f"Starting evaluation of instance {instance_id}")
         runtime = None
         repository = None
         agentic_loop = None
@@ -157,6 +160,7 @@ class EvaluationRunner:
             self.evaluation.instances.append(instance)
 
         try:
+            logger.info(f"Loading moatless instance {instance_id}")
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
 
@@ -197,27 +201,28 @@ class EvaluationRunner:
                 moatless_instance=moatless_instance,
                 trajectory_path=trajectory_path,
             )
+            logger.info(f"Completed agentic loop for instance {instance_id}")
 
             start_time = time.time()
             try:
                 if self.use_testbed:
-                    logger.info(f"Evaluating nodes for instance {instance_id}")
+                    logger.info(f"Starting testbed evaluation for instance {instance_id}")
                     eval_result = self.evaluate_nodes(
                         instance_id=instance_id,
                         instance=moatless_instance,
                         agentic_loop=agentic_loop,
                         eval_result=eval_result,
                     )
+                    logger.info(f"Completed testbed evaluation for instance {instance_id}")
             except RuntimeError as e:
+                logger.error(f"Runtime error in instance {instance_id}: {str(e)}")
                 raise e
 
             except Exception as e:
+                logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
                 eval_result["status"] = "error"
                 eval_result["error"] = traceback.format_exc()
                 eval_result["duration"] = time.time() - start_time
-                logger.exception(
-                    f"Error when evaluating nodes for instance {instance_id}"
-                )
 
 
             # Complete instance with result

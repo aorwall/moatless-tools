@@ -1,10 +1,10 @@
 import logging
 from typing import List, Any
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     FewShotExample,
     Observation,
@@ -26,8 +26,7 @@ class RunTestsArgs(ActionArguments):
     thoughts: str = Field(..., description="Your reasoning on what tests to run.")
     test_files: List[str] = Field(..., description="The list of test files to run")
 
-    class Config:
-        title = "RunTests"
+    model_config = ConfigDict(title="RunTests")
 
     @property
     def log_name(self):

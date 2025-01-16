@@ -1,8 +1,8 @@
 import logging
 from abc import ABC
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from moatless.completion.model import Completion
 from moatless.node import Node, Reward

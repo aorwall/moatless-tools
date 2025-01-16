@@ -4,7 +4,7 @@ from typing import Optional, Tuple
 
 from pydantic import PrivateAttr
 
-from moatless.actions.model import Observation
+from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository

@@ -1,5 +1,7 @@
 from typing import Any, List
 
+from moatless.completion.model import Usage
+
 
 class MoatlessError(Exception):
     """Base exception class for all Moatless exceptions."""
@@ -25,12 +27,12 @@ class CompletionError(MoatlessError):
     """Base exception for completion-related errors."""
 
     def __init__(
-        self, message: str, last_completion: Any = None, messages: List[dict] = None
+        self, message: str, last_completion: Any = None, messages: List[dict] = None, accumulated_usage: Usage = None
     ):
         super().__init__(message)
         self.last_completion = last_completion
         self.messages = messages or []
-
+        self.accumulated_usage = accumulated_usage
 
 class CompletionRuntimeError(RuntimeError, CompletionError):
     """Exception raised when completion encounters an unrecoverable error."""
@@ -39,7 +41,7 @@ class CompletionRuntimeError(RuntimeError, CompletionError):
 
 
 class CompletionRejectError(RejectError, CompletionError):
-    """Exception raised when completion should reject the current node but continue search."""
+    """Raised when a completion response is rejected due to validation failure."""
 
     pass
 

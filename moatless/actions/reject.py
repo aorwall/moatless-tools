@@ -1,9 +1,9 @@
 from typing import Type, ClassVar
 
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 
@@ -13,8 +13,7 @@ class RejectArgs(ActionArguments):
 
     rejection_reason: str = Field(..., description="Explanation for rejection.")
 
-    class Config:
-        title = "Reject"
+    model_config = ConfigDict(title="Reject")
 
     def to_prompt(self):
         return f"Reject with reason: {self.rejection_reason}"

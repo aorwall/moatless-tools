@@ -1,8 +1,8 @@
 from typing import Optional, List, Type, ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments, FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
@@ -35,8 +35,7 @@ class FindFunctionArgs(SearchBaseArgs):
             raise ValueError("class_name must be None or non-empty")
         return self
 
-    class Config:
-        title = "FindFunction"
+    model_config = ConfigDict(title="FindFunction")
 
     def to_prompt(self):
         prompt = f"Searching for function: {self.function_name}"

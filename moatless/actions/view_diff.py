@@ -1,8 +1,10 @@
 import logging
 from typing import List
 
+from pydantic import ConfigDict
+
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation, FewShotExample
+from moatless.actions.schema import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 
@@ -18,8 +20,7 @@ class ViewDiffArgs(ActionArguments):
     * Uses git patch format
     """
 
-    class Config:
-        title = "ViewDiff"
+    model_config = ConfigDict(title="ViewDiff")
 
 
 class ViewDiff(Action):

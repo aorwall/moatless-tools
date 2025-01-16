@@ -1,8 +1,8 @@
 from typing import Optional, List, Type, ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments, FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
@@ -31,8 +31,7 @@ class SemanticSearchArgs(SearchBaseArgs):
         description="The category of files to search for. This can be 'implementation' for core implementation files or 'test' for test files.",
     )
 
-    class Config:
-        title = "SemanticSearch"
+    model_config = ConfigDict(title="SemanticSearch")
 
     def to_prompt(self):
         prompt = f"Searching for code using the query: {self.query}"

@@ -7,7 +7,7 @@ from typing import Optional, List
 
 from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.benchmark.schema import Evaluation, EvaluationInstance, TreeSearchSettings
-from moatless.completion.completion import LLMResponseFormat
+from moatless.completion.base import LLMResponseFormat
 from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)

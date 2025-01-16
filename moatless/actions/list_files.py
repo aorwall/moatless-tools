@@ -1,9 +1,9 @@
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     Observation,
     FewShotExample,
@@ -20,8 +20,7 @@ class ListFilesArgs(ActionArguments):
         description="The directory path to list. Empty string means root directory.",
     )
 
-    class Config:
-        title = "ListFiles"
+    model_config = ConfigDict(title="ListFiles")
 
     def to_prompt(self):
         return f"List contents of directory: {self.directory or '(root)'}"

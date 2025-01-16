@@ -2,9 +2,10 @@ import logging
 from fnmatch import fnmatch
 from typing import List, Optional, Tuple, Type, ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.action import FewShotExample
+from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 
@@ -31,8 +32,7 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    class Config:
-        title = "FindCodeSnippet"
+    model_config = ConfigDict(title="FindCodeSnippet")
 
     @model_validator(mode="after")
     def validate_snippet(self) -> "FindCodeSnippetArgs":

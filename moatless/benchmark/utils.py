@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+import threading
 
 from moatless.codeblocks.module import Module
 from moatless.loop import AgenticLoop
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
 
-def load_moatless_datasets(split: str | None):
+def load_moatless_datasets(split: str | None = None):
     global _moatless_instances
 
     if split:
@@ -41,7 +42,7 @@ def get_moatless_instances(split: str | None = None):
     global _moatless_instances
     if not _moatless_instances:
         load_moatless_datasets(split)
-    return _moatless_instances
+    return dict(_moatless_instances)  # Return a copy to prevent external modifications
 
 
 def get_moatless_instance(instance_id: str, split: str | None = None):
@@ -53,7 +54,7 @@ def get_moatless_instance(instance_id: str, split: str | None = None):
     if not instance:
         raise ValueError(f"Instance {instance_id} not found.")
 
-    return instance
+    return dict(instance)  # Return a copy to prevent external modifications
 
 
 def find_relevant_spans(original_block: Module, updated_block: Module):

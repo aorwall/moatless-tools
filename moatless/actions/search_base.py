@@ -2,16 +2,17 @@ import logging
 from abc import ABC
 from typing import List, Optional, Type, Any, ClassVar, Tuple
 
-from litellm.types.llms.openai import (
+from pydantic import Field, PrivateAttr, BaseModel, field_validator, model_validator
+
+from moatless.actions.action import Action
+from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
+from moatless.completion import BaseCompletionModel
+from moatless.completion.model import Completion
+from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
 )
-from pydantic import Field, PrivateAttr, BaseModel, field_validator
-
-from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
-from moatless.completion import CompletionModel
-from moatless.completion.model import Completion, StructuredOutput
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -72,7 +73,7 @@ class IdentifiedSpans(BaseModel):
     )
 
 
-class Identify(StructuredOutput):
+class Identify(ResponseSchema):
     """Identify if the provided search result is relevant to the reported issue."""
 
     thoughts: Optional[str] = Field(
@@ -105,7 +106,7 @@ class SearchBaseAction(Action):
         10,
         description="The maximum number of search hits to display.",
     )
-    completion_model: CompletionModel = Field(
+    completion_model: BaseCompletionModel = Field(
         ...,
         description="The completion model used to identify relevant code sections in search results.",
     )
@@ -117,12 +118,18 @@ class SearchBaseAction(Action):
         self,
         repository: Repository = None,
         code_index: CodeIndex | None = None,
-        completion_model: CompletionModel = None,
+        completion_model: BaseCompletionModel = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)
         self._repository = repository
         self._code_index = code_index
+
+    @model_validator(mode="after")
+    def initalize_model(self):
+        if self.completion_model:
+            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
+        return self
 
     def execute(
         self,
@@ -298,9 +305,7 @@ class SearchBaseAction(Action):
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
             completion_response = self.completion_model.create_completion(
-                messages=messages,
-                system_prompt=IDENTIFY_SYSTEM_PROMPT,
-                response_model=Identify,
+                messages=messages
             )
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."

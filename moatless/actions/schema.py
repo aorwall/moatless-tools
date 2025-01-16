@@ -6,7 +6,8 @@ from typing import Dict, Type, Any, Optional
 
 from pydantic import Field, BaseModel, model_validator
 
-from moatless.completion.model import ToolCall, Completion, StructuredOutput
+from moatless.completion.model import Completion
+from moatless.completion.schema import ResponseSchema
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +15,8 @@ logger = logging.getLogger(__name__)
 _action_args: Dict[str, Type["ActionArguments"]] = {}
 
 
-class ActionArguments(StructuredOutput, ABC):
+class ActionArguments(ResponseSchema, ABC):
     thoughts: str = Field(..., description="Your reasoning for the action.")
-
-    class Config:
-        title = "Action"
-
-    @classmethod
-    def get_name(cls) -> str:
-        """Returns the action name for the class based on Config title."""
-        return str(getattr(cls.Config, "title", cls.__name__))
 
     def format_for_llm(self) -> str:
         """Format the action name for LLM consumption"""
@@ -33,11 +26,6 @@ class ActionArguments(StructuredOutput, ABC):
     def format_name_for_llm(cls) -> str:
         """Format the class name for LLM consumption"""
         return str(cls.get_name())
-
-    def to_tool_call(self) -> ToolCall:
-        tool_input = self.model_dump()
-
-        return ToolCall(name=self.name, input=tool_input)
 
     @classmethod
     def from_tool_call(cls, tool_args: dict[str, Any], tool_name: str | None = None):
@@ -130,13 +118,6 @@ class ActionArguments(StructuredOutput, ABC):
                 return action_args_class.model_validate(obj)
         return super().model_validate(obj)
 
-
-class RewardScaleEntry(BaseModel):
-    min_value: int
-    max_value: int
-    description: str
-
-
 class Observation(BaseModel):
     message: Optional[str] = Field(
         None,
@@ -165,6 +146,12 @@ class Observation(BaseModel):
         return cls(message=message, terminal=terminal)
 
 
+class RewardScaleEntry(BaseModel):
+    min_value: int
+    max_value: int
+    description: str
+
+
 class FewShotExample(BaseModel):
     user_input: str = Field(..., description="The user's input/question")
     action: ActionArguments = Field(
@@ -174,24 +161,3 @@ class FewShotExample(BaseModel):
     @classmethod
     def create(cls, user_input: str, action: ActionArguments) -> "FewShotExample":
         return cls(user_input=user_input, action=action)
-
-
-class ActionError(ActionArguments):
-    """Error"""
-
-    error: str = Field(..., description="Error.")
-
-    class Config:
-        title = "Error"
-
-    def to_prompt(self):
-        return f"Error: {self.error}"
-
-
-class RetryException(Exception):
-    """Exception raised when an action needs to be retried with corrected arguments."""
-
-    def __init__(self, message: str, action_args: ActionArguments):
-        super().__init__(message)
-        self.message = message
-        self.action_args = action_args

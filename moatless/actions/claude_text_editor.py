@@ -2,18 +2,19 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional, List
 
+from litellm import ConfigDict
 from pydantic import Field, PrivateAttr, field_validator
 
 from moatless.actions import RunTests, CreateFile, ViewCode
 from moatless.actions.action import Action
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
-from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
-from moatless.completion import CompletionModel
-from moatless.completion.model import ToolCall
+from moatless.completion import BaseCompletionModel
+from moatless.completion.schema import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -37,6 +38,7 @@ class EditActionArguments(ActionArguments):
     """
     An filesystem editor tool that allows the agent to view, create, and edit files.
     """
+    model_config = ConfigDict(title="str_replace_editor")
 
     command: Command = Field(..., description="The edit command to execute")
     path: str = Field(..., description="The file path to edit")
@@ -49,6 +51,10 @@ class EditActionArguments(ActionArguments):
     old_str: Optional[str] = Field(None, description="String to replace")
     new_str: Optional[str] = Field(None, description="Replacement string")
     insert_line: Optional[int] = Field(None, description="Line number for insertion")
+
+    @classmethod
+    def tool_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
+        return ChatCompletionToolParam(type="text_editor_20241022", function=ChatCompletionToolParamFunctionChunk(name="str_replace_editor"))
 
     @field_validator("file_text")
     @classmethod
@@ -97,15 +103,7 @@ class EditActionArguments(ActionArguments):
         if v not in valid_commands:
             raise ValueError(f"Unknown command: {v}")
         return v
-
-    class Config:
-        title = "str_replace_editor"
-
-    def to_tool_call(self) -> ToolCall:
-        return ToolCall(
-            name=self.name, type="text_editor_20241022", input=self.model_dump()
-        )
-
+    
 
 class ClaudeEditTool(Action, CodeModificationMixin):
     """
@@ -127,7 +125,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         self,
         code_index: CodeIndex | None = None,
         repository: Repository | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: BaseCompletionModel | None = None,
         **data,
     ):
         super().__init__(**data)
@@ -201,9 +199,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context, path, args.insert_line, args.new_str
             )
         else:
-            raise RetryException(
+            raise Observation(
                 message=f"Unknown command: {args.command}",
-                action_args=args,
+                properties={"fail_reason": "file_exists"},
             )
 
         if not observation.properties or not observation.properties.get("diff"):

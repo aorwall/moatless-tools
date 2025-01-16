@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.report import BenchmarkResult
-from moatless.completion.completion import CompletionModel
+from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.feedback import BaseFeedbackGenerator
@@ -64,7 +64,7 @@ class TreeSearchSettings(BaseModel):
         description="The maximum depth for one trajectory in simulations.",
     )
 
-    model: Optional[CompletionModel] = Field(
+    model: Optional[BaseCompletionModel] = Field(
         default=None,
         description="The default model.",
     )

@@ -1,15 +1,15 @@
 import logging
 from typing import Optional, Tuple
 
-from litellm.types.llms.openai import (
+from pydantic import Field, model_validator
+
+from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
+from moatless.completion import BaseCompletionModel
+from moatless.completion.model import Completion
+from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
 )
-from pydantic import Field
-
-from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
-from moatless.completion import CompletionModel
-from moatless.completion.model import Completion
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class IdentifyMixin:
     """Mixin that provides identify flow functionality for large code sections."""
 
-    completion_model: Optional[CompletionModel] = Field(
+    completion_model: Optional[BaseCompletionModel] = Field(
         None,
         description="The completion model used to identify relevant code sections.",
     )
@@ -31,6 +31,12 @@ class IdentifyMixin:
         16000,
         description="The maximum number of tokens allowed in the identify prompt.",
     )
+
+    @model_validator(mode="after")
+    def initalize_model(self):
+        if self.completion_model:
+            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
+        return self
 
     def _identify_code(
         self, args, view_context: FileContext, max_tokens: int
@@ -45,6 +51,7 @@ class IdentifyMixin:
         Returns:
             A tuple of (identified_context, completion)
         """
+
         code_str = view_context.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
@@ -67,9 +74,7 @@ class IdentifyMixin:
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
             completion_response = self.completion_model.create_completion(
-                messages=messages,
-                system_prompt=IDENTIFY_SYSTEM_PROMPT,
-                response_model=Identify,
+                messages=messages
             )
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."

@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Callable, Union
+from typing import Optional, Dict, Any, List, Callable
 
+from litellm import ConfigDict
 from pydantic import BaseModel, Field, model_validator
 
 from moatless.actions.action import Action
@@ -93,8 +93,7 @@ class SearchTree(BaseModel):
         default_factory=list, description="Event handlers for tree events", exclude=True
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
     def create(

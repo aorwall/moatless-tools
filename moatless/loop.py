@@ -1,13 +1,14 @@
 import json
 import logging
-from typing import Optional, Dict, Any, Callable, List
 from datetime import datetime
+from typing import Optional, Dict, Any, Callable, List
 
+from litellm import ConfigDict
 from pydantic import BaseModel, Field
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
-from moatless.exceptions import RuntimeError
+from moatless.exceptions import RejectError, RuntimeError
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 class AgenticLoop(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     root: Node = Field(..., description="The root node of the action sequence.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
     metadata: Dict[str, Any] = Field(
@@ -35,9 +38,6 @@ class AgenticLoop(BaseModel):
     event_handlers: List[Callable] = Field(
         default_factory=list, description="Event handlers for loop events", exclude=True
     )
-
-    class Config:
-        arbitrary_types_allowed = True
 
     @classmethod
     def create(
@@ -114,10 +114,15 @@ class AgenticLoop(BaseModel):
                     },
                 )
 
-            except RuntimeError as e:
-                self.log(logger.error, f"Runtime error: {e.message}")
+            except RejectError as e:
+                self.log(logger.error, f"Rejection error: {e}")
                 self.emit_event("loop_error", {"error": str(e)})
-                break
+            except Exception as e:
+                self.log(logger.error, f"Unexpected error: {e}")
+                self.emit_event("loop_error", {"error": str(e)})
+                raise e
+            finally:
+                self.maybe_persist()
 
         self.emit_event(
             "loop_completed",

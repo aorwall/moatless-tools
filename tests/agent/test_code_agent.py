@@ -1,26 +1,23 @@
-from unittest.mock import Mock, MagicMock
 import json
-from pydantic import BaseModel
 from typing import List
-from moatless.actions.action import Action
-from moatless.actions.code_change import RequestCodeChange
+from unittest.mock import Mock
+
 from moatless.actions.find_class import FindClass
 from moatless.actions.find_code_snippet import FindCodeSnippet
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish
 from moatless.actions.reject import Reject
-from moatless.actions.view_code import ViewCodeArgs, ViewCode
 from moatless.actions.run_tests import RunTests
 from moatless.actions.search_base import SearchBaseAction
 from moatless.actions.semantic_search import SemanticSearch
-from moatless.agent.code_agent import CodingAgent, create_coding_actions
-from moatless.completion.completion import CompletionModel
-from moatless.file_context import FileContext
-from moatless.node import Node
-from moatless.repository.repository import InMemRepository
+from moatless.actions.string_replace import StringReplace
+from moatless.actions.view_code import ViewCode
+from moatless.agent.code_agent import CodingAgent
+from moatless.completion.base import BaseCompletionModel
 from moatless.index.code_index import CodeIndex
-from moatless.runtime.runtime import TestResult
+from moatless.repository.repository import InMemRepository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.runtime.runtime import TestResult
 
 
 class MockCodeIndex(CodeIndex):
@@ -39,7 +36,7 @@ def test_dump_and_load_coding_agent():
     code_index = MockCodeIndex()
     runtime = MockRuntimeEnvironment()
 
-    completion_model = CompletionModel(
+    completion_model = BaseCompletionModel(
         model="gpt-3.5-turbo",
         max_tokens=1000,
         temperature=0.7,
@@ -52,7 +49,7 @@ def test_dump_and_load_coding_agent():
         FindCodeSnippet(repository=repository, code_index=code_index),
         SemanticSearch(repository=repository, code_index=code_index),
         ViewCode(repository=repository),
-        RequestCodeChange(repository=repository, completion_model=completion_model),
+        StringReplace(repository=repository, completion_model=completion_model),
         RunTests(repository=repository, code_index=code_index, runtime=runtime),
         Finish(),
         Reject(),
@@ -89,7 +86,7 @@ def test_dump_and_load_coding_agent():
     )
 
     # Assert that the completion model is preserved
-    assert isinstance(loaded_agent.completion, CompletionModel)
+    assert isinstance(loaded_agent.completion, BaseCompletionModel)
     assert loaded_agent.completion.model == original_agent.completion.model
     assert loaded_agent.completion.max_tokens == original_agent.completion.max_tokens
     assert loaded_agent.completion.temperature == original_agent.completion.temperature
@@ -115,19 +112,19 @@ def test_create_system_prompt_with_few_shot_examples():
     # Setup
     repository = InMemRepository()
     code_index = MockCodeIndex()
-    completion_model = Mock(CompletionModel)
+    completion_model = Mock(BaseCompletionModel)
     completion_model.response_format = "json"
     
     actions = [
         FindClass(repository=repository, code_index=code_index),
         FindFunction(repository=repository, code_index=code_index),
-        RequestCodeChange(repository=repository, completion_model=completion_model)
+        StringReplace(repository=repository, completion_model=completion_model)
     ]
     
     agent = CodingAgent(actions=actions, completion=completion_model)
     
     # Get the system prompt
-    prompt = agent.generate_system_prompt([FindClass, FindFunction, RequestCodeChange])
+    prompt = agent.generate_system_prompt([FindClass, FindFunction, StringReplace])
     print(prompt)
     
     # Verify the prompt structure

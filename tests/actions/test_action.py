@@ -5,10 +5,10 @@ from instructor import OpenAISchema
 from pydantic import Field
 
 from moatless.actions.action import Action, ActionArguments
-from moatless.actions.code_change import RequestCodeChange, RequestCodeChangeArgs
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish, FinishArgs
 from moatless.actions.semantic_search import SemanticSearch, SemanticSearchArgs
+from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCode, ViewCodeArgs
 
 
@@ -32,7 +32,7 @@ def test_action_args_name():
 
 
 def test_take_action():
-    actions = [SemanticSearchArgs, RequestCodeChangeArgs, FinishArgs]
+    actions = [SemanticSearchArgs, StringReplace, FinishArgs]
 
     class TakeAction(OpenAISchema):
         action: Union[tuple(actions)] = Field(...)
@@ -48,13 +48,13 @@ def test_take_action():
 
 def test_get_action_by_args_class():
     assert Action.get_action_by_args_class(FinishArgs) == Finish
-    assert Action.get_action_by_args_class(RequestCodeChangeArgs) == RequestCodeChange
+    assert Action.get_action_by_args_class(StringReplaceArgs) == StringReplace
     assert Action.get_action_by_args_class(ViewCodeArgs) == ViewCode
     assert Action.get_action_by_args_class(SemanticSearchArgs) == SemanticSearch
 
 def test_get_action_by_name():
     assert Action.get_action_by_name("Finish") == Finish
-    assert Action.get_action_by_name("RequestCodeChange") == RequestCodeChange
+    assert Action.get_action_by_name("StringReplace") == StringReplace
     assert Action.get_action_by_name("ViewCode") == ViewCode
     assert Action.get_action_by_name("SemanticSearch") == SemanticSearch
     assert Action.get_action_by_name("FindFunction") == FindFunction

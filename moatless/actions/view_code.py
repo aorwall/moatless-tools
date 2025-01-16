@@ -1,18 +1,18 @@
 import logging
 from typing import List, Optional
 
-from pydantic import Field, BaseModel, PrivateAttr
+from pydantic import Field, BaseModel, PrivateAttr, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.actions.identify_mixin import IdentifyMixin
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     FewShotExample,
     Observation,
     RewardScaleEntry,
 )
 from moatless.codeblocks import CodeBlockType
-from moatless.completion import CompletionModel
+from moatless.completion import BaseCompletionModel
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
@@ -56,8 +56,7 @@ class ViewCodeArgs(ActionArguments):
         ..., description="The code that should be provided in the file context."
     )
 
-    class Config:
-        title = "ViewCode"
+    model_config = ConfigDict(title="ViewCode")
 
     @property
     def log_name(self):
@@ -95,7 +94,7 @@ class ViewCode(Action, IdentifyMixin):
     def __init__(
         self,
         repository: Repository = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: BaseCompletionModel | None = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)

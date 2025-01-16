@@ -1,12 +1,12 @@
 import re
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
-from moatless.actions.action import Action
+from moatless.actions.action import Action, FewShotExample
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
-from moatless.actions.model import ActionArguments, FewShotExample, Observation
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.repository.file import do_diff
@@ -20,13 +20,13 @@ class AppendStringArgs(ActionArguments):
     Append text content to the end of a file.
     """
 
+    model_config = ConfigDict(title="AppendString")
+
     path: str = Field(..., description="Path to the file to append to")
     new_str: str = Field(
         ..., description="Text content to append at the end of the file"
     )
 
-    class Config:
-        title = "AppendString"
 
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>

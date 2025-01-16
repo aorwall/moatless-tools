@@ -7,14 +7,13 @@ from typing import List, Type, Dict, Any
 from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
 
 from moatless.actions.action import Action
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
-    Observation,
 )
 from moatless.agent.settings import AgentSettings
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
+from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.model import Completion
-from moatless.exceptions import RuntimeError, CompletionRejectError
+from moatless.exceptions import CompletionError, RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
@@ -37,12 +36,12 @@ class ActionAgent(BaseModel):
         description="Generator for message history",
     )
 
-    _completion: CompletionModel = PrivateAttr()
+    _completion: BaseCompletionModel = PrivateAttr()
     _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
 
     def __init__(
         self,
-        completion: CompletionModel,
+        completion: BaseCompletionModel,
         system_prompt: str | None = None,
         actions: List[Action] | None = None,
         message_generator: MessageHistoryGenerator | None = None,
@@ -56,8 +55,8 @@ class ActionAgent(BaseModel):
             message_generator=message_generator,
             **data,
         )
-        self.set_actions(actions)
         self._completion = completion
+        self.set_actions(actions)
 
     @classmethod
     def from_agent_settings(
@@ -79,6 +78,9 @@ class ActionAgent(BaseModel):
     def set_actions(self, actions: List[Action]):
         self.actions = actions
         self._action_map = {action.args_schema: action for action in actions}
+        action_args = [action.args_schema for action in self.actions]
+        system_prompt = self.generate_system_prompt()
+        self._completion.initialize(action_args, system_prompt)
 
     @model_validator(mode="after")
     def verify_actions(self) -> "ActionAgent":
@@ -101,15 +103,13 @@ class ActionAgent(BaseModel):
             node.reset()
 
         node.possible_actions = [action.name for action in self.actions]
-        system_prompt = self.generate_system_prompt()
-        action_args = [action.args_schema for action in self.actions]
 
         try:
-            messages = self.message_generator.generate(node)
+            messages = self.message_generator.generate_messages(node)
             logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
             completion_response = self._completion.create_completion(
-                messages, system_prompt=system_prompt, response_model=action_args
+                messages=messages,
             )
             node.completions["build_action"] = completion_response.completion
 
@@ -123,20 +123,21 @@ class ActionAgent(BaseModel):
         except Exception as e:
             node.terminal = True
             node.error = traceback.format_exc()
-
-            if hasattr(e, "messages") and hasattr(e, "last_completion"):
-                # TODO: Move mapping to completion.py
+            logger.error(f"Node{node.node_id}: Build action failed with error: {e}") 
+            if hasattr(e, "last_completion") and e.last_completion:
                 node.completions["build_action"] = Completion.from_llm_completion(
-                    input_messages=e.messages,
+                    input_messages=e.messages if hasattr(e, "messages") else [],
                     completion_response=e.last_completion,
                     model=self.completion.model,
+                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
                 logger.warning(
                     f"Node{node.node_id}: Build action failed with error: {e}"
                 )
-                return
-            else:
-                raise e
+                if isinstance(e, CompletionRejectError):
+                    return
+            
+            raise e
 
         if node.action is None:
             return
@@ -186,11 +187,10 @@ class ActionAgent(BaseModel):
         except CompletionRejectError as e:
             logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
             action_step.completion = e.last_completion
-            action_step.observation = Observation(
-                message=e.message,
-                is_terminal=True,
-            )
-
+            node.error = traceback.format_exc()
+            node.terminal = True
+            raise e
+            
     def generate_system_prompt(self) -> str:
         """Generate a system prompt for the agent."""
 
@@ -312,7 +312,7 @@ class ActionAgent(BaseModel):
                 )
 
             if completion_data:
-                obj["completion"] = CompletionModel.model_validate(completion_data)
+                obj["completion"] = BaseCompletionModel.model_validate(completion_data)
             else:
                 obj["completion"] = None
 
@@ -355,7 +355,7 @@ class ActionAgent(BaseModel):
 
         # Handle completion model
         if "completion" in data and isinstance(data["completion"], dict):
-            data["completion"] = CompletionModel.model_validate(data["completion"])
+            data["completion"] = BaseCompletionModel.model_validate(data["completion"])
 
         # Handle actions with dependencies
         if repository and "actions" in data and isinstance(data["actions"], list):
@@ -385,9 +385,9 @@ class ActionAgent(BaseModel):
         return cls.model_validate(data)
 
     @property
-    def completion(self) -> CompletionModel:
+    def completion(self) -> BaseCompletionModel:
         return self._completion
 
     @completion.setter
-    def completion(self, value: CompletionModel):
+    def completion(self, value: BaseCompletionModel):
         self._completion = value
