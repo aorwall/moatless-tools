@@ -133,6 +133,10 @@ class MessageHistoryGenerator(BaseModel):
             from moatless.message_history.summary import SummaryMessageHistoryGenerator
 
             return SummaryMessageHistoryGenerator(**obj)
+        
+        elif message_history_type == MessageHistoryType.MESSAGES:
+            
+            return cls(**obj)
         else:
             raise ValueError(f"Invalid message_history_type: {message_history_type}")
 
