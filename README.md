@@ -114,7 +114,7 @@ Before running the full evaluation, you can verify your setup using the integrat
 
 ```bash
 # Run a single model test
-poetry run scripts/run_integration_tests.py --model claude-3-5-sonnet-20241022
+poetry run -m scripts.run_integration_tests --model claude-3-5-sonnet-20241022
 ```
 
 The script will run the model against a sample SWE-Bench instance
@@ -127,7 +127,7 @@ Results are saved in `test_results/integration_test_<timestamp>/` .
 The evaluation script supports various configuration options through command line arguments:
 
 ```bash
-poetry run python -m moatless.benchmark.run_evaluation [OPTIONS]
+poetry run python -m scripts.run_evaluation [OPTIONS]
 ```
 
 Required arguments:
@@ -160,22 +160,23 @@ Available dataset splits that can be specified with the `--split` argument:
 
 | Split Name | Description | Instance Count |
 |------------|-------------|----------------|
+| easy | Instances solved by at least 85% of all submissions to SWE-Bench. Can be used to verify the evaluation setup. | 4 |
 | lite | All instances from the lite dataset | 300 | 
+| lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 84 |
 | verified | All instances from the verified dataset | 500 | 
 | verified_mini | [MariusHobbhahn/swe-bench-verified-mini](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini), a subset of SWE-Bench Verified  | 50 |
-| lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 84 |
 
 Example usage:
 ```bash
 # Run evaluation with Claude 3.5 Sonnet using the ReACT format
-poetry run python -m moatless.benchmark.run_evaluation \
+poetry run python -m scripts.run_evaluation \
   --model claude-3-5-sonnet-20241022 \
   --response-format react \
   --message-history react \
   --num-workers 10
 
 # Run specific instances with GPT-4
-poetry run python -m moatless.benchmark.run_evaluation \
+poetry run python -m scripts.run_evaluation \
   --model gpt-4o \
   --instance-ids "django__django-16379"
 ```
