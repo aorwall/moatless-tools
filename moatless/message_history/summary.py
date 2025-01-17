@@ -1,7 +1,7 @@
 import logging
 from typing import List
 
-from moatless.message_history.schema import (
+from moatless.completion.schema import (
     ChatCompletionUserMessage,
     AllMessageValues,
 )
@@ -19,14 +19,9 @@ class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
         formatted_history: List[str] = []
         counter = 0
 
-        if self.include_root_node:
-            content = node.get_root().message
-            if not previous_nodes:
-                return [ChatCompletionUserMessage(role="user", content=content)]
-        else:
-            content = ""
-            if not previous_nodes:
-                return []
+        content = node.get_root().message
+        if not previous_nodes:
+            return [ChatCompletionUserMessage(role="user", content=content)]
 
         for i, previous_node in enumerate(previous_nodes):
             if previous_node.action:

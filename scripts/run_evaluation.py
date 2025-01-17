@@ -110,119 +110,6 @@ def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
         return EvaluationDatasetSplit(**data)
 
 
-class SimpleEvaluationMonitor:
-    def __init__(self, repository, evaluation, console_logger, file_logger):
-        self.repository = repository
-        self.evaluation = evaluation
-        self.start_time = datetime.now()
-        self.instances_data = {}
-        self.total_cost = 0.0
-        self.total_tokens = 0
-        self.console = console_logger
-        self.logger = file_logger
-
-        # Load initial instances
-        self._log_settings()
-
-        print(f"Starting evaluation: {evaluation.evaluation_name}")
-        print(f"Found {len(evaluation.instances)} instances in evaluation")
-
-    def _log_settings(self):
-        """Log evaluation configuration and settings"""
-        eval_dir = os.path.join(self.repository.evaluations_dir, self.evaluation.evaluation_name)
-        settings = self.evaluation.settings
-
-        # Evaluation info
-        info_lines = [
-            "\nEvaluation Settings:",
-            f"Directory: {eval_dir}",
-            "\nModel Settings:",
-            f"  Model: {settings.model.model}",
-            f"  Temperature: {settings.model.temperature}",
-            "\nTree Search Settings:",
-            f"  Max Iterations: {settings.max_iterations}",
-            f"  Max Expansions: {settings.max_expansions}",
-            f"  Max Cost: ${settings.max_cost}",
-            "\nAgent Settings:",
-            f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
-            f"  Response Format: {settings.model.response_format.value if settings.model.response_format else 'default'}",
-            f"  Message History: {settings.agent_settings.message_history_type.value}",
-            f"  Thoughts in Action: {settings.model.thoughts_in_action}",
-            f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
-        ]
-
-        for line in info_lines:
-            print(line)
-            self.logger.info(line)
-
-    def handle_event(self, event):
-        """Handle evaluation events by logging them"""
-        event_type = event.event_type
-        data = event.data if event.data else {}
-        instance_id = data.get("instance_id")
-        
-        # Format log message based on event type
-        log_msg = None
-    
-        if event_type == "instance_started":
-            log_msg = f"{instance_id}: Started processing"
-            
-        elif event_type == "instance_completed":
-            resolved = data.get("resolved")
-            status = "✓" if resolved is True else "✗" if resolved is False else "-"
-            instance = self.evaluation.get_instance(instance_id)
-            log_msg = f"{instance_id}: Completed [{status}] - Iterations: {instance.iterations}"
-            
-        elif event_type == "instance_error":
-            error = data.get("error", "Unknown error")
-            log_msg = f"{instance_id}: Error - {error}"
-            
-        elif event_type == "loop_started":
-            log_msg = f"{instance_id}: Started agentic loop"
-            
-        elif event_type == "loop_iteration":
-            action = data.get("action", "Unknown")
-            node_id = data.get("current_node_id", 0)
-            log_msg = f"{instance_id}: Running Node{node_id} - Action: {action}"
-            
-        elif event_type == "loop_completed":
-            duration = data.get("duration", 0)
-            log_msg = f"{instance_id}: Completed loop in {duration:.1f}s"
-            
-        elif event_type == "instance_evaluation_started":
-            log_msg = f"{instance_id}: Started testbed evaluation"
-            
-        elif event_type == "instance_evaluation_result":
-            resolved = data.get("resolved")
-            status = "✓" if resolved is True else "✗" if resolved is False else "-"
-            node_id = data.get("node_id")
-            log_msg = f"{instance_id}: Evaluated node {node_id} [{status}]"
-            self.log_eval_summary()
-            
-        elif event_type == "instance_evaluation_error":
-            error = data.get("error", "Unknown error")
-            node_id = data.get("node_id")
-            log_msg = f"{instance_id}: Evaluation error on node {node_id} - {error}"
-        
-        if log_msg:
-            self.console.info(log_msg)
-            self.logger.info(log_msg)
-
-
-    def log_eval_summary(self):
-        """Log total instances, completed, errors and resolved instances"""
-        total = len(self.evaluation.instances)
-        completed = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.COMPLETED)
-        errors = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.ERROR)
-        resolved = sum(1 for i in self.evaluation.instances if i.resolved is True)
-        resolved_rate = (resolved / (completed + errors)) * 100 if completed + errors > 0 else 0
-        summary = f"""
-📊 Evaluation Progress:
-Total = {total} | Completed = {completed} ({completed/total*100:.1f}%) | Errors = {errors} ({errors/total*100:.1f}%) | Resolved = {resolved} ({resolved_rate:.1f}%)"""
-        self.console.info(summary)
-        self.logger.info(summary)
-
-
 def print_config(config: dict, console_logger: logging.Logger):
     """Print configuration details"""
     config_sections = {
@@ -232,14 +119,14 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Thoughts in Action", "thoughts_in_action"),
             ("API Key", "api_key"),
             ("Base URL", "base_url"),
+            ("Temperature", "temperature"),
         ],
         "Dataset Settings": [
             ("Split", "split"),
             ("Instance IDs", "instance_ids"),
         ],
-        "Tree Search Settings": [
+        "Loop Settings": [
             ("Max Iterations", "max_iterations"),
-            ("Max Expansions", "max_expansions"),
             ("Max Cost", "max_cost"),
         ],
         "Runner Settings": [
@@ -278,6 +165,89 @@ def print_config(config: dict, console_logger: logging.Logger):
                 print(f"{label:20}: N/A")
 
     print("\n" + "=" * 50 + "\n")
+
+
+class SimpleEvaluationMonitor:
+    def __init__(self, repository, evaluation, console_logger, file_logger):
+        self.repository = repository
+        self.evaluation = evaluation
+        self.start_time = datetime.now()
+        self.instances_data = {}
+        self.total_cost = 0.0
+        self.total_tokens = 0
+        self.console = console_logger
+        self.logger = file_logger
+
+        print(f"Starting evaluation: {evaluation.evaluation_name}")
+        print(f"Found {len(evaluation.instances)} instances in evaluation")
+
+    def handle_event(self, event):
+        """Handle evaluation events by logging them"""
+        event_type = event.event_type
+        data = event.data if event.data else {}
+        instance_id = data.get("instance_id")
+        
+        # Format log message based on event type
+        log_msg = None
+    
+        if event_type == "instance_started":
+            log_msg = f"{instance_id}: Started processing"
+            
+        elif event_type == "instance_completed":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
+            instance = self.evaluation.get_instance(instance_id)
+            log_msg = f"{instance_id}: Completed [{status}] - Iterations: {instance.iterations}"
+            self.log_eval_summary()
+            
+        elif event_type == "instance_error":
+            error = data.get("error", "Unknown error")
+            log_msg = f"{instance_id}: Error - {error}"
+            
+        elif event_type == "loop_started":
+            log_msg = f"{instance_id}: Started agentic loop"
+            
+        elif event_type == "loop_iteration":
+            action = data.get("action", "Unknown")
+            node_id = data.get("current_node_id", 0)
+            log_msg = f"{instance_id}: Running Node{node_id} - Action: {action}"
+            
+        elif event_type == "loop_completed":
+            duration = data.get("duration", 0)
+            log_msg = f"{instance_id}: Completed loop in {duration:.1f}s"
+            
+        elif event_type == "instance_evaluation_started":
+            log_msg = f"{instance_id}: Started testbed evaluation"
+            
+        elif event_type == "instance_evaluation_result":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
+            node_id = data.get("node_id")
+            log_msg = f"{instance_id}: Evaluated node {node_id} [{status}]"
+            self.log_eval_summary()
+            
+        elif event_type == "instance_evaluation_error":
+            error = data.get("error", "Unknown error")
+            node_id = data.get("node_id")
+            log_msg = f"{instance_id}: Evaluation error on node {node_id} - {error}"
+        
+        if log_msg:
+            print(log_msg)
+            self.logger.info(log_msg)
+
+
+    def log_eval_summary(self):
+        """Log total instances, completed, errors and resolved instances"""
+        total = len(self.evaluation.instances)
+        completed = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.ERROR)
+        resolved = sum(1 for i in self.evaluation.instances if i.resolved is True)
+        resolved_rate = (resolved / (completed + errors)) * 100 if completed + errors > 0 else 0
+        summary = f"""
+📊 Evaluation Progress:
+Total = {total} | Completed = {completed} ({completed/total*100:.1f}%) | Errors = {errors} ({errors/total*100:.1f}%) | Resolved = {resolved} ({resolved_rate:.1f}%)"""
+        self.console.info(summary)
+        self.logger.info(summary)
 
 
 def run_evaluation(config: dict):

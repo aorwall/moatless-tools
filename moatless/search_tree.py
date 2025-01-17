@@ -60,11 +60,8 @@ class SearchTree(BaseModel):
     reward_threshold: Optional[float] = Field(
         None, description="The min reward threshold to consider before finishing."
     )
-    max_depth: Optional[int] = Field(None, description="The maximum depth for one trajectory in simulations.")
-    finish_before_reexpanding: bool = Field(False, description="Whether to reach a Finish state before reexpanding.")
-    finish_before_reexpanding_depth: Optional[int] = Field(
-        20, description="The depth to reach a Finish state before reexpanding."
-    )
+    max_depth: Optional[int] = Field(20, description="The maximum depth for one trajectory in simulations.")
+
     event_handlers: List[Callable] = Field(
         default_factory=list, description="Event handlers for tree events", exclude=True
     )
@@ -194,6 +191,9 @@ class SearchTree(BaseModel):
                 f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
             )
 
+        # Emit tree started event
+        self.emit_event("tree_started", {})
+
         while not self.is_finished():
             total_cost = self.total_usage().completion_cost
             self.log(
@@ -211,7 +211,7 @@ class SearchTree(BaseModel):
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, new_node))
 
-                # Emit iteration event
+                # Emit tree iteration event
                 self.emit_event(
                     "tree_iteration",
                     {
@@ -221,6 +221,8 @@ class SearchTree(BaseModel):
                         "finished_nodes": len(self.get_finished_nodes()),
                         "total_nodes": len(self.root.get_all_nodes()),
                         "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None,
+                        "action": new_node.action.name if new_node.action else None,
+                        "current_node_id": new_node.node_id,
                     },
                 )
             else:
@@ -238,6 +240,17 @@ class SearchTree(BaseModel):
                 f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
             )
 
+        # Emit tree completed event
+        self.emit_event(
+            "tree_completed",
+            {
+                "total_iterations": len(self.root.get_all_nodes()),
+                "total_cost": self.total_usage().completion_cost,
+                "finished_nodes": len(self.get_finished_nodes()),
+                "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None,
+            },
+        )
+
         return self.get_best_trajectory()
 
     def _select(self, node: Node) -> Optional[Node]:
@@ -247,30 +260,6 @@ class SearchTree(BaseModel):
         if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
-
-        if expandable_nodes and self.finish_before_reexpanding:
-            # Sort by node_id to get the most recently created node
-            latest_node = max(expandable_nodes, key=lambda n: n.node_id)
-
-            # Check if any node in the tree has reached a finished state
-            all_nodes = node.get_all_nodes()
-            has_finished_node = any(n.is_finished() for n in all_nodes)
-
-            # Check if any node has exceeded the depth limit
-            max_depth_exceeded = (
-                any(n.get_depth() >= self.finish_before_reexpanding_depth for n in all_nodes)
-                if self.finish_before_reexpanding_depth is not None
-                else False
-            )
-
-            # Continue linear expansion only if no finished nodes exist and depth never exceeded
-            if not has_finished_node and not max_depth_exceeded:
-                return latest_node
-            else:
-                self.log(
-                    logger.info,
-                    f"Breaking linear path: {'finished state exists' if has_finished_node else 'depth limit exceeded'}",
-                )
 
         # If we have a finished node or exceeded depth, use normal selection
         return self.selector.select(expandable_nodes)
@@ -307,15 +296,30 @@ class SearchTree(BaseModel):
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
             self.agent.run(node)
+            logger.info(f"Node{node.node_id}: Action executed. Depth: {node.get_depth()} ({self.max_depth})")
+
+            if self.max_depth and node.get_depth() >= self.max_depth and not node.terminal:
+                logger.info(f"Node{node.node_id}: Reached max depth {self.max_depth}. Marking as terminal.")
+                node.terminal = True
 
         if self.value_function and not node.is_duplicate and node.observation:
             try:
+                logger.info(f"Node{node.node_id}: Evaluating value function")
                 node.reward, completion_response = self.value_function.get_reward(node=node)
-                node.completions["value_function"] = completion_response
-                self.log(
-                    logger.info,
-                    f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
-                )
+                
+                if completion_response:
+                    node.completions["value_function"] = completion_response
+
+                if node.reward:
+                    self.log(
+                        logger.info,
+                        f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
+                    )
+                else:
+                    self.log(
+                        logger.info,
+                        f"Node{node.node_id}: The value function returned no reward.",
+                    )
             except RejectError as e:
                 self.log(
                     logger.warning,
@@ -328,6 +332,7 @@ class SearchTree(BaseModel):
                     f"Node{node.node_id}: Value function runtime error: {e.message}",
                 )
                 raise  # Re-raise to abort the entire search
+            
 
     def _backpropagate(self, node: Node):
         """Backpropagate the reward up the tree."""

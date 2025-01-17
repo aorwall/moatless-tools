@@ -6,7 +6,7 @@ from typing import Union, List, Dict, Any, Type, Optional
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel
-from moatless.completion.base import CompletionRetryError
+from moatless.completion.base import CompletionRetryError, LLMResponseFormat
 from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
 
 logger = logging.getLogger(__name__)
@@ -20,6 +20,7 @@ class JsonCompletionModel(BaseCompletionModel):
     2. Configuring the LLM to output valid JSON
     3. Validating and parsing JSON responses
     """
+
 
     def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
         """Add JSON schema instructions to system prompt.

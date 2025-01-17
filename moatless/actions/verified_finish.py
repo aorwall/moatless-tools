@@ -29,11 +29,9 @@ class VerifiedFinishArgs(ActionArguments):
     model_config = ConfigDict(title="Finish")
 
     def to_prompt(self):
-        files_str = "\n".join(f"- {file}" for file in self.test_files_changed)
         return (
             f"Finish with reason: {self.finish_reason}\n"
             f"Test verification: {self.test_verification}\n"
-            f"Modified/Created test files:\n{files_str}"
         )
 
     def equals(self, other: "ActionArguments") -> bool:

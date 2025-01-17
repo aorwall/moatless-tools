@@ -288,7 +288,7 @@ class ContextFile(BaseModel):
                 for line in hunk:
                     if line.is_context:
                         if line_no >= len(content_lines):
-                            raise Exception(f"Patch context mismatch: Line {line_no} is beyond end of file")
+                            raise Exception(f"Patch context mismatch: Line {line_no} is beyond end of file ({len(content_lines)} lines)")
                         elif line.value.strip() and content_lines[line_no].strip() != line.value.strip():
                             raise Exception(
                                 f'Patch context mismatch at line {line_no}: Expected "{line.value.strip()}", got "{content_lines[line_no].strip()}"'
@@ -1165,8 +1165,8 @@ class FileContext(BaseModel):
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
-    def has_patch(self):
-        return any(file.patch for file in self._files.values())
+    def has_patch(self, ignore_tests: bool = False):
+        return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
 
     def has_test_patch(self):
         return any(file.patch for file in self._files.values() if is_test(file.file_path))
@@ -1469,7 +1469,7 @@ class FileContext(BaseModel):
 
         return f"{passed_count} passed. {failure_count} failed. {error_count} errors."
 
-    def get_test_failure_details(self) -> str:
+    def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
         """
         Returns detailed output for each failed or errored test result.
 
@@ -1478,6 +1478,7 @@ class FileContext(BaseModel):
         """
         from testbeds.schema import TestStatus
 
+        sum_tokens = 0
         test_result_strings = []
         for test_file in self._test_files.values():
             for result in test_file.test_results:
@@ -1490,7 +1491,19 @@ class FileContext(BaseModel):
                         if result.line:
                             attributes += f", line: {result.line}"
 
-                    test_result_strings.append(f"* {result.status.value} {attributes}>\n```\n{result.message}\n```\n")
+                    if len(result.message) > max_chars_per_test:
+                        truncated_message = result.message[:max_chars_per_test]
+                        truncated_message += "\n...truncated"
+                    else:
+                        truncated_message = result.message
+
+                    test_result_str = f"* {result.status.value} {attributes}>\n```\n{truncated_message}\n```\n"
+                    test_result_tokens = count_tokens(test_result_str)
+                    if sum_tokens + test_result_tokens > max_tokens:
+                        break
+                    
+                    sum_tokens += test_result_tokens
+                    test_result_strings.append(test_result_str)
 
         return "\n".join(test_result_strings) if test_result_strings else ""
 

@@ -29,6 +29,7 @@ from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
 from moatless.model_config import MODEL_CONFIGS
 from moatless.schema import MessageHistoryType
+from swesearch.evaluation_setups import create_evaluation_setup
 
 # Default evaluation settings
 DEFAULT_CONFIG = {
@@ -342,30 +343,8 @@ def run_evaluation(config: dict):
     if not instance_ids:
         raise ValueError("No instance IDs provided")
 
-    model_settings = BaseCompletionModel(
-        model=config["model"],
-        temperature=config.get("temperature", 0.0),
-        max_tokens=4000,
-        model_api_key=config.get("api_key"),
-        model_base_url=config.get("base_url"),
-        response_format=config.get("response_format"),
-        thoughts_in_action=config.get("thoughts_in_action", False),
-    )
-
-    agent_settings = AgentSettings(
-        completion_model=model_settings,
-        message_history_type=config.get("message_history_type", MessageHistoryType.MESSAGES),
-        system_prompt=None,
-        thoughts_in_action=config.get("thoughts_in_action", False),
-    )
-
-    tree_search_settings = TreeSearchSettings(
-        max_iterations=config["max_iterations"],
-        max_expansions=config["max_expansions"],
-        max_cost=config["max_cost"],
-        model=model_settings,
-        agent_settings=agent_settings,
-    )
+    # Create tree search settings using the evaluation setup function
+    tree_search_settings = create_evaluation_setup(config)
 
     evaluation = create_evaluation(
         repository=repository,

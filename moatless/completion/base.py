@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from abc import ABC
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, List, Union, Any, Dict
 
@@ -216,6 +216,14 @@ class BaseCompletionModel(BaseModel, ABC):
             else:
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
+            if not completion_response.choices[0].message.content and not completion_response.choices[0].message.tool_calls:
+                raise CompletionRuntimeError(
+                    "Completion response is empty",
+                    messages=messages,
+                    last_completion=completion_response,
+                    accumulated_usage=accumulated_usage,
+                )
+
             try:
                 # Validate the response - may raise CompletionRejectError
                 structured_outputs, text_response, flags = self._validate_completion(
@@ -256,6 +264,8 @@ class BaseCompletionModel(BaseModel, ABC):
                 last_completion=completion_response.model_dump() if completion_response else None,
                 accumulated_usage=accumulated_usage,
             ) from e
+        except CompletionRuntimeError as e:
+            raise e
         except Exception as e:
             logger.error(f"Completion failed after {retry_count} retries. Exception: {e}. Type: {type(e)}")
             raise CompletionRuntimeError(
@@ -285,52 +295,67 @@ class BaseCompletionModel(BaseModel, ABC):
             CompletionRuntimeError: For provider errors
         """
         import litellm
-        from litellm import BadRequestError
+        from litellm import BadRequestError, RateLimitError, APIConnectionError
+        from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
         params = self._completion_params.copy()
 
-        try:
-            betas = []
-            if "claude-3-5" in self.model:
-                self._inject_prompt_caching(messages)
-                betas.append("prompt-caching-2024-07-31")
+        @retry(
+            retry=retry_if_exception_type((RateLimitError, APIConnectionError)),
+            wait=wait_exponential(multiplier=5, min=5, max=60),
+            stop=stop_after_attempt(3),
+            reraise=True,
+            before_sleep=lambda retry_state: logger.warning(
+                f"Rate limited by provider, retrying in {retry_state.next_action.sleep} seconds"
+            ),
+        )
+        def _do_completion_with_rate_limit_retry():
+            try:
+                betas = []
+                if "claude-3-5" in self.model:
+                    self._inject_prompt_caching(messages)
+                    betas.append("prompt-caching-2024-07-31")
 
-            if "claude-3-5-sonnet" in self.model:
-                betas.append("computer-use-2024-10-22")
+                if "claude-3-5-sonnet" in self.model:
+                    betas.append("computer-use-2024-10-22")
 
-            if betas:
-                extra_headers = {"anthropic-beta": ",".join(betas)}
-            else:
-                extra_headers = None
+                if betas:
+                    extra_headers = {"anthropic-beta": ",".join(betas)}
+                else:
+                    extra_headers = None
 
-            return litellm.completion(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                messages=messages,
-                metadata=self.metadata or {},
-                timeout=self.timeout,
-                api_base=self.model_base_url,
-                api_key=self.model_api_key,
-                extra_headers=extra_headers,
-                **params,
-            )
+                return litellm.completion(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    messages=messages,
+                    metadata=dict(self.metadata or {}),
+                    timeout=self.timeout,
+                    api_base=self.model_base_url,
+                    api_key=self.model_api_key,
+                    extra_headers=extra_headers,
+                    **params,
+                )
 
-        except BadRequestError as e:
-            logger.exception(
-                f"LiteLLM completion failed. Model: {self.model}, "
-                f"Response Schemas: {', '.join(self._get_schema_names())}, "
-                f"Completion Params:\n{json.dumps(params, indent=2)}\n"
-                f"Error: {e}"
-            )
-            raise CompletionRuntimeError(str(e), messages=messages) from e
-        except Exception as e:
-            logger.exception(
-                f"LiteLLM completion failed. Model: {self.model}, "
-                f"Response Schemas: {', '.join(self._get_schema_names())}, "
-                f"Error: {e}"
-            )
-            raise CompletionRuntimeError(str(e), messages=messages) from e
+            except BadRequestError as e:
+                logger.exception(
+                    f"LiteLLM completion failed. Model: {self.model}, "
+                    f"Response Schemas: {', '.join(self._get_schema_names())}, "
+                    f"Completion Params:\n{json.dumps(params, indent=2)}\n"
+                    f"Error: {e}"
+                )
+                raise CompletionRuntimeError(str(e), messages=messages) from e
+            except RateLimitError:
+                raise  # Let tenacity handle the retry
+            except Exception as e:
+                logger.exception(
+                    f"LiteLLM completion failed. Model: {self.model}, "
+                    f"Response Schemas: {', '.join(self._get_schema_names())}, "
+                    f"Error: {e}"
+                )
+                raise CompletionRuntimeError(str(e), messages=messages) from e
+
+        return _do_completion_with_rate_limit_retry()
 
     def _get_schema_names(self):
         return [schema.__name__ for schema in self.response_schema] if self.response_schema else ["None"]
@@ -359,6 +384,7 @@ class BaseCompletionModel(BaseModel, ABC):
                     message["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
                     breakpoints_remaining -= 1
 
+    @abstractmethod
     def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
         """Validate and transform the LLM's response into a structured format.
 
