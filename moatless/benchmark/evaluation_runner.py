@@ -43,13 +43,11 @@ class DateTimeEncoder(json.JSONEncoder):
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "TreeSearchSettings",
-    "Evaluation",
-    "InstanceStatus",
-    "EvaluationStatus",
-    "EvaluationEvent",
-]
+litellm_logger = logging.getLogger("litellm")
+for handler in litellm_logger.handlers[:]:
+    litellm_logger.removeHandler(handler)
+litellm_logger.addHandler(logging.NullHandler())
+litellm_logger.propagate = True
 
 
 class EvaluationRunner:
@@ -145,7 +143,6 @@ class EvaluationRunner:
 
         instance_dir = os.path.join(self.get_evaluation_dir(), instance_id)
         trajectory_path = os.path.join(instance_dir, "trajectory.json")
-        eval_result_path = os.path.join(instance_dir, "eval_result.json")
         os.makedirs(instance_dir, exist_ok=True)
         instance = self.evaluation.get_instance(instance_id)
         if not instance:
@@ -157,36 +154,6 @@ class EvaluationRunner:
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
 
-            eval_result = None
-
-            if os.path.exists(eval_result_path):
-                try:
-                    with open(eval_result_path) as f:
-                        eval_result = json.load(f)
-                        logger.info(f"Loading eval_result from {eval_result_path}, evaluated ")
-                        if "node_results" not in eval_result:
-                            if len(eval_result) > 0:
-                                logger.info(f"Found nood results with {eval_result.keys()} on root, fix format")
-                                eval_result = {
-                                    "node_results": eval_result,
-                                    "status": "started",
-                                    "start_time": datetime.now(timezone.utc).isoformat(),
-                                }
-                            else:
-                                logger.info("No node_results found")
-                                eval_result = None
-                        else:
-                            logger.info(f"Found evaluated nodes {eval_result['node_results'].keys()}")
-
-                except json.JSONDecodeError:
-                    pass
-
-            if not eval_result:
-                eval_result = {
-                    "node_results": {},
-                    "status": "started",
-                    "start_time": datetime.now(timezone.utc).isoformat(),
-                }
             agentic_loop = self.create_and_run_agentic_loop(
                 problem_statement=problem_statement,
                 instance=instance,
@@ -195,30 +162,16 @@ class EvaluationRunner:
             )
             logger.info(f"Completed agentic loop for instance {instance_id}")
 
-            start_time = time.time()
-            try:
-                if self.use_testbed:
-                    logger.info(f"Starting testbed evaluation for instance {instance_id}")
-                    eval_result = self.evaluate_nodes(
-                        instance_id=instance_id,
-                        instance=moatless_instance,
-                        agentic_loop=agentic_loop,
-                        eval_result=eval_result,
-                    )
-                    logger.info(f"Completed testbed evaluation for instance {instance_id}")
-            except RuntimeError as e:
-                logger.error(f"Runtime error in instance {instance_id}: {str(e)}")
-                raise e
+            if self.use_testbed:
+                logger.info(f"Starting testbed evaluation for instance {instance_id}")
+                resolved = self.evaluate_nodes(
+                    instance=moatless_instance,
+                    agentic_loop=agentic_loop,
+                )
+                logger.info(f"Completed testbed evaluation for instance {instance_id}")
 
-            except Exception as e:
-                logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
-                eval_result["status"] = "error"
-                eval_result["error"] = traceback.format_exc()
-                eval_result["duration"] = time.time() - start_time
-
-            # Complete instance with result
-            instance.complete()
-            self.emit_event("instance_completed", {"instance_id": instance_id})
+            instance.complete(resolved=resolved)
+            self.emit_event("instance_completed", {"instance_id": instance_id, "resolved": resolved})
             return
 
         except Exception as e:
@@ -227,11 +180,6 @@ class EvaluationRunner:
             self.emit_event("instance_error", {"instance_id": instance_id, "error": str(e)})
             raise
         finally:
-            if eval_result:
-                # Save evaluation result
-                with open(eval_result_path, "w") as f:
-                    json.dump(eval_result, f, indent=2)
-
             if self.remove_repo_after_evaluation:
                 repo_path = instance_repo_path(instance_id, self.repo_base_dir)
                 if os.path.exists(repo_path):
@@ -243,54 +191,6 @@ class EvaluationRunner:
             del agentic_loop
             del eval_result
             gc.collect()
-
-    def evaluate_nodes(
-        self,
-        instance_id: str,
-        instance: dict,
-        agentic_loop: AgenticLoop,
-        eval_result: dict,
-    ):
-        """Evaluate leaf node using the testbed."""
-        leaf_node = agentic_loop.get_last_node()
-        patch_results = {}
-
-        if str(leaf_node.node_id) in eval_result.get("node_results", {}):
-            logger.info(f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated")
-            return eval_result
-
-        logger.info(f"Evaluate Node{leaf_node.node_id} for instance {instance_id}.")
-        patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
-        if patch and patch.strip():
-            patch_hash = create_sha256_hash(patch)
-
-            if patch_hash in patch_results:
-                eval_result["node_results"][str(leaf_node.node_id)] = patch_results[patch_hash]
-            else:
-                repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
-                # TODO: Set run_id on testbed environment
-                run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
-                runtime = TestbedEnvironment(
-                    repository=repository,
-                    instance=instance,
-                    # run_id=run_id,
-                )
-
-                start_time = time.time()
-                result = runtime.evaluate(patch=patch)
-                if not result:
-                    logger.error(f"Error in evaluating patch for {instance_id}")
-                    return None
-
-                eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
-                patch_results[patch_hash] = eval_result["node_results"][str(leaf_node.node_id)]
-                logger.info(
-                    f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
-                )
-        else:
-            logger.info(f"Skip Node{leaf_node.node_id} for instance {instance_id} with no patch.")
-
-        return eval_result
 
     def create_and_run_agentic_loop(
         self,
@@ -304,6 +204,8 @@ class EvaluationRunner:
             "evaluation_name": self.evaluation.evaluation_name,
             "instance_id": instance.instance_id,
         }
+
+        start_time = time.time()
 
         agentic_loop = None
         rerun_tree = False
@@ -394,27 +296,120 @@ class EvaluationRunner:
 
         def tree_event_handler(event):
             logger.info(f"Got event {event['event_type']}")
-            if event["event_type"] == "tree_iteration":
+            if event["event_type"] == "loop_iteration":
                 instance.usage = agentic_loop.total_usage()
                 instance.iterations = len(agentic_loop.root.get_all_nodes())
 
                 logger.info("Emit event tree_progress")
                 self.emit_event(
-                    "tree_progress",
+                    "loop_iteration",
                     {
                         "instance_id": instance.instance_id,
+                        **event["data"],
                     },
                 )
 
         instance.start()
-        self.emit_event("instance_started", {"instance_id": instance.instance_id})
+        self.emit_event("loop_started", {"instance_id": instance.instance_id})
 
         agentic_loop.add_event_handler(tree_event_handler)
         agentic_loop.run()
 
-        self.emit_event("instance_completed", {"instance_id": instance.instance_id})
+        duration = time.time() - start_time
+        self.emit_event("loop_completed", {"instance_id": instance.instance_id, "duration": duration})
 
         return agentic_loop
+
+    def evaluate_nodes(
+        self,
+        instance: dict,
+        agentic_loop: AgenticLoop
+    ) -> bool | None:
+        
+        instance_id = instance["instance_id"]
+    
+        eval_result = None
+        instance_dir = os.path.join(self.get_evaluation_dir(), instance_id)
+        eval_result_path = os.path.join(instance_dir, "eval_result.json")
+
+        if os.path.exists(eval_result_path):
+            try:
+                with open(eval_result_path) as f:
+                    eval_result = json.load(f)
+                    logger.info(f"Loading eval_result from {eval_result_path}, evaluated ")
+                    if "node_results" not in eval_result:
+                        if len(eval_result) > 0:
+                            logger.info(f"Found nood results with {eval_result.keys()} on root, fix format")
+                            eval_result = {
+                                "node_results": eval_result,
+                                "start_time": datetime.now(timezone.utc).isoformat(),
+                            }
+                        else:
+                            logger.info("No node_results found")
+                            eval_result = None
+                    else:
+                        logger.info(f"Found evaluated nodes {eval_result['node_results'].keys()}")
+
+            except json.JSONDecodeError:
+                pass
+
+        if not eval_result:
+            eval_result = {
+                "node_results": {},
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
+            
+        """Evaluate leaf node using the testbed."""
+        leaf_node = agentic_loop.get_last_node()
+
+        if str(leaf_node.node_id) in eval_result.get("node_results", {}):
+            result = eval_result.get("node_results", {})[str(leaf_node.node_id)]
+            if result.get("resolved") is not None:
+                logger.info(f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated with resolved: {result['resolved']}")
+                self.emit_event("instance_evaluation_result", {"instance_id": instance_id, "node_id": leaf_node.node_id, "resolved": result.get("resolved")})
+                return result.get("resolved")
+
+        logger.info(f"Evaluate Node{leaf_node.node_id} for instance {instance_id}.")
+        patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
+        if patch and patch.strip():
+            start_time = time.time()
+            self.emit_event("instance_evaluation_started", {"instance_id": instance_id, "node_id": leaf_node.node_id})
+            try:
+                repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
+                # TODO: Set run_id on testbed environment
+                run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
+                runtime = TestbedEnvironment(
+                    repository=repository,
+                    instance=instance,
+                    # run_id=run_id,
+                )
+
+                result = runtime.evaluate(patch=patch)
+                if not result:
+                    logger.error(f"Error in evaluating patch for {instance_id}")
+                    return None
+
+                eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
+                logger.info(
+                    f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                )
+                self.emit_event("instance_evaluation_result", {"instance_id": instance_id, "node_id": leaf_node.node_id, "resolved": result.resolved})
+                return result.resolved
+        
+            except Exception as e:
+                logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
+                eval_result["error"] = traceback.format_exc()
+                self.emit_event("instance_evaluation_error", {"instance_id": instance_id, "node_id": leaf_node.node_id, "error": str(e)})
+            finally:
+                with open(eval_result_path, "w") as f:
+                    json.dump(eval_result, f, indent=2)
+                eval_result["duration"] = time.time() - start_time
+
+                del runtime
+                del repository
+        else:
+            logger.info(f"Skip Node{leaf_node.node_id} for instance {instance_id} with no patch.")
+            return None
 
     def get_evaluation_dir(self) -> str:
         """Get the directory path for an evaluation."""

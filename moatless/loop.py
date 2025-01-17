@@ -99,10 +99,11 @@ class AgenticLoop(BaseModel):
                 self.emit_event(
                     "loop_iteration",
                     {
+                        "metadata": self.metadata,
                         "iteration": len(self.root.get_all_nodes()),
                         "total_cost": total_cost,
-                        "current_node_id": current_node.node_id,
-                        "total_nodes": len(self.root.get_all_nodes()),
+                        "action": current_node.action.name if current_node.action else None,
+                        "current_node_id": current_node.node_id
                     },
                 )
 
