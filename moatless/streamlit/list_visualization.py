@@ -57,16 +57,12 @@ def create_linear_table(
                         st.metric("✅ Passed", passed)
                     with metrics_cols[1]:
                         if failed > 0:
-                            st.metric(
-                                "❌ Failed", failed, delta=failed, delta_color="inverse"
-                            )
+                            st.metric("❌ Failed", failed, delta=failed, delta_color="inverse")
                         else:
                             st.metric("✅ Failed", failed)
                     with metrics_cols[2]:
                         if errors > 0:
-                            st.metric(
-                                "⚠️ Errors", errors, delta=errors, delta_color="inverse"
-                            )
+                            st.metric("⚠️ Errors", errors, delta=errors, delta_color="inverse")
                         else:
                             st.metric("✅ Errors", errors)
 
@@ -113,9 +109,7 @@ def create_linear_table(
     # Calculate number of nodes to show (excluding root node)
     visible_nodes = [n for n in nodes[1:] if n.node_id <= max_node_id]
     nodes_per_row = 8
-    num_rows = (
-        len(visible_nodes) + nodes_per_row - 1
-    ) // nodes_per_row  # Ceiling division
+    num_rows = (len(visible_nodes) + nodes_per_row - 1) // nodes_per_row  # Ceiling division
 
     for row in range(num_rows):
         start_idx = row * nodes_per_row
@@ -154,25 +148,15 @@ def create_linear_table(
 
                     if node.observation.properties.get("diff"):
                         diff_lines = node.observation.properties["diff"].split("\n")
-                        additions = sum(
-                            1
-                            for line in diff_lines
-                            if line.startswith("+") and not line.startswith("+++")
-                        )
-                        deletions = sum(
-                            1
-                            for line in diff_lines
-                            if line.startswith("-") and not line.startswith("---")
-                        )
+                        additions = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+                        deletions = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
                         if additions or deletions:
                             diff_stats = f"+{additions}/-{deletions}"
 
                 # Combine test status and diff stats on same line if both exist
                 status_line = test_status
                 if diff_stats:
-                    status_line = (
-                        f"{test_status} {diff_stats}" if test_status else diff_stats
-                    )
+                    status_line = f"{test_status} {diff_stats}" if test_status else diff_stats
                 if fail_reason:
                     status_line = fail_reason
                     color = "red"
@@ -244,9 +228,7 @@ def create_linear_table(
                     if usage.completion_cost:
                         has_cost = True
                         cost = f"${usage.completion_cost:.4f}"
-                        usage_rows.append(
-                            f"|{completion_type}|{cost}|{' '.join(tokens)}|"
-                        )
+                        usage_rows.append(f"|{completion_type}|{cost}|{' '.join(tokens)}|")
                     elif tokens:
                         usage_rows.append(f"|{completion_type}|{' '.join(tokens)}|")
 
@@ -313,23 +295,15 @@ def create_linear_table(
                         st.error(f"🛑 {node.observation.properties['fail_reason']}")
 
                     if "flags" in node.observation.properties:
-                        st.warning(
-                            f"⚠️ {', '.join(node.observation.properties['flags'])}"
-                        )
+                        st.warning(f"⚠️ {', '.join(node.observation.properties['flags'])}")
 
                     if "test_results" in node.observation.properties:
                         test_results = node.observation.properties["test_results"]
                         total_tests = len(test_results)
-                        failed_test_count = sum(
-                            1
-                            for test in test_results
-                            if test["status"] in ["FAILED", "ERROR"]
-                        )
+                        failed_test_count = sum(1 for test in test_results if test["status"] in ["FAILED", "ERROR"])
 
                         if failed_test_count > 0:
-                            st.warning(
-                                f"⚠️ {failed_test_count} out of {total_tests} tests failed"
-                            )
+                            st.warning(f"⚠️ {failed_test_count} out of {total_tests} tests failed")
                         else:
                             st.success(f"✅ All {total_tests} tests passed")
 
@@ -377,16 +351,12 @@ def create_linear_table(
                         st.metric("✅ Passed", passed)
                     with cols[1]:
                         if failed > 0:
-                            st.metric(
-                                "❌ Failed", failed, delta=failed, delta_color="inverse"
-                            )
+                            st.metric("❌ Failed", failed, delta=failed, delta_color="inverse")
                         else:
                             st.metric("✅ Failed", failed)
                     with cols[2]:
                         if errors > 0:
-                            st.metric(
-                                "⚠️ Errors", errors, delta=errors, delta_color="inverse"
-                            )
+                            st.metric("⚠️ Errors", errors, delta=errors, delta_color="inverse")
                         else:
                             st.metric("✅ Errors", errors)
 
@@ -397,21 +367,9 @@ def create_linear_table(
                         st.markdown(f"#### {test_file.file_path}")
 
                         # Count results for this file
-                        file_passed = sum(
-                            1
-                            for r in test_file.test_results
-                            if r.status == TestStatus.PASSED
-                        )
-                        file_failed = sum(
-                            1
-                            for r in test_file.test_results
-                            if r.status == TestStatus.FAILED
-                        )
-                        file_errors = sum(
-                            1
-                            for r in test_file.test_results
-                            if r.status == TestStatus.ERROR
-                        )
+                        file_passed = sum(1 for r in test_file.test_results if r.status == TestStatus.PASSED)
+                        file_failed = sum(1 for r in test_file.test_results if r.status == TestStatus.FAILED)
+                        file_errors = sum(1 for r in test_file.test_results if r.status == TestStatus.ERROR)
 
                         # Show file metrics
                         cols = st.columns(3)
@@ -426,16 +384,11 @@ def create_linear_table(
                         failures = [
                             r
                             for r in test_file.test_results
-                            if r.status in [TestStatus.FAILED, TestStatus.ERROR]
-                            and r.message
+                            if r.status in [TestStatus.FAILED, TestStatus.ERROR] and r.message
                         ]
                         if failures:
                             for result in failures:
-                                error_type = (
-                                    "❌ Failed"
-                                    if result.status == TestStatus.FAILED
-                                    else "⚠️ Error"
-                                )
+                                error_type = "❌ Failed" if result.status == TestStatus.FAILED else "⚠️ Error"
                                 location = f"line {result.line}" if result.line else ""
                                 if result.span_id:
                                     location = f"{location} {result.span_id}".strip()
@@ -452,9 +405,7 @@ def create_linear_table(
 
             # Add new JSON tab at the end
             with context_tabs[-1]:
-                st.json(
-                    node.file_context.model_dump(exclude_none=False), expanded=False
-                )
+                st.json(node.file_context.model_dump(exclude_none=False), expanded=False)
 
         # Add a separator between rows
         st.markdown("---")

@@ -6,12 +6,7 @@ from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
-from moatless.actions.model import (
-    ActionArguments,
-    Observation,
-    RewardScaleEntry,
-    FewShotExample,
-)
+from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry, FewShotExample
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
@@ -79,41 +74,6 @@ class Action(BaseModel, ABC):
                 "Repetitive or Redundant Actions: Detect if the agent is repeating the same unsuccessful or redundant actions without making progress. Pay close attention to the agent's history and outputs indicating lack of progress.",
             ]
 
-    @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
-        return [
-            RewardScaleEntry(
-                min_value=75,
-                max_value=100,
-                description="The action significantly advances the solution.",
-            ),
-            RewardScaleEntry(
-                min_value=50,
-                max_value=74,
-                description="The action contributes positively towards solving the problem.",
-            ),
-            RewardScaleEntry(
-                min_value=25,
-                max_value=49,
-                description="The action is acceptable but may have some issues.",
-            ),
-            RewardScaleEntry(
-                min_value=0,
-                max_value=24,
-                description="The action has minimal impact or minor negative consequences.",
-            ),
-            RewardScaleEntry(
-                min_value=-49,
-                max_value=-1,
-                description="The code change is inappropriate, unhelpful, introduces new issues, or redundantly repeats previous changes without making further progress. The Git diff does not align with instructions or is unnecessary.",
-            ),
-            RewardScaleEntry(
-                min_value=-100,
-                max_value=-50,
-                description="The code change is counterproductive, causing significant setbacks or demonstrating persistent repetition without learning. The agent fails to recognize completed tasks and continues to attempt redundant actions.",
-            ),
-        ]
-
     @staticmethod
     def generate_reward_scale_entries(
         descriptions: List[Tuple[int, int, str]],
@@ -154,14 +114,7 @@ class Action(BaseModel, ABC):
         Get the base prompt for the value function.
         This method can be overridden in subclasses to provide action-specific prompts.
         """
-        return """Your role is to evaluate the **last executed action** of the search tree that our AI agents are traversing, to help us determine the best trajectory to solve a programming issue. The agent is responsible for identifying and modifying the correct file(s) in response to the problem statement.
-
-Important: While line numbers may be referenced in the initial problem description, they can shift as changes are made to the file. Focus on whether the agent is modifying the correct logical parts of the code, rather than strictly matching the initially mentioned line numbers. What matters is that the right section of code is being modified, even if its current line number differs from what was originally specified.
-
-At this stage, the agent is still working on the solution. Your task is twofold:
-1. **Evaluation**: Assess whether the change done by the **last executed action** is appropriate for addressing the problem and whether the agent is on the right path to resolving the issue. Verify that the correct sections of code are being modified, regardless of their current line numbers.
-2. **Alternative Feedback**: Independently of your evaluation, provide guidance for an alternative problem-solving branch. This ensures parallel exploration of different solution paths.
-"""
+        pass
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -172,9 +125,7 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         return []
 
     @classmethod
-    def get_action_by_args_class(
-        cls, args_class: Type[ActionArguments]
-    ) -> Optional[Type["Action"]]:
+    def get_action_by_args_class(cls, args_class: Type[ActionArguments]) -> Optional[Type["Action"]]:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -186,10 +137,7 @@ At this stage, the agent is still working on the solution. Your task is twofold:
         """
 
         def search_subclasses(current_class):
-            if (
-                hasattr(current_class, "args_schema")
-                and current_class.args_schema == args_class
-            ):
+            if hasattr(current_class, "args_schema") and current_class.args_schema == args_class:
                 return current_class
             for subclass in current_class.__subclasses__():
                 result = search_subclasses(subclass)

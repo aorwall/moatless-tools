@@ -8,13 +8,13 @@ from moatless.actions.finish import FinishArgs
 from moatless.agent.agent import ActionAgent
 from moatless.artifacts.file import FileArtifactHandler
 from moatless.chat import Chat
-from moatless.completion.completion import CompletionModel, CompletionResponse
+from moatless.completion.base import BaseCompletionModel, CompletionResponse
 from moatless.schema import Attachment, UserMessage, AssistantMessage
 
 
 @pytest.fixture
 def mock_completion_model():
-    model = Mock(spec=CompletionModel)
+    model = Mock(spec=BaseCompletionModel)
 
     def mock_create_completion(*args, **kwargs):
         return CompletionResponse(

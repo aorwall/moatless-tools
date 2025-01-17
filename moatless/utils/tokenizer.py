@@ -10,9 +10,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
 
     if model.startswith("voyage"):
         if _voyageai is None:
-            voyageai_import_err = (
-                "`voyageai` package not found, please run `pip install voyageai`"
-            )
+            voyageai_import_err = "`voyageai` package not found, please run `pip install voyageai`"
             try:
                 import voyageai
             except ImportError as e:
@@ -23,9 +21,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
         return _voyageai.count_tokens([content])
 
     if _enc is None:
-        tiktoken_import_err = (
-            "`tiktoken` package not found, please run `pip install tiktoken`"
-        )
+        tiktoken_import_err = "`tiktoken` package not found, please run `pip install tiktoken`"
         try:
             import tiktoken
         except ImportError as e:

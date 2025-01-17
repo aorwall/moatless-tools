@@ -2,15 +2,14 @@ import pytest
 
 from moatless.actions.finish import FinishArgs
 from moatless.actions.reject import RejectArgs
-from moatless.completion.completion import CompletionModel, LLMResponseFormat
-from moatless.completion.model import AssistantMessage, UserMessage, Usage
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from tests.conftest import TEST_MODELS
 
 
 @pytest.mark.parametrize("model", TEST_MODELS)
 @pytest.mark.llm_integration
 def test_create_completion(model):
-    completion_model = CompletionModel(model=model, temperature=0.0)
+    completion_model = BaseCompletionModel(model=model, temperature=0.0)
 
     actions = [RejectArgs, FinishArgs]
 
@@ -42,7 +41,7 @@ def test_create_completion(model):
 @pytest.mark.parametrize("model", TEST_MODELS)
 @pytest.mark.llm_integration
 def test_create_text_completion(model):
-    completion_model = CompletionModel(model=model, temperature=0.0)
+    completion_model = BaseCompletionModel(model=model, temperature=0.0)
 
     messages = [
         UserMessage(
@@ -66,7 +65,7 @@ def test_create_text_completion(model):
     assert completion.usage.prompt_tokens > 0
 
 def test_create_completion_qwen_coder():
-    completion_model = CompletionModel(model="openai/Qwen/Qwen2.5-Coder-32B-Instruct", temperature=0.0)
+    completion_model = BaseCompletionModel(model="openai/Qwen/Qwen2.5-Coder-32B-Instruct", temperature=0.0)
     completion_model.response_format = LLMResponseFormat.TOOLS
 
     actions = [RejectArgs, FinishArgs]

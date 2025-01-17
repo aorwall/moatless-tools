@@ -27,9 +27,7 @@ def read_predictions(pred_path: str):
                         try:
                             all_preds.append(json.loads(line))
                         except Exception as e:
-                            logging.exception(
-                                f"Error parsing line {line} in predictions from {pred_path}"
-                            )
+                            logging.exception(f"Error parsing line {line} in predictions from {pred_path}")
 
             for prediction in all_preds:
                 predictions[prediction["instance_id"]] = prediction["model_patch"]
@@ -131,9 +129,7 @@ def generate_report(
                         is_different = True
 
             if is_different:
-                evaluation_instance["alternative_spans"].append(
-                    {"run_name": run_name, "spans": alternative_spans}
-                )
+                evaluation_instance["alternative_spans"].append({"run_name": run_name, "spans": alternative_spans})
 
             resolved = {
                 "name": run_name,

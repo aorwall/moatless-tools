@@ -127,11 +127,7 @@ class CodeParser:
             return None
 
     def _build_queries(self, query_file: str):
-        with (
-            resources.files("moatless.codeblocks.parser.queries")
-            .joinpath(query_file)
-            .open() as file
-        ):
+        with resources.files("moatless.codeblocks.parser.queries").joinpath(query_file).open() as file:
             query_list = file.read().strip().split("\n\n")
             parsed_queries = []
             for i, query in enumerate(query_list):
@@ -174,10 +170,8 @@ class CodeParser:
         if (
             node_match.first_child
             and self._min_lines_to_parse_block
-            and node_match.block_type
-            not in [CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]
-            and (node.end_point[0] - node.start_point[0])
-            < self._min_lines_to_parse_block
+            and node_match.block_type not in [CodeBlockType.MODULE, CodeBlockType.CLASS, CodeBlockType.TEST_SUITE]
+            and (node.end_point[0] - node.start_point[0]) < self._min_lines_to_parse_block
         ):
             node_match.first_child = None
 
@@ -196,12 +190,8 @@ class CodeParser:
             identifier = None
 
         if self._enable_code_graph:
-            relationships = self.create_references(
-                code, content_bytes, identifier, node_match
-            )
-            parameters = self.create_parameters(
-                content_bytes, node_match, relationships
-            )
+            relationships = self.create_references(code, content_bytes, identifier, node_match)
+            parameters = self.create_parameters(content_bytes, node_match, relationships)
         else:
             relationships = []
             parameters = []
@@ -244,9 +234,7 @@ class CodeParser:
 
             # Set a unique identifier on each code block
             # TODO: Just count occurrences of the identifier
-            existing_identifiers = [
-                b.identifier for b in parent_block.children if b.type == code_block.type
-            ]
+            existing_identifiers = [b.identifier for b in parent_block.children if b.type == code_block.type]
             if identifier in existing_identifiers:
                 code_block.identifier = f"{identifier}_{len(existing_identifiers)}"
 
@@ -262,9 +250,7 @@ class CodeParser:
                 # TODO: Find a more robust way to connect comments to the right span
                 self.comments_with_no_span.append(code_block)
             else:
-                new_span = self._create_new_span(
-                    current_span=current_span, block=code_block
-                )
+                new_span = self._create_new_span(current_span=current_span, block=code_block)
                 if new_span:
                     current_span = new_span
                     self.spans_by_id[current_span.span_id] = current_span
@@ -289,9 +275,7 @@ class CodeParser:
                 self._graph.add_node(code_block.path_string(), block=code_block)
 
                 for relationship in relationships:
-                    self._graph.add_edge(
-                        code_block.path_string(), ".".join(relationship.path)
-                    )
+                    self._graph.add_edge(code_block.path_string(), ".".join(relationship.path))
 
         else:
             current_span = None
@@ -330,17 +314,13 @@ class CodeParser:
         index = 0
 
         while next_node:
-            if (
-                next_node.children and next_node.type == "block"
-            ):  # TODO: This should be handled in get_block_definition
+            if next_node.children and next_node.type == "block":  # TODO: This should be handled in get_block_definition
                 next_node = next_node.children[0]
             elif next_node.children and next_node.type == "ERROR":
                 next_node = next_node.children[0]
                 code_block.type = CodeBlockType.ERROR
 
-            self.debug_log(
-                f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}"
-            )
+            self.debug_log(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
             child_block, child_last_node, child_span = self.parse_code(
                 content_bytes,
@@ -377,9 +357,7 @@ class CodeParser:
             elif next_node.next_sibling:
                 next_node = next_node.next_sibling
             else:
-                next_parent_node = self.get_parent_next(
-                    next_node, node_match.check_child or node
-                )
+                next_parent_node = self.get_parent_next(next_node, node_match.check_child or node)
                 next_node = None if next_parent_node == next_node else next_parent_node
 
         self.debug_log(f"end   [{level}]: {code_block.content}")
@@ -421,21 +399,15 @@ class CodeParser:
         if self.apply_gpt_tweaks:
             match = self.find_match_with_gpt_tweaks(node)
             if match:
-                self.debug_log(
-                    f"find_in_tree() GPT match: {match.block_type} on {node}"
-                )
+                self.debug_log(f"find_in_tree() GPT match: {match.block_type} on {node}")
                 return match
 
         if not node.parent and node.children:
-            return NodeMatch(
-                block_type=CodeBlockType.MODULE, first_child=node.children[0]
-            )
+            return NodeMatch(block_type=CodeBlockType.MODULE, first_child=node.children[0])
 
         match = self.find_match(node)
         if match:
-            self.debug_log(
-                f"find_in_tree() Found match on node type {node.type} with block type {match.block_type}"
-            )
+            self.debug_log(f"find_in_tree() Found match on node type {node.type} with block type {match.block_type}")
             return match
         else:
             self.debug_log(
@@ -449,9 +421,7 @@ class CodeParser:
                 continue
             match = self._find_match(node, query, label, capture_from_parent=True)
             if match:
-                self.debug_log(
-                    f"find_match_with_gpt_tweaks() Found match on node {node.type} with query {label}"
-                )
+                self.debug_log(f"find_match_with_gpt_tweaks() Found match on node {node.type} with query {label}")
                 if not match.query:
                     match.query = label
                 return match
@@ -468,18 +438,14 @@ class CodeParser:
             match = self._find_match(node, query, label)
             queries += 1
             if match:
-                self.debug_log(
-                    f"find_match() Found match on node {node.type} with query {label}"
-                )
+                self.debug_log(f"find_match() Found match on node {node.type} with query {label}")
                 if not match.query:
                     match.query = label
                 return match
 
         return None
 
-    def _find_match(
-        self, node: Node, query, label: str, capture_from_parent: bool = False
-    ) -> NodeMatch | None:
+    def _find_match(self, node: Node, query, label: str, capture_from_parent: bool = False) -> NodeMatch | None:
         if capture_from_parent:
             captures = query.captures(node.parent)
         else:
@@ -552,9 +518,7 @@ class CodeParser:
                 node_match.block_type = CodeBlockType.from_string(tag)
 
         if node_match.block_type:
-            self.debug_log(
-                f"[{label}] Return match with type {node_match.block_type} for node {node}"
-            )
+            self.debug_log(f"[{label}] Return match with type {node_match.block_type} for node {node}")
             return node_match
 
         return None
@@ -562,13 +526,9 @@ class CodeParser:
     def create_references(self, code, content_bytes, identifier, node_match):
         references = []
         if node_match.block_type == CodeBlockType.IMPORT and node_match.relationships:
-            module_nodes = [
-                ref for ref in node_match.relationships if ref[1] == "reference.module"
-            ]
+            module_nodes = [ref for ref in node_match.relationships if ref[1] == "reference.module"]
             if module_nodes:
-                module_reference_id = self.get_content(
-                    module_nodes[0][0], content_bytes
-                )
+                module_reference_id = self.get_content(module_nodes[0][0], content_bytes)
                 if len(node_match.relationships) > 1:
                     for ref_node in node_match.relationships:
                         if ref_node == module_nodes[0]:
@@ -648,9 +608,7 @@ class CodeParser:
     def create_parameters(self, content_bytes, node_match, references):
         parameters = []
         for parameter in node_match.parameters:
-            parameter_type = (
-                self.get_content(parameter[1], content_bytes) if parameter[1] else None
-            )
+            parameter_type = self.get_content(parameter[1], content_bytes) if parameter[1] else None
             parameter_id = self.get_content(parameter[0], content_bytes)
 
             parameters.append(Parameter(identifier=parameter_id, type=parameter_type))
@@ -660,9 +618,7 @@ class CodeParser:
 
                 type_split = parameter_type.split(".")
 
-                reference = Relationship(
-                    scope=ReferenceScope.LOCAL, identifier=parameter_id, path=type_split
-                )
+                reference = Relationship(scope=ReferenceScope.LOCAL, identifier=parameter_id, path=type_split)
                 references.append(reference)
         return parameters
 
@@ -690,9 +646,7 @@ class CodeParser:
         self.debug_log(f"get_parent_next: {node.type} - {orig_node.type}")
         if node != orig_node:
             if node.next_sibling:
-                self.debug_log(
-                    f"get_parent_next: node.next_sibling -> {node.next_sibling}"
-                )
+                self.debug_log(f"get_parent_next: node.next_sibling -> {node.next_sibling}")
                 return node.next_sibling
             else:
                 return self.get_parent_next(node.parent, orig_node)
@@ -734,14 +688,10 @@ class CodeParser:
     def get_content(self, node: Node, content_bytes: bytes) -> str:
         return content_bytes[node.start_byte : node.end_byte].decode(self.encoding)
 
-    def _create_new_span(
-        self, current_span: BlockSpan | None, block: CodeBlock
-    ) -> BlockSpan | None:
+    def _create_new_span(self, current_span: BlockSpan | None, block: CodeBlock) -> BlockSpan | None:
         # Set documentation phase on comments in the start of structure blocks if more than min_tokens_for_docs_span
         # TODO: This is isn't valid in other languages, try to set block type to docstring?
-        block_types_with_document_span = [
-            CodeBlockType.MODULE
-        ]  # TODO: Make this configurable
+        block_types_with_document_span = [CodeBlockType.MODULE]  # TODO: Make this configurable
 
         # Set initation phase on imports in module blocks
         if block.type == CodeBlockType.IMPORT and (
@@ -755,10 +705,7 @@ class CodeParser:
         elif block.type == CodeBlockType.COMMENT and (
             not current_span
             or current_span.block_type in block_types_with_document_span
-            and (
-                current_span.span_type != SpanType.IMPLEMENTATION
-                or current_span.index == 0
-            )
+            and (current_span.span_type != SpanType.IMPLEMENTATION or current_span.index == 0)
         ):
             span_type = SpanType.DOCUMENTATION
             span_id = self._create_span_id(block, label="docstring")
@@ -766,8 +713,7 @@ class CodeParser:
         # Set initation phase when block is a class or constructor, and until first function:
         elif block.type in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR] or (
             current_span
-            and current_span.block_type
-            in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR]
+            and current_span.block_type in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR]
             and current_span.initiating_block.parent != block.parent
             and current_span.span_type != SpanType.IMPLEMENTATION
             and block.type not in [CodeBlockType.FUNCTION]
@@ -801,10 +747,7 @@ class CodeParser:
                 )
 
         # create new spans on initation after docstring
-        if (
-            current_span.span_type == SpanType.DOCUMENTATION
-            and span_type == SpanType.INITATION
-        ):
+        if current_span.span_type == SpanType.DOCUMENTATION and span_type == SpanType.INITATION:
             return BlockSpan(
                 span_id=span_id,
                 span_type=span_type,
@@ -886,9 +829,7 @@ class CodeParser:
         if block.type.group == CodeBlockTypeGroup.STRUCTURE:
             structure_block = block
         else:
-            structure_block = block.find_type_group_in_parents(
-                CodeBlockTypeGroup.STRUCTURE
-            )
+            structure_block = block.find_type_group_in_parents(CodeBlockTypeGroup.STRUCTURE)
 
         if not structure_block:
             return "unknown"

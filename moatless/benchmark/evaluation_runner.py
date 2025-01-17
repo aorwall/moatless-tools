@@ -27,7 +27,7 @@ from moatless.benchmark.swebench import (
     create_index,
 )
 from moatless.benchmark.swebench.utils import instance_repo_path
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.benchmark.utils import get_moatless_instance, load_moatless_datasets
 from moatless.exceptions import RuntimeError
 from moatless.loop import AgenticLoop
 from moatless.runtime.testbed import TestbedEnvironment
@@ -112,13 +112,10 @@ class EvaluationRunner:
             f"Processing {len(instance_ids)} instances with {self.num_workers} workers. Rerun error {self.rerun_errors}"
         )
 
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self.num_workers
-        ) as executor:
-            futures = [
-                executor.submit(self.evaluate_instance, instance_id)
-                for instance_id in instance_ids
-            ]
+        load_moatless_datasets()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            futures = [executor.submit(self.evaluate_instance, instance_id) for instance_id in instance_ids]
 
             for future in futures:
                 try:
@@ -130,9 +127,7 @@ class EvaluationRunner:
                     self.emit_event("instance_error", {"error": traceback.format_exc()})
 
         logger.info(f"Completed processing with {error} errors")
-        self.evaluation.status = (
-            EvaluationStatus.COMPLETED if error == 0 else EvaluationStatus.ERROR
-        )
+        self.evaluation.status = EvaluationStatus.COMPLETED if error == 0 else EvaluationStatus.ERROR
         self.evaluation.finish_time = datetime.now(timezone.utc)
 
         self.emit_event(
@@ -142,6 +137,7 @@ class EvaluationRunner:
 
     def evaluate_instance(self, instance_id: str):
         """Evaluate a single instance."""
+        logger.info(f"Starting evaluation of instance {instance_id}")
         runtime = None
         repository = None
         agentic_loop = None
@@ -157,6 +153,7 @@ class EvaluationRunner:
             self.evaluation.instances.append(instance)
 
         try:
+            logger.info(f"Loading moatless instance {instance_id}")
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
 
@@ -168,7 +165,6 @@ class EvaluationRunner:
                         eval_result = json.load(f)
                         logger.info(f"Loading eval_result from {eval_result_path}, evaluated ")
                         if "node_results" not in eval_result:
-
                             if len(eval_result) > 0:
                                 logger.info(f"Found nood results with {eval_result.keys()} on root, fix format")
                                 eval_result = {
@@ -197,45 +193,38 @@ class EvaluationRunner:
                 moatless_instance=moatless_instance,
                 trajectory_path=trajectory_path,
             )
+            logger.info(f"Completed agentic loop for instance {instance_id}")
 
             start_time = time.time()
             try:
                 if self.use_testbed:
-                    logger.info(f"Evaluating nodes for instance {instance_id}")
+                    logger.info(f"Starting testbed evaluation for instance {instance_id}")
                     eval_result = self.evaluate_nodes(
                         instance_id=instance_id,
                         instance=moatless_instance,
                         agentic_loop=agentic_loop,
                         eval_result=eval_result,
                     )
+                    logger.info(f"Completed testbed evaluation for instance {instance_id}")
             except RuntimeError as e:
+                logger.error(f"Runtime error in instance {instance_id}: {str(e)}")
                 raise e
 
             except Exception as e:
+                logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
                 eval_result["status"] = "error"
                 eval_result["error"] = traceback.format_exc()
                 eval_result["duration"] = time.time() - start_time
-                logger.exception(
-                    f"Error when evaluating nodes for instance {instance_id}"
-                )
-
 
             # Complete instance with result
             instance.complete()
-            self.emit_event(
-                "instance_completed",
-                {
-                    "instance_id": instance_id
-                }
-            )
+            self.emit_event("instance_completed", {"instance_id": instance_id})
             return
 
         except Exception as e:
             stacktrace = traceback.format_exc()
             instance.fail(error=stacktrace)
-            self.emit_event(
-                "instance_error", {"instance_id": instance_id, "error": str(e)}
-            )
+            self.emit_event("instance_error", {"instance_id": instance_id, "error": str(e)})
             raise
         finally:
             if eval_result:
@@ -267,28 +256,20 @@ class EvaluationRunner:
         patch_results = {}
 
         if str(leaf_node.node_id) in eval_result.get("node_results", {}):
-            logger.info(
-                f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated"
-            )
+            logger.info(f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated")
             return eval_result
 
-        logger.info(
-            f"Evaluate Node{leaf_node.node_id} for instance {instance_id}."
-        )
+        logger.info(f"Evaluate Node{leaf_node.node_id} for instance {instance_id}.")
         patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
         if patch and patch.strip():
             patch_hash = create_sha256_hash(patch)
 
             if patch_hash in patch_results:
-                eval_result["node_results"][str(leaf_node.node_id)] = patch_results[
-                    patch_hash
-                ]
+                eval_result["node_results"][str(leaf_node.node_id)] = patch_results[patch_hash]
             else:
                 repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
                 # TODO: Set run_id on testbed environment
-                run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[
-                         :8
-                         ]
+                run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
                 runtime = TestbedEnvironment(
                     repository=repository,
                     instance=instance,
@@ -301,19 +282,13 @@ class EvaluationRunner:
                     logger.error(f"Error in evaluating patch for {instance_id}")
                     return None
 
-                eval_result["node_results"][str(leaf_node.node_id)] = (
-                    result.model_dump()
-                )
-                patch_results[patch_hash] = eval_result["node_results"][
-                    str(leaf_node.node_id)
-                ]
+                eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
+                patch_results[patch_hash] = eval_result["node_results"][str(leaf_node.node_id)]
                 logger.info(
                     f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                 )
         else:
-            logger.info(
-                f"Skip Node{leaf_node.node_id} for instance {instance_id} with no patch."
-            )
+            logger.info(f"Skip Node{leaf_node.node_id} for instance {instance_id} with no patch.")
 
         return eval_result
 
@@ -340,15 +315,11 @@ class EvaluationRunner:
 
                 if self.rerun_errors:
                     last_node = persisted_loop.get_last_node()
-                    if last_node.error or (
-                        last_node.action and last_node.action.name == "Error"
-                    ):
+                    if last_node.error or (last_node.action and last_node.action.name == "Error"):
                         rerun_tree = True
 
                 if persisted_loop.is_finished() and not rerun_tree:
-                    logger.info(
-                        f"Found completed search tree for {instance.instance_id}"
-                    )
+                    logger.info(f"Found completed search tree for {instance.instance_id}")
                     return persisted_loop
             except json.JSONDecodeError as e:
                 logger.error(
@@ -356,18 +327,14 @@ class EvaluationRunner:
                 )
                 os.remove(trajectory_path)
 
-        repository = create_repository(
-            moatless_instance, repo_base_dir=self.repo_base_dir
-        )
+        repository = create_repository(moatless_instance, repo_base_dir=self.repo_base_dir)
         code_index = create_index(moatless_instance, repository=repository)
 
         runtime = None
         if self.use_testbed:
             from moatless.runtime.testbed import TestbedEnvironment
 
-            run_id = hashlib.sha256(
-                self.evaluation.evaluation_name.encode()
-            ).hexdigest()[:8]
+            run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
             runtime = TestbedEnvironment(
                 repository=repository,
                 instance=moatless_instance,
@@ -382,9 +349,7 @@ class EvaluationRunner:
                 runtime=runtime,
                 code_index=code_index,
             )
-            completion_model = (
-                self.evaluation.settings.agent_settings.completion_model.clone()
-            )
+            completion_model = self.evaluation.settings.agent_settings.completion_model.clone()
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             agentic_loop.agent = CodingAgent.create(
@@ -396,9 +361,7 @@ class EvaluationRunner:
                 thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
             )
         else:
-            completion_model = (
-                self.evaluation.settings.agent_settings.completion_model.clone()
-            )
+            completion_model = self.evaluation.settings.agent_settings.completion_model.clone()
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             agent = CodingAgent.create(
@@ -422,15 +385,9 @@ class EvaluationRunner:
 
         if self.rerun_errors:
             last_node = agentic_loop.get_last_node()
-            if last_node.error or (
-                last_node.action and last_node.action.name == "Error" and last_node.parent
-            ):
+            if last_node.error or (last_node.action and last_node.action.name == "Error" and last_node.parent):
                 # Remove error node from parent's children
-                last_node.parent.children = [
-                    c
-                    for c in last_node.parent.children
-                    if c.node_id != last_node.node_id
-                ]
+                last_node.parent.children = [c for c in last_node.parent.children if c.node_id != last_node.node_id]
                 logger.info(
                     f"Removed error node {last_node.node_id} from parent {last_node.parent.node_id} on instance {instance.instance_id}"
                 )

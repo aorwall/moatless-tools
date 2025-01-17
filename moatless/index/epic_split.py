@@ -39,48 +39,32 @@ SPLIT_BLOCK_TYPES = [
 
 
 class EpicSplitter(NodeParser):
-    language: str = Field(
-        default="python", description="Language of the code blocks to parse."
-    )
+    language: str = Field(default="python", description="Language of the code blocks to parse.")
 
-    text_splitter: TextSplitter = Field(
-        description="Text splitter to use for splitting non code documents into nodes."
-    )
+    text_splitter: TextSplitter = Field(description="Text splitter to use for splitting non code documents into nodes.")
 
-    include_non_code_files: bool = Field(
-        default=True, description="Whether or not to include non code files."
-    )
+    include_non_code_files: bool = Field(default=True, description="Whether or not to include non code files.")
 
     non_code_file_extensions: list[str] = Field(
         default=["md", "txt"],
         description="File extensions to consider as non code files.",
     )
 
-    comment_strategy: CommentStrategy = Field(
-        default=CommentStrategy.INCLUDE, description="Comment strategy to use."
-    )
+    comment_strategy: CommentStrategy = Field(default=CommentStrategy.INCLUDE, description="Comment strategy to use.")
 
-    chunk_size: int = Field(
-        default=1500, description="Chunk size to use for splitting code documents."
-    )
+    chunk_size: int = Field(default=1500, description="Chunk size to use for splitting code documents.")
 
-    max_chunks: int = Field(
-        default=100, description="Max number of chunks to split a document into."
-    )
+    max_chunks: int = Field(default=100, description="Max number of chunks to split a document into.")
 
     min_chunk_size: int = Field(default=256, description="Min tokens to split code.")
 
     max_chunk_size: int = Field(default=2000, description="Max tokens in one chunk.")
 
-    hard_token_limit: int = Field(
-        default=6000, description="Hard token limit for a chunk."
-    )
+    hard_token_limit: int = Field(default=6000, description="Hard token limit for a chunk.")
 
     repo_path: str = Field(default=None, description="Path to the repository.")
 
-    index_callback: Optional[Callable] = Field(
-        default=None, description="Callback to call when indexing a code block."
-    )
+    index_callback: Optional[Callable] = Field(default=None, description="Callback to call when indexing a code block.")
 
     _parser: CodeParser = PrivateAttr()
     # _fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
@@ -164,9 +148,7 @@ class EpicSplitter(NodeParser):
 
                 parse_time = time.time_ns() - starttime
                 if parse_time > 1e9:
-                    logger.warning(
-                        f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds."
-                    )
+                    logger.warning(f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds.")
 
             except Exception as e:
                 logger.warning(
@@ -179,9 +161,7 @@ class EpicSplitter(NodeParser):
             chunks = self._chunk_contents(codeblock=codeblock, file_path=file_path)
             parse_time = time.time_ns() - starttime
             if parse_time > 1e8:
-                logger.warning(
-                    f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds."
-                )
+                logger.warning(f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds.")
             if len(chunks) > 100:
                 logger.info(f"Splitting file {file_path} in {len(chunks)} chunks")
 
@@ -194,9 +174,7 @@ class EpicSplitter(NodeParser):
                     all_nodes.append(chunk_node)
             parse_time = time.time_ns() - starttime
             if parse_time > 1e9:
-                logger.warning(
-                    f"Create nodes for file {file_path} took {parse_time / 1e9:.2f} seconds."
-                )
+                logger.warning(f"Create nodes for file {file_path} took {parse_time / 1e9:.2f} seconds.")
         return all_nodes
 
     def _chunk_contents(
@@ -210,8 +188,7 @@ class EpicSplitter(NodeParser):
         if tokens > self.hard_token_limit:
             for child in codeblock.children:
                 if (
-                    child.type == CodeBlockType.COMMENT
-                    and "generated" in child.content.lower()
+                    child.type == CodeBlockType.COMMENT and "generated" in child.content.lower()
                 ):  # TODO: Make a generic solution to detect files that shouldn't be indexed. Maybe ask an LLM?
                     logger.info(
                         f"File {file_path} has {tokens} tokens and the word 'generated' in the first comments,"
@@ -227,9 +204,7 @@ class EpicSplitter(NodeParser):
 
         return self._chunk_block(codeblock, file_path)
 
-    def _chunk_block(
-        self, codeblock: CodeBlock, file_path: Optional[str] = None
-    ) -> list[CodeBlockChunk]:
+    def _chunk_block(self, codeblock: CodeBlock, file_path: Optional[str] = None) -> list[CodeBlockChunk]:
         chunks: list[CodeBlockChunk] = []
         current_chunk = []
         comment_chunk = []
@@ -245,18 +220,14 @@ class EpicSplitter(NodeParser):
                 elif self._ignore_comment(child) or ignoring_comment:
                     ignoring_comment = True
                     continue
-                elif (
-                    self.comment_strategy == CommentStrategy.ASSOCIATE
-                    and not codeblock.parent
-                ):
+                elif self.comment_strategy == CommentStrategy.ASSOCIATE and not codeblock.parent:
                     comment_chunk.append(child)
                     continue
             else:
                 ignoring_comment = False
 
             if (
-                child.type in SPLIT_BLOCK_TYPES
-                and child.sum_tokens() > self.min_chunk_size
+                child.type in SPLIT_BLOCK_TYPES and child.sum_tokens() > self.min_chunk_size
             ) or parent_tokens + child.sum_tokens() > self.max_chunk_size:
                 if current_chunk:
                     chunks.append(current_chunk)
@@ -271,12 +242,7 @@ class EpicSplitter(NodeParser):
                 if child_chunks:
                     first_child_chunk = child_chunks[0]
 
-                    if (
-                        parent_tokens
-                        + child.tokens
-                        + count_chunk_tokens(first_child_chunk)
-                        < self.max_chunk_size
-                    ):
+                    if parent_tokens + child.tokens + count_chunk_tokens(first_child_chunk) < self.max_chunk_size:
                         current_chunk.extend(first_child_chunk)
                         chunks.append(current_chunk)
                         chunks.extend(child_chunks[1:])
@@ -288,9 +254,7 @@ class EpicSplitter(NodeParser):
 
                 continue
 
-            new_token_count = (
-                parent_tokens + count_chunk_tokens(current_chunk) + child.sum_tokens()
-            )
+            new_token_count = parent_tokens + count_chunk_tokens(current_chunk) + child.sum_tokens()
             if (
                 codeblock.type not in SPLIT_BLOCK_TYPES
                 and new_token_count < self.max_chunk_size
@@ -321,15 +285,9 @@ class EpicSplitter(NodeParser):
             should_continue = False
 
             for i, chunk in enumerate(chunks):
-                if (
-                    count_chunk_tokens(chunk) < self.min_chunk_size
-                    or len(chunks) > self.max_chunks
-                ):
+                if count_chunk_tokens(chunk) < self.min_chunk_size or len(chunks) > self.max_chunks:
                     if i == 0 and len(chunks) > 1:
-                        if (
-                            count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk)
-                            <= self.hard_token_limit
-                        ):
+                        if count_chunk_tokens(chunks[1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
                             chunks[1] = chunk + chunks[1]
                             should_continue = True
                         else:
@@ -338,8 +296,7 @@ class EpicSplitter(NodeParser):
                     elif i == len(chunks) - 1:
                         if (
                             merged_chunks
-                            and count_chunk_tokens(merged_chunks[-1])
-                            + count_chunk_tokens(chunk)
+                            and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk)
                             <= self.hard_token_limit
                         ):
                             merged_chunks[-1] = merged_chunks[-1] + chunk
@@ -348,13 +305,10 @@ class EpicSplitter(NodeParser):
                             merged_chunks.append(chunk)
 
                     else:
-                        if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(
-                            chunks[i + 1]
-                        ):
+                        if count_chunk_tokens(chunks[i - 1]) < count_chunk_tokens(chunks[i + 1]):
                             if (
                                 merged_chunks
-                                and count_chunk_tokens(merged_chunks[-1])
-                                + count_chunk_tokens(chunk)
+                                and count_chunk_tokens(merged_chunks[-1]) + count_chunk_tokens(chunk)
                                 <= self.hard_token_limit
                             ):
                                 merged_chunks[-1] = merged_chunks[-1] + chunk
@@ -362,11 +316,7 @@ class EpicSplitter(NodeParser):
                             else:
                                 merged_chunks.append(chunk)
                         else:
-                            if (
-                                count_chunk_tokens(chunks[i + 1])
-                                + count_chunk_tokens(chunk)
-                                <= self.hard_token_limit
-                            ):
+                            if count_chunk_tokens(chunks[i + 1]) + count_chunk_tokens(chunk) <= self.hard_token_limit:
                                 chunks[i + 1] = chunk + chunks[i + 1]
                                 should_continue = True
                             else:
@@ -388,10 +338,7 @@ class EpicSplitter(NodeParser):
         return path_tree
 
     def _ignore_comment(self, codeblock: CodeBlock) -> bool:
-        return (
-            re.search(r"(?i)copyright|license|author", codeblock.content)
-            or not codeblock.content
-        )
+        return re.search(r"(?i)copyright|license|author", codeblock.content) or not codeblock.content
 
     def _to_context_string(self, codeblock: CodeBlock, path_tree: PathTree) -> str:
         contents = ""
@@ -426,17 +373,11 @@ class EpicSplitter(NodeParser):
                         CodeBlockType.TEST_SUITE,
                     ]
                 ):
-                    contents += child.create_commented_out_block(
-                        "... other code"
-                    ).to_string()
-                contents += self._to_context_string(
-                    codeblock=child, path_tree=child_tree
-                )
+                    contents += child.create_commented_out_block("... other code").to_string()
+                contents += self._to_context_string(codeblock=child, path_tree=child_tree)
                 has_outcommented_code = False
             elif child_tree:
-                contents += self._to_context_string(
-                    codeblock=child, path_tree=child_tree
-                )
+                contents += self._to_context_string(codeblock=child, path_tree=child_tree)
                 has_outcommented_code = False
             elif child.type not in [
                 CodeBlockType.COMMENT,
@@ -460,9 +401,7 @@ class EpicSplitter(NodeParser):
             if block_path[: len(codeblock.full_path())] == codeblock.full_path()
         ]
 
-    def _create_node(
-        self, content: str, node: BaseNode, chunk: CodeBlockChunk | None = None
-    ) -> TextNode | None:
+    def _create_node(self, content: str, node: BaseNode, chunk: CodeBlockChunk | None = None) -> TextNode | None:
         metadata = {}
         metadata.update(node.metadata)
 
@@ -473,13 +412,7 @@ class EpicSplitter(NodeParser):
             metadata["end_line"] = chunk[-1].end_line
 
             # TODO: Change this when EpicSplitter is adjusted to use the span concept natively
-            span_ids = set(
-                [
-                    block.belongs_to_span.span_id
-                    for block in chunk
-                    if block.belongs_to_span
-                ]
-            )
+            span_ids = set([block.belongs_to_span.span_id for block in chunk if block.belongs_to_span])
             metadata["span_ids"] = list(sorted(span_ids))
 
             node_id += f"_{chunk[0].path_string()}_{chunk[-1].path_string()}"

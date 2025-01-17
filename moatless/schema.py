@@ -12,6 +12,7 @@ class MessageHistoryType(Enum):
     SUMMARY = "summary"  # Generates one message with summarized history
     REACT = "react"
     MESSAGES_COMPACT = "messages_compact"
+    INSTRUCTION = "instruct"
 
     @classmethod
     def _missing_(cls, value: str):
@@ -30,9 +31,7 @@ class MessageHistoryType(Enum):
 
 
 class FileWithSpans(BaseModel):
-    file_path: str = Field(
-        description="The file path where the relevant code is found."
-    )
+    file_path: str = Field(description="The file path where the relevant code is found.")
     span_ids: list[str] = Field(
         default_factory=list,
         description="Span IDs identiying the relevant code spans. A span id is a unique identifier for a code sippet. It can be a class name or function name. For functions in classes separete with a dot like 'class.function'.",
@@ -66,9 +65,7 @@ class Attachment(BaseModel):
 
     file_name: str = Field(description="Original name of the uploaded file")
     content: bytes = Field(description="Raw binary content of the file")
-    mime_type: Optional[str] = Field(
-        default=None, description="MIME type of the file content"
-    )
+    mime_type: Optional[str] = Field(default=None, description="MIME type of the file content")
 
 
 class Message(BaseModel):
@@ -77,9 +74,7 @@ class Message(BaseModel):
 
 
 class UserMessage(Message):
-    role: Literal["user"] = Field(
-        default="user", description="Role is always 'user' for user messages"
-    )
+    role: Literal["user"] = Field(default="user", description="Role is always 'user' for user messages")
     artifact_ids: Optional[List[str]] = Field(
         default=None, description="List of artifact ids associated with the message"
     )
@@ -90,6 +85,4 @@ class AssistantMessage(Message):
         default="assistant",
         description="Role is always 'assistant' for assistant messages",
     )
-    actions: Optional[List[ActionView]] = Field(
-        default=None, description="List of actions performed by the assistant"
-    )
+    actions: Optional[List[ActionView]] = Field(default=None, description="List of actions performed by the assistant")

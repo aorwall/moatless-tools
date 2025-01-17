@@ -1,143 +1,68 @@
-import hashlib
 import json
 import logging
-from typing import Optional, Any, Union, Self, ClassVar
+from typing import Optional, Any, Union
 
-from docstring_parser import parse
-from instructor.utils import classproperty
-from pydantic import BaseModel, model_validator, Field, ValidationError
+from pydantic import BaseModel, model_validator, Field
 
 logger = logging.getLogger(__name__)
 
 # Model costs per million tokens
 MODEL_COSTS = {
-    "claude-3-5-haiku-20241022": {
-        "input": 0.80,
-        "output": 4.0,
-        "cache": 0.08,
-        "cached_included": False
-    },
-    "claude-3-5-sonnet-20241022": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache": 0.30,
-        "cached_included": False
-    },
-    "deepseek/deepseek-chat": {
-        "input": 0.14,
-        "output": 0.28,
-        "cache": 0.014,
-        "cached_included": True
-    }
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.0, "cache": 0.08, "cached_included": False},
+    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0, "cache": 0.30, "cached_included": False},
+    "deepseek/deepseek-chat": {"input": 0.14, "output": 0.28, "cache": 0.014, "cached_included": True},
+    "o1-mini-2024-09-12": {"input": 3.0, "output": 12.0, "cache": 1.5, "cached_included": True},
+    "o1-preview-2024-09-12": {"input": 15.0, "output": 60.0, "cache": 7.5, "cached_included": True},
 }
 
 
-class Message(BaseModel):
-    role: str = Field(..., description="The role of the sender")
-    content: Optional[str] = Field(None, description="The message content")
-
-
-class ToolCall(BaseModel):
-    name: str = Field(..., description="The name of the tool being called")
-    type: Optional[str] = Field(None, description="The type of tool call")
-    input: Optional[dict[str, Any]] = Field(
-        None, description="The input parameters for the tool"
-    )
-
-    def __post_init__(self):
-        # Ensure name is always a string
-        self.name = str(self.name)
-
-
-class AssistantMessage(Message):
-    role: str = Field("assistant", description="The role of the assistant")
-    content: Optional[str] = Field(None, description="The assistant's message content")
-    tool_call: Optional[ToolCall] = Field(
-        None, description="Tool call made by the assistant"
-    )
-
-    @property
-    def tool_call_id(self) -> Optional[str]:
-        """Generate a deterministic tool call ID based on the tool call content"""
-        if not self.tool_call:
-            return None
-
-        # Create a string combining name and input for hashing
-        tool_str = f"{str(self.tool_call.name)}:{json.dumps(self.tool_call.input, sort_keys=True)}"
-        # Generate SHA-256 hash and take first 8 characters
-        hash_id = hashlib.sha256(tool_str.encode()).hexdigest()[:8]
-        return f"call_{hash_id}"
-
-
-class UserMessage(Message):
-    role: str = Field("user", description="The role of the user")
-    content: str = Field(..., description="The user's message content")
-
-
 class Usage(BaseModel):
-    completion_cost: float = 0
-    completion_tokens: int = 0
-    prompt_tokens: int = 0
-    cached_tokens: int = 0
+    version: int = Field(default=2, description="Version of the usage model")
+    completion_cost: float = Field(default=0, description="Total cost of the completion in USD")
+    completion_tokens: int = Field(default=0, description="Number of tokens in the completion/response")
+    prompt_tokens: int = Field(
+        default=0, description="Total number of tokens in the prompt, including both cached and non-cached tokens"
+    )
+    cache_read_tokens: int = Field(default=0, description="Number of tokens read from cache, included in prompt_tokens")
+    cache_write_tokens: int = Field(
+        default=0, description="Number of tokens written to cache, included in prompt_tokens"
+    )
 
     def get_total_prompt_tokens(self, model: str) -> int:
         """Get total prompt tokens based on model's token counting behavior."""
         if model not in MODEL_COSTS:
             return self.prompt_tokens
-        
-        if MODEL_COSTS[model]["cached_included"]:
-            # For models like deepseek where cached tokens are included in prompt_tokens
-            return self.prompt_tokens
-        else:
-            # For models like Claude where cached tokens are separate
-            return self.prompt_tokens + self.cached_tokens
+
+        # All tokens are already included in prompt_tokens
+        return self.prompt_tokens
 
     def get_calculated_cost(self, model: str) -> float:
         """Get the calculated cost based on instance token counts and model."""
         if self.completion_cost > 0:
             return self.completion_cost
-        return self.calculate_cost(
-            model,
-            self.prompt_tokens,
-            self.completion_tokens,
-            self.cached_tokens
-        )
+        return self.calculate_cost(model, self.prompt_tokens, self.completion_tokens, self.cache_read_tokens)
 
     @staticmethod
-    def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int, cached_tokens: int = 0) -> float:
+    def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int, cache_read_tokens: int = 0) -> float:
         """Calculate cost based on token counts and model."""
         if model not in MODEL_COSTS:
             return 0.0
-                
+
         rates = MODEL_COSTS[model]
-        if rates["cached_included"]:
-            # For models like deepseek where cached tokens are included in prompt_tokens
-            # We need to subtract cached tokens from the input cost calculation
-            non_cached_tokens = prompt_tokens - cached_tokens
-            input_cost = non_cached_tokens * rates["input"] / 1_000_000
-            cache_cost = cached_tokens * rates["cache"] / 1_000_000 if cached_tokens else 0
-        else:
-            # For models like Claude where cached tokens are separate
-            input_cost = prompt_tokens * rates["input"] / 1_000_000
-            cache_cost = cached_tokens * rates["cache"] / 1_000_000 if cached_tokens else 0
-            
+        non_cached_tokens = prompt_tokens - cache_read_tokens
+        input_cost = non_cached_tokens * rates["input"] / 1_000_000
+        cache_cost = cache_read_tokens * rates["cache"] / 1_000_000 if cache_read_tokens else 0
         output_cost = completion_tokens * rates["output"] / 1_000_000
         return input_cost + output_cost + cache_cost
 
     @classmethod
-    def from_completion_response(
-        cls, completion_response: dict | BaseModel, model: str
-    ) -> Union["Usage", None]:
-        if isinstance(completion_response, BaseModel) and hasattr(
-            completion_response, "usage"
-        ):
+    def from_completion_response(cls, completion_response: dict | BaseModel, model: str) -> Union["Usage", None]:
+        if isinstance(completion_response, BaseModel) and hasattr(completion_response, "usage"):
             usage = completion_response.usage.model_dump()
         elif isinstance(completion_response, dict) and "usage" in completion_response:
             usage = completion_response["usage"]
         else:
-            logger.warning(
-                f"No usage info available in completion response: {completion_response}"
-            )
+            logger.warning(f"No usage info available in completion response: {completion_response}")
             return None
 
         logger.debug(f"Usage: {json.dumps(usage, indent=2)}")
@@ -147,23 +72,23 @@ class Usage(BaseModel):
         if usage.get("cache_creation_input_tokens"):
             prompt_tokens += usage["cache_creation_input_tokens"]
 
-        completion_tokens = usage.get("completion_tokens") or usage.get(
-            "output_tokens", 0
-        )
+        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens", 0)
 
         if usage.get("prompt_cache_hit_tokens"):
-            cached_tokens = usage["prompt_cache_hit_tokens"]
+            cache_read_tokens = usage["prompt_cache_hit_tokens"]
         elif usage.get("cache_read_input_tokens"):
-            cached_tokens = usage["cache_read_input_tokens"]
+            cache_read_tokens = usage["cache_read_input_tokens"]
+        elif usage.get("prompt_tokens_details") and usage["prompt_tokens_details"].get("cached_tokens"):
+            cache_read_tokens = usage["prompt_tokens_details"]["cached_tokens"]
         else:
-            cached_tokens = 0
+            cache_read_tokens = 0
+
+        cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
 
         try:
             import litellm
 
-            cost = litellm.completion_cost(
-                completion_response=completion_response, model=model
-            )
+            cost = litellm.completion_cost(completion_response=completion_response, model=model)
         except Exception:
             # If cost calculation fails, fall back to calculating it manually
             try:
@@ -176,22 +101,19 @@ class Usage(BaseModel):
                 )
                 cost = prompt_cost + completion_cost
             except NotFoundError as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
+                logger.debug(f"Failed to calculate cost for completion response: {completion_response}. Error: {e}")
                 # Use our own cost calculation if litellm fails
-                cost = cls.calculate_cost(model, prompt_tokens, completion_tokens, cached_tokens)
+                cost = cls.calculate_cost(model, prompt_tokens, completion_tokens, cache_read_tokens)
             except Exception as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
+                logger.debug(f"Failed to calculate cost for completion response: {completion_response}. Error: {e}")
                 cost = 0
 
         return cls(
             completion_cost=cost,
             completion_tokens=completion_tokens,
             prompt_tokens=prompt_tokens,
-            cached_tokens=cached_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
         )
 
     def __add__(self, other: "Usage") -> "Usage":
@@ -199,13 +121,15 @@ class Usage(BaseModel):
         other_cost = getattr(other, "completion_cost", 0)
         other_completion = getattr(other, "completion_tokens", 0)
         other_prompt = getattr(other, "prompt_tokens", 0)
-        other_cached = getattr(other, "cached_tokens", 0)
+        other_cache_read = getattr(other, "cache_read_tokens", 0)
+        other_cache_write = getattr(other, "cache_write_tokens", 0)
 
         return Usage(
             completion_cost=self.completion_cost + other_cost,
             completion_tokens=self.completion_tokens + other_completion,
             prompt_tokens=self.prompt_tokens + other_prompt,
-            cached_tokens=self.cached_tokens + other_cached,
+            cache_read_tokens=self.cache_read_tokens + other_cache_read,
+            cache_write_tokens=self.cache_write_tokens + other_cache_write,
         )
 
     def __str__(self) -> str:
@@ -213,16 +137,31 @@ class Usage(BaseModel):
             f"Usage(cost: ${self.completion_cost:.4f}, "
             f"completion tokens: {self.completion_tokens}, "
             f"prompt tokens: {self.prompt_tokens}, "
-            f"cached tokens: {self.cached_tokens})"
+            f"cache read tokens: {self.cache_read_tokens}, "
+            f"cache write tokens: {self.cache_write_tokens})"
         )
 
     @model_validator(mode="before")
     @classmethod
-    def fix_null_tokens(cls, data: Any) -> Any:
+    def fix_backward_compatibility(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            # Handle backward compatibility for cached_tokens
+            if "cached_tokens" in data:
+                data["cache_read_tokens"] = data.pop("cached_tokens")
+
+            # Set any null values to 0
             for key, value in data.items():
                 if not value:
                     data[key] = 0
+
+            # Handle older versions for cache-excluded models
+            version = data.get("version")
+            model = data.get("model")
+            if (version is None or version == 1) and model in MODEL_COSTS:
+                if not MODEL_COSTS[model]["cached_included"]:
+                    # For older versions with cache-excluded models like Claude
+                    # cache tokens were not included in prompt_tokens, so we need to add them
+                    data["prompt_tokens"] = data["prompt_tokens"] + data["cache_read_tokens"]
 
         return data
 
@@ -238,6 +177,30 @@ class Completion(BaseModel):
         description="List of flags indicating special conditions or states during completion",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def fix_usage(cls, data: Any) -> Any:
+        """Allow thoughts to be null."""
+        if isinstance(data, dict):
+            if "response" in data:
+                # Check if we need to reparse usage for version 1 with retries
+
+                if isinstance(data.get("usage"), dict):
+                    version = data.get("usage", {}).get("version")
+                    retries = data.get("retries", 0)
+                elif isinstance(data.get("usage"), Usage):
+                    version = data.get("usage").version
+                    retries = data.get("retries", 0)
+                else:
+                    version = 1
+                    retries = data.get("retries", 0)
+
+                if version == 1 and retries > 0:
+                    data["usage"] = Usage.from_completion_response(data["response"], data["model"])
+                elif "usage" not in data:
+                    data["usage"] = Usage.from_completion_response(data["response"], data["model"])
+        return data
+
     @classmethod
     def from_llm_completion(
         cls,
@@ -248,14 +211,14 @@ class Completion(BaseModel):
         retries: int | None = None,
         flags: list[str] | None = None,
     ) -> Optional["Completion"]:
+        if completion_response is None:
+            raise ValueError("Completion response is None")
         if isinstance(completion_response, BaseModel):
             response = completion_response.model_dump()
         elif isinstance(completion_response, dict):
             response = completion_response
         else:
-            logger.error(
-                f"Unexpected completion response type: {type(completion_response)}"
-            )
+            logger.error(f"Unexpected completion response type: {type(completion_response)}")
             return None
 
         if not usage:
@@ -269,376 +232,3 @@ class Completion(BaseModel):
             usage=usage,
             flags=flags or [],
         )
-
-
-class NameDescriptor:
-    def __get__(self, obj, cls=None) -> str:
-        if hasattr(cls, "Config") and hasattr(cls.Config, "title") and cls.Config.title:
-            return cls.Config.title
-        return cls.__name__
-
-
-class StructuredOutput(BaseModel):
-    name: ClassVar[NameDescriptor] = NameDescriptor()
-
-    class Config:
-        ignored_types = (classproperty,)
-
-    @classproperty
-    def description(cls):
-        return cls.model_json_schema().get("description", "")
-
-    @classmethod
-    def openai_schema(cls, thoughts_in_action: bool = False) -> dict[str, Any]:
-        """
-        Return the schema in the format of OpenAI's schema as jsonschema
-        """
-        schema = cls.model_json_schema()
-        docstring = parse(cls.__doc__ or "")
-        parameters = {
-            k: v
-            for k, v in schema.items()
-            if k not in ("title", "description")
-            and (thoughts_in_action or k != "thoughts")
-        }
-
-        if not thoughts_in_action and parameters["properties"].get("thoughts"):
-            del parameters["properties"]["thoughts"]
-
-        def remove_defaults(obj: dict) -> None:
-            """Recursively remove default fields from a schema object"""
-            if isinstance(obj, dict):
-                if "default" in obj:
-                    del obj["default"]
-                # Recurse into nested properties
-                for value in obj.values():
-                    remove_defaults(value)
-            elif isinstance(obj, list):
-                for item in obj:
-                    remove_defaults(item)
-
-        def resolve_refs(obj: dict, defs: dict) -> dict:
-            """Recursively resolve $ref references in the schema"""
-            if not isinstance(obj, dict):
-                return obj
-
-            result = {}
-            for k, v in obj.items():
-                if k == "items" and isinstance(v, dict) and "$ref" in v:
-                    # Handle array items that use $ref
-                    ref_path = v["$ref"]
-                    if ref_path.startswith("#/$defs/"):
-                        ref_name = ref_path.split("/")[-1]
-                        if ref_name in defs:
-                            result[k] = defs[ref_name].copy()
-                            continue
-                elif k == "$ref":
-                    ref_path = v
-                    if ref_path.startswith("#/$defs/"):
-                        ref_name = ref_path.split("/")[-1]
-                        if ref_name in defs:
-                            # Create a new dict with all properties except $ref
-                            resolved = {
-                                k2: v2 for k2, v2 in obj.items() if k2 != "$ref"
-                            }
-                            # Merge with the referenced definition
-                            referenced = defs[ref_name].copy()
-                            referenced.update(resolved)
-                            return resolve_refs(referenced, defs)
-
-                # Recursively resolve nested objects/arrays
-                if isinstance(v, dict):
-                    result[k] = resolve_refs(v, defs)
-                elif isinstance(v, list):
-                    result[k] = [
-                        resolve_refs(item, defs) if isinstance(item, dict) else item
-                        for item in v
-                    ]
-                else:
-                    result[k] = v
-
-            return result
-
-        # Remove default field from all properties recursively
-        remove_defaults(parameters)
-
-        # Resolve all $ref references
-        if "$defs" in parameters:
-            defs = parameters.pop("$defs")
-            parameters = resolve_refs(parameters, defs)
-
-        for param in docstring.params:
-            if (name := param.arg_name) in parameters["properties"] and (
-                description := param.description
-            ):
-                if "description" not in parameters["properties"][name]:
-                    parameters["properties"][name]["description"] = description
-
-        parameters["required"] = sorted(
-            k
-            for k, v in parameters["properties"].items()
-            if "default" not in v and (thoughts_in_action or k != "thoughts")
-        )
-
-        if "description" not in schema:
-            if docstring.short_description:
-                schema["description"] = docstring.short_description
-            else:
-                schema["description"] = (
-                    f"Correctly extracted `{cls.__name__}` with all "
-                    f"the required parameters with correct types"
-                )
-        name = cls.name
-        return {
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": schema["description"],
-                "parameters": parameters,
-            },
-        }
-
-    @classmethod
-    def anthropic_schema(cls) -> dict[str, Any]:
-        schema = cls.model_json_schema()
-        del schema["title"]
-
-        if "description" in schema:
-            description = schema["description"]
-            del schema["description"]
-        else:
-            description = None
-
-        response = {
-            "name": cls.name,
-            "input_schema": schema,
-        }
-
-        if description:
-            response["description"] = description
-
-        # Exclude thoughts field from properties and required if it exists
-        if "thoughts" in schema.get("properties", {}):
-            del schema["properties"]["thoughts"]
-            if "required" in schema and "thoughts" in schema["required"]:
-                schema["required"].remove("thoughts")
-
-        return response
-
-    @classmethod
-    def model_validate_xml(cls, xml_text: str) -> Self:
-        """Parse XML format into model fields."""
-        parsed_input = {}
-        # Fields that can be parsed from XML format
-        xml_fields = ["path", "old_str", "new_str", "file_text", "insert_line"]
-
-        for field in xml_fields:
-            start_tag = f"<{field}>"
-            end_tag = f"</{field}>"
-            if start_tag in xml_text and end_tag in xml_text:
-                start_idx = xml_text.index(start_tag) + len(start_tag)
-                end_idx = xml_text.index(end_tag)
-                content = xml_text[start_idx:end_idx]
-
-                # Handle both single-line and multi-line block content
-                if content:
-                    # If content starts/ends with newlines, preserve the inner content
-                    if content.startswith("\n") and content.endswith("\n"):
-                        # Remove first and last newline but preserve internal formatting
-                        content = content[1:-1].rstrip("\n")
-                    parsed_input[field] = content
-
-        return cls.model_validate(parsed_input)
-
-    @classmethod
-    def model_validate_json(
-        cls,
-        json_data: str | bytes | bytearray,
-        **kwarg,
-    ) -> Self:
-        if not json_data:
-            raise ValidationError("Message is empty")
-
-        try:
-            parsed_data = json.loads(json_data, strict=False)
-
-            def unescape_values(obj):
-                if isinstance(obj, dict):
-                    return {k: unescape_values(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [unescape_values(v) for v in obj]
-                elif isinstance(obj, str) and "\\" in obj:
-                    return obj.encode().decode("unicode_escape")
-                return obj
-
-            cleaned_data = unescape_values(parsed_data)
-            cleaned_json = json.dumps(cleaned_data)
-            return super().model_validate_json(cleaned_json, **kwarg)
-
-        except (json.JSONDecodeError, ValidationError) as e:
-            # If direct parsing fails, try more aggressive cleanup
-            logger.warning(f"Initial JSON parse failed, attempting alternate cleanup")
-
-            message = json_data
-
-            cleaned_message = "".join(
-                char for char in message if ord(char) >= 32 or char in "\n\r\t"
-            )
-            if cleaned_message != message:
-                logger.info(
-                    f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}"
-                )
-            message = cleaned_message
-
-            # Replace None with null
-            message = message.replace(": None", ": null").replace(":None", ":null")
-
-            # Extract JSON and try parsing again
-            message, all_jsons = extract_json_from_message(message)
-            if all_jsons:
-                if len(all_jsons) > 1:
-                    logger.warning(
-                        f"Found multiple JSON objects, using the first one. All found: {all_jsons}"
-                    )
-                message = all_jsons[0]
-
-            # Normalize line endings
-            if isinstance(message, str):
-                message = message.replace("\r\n", "\n").replace("\r", "\n")
-
-            logger.debug(f"Final message to validate: {repr(message)}")
-
-            return super().model_validate_json(
-                message if isinstance(message, str) else json.dumps(message), **kwarg
-            )
-
-    def format_args_for_llm(self) -> str:
-        """
-        Format the input arguments for LLM completion calls. Override in subclasses for custom formats.
-        Default implementation returns JSON format.
-        """
-        return json.dumps(
-            self.model_dump(
-                exclude={"thoughts"} if hasattr(self, "thoughts") else None
-            ),
-            indent=2,
-        )
-
-    @classmethod
-    def format_schema_for_llm(cls, thoughts_in_action: bool = False) -> str:
-        """
-        Format the schema description for LLM completion calls.
-        Default implementation returns JSON schema.
-        """
-        schema = cls.model_json_schema()
-
-        if not thoughts_in_action and schema["properties"].get("thoughts"):
-            del schema["properties"]["thoughts"]
-            schema["required"] = sorted(
-                k
-                for k, v in schema["properties"].items()
-                if "default" not in v and (thoughts_in_action or k != "thoughts")
-            )
-
-        return f"Requires a JSON response with the following schema: {json.dumps(schema, ensure_ascii=False)}"
-
-    @classmethod
-    def format_xml_schema(cls, xml_fields: dict[str, str]) -> str:
-        """
-        Format XML schema description.
-        Used by actions that require XML-formatted input.
-
-        Args:
-            xml_fields: Dictionary mapping field names to their descriptions
-        """
-        schema = [f"Requires the following XML format:"]
-
-        # Build example XML structure
-        example = []
-        for field_name, field_desc in xml_fields.items():
-            example.append(f"<{field_name}>{field_desc}</{field_name}>")
-
-        return "\n".join(schema + example)
-
-
-def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
-    """
-    Extract JSON from a message, handling both code blocks and raw JSON.
-    Returns a tuple of (selected_json_dict, all_found_json_dicts).
-    """
-
-    def clean_json_string(json_str: str) -> str:
-        # Remove single-line comments and clean control characters
-        lines = []
-        for line in json_str.split("\n"):
-            # Remove everything after // or #
-            line = line.split("//")[0].split("#")[0].rstrip()
-            # Clean control characters but preserve newlines and spaces
-            line = "".join(char for char in line if ord(char) >= 32 or char in "\n\t")
-            if line:  # Only add non-empty lines
-                lines.append(line)
-        return "\n".join(lines)
-
-    all_found_jsons = []
-
-    # First try to find ```json blocks
-    try:
-        current_pos = 0
-        while True:
-            start = message.find("```json", current_pos)
-            if start == -1:
-                break
-            start += 7  # Move past ```json
-            end = message.find("```", start)
-            if end == -1:
-                break
-            potential_json = clean_json_string(message[start:end].strip())
-            try:
-                json_dict = json.loads(potential_json)
-                # Validate that this is a complete, non-truncated JSON object
-                if isinstance(json_dict, dict) and all(
-                    isinstance(k, str) for k in json_dict.keys()
-                ):
-                    all_found_jsons.append(json_dict)
-            except json.JSONDecodeError:
-                pass
-            current_pos = end + 3
-
-        if all_found_jsons:
-            # Return the most complete JSON object (one with the most fields)
-            return max(all_found_jsons, key=lambda x: len(x)), all_found_jsons
-    except Exception as e:
-        logger.warning(f"Failed to extract JSON from code blocks: {e}")
-
-    # If no ```json blocks found or they failed, try to find raw JSON objects
-    try:
-        current_pos = 0
-        while True:
-            start = message.find("{", current_pos)
-            if start == -1:
-                break
-            # Try to parse JSON starting from each { found
-            for end in range(len(message), start, -1):
-                try:
-                    potential_json = clean_json_string(message[start:end])
-                    json_dict = json.loads(potential_json)
-                    # Validate that this is a complete, non-truncated JSON object
-                    if isinstance(json_dict, dict) and all(
-                        isinstance(k, str) for k in json_dict.keys()
-                    ):
-                        all_found_jsons.append(json_dict)
-                    break
-                except json.JSONDecodeError:
-                    continue
-            if not all_found_jsons:  # If no valid JSON found, move past this {
-                current_pos = start - +1
-            else:
-                current_pos = end
-
-        if all_found_jsons:
-            # Return the most complete JSON object (one with the most fields)
-            return max(all_found_jsons, key=lambda x: len(x)), all_found_jsons
-    except Exception as e:
-        logger.warning(f"Failed to extract raw JSON objects: {e}")
-
-    return message, all_found_jsons

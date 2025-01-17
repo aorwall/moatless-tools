@@ -5,17 +5,15 @@ import os
 
 import streamlit as st
 from dotenv import load_dotenv
+from moatless.streamlit.investigate_node import investigate_node
 
 from moatless.benchmark.report import generate_report
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.search_tree import SearchTree
-from moatless.streamlit.investigate_node import investigate_node
 from moatless.streamlit.shared import trajectory_table
 from moatless.streamlit.tree_visualization import update_visualization
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -25,9 +23,7 @@ def main():
     # Add argument parsing at the start of main()
     parser = argparse.ArgumentParser()
     parser.add_argument("path", nargs="?", help="Path to the file")
-    parser.add_argument(
-        "--linear", action="store_true", help="Force linear visualization"
-    )
+    parser.add_argument("--linear", action="store_true", help="Force linear visualization")
     args, unknown = parser.parse_known_args()
 
     st.set_page_config(
@@ -99,18 +95,12 @@ def main():
 
             else:
                 instance = None
-                if (
-                    not "search_tree" in st.session_state
-                    or st.session_state.search_tree.persist_path != file_path
-                ):
+                if not "search_tree" in st.session_state or st.session_state.search_tree.persist_path != file_path:
                     with st.spinner("Loading search tree from trajectory file"):
                         # Need to load twice to get the instance id...
                         with open(file_path, "r") as f:
                             search_tree = json.load(f)
-                            if (
-                                "metadata" in search_tree
-                                and "instance_id" in search_tree["metadata"]
-                            ):
+                            if "metadata" in search_tree and "instance_id" in search_tree["metadata"]:
                                 instance_id = search_tree["metadata"]["instance_id"]
                             else:
                                 instance_id = None
@@ -154,9 +144,7 @@ def main():
                     )
 
         else:
-            st.error(
-                "The specified file does not exist. Please check the path and try again."
-            )
+            st.error("The specified file does not exist. Please check the path and try again.")
 
     if not file_path:
         st.info("Please provide a valid file path and click 'Load File' to begin.")

@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, Union, List
+from typing import Union, List
 
 import anthropic
 import tenacity
@@ -11,35 +11,27 @@ from anthropic.types.beta import (
     BetaTextBlock,
 )
 from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
-from pydantic import Field, ValidationError
+from pydantic import ValidationError
 
-from moatless.completion import CompletionModel
-from moatless.completion.completion import LLMResponseFormat, CompletionResponse
-from moatless.completion.model import Completion, StructuredOutput, Usage
+from moatless.completion import BaseCompletionModel, CompletionResponse
+from moatless.completion.model import Completion, Usage
+from moatless.completion.schema import AllMessageValues
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
 
-class AnthtropicCompletionModel(CompletionModel):
-    response_format: Optional[LLMResponseFormat] = Field(
-        LLMResponseFormat.TOOLS, description="The response format expected from the LLM"
-    )
-
-    @property
-    def supports_anthropic_computer_use(self):
-        return "claude-3-5-sonnet-20241022" in self.model
-
+# TODO: Add necessary functionality for Anthropic in other CompletionModel implementations and remove this
+class AnthtropicCompletionModel(BaseCompletionModel):
     def create_completion(
         self,
-        messages: List[dict],
+        messages: List[AllMessageValues],
         system_prompt: str,
-        response_model: List[type[StructuredOutput]] | type[StructuredOutput],
+        response_schema: List[type[ResponseSchema]] | type[ResponseSchema],
     ) -> CompletionResponse:
         # Convert Message objects to dictionaries if needed
-        messages = [
-            msg.model_dump() if hasattr(msg, "model_dump") else msg for msg in messages
-        ]
+        messages = [msg.model_dump() if hasattr(msg, "model_dump") else msg for msg in messages]
 
         total_usage = Usage()
         retry_count = 0
@@ -48,20 +40,18 @@ class AnthtropicCompletionModel(CompletionModel):
         tool_choice = {"type": "any"}
 
         actions = []
-        if not response_model:
+        if not response_schema:
             tools = NOT_GIVEN
             tool_choice = NOT_GIVEN
         else:
-            if isinstance(response_model, list):
-                actions = response_model
-            elif response_model:
-                actions = [response_model]
+            if isinstance(response_schema, list):
+                actions = response_schema
+            elif response_schema:
+                actions = [response_schema]
 
             for action in actions:
                 if hasattr(action, "name") and action.name == "str_replace_editor":
-                    tools.append(
-                        {"name": "str_replace_editor", "type": "text_editor_20241022"}
-                    )
+                    tools.append({"name": "str_replace_editor", "type": "text_editor_20241022"})
                 else:
                     schema = action.anthropic_schema()
 
@@ -110,9 +100,7 @@ class AnthtropicCompletionModel(CompletionModel):
                     extra_headers=extra_headers,
                 )
 
-                total_usage += Usage.from_completion_response(
-                    completion_response, self.model
-                )
+                total_usage += Usage.from_completion_response(completion_response, self.model)
 
                 def get_response_format(name: str):
                     if len(actions) == 1:
@@ -126,9 +114,7 @@ class AnthtropicCompletionModel(CompletionModel):
                 text = None
                 structured_outputs = []
                 for block in completion_response.content:
-                    if isinstance(block, ToolUseBlock) or isinstance(
-                        block, BetaToolUseBlock
-                    ):
+                    if isinstance(block, ToolUseBlock) or isinstance(block, BetaToolUseBlock):
                         action = None
 
                         tool_call_id = block.id
@@ -147,9 +133,7 @@ class AnthtropicCompletionModel(CompletionModel):
                         action_args = action.model_validate(block.input)
                         structured_outputs.append(action_args)
 
-                    elif isinstance(block, TextBlock) or isinstance(
-                        block, BetaTextBlock
-                    ):
+                    elif isinstance(block, TextBlock) or isinstance(block, BetaTextBlock):
                         text = block.text
 
                     else:
@@ -164,18 +148,12 @@ class AnthtropicCompletionModel(CompletionModel):
                 )
 
                 # Log summary of the response
-                action_names = [
-                    output.__class__.__name__ for output in structured_outputs
-                ]
+                action_names = [output.__class__.__name__ for output in structured_outputs]
                 has_text = bool(text and text.strip())
                 if action_names:
-                    logger.info(
-                        f"Completion response summary - Actions: {action_names}, Has text: {has_text}"
-                    )
+                    logger.info(f"Completion response summary - Actions: {action_names}, Has text: {has_text}")
                 else:
-                    logger.info(
-                        f"Completion response summary - Text only: {text[:200]}..."
-                    )
+                    logger.info(f"Completion response summary - Text only: {text[:200]}...")
 
                 return CompletionResponse(
                     structured_outputs=structured_outputs,
@@ -190,9 +168,7 @@ class AnthtropicCompletionModel(CompletionModel):
                 messages.append(
                     {
                         "role": "assistant",
-                        "content": [
-                            block.model_dump() for block in completion_response.content
-                        ],
+                        "content": [block.model_dump() for block in completion_response.content],
                     }
                 )
                 messages.append(
@@ -228,11 +204,7 @@ class AnthtropicCompletionModel(CompletionModel):
 
 
 def _inject_prompt_caching(
-    messages: list[
-        Union[
-            "AnthropicMessagesUserMessageParam", "AnthopicMessagesAssistantMessageParam"
-        ]
-    ],
+    messages: list[Union["AnthropicMessagesUserMessageParam", "AnthopicMessagesAssistantMessageParam"]],
 ):
     from anthropic.types.beta import BetaCacheControlEphemeralParam
 
@@ -242,14 +214,15 @@ def _inject_prompt_caching(
     """
 
     breakpoints_remaining = 3
+
+    # Add
+
     for message in reversed(messages):
         # message["role"] == "user" and
         if isinstance(content := message["content"], list):
             if breakpoints_remaining:
                 breakpoints_remaining -= 1
-                content[-1]["cache_control"] = BetaCacheControlEphemeralParam(
-                    {"type": "ephemeral"}
-                )
+                content[-1]["cache_control"] = BetaCacheControlEphemeralParam({"type": "ephemeral"})
             else:
                 content[-1].pop("cache_control", None)
                 # we'll only every have one extra turn per loop

@@ -4,7 +4,7 @@ from typing import Optional, List, Dict, Any, Union
 
 from pydantic import BaseModel, Field
 
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import (
@@ -32,9 +32,7 @@ class ActionStep(BaseModel):
         data = super().model_dump(**kwargs)
 
         data["action"] = self.action.model_dump(**kwargs)
-        data["action"]["action_args_class"] = (
-            f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
-        )
+        data["action"]["action_args_class"] = f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
 
         return data
 
@@ -50,13 +48,8 @@ class FeedbackData(BaseModel):
     """Structured feedback data model"""
 
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
-    analysis: Optional[str] = Field(
-        None, description="Analysis of the task and alternative branch attempts"
-    )
-    suggested_node_id: Optional[int] = Field(
-        None, description="ID of the node that should be expanded next (optional)"
-    )
-
+    analysis: Optional[str] = Field(None, description="Analysis of the task and alternative branch attempts")
+    suggested_node_id: Optional[int] = Field(None, description="ID of the node that should be expanded next (optional)")
 
 
 class Reward(BaseModel):
@@ -73,63 +66,40 @@ class Reward(BaseModel):
         le=100,
     )
 
+
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
 
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
 
-    workspace: Optional[Workspace] = Field(
-        None, description="The workspace associated with the node"
-    )
+    workspace: Optional[Workspace] = Field(None, description="The workspace associated with the node")
     artifact_changes: List[ArtifactChange] = Field(
         default_factory=list,
         description="The artifact changes associated with the node",
     )
 
-    user_message: Optional[str] = Field(
-        None, description="The user message for this node"
-    )
-    assistant_message: Optional[str] = Field(
-        None, description="The assistant response for this node"
-    )
+    user_message: Optional[str] = Field(None, description="The user message for this node")
+    assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
 
     action_steps: List[ActionStep] = Field(
         default_factory=list,
         description="The sequence of actions and observations for this node",
     )
 
-    file_context: Optional[FileContext] = Field(
-        None, description="The file context state associated with the node"
-    )
+    file_context: Optional[FileContext] = Field(None, description="The file context state associated with the node")
     # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
-    completions: Dict[str, Completion] = Field(
-        default_factory=dict, description="The completions used in this node"
-    )
-    possible_actions: List[str] = Field(
-        default_factory=list, description="List of possible action types for this node"
-    )
-    is_duplicate: Optional[bool] = Field(
-        None, description="Flag to indicate if the node is a duplicate"
-    )
-    terminal: bool = Field(
-        False, description="Flag to indicate if the node is a terminal node"
-    )
+    completions: Dict[str, Completion] = Field(default_factory=dict, description="The completions used in this node")
+    possible_actions: List[str] = Field(default_factory=list, description="List of possible action types for this node")
+    is_duplicate: Optional[bool] = Field(None, description="Flag to indicate if the node is a duplicate")
+    terminal: bool = Field(False, description="Flag to indicate if the node is a terminal node")
     error: Optional[str] = Field(None, description="Error when running node")
     reward: Optional[Reward] = Field(None, description="The reward of the node")
     visits: int = Field(0, description="The number of times the node has been visited")
-    value: Optional[float] = Field(
-        None, description="The total value (reward) of the node"
-    )
-    max_expansions: Optional[int] = Field(
-        None, description="The maximum number of expansions"
-    )
-    agent_settings: Optional[AgentSettings] = Field(
-        None, description="The agent settings associated with the node"
-    )
-    feedback_data: Optional[FeedbackData] = Field(
-        None, description="Structured feedback data for the node"
-    )
+    value: Optional[float] = Field(None, description="The total value (reward) of the node")
+    max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
+    agent_settings: Optional[AgentSettings] = Field(None, description="The agent settings associated with the node")
+    feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
 
     @property
     def action(self) -> Optional[ActionArguments]:
@@ -181,10 +151,7 @@ class Node(BaseModel):
         """Create a stub node with a unique ID."""
         # Get the highest existing node ID from the kwargs or use 0
         existing_nodes = kwargs.get("children", [])
-        highest_id = (
-            max([n.node_id for n in existing_nodes] + [kwargs.get("node_id", -1), -1])
-            + 1
-        )
+        highest_id = max([n.node_id for n in existing_nodes] + [kwargs.get("node_id", -1), -1]) + 1
         return cls(node_id=highest_id, **kwargs)
 
     def is_leaf(self) -> bool:
@@ -232,11 +199,7 @@ class Node(BaseModel):
 
     def is_expandable(self) -> bool:
         """Check if the node can be expanded further."""
-        return (
-            not self.is_terminal()
-            and not self.is_fully_expanded()
-            and not self.is_duplicate
-        )
+        return not self.is_terminal() and not self.is_fully_expanded() and not self.is_duplicate
 
     def find_duplicate(self) -> Optional["Node"]:
         if not self.parent:
@@ -252,9 +215,7 @@ class Node(BaseModel):
         if not self.parent:
             return []
 
-        return [
-            child for child in self.parent.children if child.node_id != self.node_id
-        ]
+        return [child for child in self.parent.children if child.node_id != self.node_id]
 
     def get_trajectory(self) -> List["Node"]:
         nodes = []
@@ -383,9 +344,7 @@ class Node(BaseModel):
             user_message=self.user_message,
             is_duplicate=self.is_duplicate,
             action=self.action,
-            possible_actions=self.possible_actions.copy()
-            if self.possible_actions
-            else [],
+            possible_actions=self.possible_actions.copy() if self.possible_actions else [],
         )
 
         new_node.reset()
@@ -411,9 +370,7 @@ class Node(BaseModel):
 
         if self.completions and "completions" not in exclude_set:
             node_dict["completions"] = {
-                key: completion.model_dump(**kwargs)
-                for key, completion in self.completions.items()
-                if completion
+                key: completion.model_dump(**kwargs) for key, completion in self.completions.items() if completion
             }
 
         if self.reward and "reward" not in exclude_set:
@@ -425,14 +382,10 @@ class Node(BaseModel):
         if self.file_context and "file_context" not in exclude_set:
             node_dict["file_context"] = self.file_context.model_dump(**kwargs)
 
-        node_dict["action_steps"] = [
-            action_step.model_dump(**kwargs) for action_step in self.action_steps
-        ]
+        node_dict["action_steps"] = [action_step.model_dump(**kwargs) for action_step in self.action_steps]
 
         if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
-            node_dict["children"] = [
-                child.model_dump(**kwargs) for child in self.children
-            ]
+            node_dict["children"] = [child.model_dump(**kwargs) for child in self.children]
 
         return node_dict
 
@@ -465,8 +418,7 @@ class Node(BaseModel):
 
         if node_data.get("action_steps"):
             node_data["action_steps"] = [
-                ActionStep.model_validate(step_data)
-                for step_data in node_data["action_steps"]
+                ActionStep.model_validate(step_data) for step_data in node_data["action_steps"]
             ]
 
             # To keep backward compatiblity
@@ -486,9 +438,7 @@ class Node(BaseModel):
         node_data["value"] = node_data.get("value", 0.0)
 
         if node_data.get("feedback_data"):
-            node_data["feedback_data"] = FeedbackData.model_validate(
-                node_data["feedback_data"]
-            )
+            node_data["feedback_data"] = FeedbackData.model_validate(node_data["feedback_data"])
 
         if "children" in node_data:
             children = node_data.get("children", [])
@@ -577,9 +527,7 @@ class Node(BaseModel):
 
         for node in nodes:
             node_data = node.model_dump(exclude={"parent", "children"}, **kwargs)
-            node_data["parent_id"] = (
-                node.parent.node_id if node.parent is not None else None
-            )
+            node_data["parent_id"] = node.parent.node_id if node.parent is not None else None
             node_list.append(node_data)
 
         return node_list
@@ -696,10 +644,7 @@ def _append_ascii_node(
         action_names = [step.action.name for step in node.action_steps if step.action]
         state_params.extend(action_names)
         # Check if any action step expects correction
-        if any(
-            step.observation and step.observation.expect_correction
-            for step in node.action_steps
-        ):
+        if any(step.observation and step.observation.expect_correction for step in node.action_steps):
             state_params.append("expect_correction")
 
     # Build reward string
@@ -734,19 +679,13 @@ def _append_ascii_node(
     # Add expandable status
     expandable_str = "expandable" if node.is_expandable() else "not-expandable"
     if use_color:
-        expandable_str = (
-            color_green(expandable_str)
-            if node.is_expandable()
-            else color_red(expandable_str)
-        )
+        expandable_str = color_green(expandable_str) if node.is_expandable() else color_red(expandable_str)
 
     # Calculate the current node's connection prefix
     connection = "└── " if is_last else "├── "
 
     # Add star marker only if trajectory marking is enabled
-    trajectory_marker = (
-        "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
-    )
+    trajectory_marker = "* " if (show_trajectory and node in current_trajectory_nodes) else "  "
 
     # Add the node line with expandable status and optional trajectory marker
     tree_lines.append(
@@ -761,9 +700,7 @@ def _append_ascii_node(
     # Add explanation if available
     if include_explanation and node.reward and node.reward.explanation:
         explanation_text = node.reward.explanation.strip()
-        _append_wrapped_text(
-            tree_lines, explanation_text, content_prefix, "│ Explanation: "
-        )
+        _append_wrapped_text(tree_lines, explanation_text, content_prefix, "│ Explanation: ")
 
     # Add feedback if available
     if include_feedback and node.feedback_data:
@@ -774,27 +711,16 @@ def _append_ascii_node(
             content_prefix,
             "│ Direct Feedback: ",
         )
-        _append_wrapped_text(
-            tree_lines, node.feedback_data.analysis, content_prefix, "│ Analysis: "
-        )
+        _append_wrapped_text(tree_lines, node.feedback_data.analysis, content_prefix, "│ Analysis: ")
 
     # Add diffs if available - only for Finish actions
-    if (
-        include_diffs
-        and node.file_context
-        and node.action
-        and node.action.name == "Finish"
-    ):
+    if include_diffs and node.file_context and node.action and node.action.name == "Finish":
         patch = node.file_context.generate_git_patch()
         if patch.strip():
             tree_lines.append(f"{content_prefix}│ Changes (git patch):")
             for line in patch.split("\n"):
                 if line.strip():
-                    prefix_char = (
-                        "+"
-                        if line.startswith("+")
-                        else ("-" if line.startswith("-") else " ")
-                    )
+                    prefix_char = "+" if line.startswith("+") else ("-" if line.startswith("-") else " ")
                     formatted_line = line.strip()
                     if use_color:
                         if prefix_char == "+":
@@ -811,13 +737,9 @@ def _append_ascii_node(
             tree_lines.append(f"{content_prefix}│  Action: {step.action.name}")
             tree_lines.append(f"{content_prefix}│  Prompt: {step.action.to_prompt()}")
             if step.observation:
-                tree_lines.append(
-                    f"{content_prefix}│  Output: {step.observation.message}"
-                )
+                tree_lines.append(f"{content_prefix}│  Output: {step.observation.message}")
                 if step.observation.extra:
-                    tree_lines.append(
-                        f"{content_prefix}│  Extra: {step.observation.extra}"
-                    )
+                    tree_lines.append(f"{content_prefix}│  Extra: {step.observation.extra}")
                 if step.observation.expect_correction:
                     tree_lines.append(f"{content_prefix}│  Expects Correction: True")
 
@@ -851,9 +773,7 @@ def _append_ascii_node(
         )
 
 
-def _append_wrapped_text(
-    tree_lines: list[str], text: str, prefix: str, header_prefix: str = "│ "
-):
+def _append_wrapped_text(tree_lines: list[str], text: str, prefix: str, header_prefix: str = "│ "):
     """Helper function to wrap and append text with proper prefixes."""
     words = text.split()
     current_line = []

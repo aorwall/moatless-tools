@@ -10,6 +10,5 @@ logger = logging.getLogger(__name__)
 
 
 class BaseDiscriminator(BaseModel, ABC):
-
     def select(self, nodes: List[Node]) -> Optional[Node]:
         raise NotImplementedError

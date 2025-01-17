@@ -2,9 +2,10 @@ import logging
 from fnmatch import fnmatch
 from typing import List, Optional, Tuple, Type, ClassVar
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.model import ActionArguments, FewShotExample
+from moatless.actions.action import FewShotExample
+from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 
@@ -31,14 +32,22 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    class Config:
-        title = "FindCodeSnippet"
+    model_config = ConfigDict(title="FindCodeSnippet")
 
     @model_validator(mode="after")
     def validate_snippet(self) -> "FindCodeSnippetArgs":
         if not self.code_snippet.strip():
             raise ValueError("code_snippet cannot be empty")
         return self
+
+    @classmethod
+    def format_schema_for_llm(cls) -> str:
+        return cls.format_xml_schema(
+            {
+                "code_snippet": "The exact code snippet to find",
+                "file_pattern": "A glob pattern to filter search results to specific file types or directories.",
+            }
+        )
 
     def to_prompt(self):
         prompt = f"Searching for code snippet: {self.code_snippet}"
@@ -52,6 +61,12 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
+    def format_args_for_llm(self) -> str:
+        return f"""<code_snippet>
+{self.code_snippet}
+</code_snippet>
+<file_pattern>{self.file_pattern if self.file_pattern else ''}</file_pattern>"""
+
 
 class FindCodeSnippet(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
@@ -61,22 +76,14 @@ class FindCodeSnippet(SearchBaseAction):
         description="The maximum number of search results to return. Default is 10.",
     )
 
-    def _search_for_context(
-        self, args: FindCodeSnippetArgs
-    ) -> Tuple[FileContext, bool]:
-        logger.info(
-            f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})"
-        )
+    def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
+        logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
 
-        matches = self._repository.find_exact_matches(
-            search_text=args.code_snippet, file_pattern=args.file_pattern
-        )
+        matches = self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
 
         if args.file_pattern and len(matches) > 1:
             matches = [
-                (file_path, line_num)
-                for file_path, line_num in matches
-                if fnmatch(file_path, args.file_pattern)
+                (file_path, line_num) for file_path, line_num in matches if fnmatch(file_path, args.file_pattern)
             ]
 
         search_result_context = FileContext(repo=self._repository)
@@ -84,9 +91,7 @@ class FindCodeSnippet(SearchBaseAction):
             num_lines = len(args.code_snippet.splitlines())
             end_line = start_line + num_lines - 1
 
-            search_result_context.add_line_span_to_context(
-                file_path, start_line, end_line, add_extra=False
-            )
+            search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
 
         return search_result_context, False
 

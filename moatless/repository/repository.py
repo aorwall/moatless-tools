@@ -21,9 +21,7 @@ class Repository(BaseModel, ABC):
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["repository_class"] = (
-            f"{self.__class__.__module__}.{self.__class__.__name__}"
-        )
+        dump["repository_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return dump
 
     @classmethod

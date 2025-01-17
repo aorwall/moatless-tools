@@ -17,20 +17,14 @@ class CommentStrategy(Enum):
 
 
 class IndexSettings(BaseModel):
-    embed_model: str = Field(
-        default="text-embedding-3-small", description="The embedding model to use."
-    )
-    dimensions: int = Field(
-        default=1536, description="The number of dimensions of the vectors."
-    )
+    embed_model: str = Field(default="text-embedding-3-small", description="The embedding model to use.")
+    dimensions: int = Field(default=1536, description="The number of dimensions of the vectors.")
 
     language: str = Field(default="python", description="The language of the code.")
     min_chunk_size: int = Field(default=100, description="The minimum chunk size.")
     chunk_size: int = Field(default=750, description="The soft max chunk size.")
     hard_token_limit: int = Field(default=2000, description="The hard token limit.")
-    max_chunks: int = Field(
-        default=200, description="The maximum number of chunks for one file."
-    )
+    max_chunks: int = Field(default=200, description="The maximum number of chunks for one file.")
     comment_strategy: CommentStrategy = Field(
         default=CommentStrategy.ASSOCIATE,
         description="Strategy on how comments will be indexed.",

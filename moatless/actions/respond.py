@@ -1,7 +1,7 @@
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 
@@ -11,8 +11,7 @@ class MessageArgs(ActionArguments):
 
     message: str = Field(..., description="The message to send to the user.")
 
-    class Config:
-        title = "SendMessage"
+    model_config = ConfigDict(title="SendMessage")
 
     def to_prompt(self):
         return f"Message: {self.message}"

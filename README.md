@@ -47,6 +47,13 @@ I have focused on testing my ideas, and the project is currently a bit messy. My
 
 ## Environment Setup
 
+Install dependencies:
+```bash
+poetry install
+```
+
+## Environment Variables
+
 Before running the evaluation, you'll need:
 1. At least one LLM provider API key (e.g., OpenAI, Anthropic, etc.)
 2. A Voyage AI API key from [voyageai.com](https://voyageai.com) to use the pre-embedded vector stores for SWE-Bench instances.
@@ -86,7 +93,94 @@ export TESTBED_API_KEY="<your-key>"
 export TESTBED_BASE_URL="<your-base-url>"
 ```
 
-## Example
+## Verified Models
+
+Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. When specifying just the `--model` argument, the following configurations are used:
+
+| Model | Response Format | Message History | Thoughts in Action |
+|-------|----------------|-----------------|-------------------|
+| claude-3-5-sonnet-20241022 | tool_call | messages | no |
+| claude-3-5-haiku-20241022 | tool_call | messages | no |
+| gpt-4o-2024-11-20 | tool_call | messages | yes |
+| gpt-4o-mini-2024-07-18 | tool_call | messages | yes |
+| deepseek/deepseek-chat | react | react | yes |
+| gemini/gemini-2.0-flash-exp | tool_call | messages | yes |
+| openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no |
+| openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | no |
+
+## Verify Setup
+
+Before running the full evaluation, you can verify your setup using the integration test script:
+
+```bash
+# Run a single model test
+poetry run scripts/run_integration_tests.py --model claude-3-5-sonnet-20241022
+```
+
+The script will run the model against a sample SWE-Bench instance
+
+Results are saved in `test_results/integration_test_<timestamp>/` .
+
+
+## Run evaluation
+
+The evaluation script supports various configuration options through command line arguments:
+
+```bash
+poetry run python -m moatless.benchmark.run_evaluation [OPTIONS]
+```
+
+Required arguments:
+- `--model MODEL`: Model to use for evaluation (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4o')
+
+Optional arguments:
+- Model settings:
+  - `--model MODEL`: Model identifier. Can be a supported model from the table below or any custom model identifier. 
+  - `--api-key KEY`: API key for the model
+  - `--base-url URL`: Base URL for the model API
+  - `--response-format FORMAT`: Response format ('tool_call' or 'react'). Defaults to 'tool_call' for custom models
+  - `--message-history TYPE`: Message history type ('messages', 'summary', 'react', 'messages_compact', 'instruct'). Defaults to 'messages' for custom models
+  - `--thoughts-in-action`: Enable thoughts in action
+  - `--temperature FLOAT`: Temperature for model sampling. Defaults to 0.0
+
+- Dataset settings:
+  - `--split SPLIT`: Dataset split to use. Defaults to 'lite'
+  - `--instance-ids ID [ID ...]`: Specific instance IDs to evaluate
+
+- Loop settings:
+  - `--max-iterations INT`: Maximum number of iterations
+  - `--max-cost FLOAT`: Maximum cost in dollars
+
+- Runner settings:
+  - `--num-workers INT`: Number of parallel workers. Defaults to 10
+  - `--evaluation-name NAME`: Custom name for the evaluation run
+  - `--rerun-errors`: Rerun instances that previously errored
+
+Available dataset splits that can be specified with the `--split` argument:
+
+| Split Name | Description | Instance Count |
+|------------|-------------|----------------|
+| lite | All instances from the lite dataset | 300 | 
+| verified | All instances from the verified dataset | 500 | 
+| verified_mini | [MariusHobbhahn/swe-bench-verified-mini](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini), a subset of SWE-Bench Verified  | 50 |
+| lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 84 |
+
+Example usage:
+```bash
+# Run evaluation with Claude 3.5 Sonnet using the ReACT format
+poetry run python -m moatless.benchmark.run_evaluation \
+  --model claude-3-5-sonnet-20241022 \
+  --response-format react \
+  --message-history react \
+  --num-workers 10
+
+# Run specific instances with GPT-4
+poetry run python -m moatless.benchmark.run_evaluation \
+  --model gpt-4o \
+  --instance-ids "django__django-16379"
+```
+
+# Code Example
 
 Basic setup using the `AgenticLoop` to solve a SWE-Bench instance.
 

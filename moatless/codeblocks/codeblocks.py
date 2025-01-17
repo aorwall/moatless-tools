@@ -317,9 +317,7 @@ class CodeBlock:
         if self.pre_code and not self.indentation and not self.pre_lines:
             pre_code_lines = self.pre_code.split("\n")
             self.pre_lines = len(pre_code_lines) - 1
-            self.indentation = (
-                pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
-            )
+            self.indentation = pre_code_lines[-1] if self.pre_lines > 0 else self.pre_code
 
     @property
     def content_lines(self):
@@ -360,12 +358,8 @@ class CodeBlock:
         for child in children:
             self.append_child(child)
 
-    def replace_children(
-        self, start_index: int, end_index: int, children: list["CodeBlock"]
-    ):
-        self.children = (
-            self.children[:start_index] + children + self.children[end_index:]
-        )
+    def replace_children(self, start_index: int, end_index: int, children: list["CodeBlock"]):
+        self.children = self.children[:start_index] + children + self.children[end_index:]
         for child in children:
             child.parent = self
 
@@ -382,24 +376,15 @@ class CodeBlock:
         del self.children[index]
 
     def sync_indentation(self, original_block: "CodeBlock", updated_block: "CodeBlock"):
-        original_indentation_length = len(original_block.indentation) + len(
-            self.indentation
-        )
-        updated_indentation_length = len(updated_block.indentation) + len(
-            updated_block.parent.indentation
-        )
+        original_indentation_length = len(original_block.indentation) + len(self.indentation)
+        updated_indentation_length = len(updated_block.indentation) + len(updated_block.parent.indentation)
 
         # To handle separate code blocks provdided out of context
-        if (
-            original_indentation_length == updated_indentation_length
-            and len(updated_block.indentation) == 0
-        ):
+        if original_indentation_length == updated_indentation_length and len(updated_block.indentation) == 0:
             updated_block.indentation = " " * original_indentation_length
 
         elif original_indentation_length > updated_indentation_length:
-            additional_indentation = " " * (
-                original_indentation_length - updated_indentation_length
-            )
+            additional_indentation = " " * (original_indentation_length - updated_indentation_length)
             updated_block.add_indentation(additional_indentation)
 
     def replace_by_path(self, path: list[str], new_block: "CodeBlock"):
@@ -432,9 +417,7 @@ class CodeBlock:
             blocks.extend(child.get_all_child_blocks())
         return blocks
 
-    def get_children(
-        self, exclude_blocks: list[CodeBlockType] = None
-    ) -> list["CodeBlock"]:
+    def get_children(self, exclude_blocks: list[CodeBlockType] = None) -> list["CodeBlock"]:
         if exclude_blocks is None:
             exclude_blocks = []
         return [child for child in self.children if child.type not in exclude_blocks]
@@ -481,9 +464,7 @@ class CodeBlock:
 
         return contents
 
-    def _build_path_tree(
-        self, block_paths: list[str], include_references: bool = False
-    ):
+    def _build_path_tree(self, block_paths: list[str], include_references: bool = False):
         path_tree = PathTree()
 
         for block_path in block_paths:
@@ -501,15 +482,13 @@ class CodeBlock:
                                         CodeBlockType.TEST_CASE,
                                     ]
                                 )
-                                if reference
-                                and reference.scope != ReferenceScope.EXTERNAL
+                                if reference and reference.scope != ReferenceScope.EXTERNAL
                             ]  # FIXME skip _fix_reference_path?
                         else:
                             references = [
                                 self._fix_reference_path(reference)
                                 for reference in self.get_all_relationships()
-                                if reference
-                                and reference.scope != ReferenceScope.EXTERNAL
+                                if reference and reference.scope != ReferenceScope.EXTERNAL
                             ]  # FIXME skip _fix_reference_path?
 
                         for ref in references:
@@ -548,10 +527,7 @@ class CodeBlock:
 
         child_tree = ""
         for _i, child in enumerate(self.children):
-            if child.belongs_to_span and (
-                not current_span
-                or current_span.span_id != child.belongs_to_span.span_id
-            ):
+            if child.belongs_to_span and (not current_span or current_span.span_id != child.belongs_to_span.span_id):
                 current_span = child.belongs_to_span
 
                 highlighted = highlight_spans is None or (
@@ -562,11 +538,7 @@ class CodeBlock:
                     color = Colors.WHITE if highlighted else Colors.GRAY
                     child_tree += f"{indent_str} {indent} {color}Span: {current_span}{Colors.RESET}\n"
 
-            if (
-                exclude_not_highlighted
-                and not highlighted
-                and not child.has_any_span(highlight_spans)
-            ):
+            if exclude_not_highlighted and not highlighted and not child.has_any_span(highlight_spans):
                 continue
 
             child_tree += child.to_tree(
@@ -593,16 +565,12 @@ class CodeBlock:
             extra += f" ({self.tokens} tokens)"
 
         if include_references and self.relationships:
-            extra += " references: " + ", ".join(
-                [str(ref) for ref in self.relationships]
-            )
+            extra += " references: " + ", ".join([str(ref) for ref in self.relationships])
 
         content = (
             Colors.YELLOW
             if is_visible
-            else Colors.GRAY
-            + (self.content.strip().replace("\n", "\\n") or "")
-            + Colors.RESET
+            else Colors.GRAY + (self.content.strip().replace("\n", "\\n") or "") + Colors.RESET
         )
 
         if self.identifier:
@@ -625,9 +593,7 @@ class CodeBlock:
             extra += f" properties: {self.properties}"
 
         if include_merge_history and self.merge_history:
-            extra += " merge_history: " + ", ".join(
-                [str(action) for action in self.merge_history]
-            )
+            extra += " merge_history: " + ", ".join([str(action) for action in self.merge_history])
 
         type_color = Colors.BLUE if is_visible else Colors.GRAY
         return f"{indent_str} {indent} {type_color}{self.type.value}{Colors.RESET} `{content}`{extra}{Colors.RESET}\n{child_tree}"
@@ -643,9 +609,7 @@ class CodeBlock:
         if show_span_id:
             contents += "\n\n"
             if span_marker == SpanMarker.COMMENT:
-                span_comment = self.create_comment(
-                    f"span_id: {self.belongs_to_span.span_id}"
-                )
+                span_comment = self.create_comment(f"span_id: {self.belongs_to_span.span_id}")
                 contents += f"{self.indentation}{span_comment}"
             elif span_marker == SpanMarker.TAG:
                 contents += f"\n<span id='{self.belongs_to_span.span_id}'>"
@@ -658,10 +622,7 @@ class CodeBlock:
                 return ""
 
             # Don't print out line numbers on out commented code to make it harder for the LLM to select it
-            if (
-                line_number == self.start_line
-                and self.type == CodeBlockType.COMMENTED_OUT_CODE
-            ):
+            if line_number == self.start_line and self.type == CodeBlockType.COMMENTED_OUT_CODE:
                 return " " * 6
             return f"{line_number:6}\t"
 
@@ -706,9 +667,7 @@ class CodeBlock:
             and self.belongs_to_span
             and (not current_span_id or current_span_id != self.belongs_to_span.span_id)
         )
-        contents += self._to_prompt_string(
-            show_span_id=show_new_span_id, show_line_numbers=show_line_numbers
-        )
+        contents += self._to_prompt_string(show_span_id=show_new_span_id, show_line_numbers=show_line_numbers)
 
         has_outcommented_code = False
         for _i, child in enumerate(self.children):
@@ -724,15 +683,11 @@ class CodeBlock:
                 show_child = child.has_blocks_with_types(include_block_types)
 
             if show_child and start_line and end_line:
-                show_child = child.has_lines(
-                    start_line, end_line
-                ) or child.is_within_lines(start_line, end_line)
+                show_child = child.has_lines(start_line, end_line) or child.is_within_lines(start_line, end_line)
 
             if show_child:
                 if has_outcommented_code:
-                    contents += child.create_commented_out_block(
-                        outcomment_code_comment
-                    ).to_string()
+                    contents += child.create_commented_out_block(outcomment_code_comment).to_string()
 
                 has_outcommented_code = False
 
@@ -768,9 +723,7 @@ class CodeBlock:
             ]
         ):
             contents += "\n.    " if show_line_numbers else "\n"
-            contents += child.create_commented_out_block(
-                outcomment_code_comment
-            ).to_string()
+            contents += child.create_commented_out_block(outcomment_code_comment).to_string()
             contents += "\n"
 
         return contents
@@ -818,9 +771,7 @@ class CodeBlock:
 
         return None
 
-    def find_type_group_in_parents(
-        self, block_type_group: CodeBlockTypeGroup
-    ) -> Optional["CodeBlock"]:
+    def find_type_group_in_parents(self, block_type_group: CodeBlockTypeGroup) -> Optional["CodeBlock"]:
         if not self.parent:
             return None
 
@@ -832,9 +783,7 @@ class CodeBlock:
 
         return None
 
-    def find_spans_by_line_numbers(
-        self, start_line: int, end_line: int | None = None
-    ) -> list[BlockSpan]:
+    def find_spans_by_line_numbers(self, start_line: int, end_line: int | None = None) -> list[BlockSpan]:
         spans = []
         for child in self.children:
             if end_line is None:
@@ -904,9 +853,7 @@ class CodeBlock:
     def root(self) -> "Module":  # noqa: F821
         return self.module
 
-    def get_blocks(
-        self, has_identifier: bool, include_types: list[CodeBlockType] | None = None
-    ) -> list["CodeBlock"]:
+    def get_blocks(self, has_identifier: bool, include_types: list[CodeBlockType] | None = None) -> list["CodeBlock"]:
         blocks = [self]
 
         for child in self.children:
@@ -923,10 +870,7 @@ class CodeBlock:
         for child in self.children:
             if child.type == CodeBlockType.IMPORT:
                 for reference in child.relationships:
-                    if (
-                        reference.path[len(reference.path) - len(ref_path) :]
-                        == ref_path
-                    ):
+                    if reference.path[len(reference.path) - len(ref_path) :] == ref_path:
                         return reference
 
             child_path = child.full_path()
@@ -946,18 +890,14 @@ class CodeBlock:
 
         return None
 
-    def get_all_relationships(
-        self, exclude_types: list[CodeBlockType] = None
-    ) -> list[Relationship]:
+    def get_all_relationships(self, exclude_types: list[CodeBlockType] = None) -> list[Relationship]:
         if exclude_types is None:
             exclude_types = []
         references = []
         references.extend(self.relationships)
         for childblock in self.children:
             if not exclude_types or childblock.type not in exclude_types:
-                references.extend(
-                    childblock.get_all_relationships(exclude_types=exclude_types)
-                )
+                references.extend(childblock.get_all_relationships(exclude_types=exclude_types))
 
         return references
 
@@ -1127,22 +1067,16 @@ class CodeBlock:
                 matching_blocks.append(child_block)
 
             if child_block.children:
-                matching_blocks.extend(
-                    child_block.find_incomplete_blocks_with_types(block_types)
-                )
+                matching_blocks.extend(child_block.find_incomplete_blocks_with_types(block_types))
 
         return matching_blocks
 
-    def find_blocks_with_types(
-        self, block_types: list[CodeBlockType]
-    ) -> list["CodeBlock"]:
+    def find_blocks_with_types(self, block_types: list[CodeBlockType]) -> list["CodeBlock"]:
         matching_blocks = []
         if self.type in block_types:
             matching_blocks.append(self)
         for child_block in self.children:
-            matching_blocks.extend(
-                child_block.find_blocks_with_types(block_types=block_types)
-            )
+            matching_blocks.extend(child_block.find_blocks_with_types(block_types=block_types))
         return matching_blocks
 
     def has_blocks_with_types(self, block_types: list[CodeBlockType]) -> bool:
@@ -1191,9 +1125,7 @@ class CodeBlock:
 
         return blocks
 
-    def find_last_by_end_line(
-        self, end_line: int, tokens: Optional[int] = None
-    ) -> Optional["CodeBlock"]:
+    def find_last_by_end_line(self, end_line: int, tokens: Optional[int] = None) -> Optional["CodeBlock"]:
         last_child = None
         for child in self.children:
             if child.start_line > end_line or (tokens and child.tokens > tokens):
@@ -1221,22 +1153,16 @@ class CodeBlock:
             if self.next.start_line > line_number:
                 return True
             else:
-                return self.next.line_within_token_context(
-                    line_number, tokens - self.tokens
-                )
+                return self.next.line_within_token_context(line_number, tokens - self.tokens)
         else:
             if not self.previous:
                 return False
             elif self.previous.end_line < line_number:
                 return True
             else:
-                return self.previous.line_within_token_context(
-                    line_number, tokens - self.tokens
-                )
+                return self.previous.line_within_token_context(line_number, tokens - self.tokens)
 
-    def find_last_previous_block_with_block_group(
-        self, block_group: CodeBlockTypeGroup
-    ):
+    def find_last_previous_block_with_block_group(self, block_group: CodeBlockTypeGroup):
         if not self.previous:
             return None
 
@@ -1262,27 +1188,15 @@ class CodeBlock:
 
     def last_block_until_line(self, line_number: int, tokens: int) -> "CodeBlock":
         if self.end_line < line_number:
-            if (
-                not self.next
-                or self.next.start_line > line_number
-                or self.next.tokens > tokens
-            ):
+            if not self.next or self.next.start_line > line_number or self.next.tokens > tokens:
                 return self
             else:
-                return self.next.last_block_until_line(
-                    line_number, tokens - self.tokens
-                )
+                return self.next.last_block_until_line(line_number, tokens - self.tokens)
         else:
-            if (
-                not self.previous
-                or self.previous.end_line < line_number
-                or self.next.tokens > tokens
-            ):
+            if not self.previous or self.previous.end_line < line_number or self.next.tokens > tokens:
                 return self
             else:
-                return self.previous.last_block_until_line(
-                    line_number, tokens - self.tokens
-                )
+                return self.previous.last_block_until_line(line_number, tokens - self.tokens)
 
     def get_all_span_ids(self, include_self: bool = True) -> set[str]:
         span_ids = set()
@@ -1322,10 +1236,7 @@ class CodeBlock:
         if (
             self.content
             and query in self.content
-            and (
-                not span_id
-                or (self.belongs_to_span and self.belongs_to_span.span_id == span_id)
-            )
+            and (not span_id or (self.belongs_to_span and self.belongs_to_span.span_id == span_id))
         ):
             return True
 

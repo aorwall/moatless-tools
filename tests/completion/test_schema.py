@@ -1,9 +1,9 @@
 import pytest
-from pydantic import ValidationError, BaseModel, Field
+from pydantic import ValidationError, BaseModel, Field, ConfigDict
 
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.completion.model import StructuredOutput
+from moatless.completion.schema import ResponseSchema
 
 
 def test_string_replace_xml_validation():
@@ -71,7 +71,7 @@ def test_string_replace_indentation():
 
 def test_structured_output_name_and_description():
     # Test class with Config.title and docstring
-    class TestWithConfig(StructuredOutput):
+    class TestWithConfig(ResponseSchema):
         """This is a test description."""
         class Config:
             title = "CustomTitle"
@@ -80,7 +80,7 @@ def test_structured_output_name_and_description():
     assert TestWithConfig.description == "This is a test description."
 
     # Test class without Config.title but with docstring
-    class TestWithoutConfig(StructuredOutput):
+    class TestWithoutConfig(ResponseSchema):
         """Another test description."""
         pass
 
@@ -88,7 +88,7 @@ def test_structured_output_name_and_description():
     assert TestWithoutConfig.description == "Another test description."
 
     # Test class without Config.title or docstring
-    class TestBare(StructuredOutput):
+    class TestBare(ResponseSchema):
         pass
 
     assert TestBare.name == "TestBare"
@@ -101,7 +101,7 @@ def test_schema_without_refs():
         optional_field: int = Field(None, description="An optional nested field")
 
     # Define the main model using StructuredOutput
-    class MainSchema(StructuredOutput):
+    class MainSchema(ResponseSchema):
         """A test schema with nested model."""
         main_field: str = Field(..., description="A main field")
         nested: NestedModel = Field(..., description="A nested model field")
@@ -165,7 +165,7 @@ def test_schema_with_array_refs():
         item_field: str = Field(..., description="An item field")
 
     # Define the main model using StructuredOutput
-    class ArraySchema(StructuredOutput):
+    class ArraySchema(ResponseSchema):
         """A test schema with array of nested models."""
         items: list[ItemModel] = Field(..., description="A list of items")
 
@@ -214,3 +214,31 @@ def test_schema_with_array_refs():
                 check_no_refs(item)
 
     check_no_refs(schema)
+
+def test_response_schema_name_behavior():
+    # Test class with model_config title
+    class SchemaWithConfigTitle(ResponseSchema):
+        field: str
+        model_config = ConfigDict(title="CustomName")
+
+    assert SchemaWithConfigTitle.name == "CustomName"
+
+    # Test class without model_config title - should use class name
+    class SchemaWithoutConfigTitle(ResponseSchema):
+        field: str
+
+    assert SchemaWithoutConfigTitle.name == "SchemaWithoutConfigTitle"
+
+    # Test class with empty model_config - should use class name
+    class SchemaWithEmptyConfig(ResponseSchema):
+        field: str
+        model_config = ConfigDict()
+
+    assert SchemaWithEmptyConfig.name == "SchemaWithEmptyConfig"
+
+    # Test class with model_config but no title - should use class name
+    class SchemaWithConfigNoTitle(ResponseSchema):
+        field: str
+        model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    assert SchemaWithConfigNoTitle.name == "SchemaWithConfigNoTitle"

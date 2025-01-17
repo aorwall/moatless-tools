@@ -1,5 +1,4 @@
 from moatless.actions.append_string import AppendString
-from moatless.actions.code_change import RequestCodeChange
 from moatless.actions.create_file import CreateFile
 from moatless.actions.find_class import FindClass
 from moatless.actions.find_code_snippet import FindCodeSnippet

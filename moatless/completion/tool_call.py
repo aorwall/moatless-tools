@@ -1,158 +1,148 @@
+import json
 import logging
-from typing import List
+from typing import List, Dict, Any, Type, Union, Optional
 
-import tenacity
-from litellm.exceptions import (
-    BadRequestError,
-    NotFoundError,
-    AuthenticationError,
-    APIError,
-)
-from pydantic import BaseModel, ValidationError
+from litellm import ChatCompletionToolMessage
+from pydantic import ValidationError
 
-from moatless.completion.completion import CompletionModel, CompletionResponse
-from moatless.completion.model import Completion, StructuredOutput, Usage
-from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
+from moatless.completion import BaseCompletionModel
+from moatless.completion.base import CompletionRetryError
+from moatless.completion.schema import ResponseSchema
 
 logger = logging.getLogger(__name__)
 
 
-class ToolCallCompletionModel(CompletionModel):
-    def create_completion(
+class ToolCallCompletionModel(BaseCompletionModel):
+    """Tool call-specific implementation of the completion model.
+
+    This class handles:
+    1. Converting response schemas into OpenAI function/tool schemas
+    2. Configuring the LLM to use tool calls
+    3. Validating and parsing tool call responses
+    4. Managing thought inclusion in tool calls
+    """
+
+    def _get_completion_params(self, schema: List[Type[ResponseSchema]]) -> Dict[str, Union[str, Dict, List]]:
+        """Get tool call-specific completion parameters.
+
+        This method:
+        1. Converts schemas to OpenAI tool format
+        2. Configures tool choice behavior
+        3. Handles thought inclusion settings
+
+        Args:
+            schema: List of prepared tool schemas
+
+        Returns:
+            Parameters for tool-based completion including:
+            - tools: List of available tools/functions
+            - tool_choice: How tools should be selected
+        """
+        return {
+            "tools": [s.tool_schema(thoughts_in_action=self.thoughts_in_action) for s in schema],
+            "tool_choice": "required" if self.thoughts_in_action else "auto",
+        }
+
+    def _create_retry_message(self, tool_call: Any, error: str):
+        return ChatCompletionToolMessage(role="tool", tool_call_id=tool_call.id, content=error)
+
+    def _validate_completion(
         self,
-        messages: List[dict],
-        system_prompt: str,
-        response_model: List[type[StructuredOutput]] | type[StructuredOutput],
-    ) -> CompletionResponse:
-        tools = []
+        completion_response: Any,
+    ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+        """Validate tool call completion response.
 
-        if isinstance(response_model, list):
-            tools.extend(
-                [
-                    r.openai_schema(thoughts_in_action=self.thoughts_in_action)
-                    for r in response_model
-                ]
-            )
-        elif response_model:
-            tools.append(response_model.openai_schema())
-        else:
-            tools = None
+        Args:
+            completion_response: Raw response from the LLM
 
-        total_usage = Usage()
-        retry_count = 0
+        Returns:
+            Tuple of:
+            - List of validated structured outputs
+            - Optional text response
+            - List of flags
 
-        messages.insert(0, {"role": "system", "content": system_prompt})
+        Raises:
+            CompletionRejectError: If validation fails
+        """
+        message = completion_response.choices[0].message
+        content = message.content or ""
 
-        retries = tenacity.Retrying(
-            retry=tenacity.retry_if_not_exception_type(
-                (APIError, BadRequestError, NotFoundError, AuthenticationError)
-            ),
-            stop=tenacity.stop_after_attempt(3),
-        )
+        # If no tool calls, return just the content
+        if not hasattr(message, "tool_calls") or not message.tool_calls:
+            return [], content, []
 
-        def _do_completion():
-            nonlocal total_usage, retry_count
-            llm_completion_response = None
+        # Track seen arguments to detect duplicates
+        seen_arguments = set()
+        flags = []
+        structured_outputs = []
+        valid_names = [s.name for s in self.response_schema]
+        invalid_function_names = []
+
+        for tool_call in message.tool_calls:
+            tool_name = tool_call.function.name
+
+            if tool_name not in valid_names:
+                retry_message = self._create_retry_message(
+                    tool_call, f"Tool {tool_name} not found. Available tools: {valid_names}"
+                )
+                raise CompletionRetryError(
+                    message=f"Tool {tool_name} not found. Available tools: {valid_names}",
+                    retry_message=retry_message,
+                )
+
+            # Check for duplicate arguments
+            if tool_call.function.arguments in seen_arguments:
+                logger.warning(f"Duplicate tool call arguments found for {tool_call.function.name}")
+                flags.append("duplicate_tool_call")
+                continue
+
+            seen_arguments.add(tool_call.function.arguments)
+
+            # Parse and validate tool arguments
             try:
-                if self.thoughts_in_action:
-                    tool_choice = "required"
-                else:
-                    tool_choice = "auto"
-
-                llm_completion_response = self._litellm_base_completion(
-                    messages=messages, tools=tools, tool_choice=tool_choice
-                )
-
-                if not llm_completion_response or not llm_completion_response.choices:
-                    raise CompletionRuntimeError(
-                        "No completion response or choices returned"
-                    )
-
-                total_usage += Usage.from_completion_response(
-                    llm_completion_response, self.model
-                )
-
-                content = llm_completion_response.choices[0].message.content
-
-                def get_response_model(tool_name: str):
-                    if isinstance(response_model, list):
-                        for r in response_model:
-                            if r.name == tool_name:
-                                return r
-                    else:
-                        return response_model
-
-                response_objects = []
-                invalid_function_names = []
-                seen_arguments = set()
-                flags = set()
-
-                if llm_completion_response.choices[0].message.tool_calls:
-                    for tool_call in llm_completion_response.choices[
-                        0
-                    ].message.tool_calls:
-                        action = get_response_model(tool_call.function.name)
-
-                        if not action:
-                            logger.warning(
-                                f"Invalid action name: {tool_call.function.name}"
-                            )
-                            invalid_function_names.append(tool_call.function.name)
-                            continue
-
-                        # Check for duplicate arguments
-                        if tool_call.function.arguments in seen_arguments:
-                            logger.warning(
-                                f"Duplicate tool call arguments found for {tool_call.function.name}"
-                            )
-                            flags.add("duplicate_tool_call")
-                            continue
-
-                        seen_arguments.add(tool_call.function.arguments)
-                        response_object = action.model_validate_json(
-                            tool_call.function.arguments
-                        )
-                        response_objects.append(response_object)
-
-                    if invalid_function_names:
-                        available_actions = [r.name for r in response_model]
-                        raise ValueError(
-                            f"Unknown functions {invalid_function_names}. Available functions: {available_actions}"
-                        )
-
-                if not content and not response_objects:
-                    raise ValueError("No tool call or content in message.")
-
-                completion = Completion.from_llm_completion(
-                    input_messages=messages,
-                    completion_response=llm_completion_response,
-                    model=self.model,
-                    retries=retry_count,
-                    usage=total_usage,
-                    flags=list(flags),
-                )
-
-                return CompletionResponse.create(
-                    text=content, output=response_objects, completion=completion
-                )
-
-            except (ValidationError, ValueError) as e:
-                logger.warning(
-                    f"Completion attempt failed with error: {e}. Will retry."
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"The response was invalid. Fix the errors, exceptions found\n{e}",
-                    }
-                )
-                raise CompletionRejectError(
-                    message=str(e),
-                    last_completion=llm_completion_response,
-                    messages=messages,
+                args = json.loads(tool_call.function.arguments)
+            except json.JSONDecodeError as e:
+                retry_message = self._create_retry_message(tool_call, f"Invalid JSON in tool args: {e}")
+                raise CompletionRetryError(
+                    message=f"Invalid JSON in tool args: {e}",
+                    retry_message=retry_message,
                 ) from e
 
-        try:
-            return retries(_do_completion)
-        except tenacity.RetryError as e:
-            raise e.reraise()
+            # Find matching schema for tool
+            schema = None
+            for s in self.response_schema:
+                if s.name == tool_name:
+                    schema = s
+                    break
+
+            if not schema:
+                retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} not found.")
+                raise CompletionRetryError(
+                    message=f"Tool {tool_name} not found.",
+                    retry_message=retry_message,
+                )
+
+            try:
+                validated = schema.model_validate(args)
+                structured_outputs.append(validated)
+            except ValidationError as e:
+                retry_message = self._create_retry_message(tool_call, f"Tool arguments is invalid. Error: {e}")
+                raise CompletionRetryError(
+                    message=f"Tool arguments is invalid. Error: {e}",
+                    retry_message=retry_message,
+                ) from e
+
+        return structured_outputs, content, flags
+
+    def _get_response_model(self, tool_name: str) -> Type[ResponseSchema]:
+        """Get the response model for a tool name.
+
+        Args:
+            tool_name: Name of the tool to find schema for
+
+        Returns:
+            Matching ResponseSchema class or None if not found
+        """
+        for r in self.response_schema:
+            if r.name == tool_name:
+                return r

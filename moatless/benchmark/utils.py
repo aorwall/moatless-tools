@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+import threading
 
 from moatless.codeblocks.module import Module
 from moatless.loop import AgenticLoop
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
 
-def load_moatless_datasets(split: str | None):
+def load_moatless_datasets(split: str | None = None):
     global _moatless_instances
 
     if split:
@@ -29,9 +30,7 @@ def load_moatless_datasets(split: str | None):
 def _load_moatless_dataset(split: str):
     global _moatless_instances
 
-    file_path = os.path.join(
-        os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json"
-    )
+    file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
     with open(file_path) as f:
         dataset = json.load(f)
         _moatless_instances.update({d["instance_id"]: d for d in dataset})
@@ -41,7 +40,7 @@ def get_moatless_instances(split: str | None = None):
     global _moatless_instances
     if not _moatless_instances:
         load_moatless_datasets(split)
-    return _moatless_instances
+    return dict(_moatless_instances)  # Return a copy to prevent external modifications
 
 
 def get_moatless_instance(instance_id: str, split: str | None = None):
@@ -53,7 +52,7 @@ def get_moatless_instance(instance_id: str, split: str | None = None):
     if not instance:
         raise ValueError(f"Instance {instance_id} not found.")
 
-    return instance
+    return dict(instance)  # Return a copy to prevent external modifications
 
 
 def find_relevant_spans(original_block: Module, updated_block: Module):
@@ -66,9 +65,7 @@ def find_relevant_spans(original_block: Module, updated_block: Module):
             continue
 
         if original_block.has_span(span.span_id):
-            updated_content = updated_block.to_prompt(
-                span_ids=set(span.span_id), show_outcommented_code=False
-            ).strip()
+            updated_content = updated_block.to_prompt(span_ids=set(span.span_id), show_outcommented_code=False).strip()
             original_content = original_block.to_prompt(
                 span_ids=set(span.span_id), show_outcommented_code=False
             ).strip()
@@ -80,9 +77,7 @@ def find_relevant_spans(original_block: Module, updated_block: Module):
             relevant_spans.update(related_span_ids)
         else:
             parent_block = updated_block.find_first_by_span_id(span.span_id).parent
-            original_parent_block = original_block.find_by_path(
-                parent_block.full_path()
-            )
+            original_parent_block = original_block.find_by_path(parent_block.full_path())
             span_ids = list(original_parent_block.belongs_to_span.span_id)
 
             related_span_ids = updated_block.find_related_span_ids(span.span_id)
@@ -119,9 +114,7 @@ def get_diff_lines(diff_input):
 
         line_change_match = line_change_re.match(line)
         if line_change_match:
-            old_start, old_length, new_start, new_length = map(
-                int, line_change_match.groups()
-            )
+            old_start, old_length, new_start, new_length = map(int, line_change_match.groups())
 
             adjustment_start = max(1, min(3, old_start - 3))
             adjusted_start = old_start + adjustment_start
@@ -162,10 +155,7 @@ def compare_patches(expected_patch, actual_patch):
             expected_files.add(change_file)
             if change_file == actual_change_file:
                 file_hits.add(change_file)
-                if (
-                    change_start >= actual_change_start
-                    and change_end <= actual_change_end
-                ):
+                if change_start >= actual_change_start and change_end <= actual_change_end:
                     line_hits += 1
                     continue
 
@@ -185,9 +175,7 @@ def create_file_spans_from_patch(repo_dir: str, patch: str) -> list[FileWithSpan
     return files_with_spans
 
 
-def get_file_spans_from_patch(
-    repository: FileRepository, patch: str
-) -> dict[str, list[str]]:
+def get_file_spans_from_patch(repository: FileRepository, patch: str) -> dict[str, list[str]]:
     expected_diff_lines = get_diff_lines(patch)
     expected_files_with_spans = {}
 
@@ -250,9 +238,7 @@ def get_missing_spans(
             actual_span_ids = actual_files_with_spans[expected_file]
 
         missing_span_ids = [
-            span_id
-            for span_id in expected_span_ids
-            if span_id not in actual_span_ids and span_id not in IGNORED_SPANS
+            span_id for span_id in expected_span_ids if span_id not in actual_span_ids and span_id not in IGNORED_SPANS
         ]
 
         if missing_span_ids:
@@ -289,9 +275,7 @@ def has_identified_spans(
     actual_files_with_spans: dict[str, list[str]],
 ) -> bool:
     for expected_file_with_spans in expected_solutions:
-        missing_spans = get_missing_spans(
-            expected_file_with_spans, actual_files_with_spans
-        )
+        missing_spans = get_missing_spans(expected_file_with_spans, actual_files_with_spans)
         if not missing_spans or missing_spans == ["docstring"]:
             return True
     return False
@@ -341,18 +325,12 @@ def calculate_estimated_context_window(instance, results):
                 logger.info(
                     f"Found result for {change['file_path']} ({change['start_line']}-{change['end_line']}) at {result.start_line}-{result.end_line} with distance {result.distance}"
                 )
-                if (
-                    result.start_line - 1 <= change["start_line"]
-                    and result.end_line + 1 >= change["end_line"]
-                ):
+                if result.start_line - 1 <= change["start_line"] and result.end_line + 1 >= change["end_line"]:
                     change["distance"] = result.distance
                     change["context_window"] = sum_tokens
                     change["position"] = i
 
-                    if all(
-                        context["context_window"] is not None
-                        for context in expected_changes
-                    ):
+                    if all(context["context_window"] is not None for context in expected_changes):
                         return expected_changes, sum_tokens
                 else:
                     closest_match_lines = change.get("closest_match_lines")
@@ -361,8 +339,7 @@ def calculate_estimated_context_window(instance, results):
                         or abs(result.start_line - change["start_line"])
                         < abs(closest_match_lines[0] - change["start_line"])
                     ) or (
-                        abs(result.end_line - change["end_line"])
-                        == abs(closest_match_lines[0] - change["end_line"])
+                        abs(result.end_line - change["end_line"]) == abs(closest_match_lines[0] - change["end_line"])
                     ):
                         change["closest_match_lines"] = (
                             result.start_line,
@@ -371,6 +348,7 @@ def calculate_estimated_context_window(instance, results):
                         change["closest_match_context_window"] = sum_tokens
 
     return expected_changes, sum_tokens
+
 
 def read_agentic_loops(dir: str) -> list[AgenticLoop]:
     loops = []
@@ -383,6 +361,7 @@ def read_agentic_loops(dir: str) -> list[AgenticLoop]:
             loop = AgenticLoop.from_file(loop_path)
             loops.append(loop)
     return loops
+
 
 def read_search_trees(dir: str) -> list[SearchTree]:
     search_trees = []

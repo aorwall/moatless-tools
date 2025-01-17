@@ -2,12 +2,12 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
-from moatless.actions.model import ActionArguments, Observation, FewShotExample
+from moatless.actions.schema import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -36,12 +36,9 @@ class InsertLinesArgs(ActionArguments):
         ...,
         description="Line number after which to insert the new text (indexing starts at 1)",
     )
-    new_str: str = Field(
-        ..., description="Text content to insert at the specified line"
-    )
+    new_str: str = Field(..., description="Text content to insert at the specified line")
 
-    class Config:
-        title = "InsertLines"
+    model_config = ConfigDict(title="InsertLines")
 
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
@@ -117,11 +114,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             )
 
         new_str_lines = new_str.split("\n")
-        new_file_text_lines = (
-            file_text_lines[: args.insert_line]
-            + new_str_lines
-            + file_text_lines[args.insert_line :]
-        )
+        new_file_text_lines = file_text_lines[: args.insert_line] + new_str_lines + file_text_lines[args.insert_line :]
         snippet_lines = (
             file_text_lines[max(0, args.insert_line - SNIPPET_LINES) : args.insert_line]
             + new_str_lines

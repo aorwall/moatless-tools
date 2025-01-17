@@ -1,15 +1,15 @@
 import logging
 from typing import Optional, Tuple
 
-from litellm.types.llms.openai import (
+from pydantic import Field, model_validator
+
+from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
+from moatless.completion import BaseCompletionModel
+from moatless.completion.model import Completion
+from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
 )
-from pydantic import Field
-
-from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
-from moatless.completion import CompletionModel
-from moatless.completion.model import Completion
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class IdentifyMixin:
     """Mixin that provides identify flow functionality for large code sections."""
 
-    completion_model: Optional[CompletionModel] = Field(
+    completion_model: Optional[BaseCompletionModel] = Field(
         None,
         description="The completion model used to identify relevant code sections.",
     )
@@ -32,9 +32,13 @@ class IdentifyMixin:
         description="The maximum number of tokens allowed in the identify prompt.",
     )
 
-    def _identify_code(
-        self, args, view_context: FileContext, max_tokens: int
-    ) -> Tuple[FileContext, Completion]:
+    @model_validator(mode="after")
+    def initalize_model(self):
+        if self.completion_model:
+            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
+        return self
+
+    def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:
@@ -45,6 +49,7 @@ class IdentifyMixin:
         Returns:
             A tuple of (identified_context, completion)
         """
+
         code_str = view_context.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
@@ -66,11 +71,7 @@ class IdentifyMixin:
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self.completion_model.create_completion(
-                messages=messages,
-                system_prompt=IDENTIFY_SYSTEM_PROMPT,
-                response_model=Identify,
-            )
+            completion_response = self.completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
@@ -93,14 +94,10 @@ class IdentifyMixin:
             tokens = identified_context.context_size()
 
             if tokens > self.max_identify_tokens:
-                logger.info(
-                    f"Identified code sections are too large ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are too large ({tokens} tokens).")
 
                 messages.append(
-                    ChatCompletionAssistantMessage(
-                        role="assistant", content=identified_code.model_dump_json()
-                    )
+                    ChatCompletionAssistantMessage(role="assistant", content=identified_code.model_dump_json())
                 )
 
                 messages.append(
@@ -111,13 +108,12 @@ class IdentifyMixin:
                     )
                 )
             else:
-                logger.info(
-                    f"Identified code sections are within the token limit ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are within the token limit ({tokens} tokens).")
                 return identified_context, completion_response.completion
 
         # If we've exhausted all retries and still too large
         raise CompletionRejectError(
             f"Unable to reduce code selection to under {max_tokens} tokens after {MAX_RETRIES} attempts",
             last_completion=completion,
+            messages=messages,
         )

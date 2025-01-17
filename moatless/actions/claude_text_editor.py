@@ -2,18 +2,19 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional, List
 
+from litellm import ConfigDict
 from pydantic import Field, PrivateAttr, field_validator
 
 from moatless.actions import RunTests, CreateFile, ViewCode
 from moatless.actions.action import Action
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
-from moatless.actions.model import ActionArguments, Observation, RetryException
 from moatless.actions.run_tests import RunTestsArgs
+from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
-from moatless.completion import CompletionModel
-from moatless.completion.model import ToolCall
+from moatless.completion import BaseCompletionModel
+from moatless.completion.schema import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -38,17 +39,21 @@ class EditActionArguments(ActionArguments):
     An filesystem editor tool that allows the agent to view, create, and edit files.
     """
 
+    model_config = ConfigDict(title="str_replace_editor")
+
     command: Command = Field(..., description="The edit command to execute")
     path: str = Field(..., description="The file path to edit")
-    file_text: Optional[str] = Field(
-        None, description="The text content for file creation"
-    )
-    view_range: Optional[List[int]] = Field(
-        None, description="Range of lines to view [start, end]"
-    )
+    file_text: Optional[str] = Field(None, description="The text content for file creation")
+    view_range: Optional[List[int]] = Field(None, description="Range of lines to view [start, end]")
     old_str: Optional[str] = Field(None, description="String to replace")
     new_str: Optional[str] = Field(None, description="Replacement string")
     insert_line: Optional[int] = Field(None, description="Line number for insertion")
+
+    @classmethod
+    def tool_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
+        return ChatCompletionToolParam(
+            type="text_editor_20241022", function=ChatCompletionToolParamFunctionChunk(name="str_replace_editor")
+        )
 
     @field_validator("file_text")
     @classmethod
@@ -68,7 +73,7 @@ class EditActionArguments(ActionArguments):
     @classmethod
     def validate_new_str(cls, v, info):
         # TODO: To keep backward compatibility, but would like to uncomment this
-        #if info.data.get("command") == "str_replace" and v is None:
+        # if info.data.get("command") == "str_replace" and v is None:
         #    raise ValueError(
         #        "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
         #    )
@@ -98,14 +103,6 @@ class EditActionArguments(ActionArguments):
             raise ValueError(f"Unknown command: {v}")
         return v
 
-    class Config:
-        title = "str_replace_editor"
-
-    def to_tool_call(self) -> ToolCall:
-        return ToolCall(
-            name=self.name, type="text_editor_20241022", input=self.model_dump()
-        )
-
 
 class ClaudeEditTool(Action, CodeModificationMixin):
     """
@@ -115,9 +112,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
     args_schema = EditActionArguments
 
-    max_tokens_to_view: int = Field(
-        2000, description="Max tokens to view in one command"
-    )
+    max_tokens_to_view: int = Field(2000, description="Max tokens to view in one command")
 
     _str_replace: StringReplace = PrivateAttr()
     _create_file: CreateFile = PrivateAttr()
@@ -127,7 +122,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         self,
         code_index: CodeIndex | None = None,
         repository: Repository | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: BaseCompletionModel | None = None,
         **data,
     ):
         super().__init__(**data)
@@ -145,9 +140,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             code_index=self._code_index,
             repository=self._repository,
         )
-        self._view_code = ViewCode(
-            repository=self._repository, completion_model=completion_model
-        )
+        self._view_code = ViewCode(repository=self._repository, completion_model=completion_model)
 
     def execute(
         self,
@@ -197,13 +190,11 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context,
             )
         elif args.command == "insert":
-            observation = self._insert(
-                file_context, path, args.insert_line, args.new_str
-            )
+            observation = self._insert(file_context, path, args.insert_line, args.new_str)
         else:
-            raise RetryException(
+            raise Observation(
                 message=f"Unknown command: {args.command}",
-                action_args=args,
+                properties={"fail_reason": "file_exists"},
             )
 
         if not observation.properties or not observation.properties.get("diff"):
@@ -231,9 +222,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         return observation
 
-    def validate_path(
-        self, file_context: FileContext, command: str, path: Path
-    ) -> str | None:
+    def validate_path(self, file_context: FileContext, command: str, path: Path) -> str | None:
         """
         Check that the path/command combination is valid.
         """
@@ -258,9 +247,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         return None
 
-    def _view(
-        self, file_context: FileContext, path: Path, args: EditActionArguments
-    ) -> Observation:
+    def _view(self, file_context: FileContext, path: Path, args: EditActionArguments) -> Observation:
         codespan = CodeSpan(file_path=str(path))
 
         view_range = args.view_range
@@ -270,9 +257,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         view_code_args = ViewCodeArgs(thoughts=args.thoughts, files=[codespan])
         return self._view_code.execute(view_code_args, file_context=file_context)
 
-    def _create(
-        self, file_context: FileContext, path: Path, file_text: str
-    ) -> Observation:
+    def _create(self, file_context: FileContext, path: Path, file_text: str) -> Observation:
         if file_context.file_exists(str(path)):
             return Observation(
                 message=f"File already exists at: {path}",
@@ -289,9 +274,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             properties={"diff": diff},
         )
 
-    def _insert(
-        self, file_context: FileContext, path: Path, insert_line: int, new_str: str
-    ) -> Observation:
+    def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
         context_file = file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
@@ -318,11 +301,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             )
 
         new_str_lines = new_str.split("\n")
-        new_file_text_lines = (
-            file_text_lines[:insert_line]
-            + new_str_lines
-            + file_text_lines[insert_line:]
-        )
+        new_file_text_lines = file_text_lines[:insert_line] + new_str_lines + file_text_lines[insert_line:]
         snippet_lines = (
             file_text_lines[max(0, insert_line - SNIPPET_LINES) : insert_line]
             + new_str_lines
@@ -359,17 +338,8 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         file_content = maybe_truncate(file_content)
         if expand_tabs:
             file_content = file_content.expandtabs()
-        file_content = "\n".join(
-            [
-                f"{i + init_line:6}\t{line}"
-                for i, line in enumerate(file_content.split("\n"))
-            ]
-        )
-        return (
-            f"Here's the result of running `cat -n` on {file_descriptor}:\n"
-            + file_content
-            + "\n"
-        )
+        file_content = "\n".join([f"{i + init_line:6}\t{line}" for i, line in enumerate(file_content.split("\n"))])
+        return f"Here's the result of running `cat -n` on {file_descriptor}:\n" + file_content + "\n"
 
     def span_id_list(self, span_ids: set[str]) -> str:
         list_str = ""

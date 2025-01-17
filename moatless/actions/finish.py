@@ -1,10 +1,9 @@
-from typing import ClassVar, List
+from typing import ClassVar, List, Type
 
-from litellm import Type
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     Observation,
     RewardScaleEntry,
@@ -26,8 +25,7 @@ class FinishArgs(ActionArguments):
         description="Explain why the task is complete and how it's verified with new tests.",
     )
 
-    class Config:
-        title = "Finish"
+    model_config = ConfigDict(title="Finish")
 
     def to_prompt(self):
         return f"Finish with reason: {self.finish_reason}"

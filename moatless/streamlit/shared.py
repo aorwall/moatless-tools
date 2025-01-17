@@ -38,18 +38,12 @@ def generate_summary(df: pd.DataFrame):
             st.metric("Total Cached Tokens", total_cached_tokens)
         with metric_col2:
             st.metric("Avg Cost per Trajectory", f"${avg_cost:.2f}")
-            st.metric(
-                "Avg Duration (excl. running/error/rejected)", f"{avg_duration:.2f} s"
-            )
+            st.metric("Avg Duration (excl. running/error/rejected)", f"{avg_duration:.2f} s")
 
     with col_chart:
-        status_data = pd.DataFrame(
-            {"Status": status_counts.index, "Count": status_counts.values}
-        )
+        status_data = pd.DataFrame({"Status": status_counts.index, "Count": status_counts.values})
 
-        status_data["Status_with_Count"] = status_data.apply(
-            lambda row: f"{row['Status']} ({row['Count']})", axis=1
-        )
+        status_data["Status_with_Count"] = status_data.apply(lambda row: f"{row['Status']} ({row['Count']})", axis=1)
 
         pie_chart = (
             alt.Chart(status_data)
@@ -151,9 +145,7 @@ def trajectory_table(report_path: str):
     col4, col5 = st.columns(2)
 
     with col1:
-        status_filter = st.multiselect(
-            "Status", df["status"].unique(), key="status_filter"
-        )
+        status_filter = st.multiselect("Status", df["status"].unique(), key="status_filter")
     with col2:
         solution_status_filter = st.multiselect(
             "Solution Status",
@@ -161,9 +153,7 @@ def trajectory_table(report_path: str):
             key="solution_status_filter",
         )
     with col3:
-        flag_filter = st.multiselect(
-            "Flags", sorted(list(all_flags)), key="flag_filter"
-        )
+        flag_filter = st.multiselect("Flags", sorted(list(all_flags)), key="flag_filter")
     with col4:
         if int(df["resolved_by"].min()) < int(df["resolved_by"].max()):
             resolved_by_range = st.slider(
@@ -174,9 +164,7 @@ def trajectory_table(report_path: str):
                 key=f"resolved_by_slider",
             )
     with col5:
-        action_filter = st.multiselect(
-            "Actions", sorted(list(all_actions)), key="action_filter"
-        )
+        action_filter = st.multiselect("Actions", sorted(list(all_actions)), key="action_filter")
 
     # Apply filters
     mask = pd.Series(True, index=df.index)
@@ -197,10 +185,7 @@ def trajectory_table(report_path: str):
     if action_filter:
         mask &= df.apply(
             lambda row: row.get("actions", {})
-            and any(
-                action in row["actions"] and row["actions"][action] > 0
-                for action in action_filter
-            ),
+            and any(action in row["actions"] and row["actions"][action] > 0 for action in action_filter),
             axis=1,
         )
 
@@ -278,15 +263,8 @@ def trajectory_table(report_path: str):
             # Find index of status column
             status_idx = display_columns.index("status")
             # Escape error message
-            error = (
-                row["error"]
-                .replace('"', "&quot;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-            )
-            styles[status_idx] = (
-                f"background-color: {color}; cursor: help; title: '<pre>{error}</pre>'"
-            )
+            error = row["error"].replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+            styles[status_idx] = f"background-color: {color}; cursor: help; title: '<pre>{error}</pre>'"
 
         return styles
 
@@ -358,14 +336,8 @@ def show_completion(completion):
                     if "content" in input_msg:
                         if isinstance(input_msg["content"], str):
                             content = input_msg["content"]
-                        elif (
-                            isinstance(input_msg["content"], list)
-                            and input_msg["role"] == "user"
-                        ):
-                            content_list = [
-                                c.get("content") or c.get("text")
-                                for c in input_msg["content"]
-                            ]
+                        elif isinstance(input_msg["content"], list) and input_msg["role"] == "user":
+                            content_list = [c.get("content") or c.get("text") for c in input_msg["content"]]
 
                             content = "\n\n".join(content_list)
                         else:
@@ -387,9 +359,7 @@ def show_completion(completion):
                         ):
                             st.json(input_msg)
                 except Exception as e:
-                    logger.exception(
-                        f"Failed to parse {json.dumps(input_msg, indent=2)}"
-                    )
+                    logger.exception(f"Failed to parse {json.dumps(input_msg, indent=2)}")
 
         if completion.response:
             st.subheader("Completion response")

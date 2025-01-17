@@ -17,9 +17,7 @@ from moatless.artifacts.artifact import (
 class FileArtifact(Artifact):
     type: str = "file"
     file_path: str = Field(description="Path on disk where the artifact is stored")
-    mime_type: Optional[str] = Field(
-        default=None, description="MIME type of the file content"
-    )
+    mime_type: Optional[str] = Field(default=None, description="MIME type of the file content")
     content: bytes = Field(exclude=True)
 
     def to_prompt_format(self) -> PromptModel:
@@ -41,9 +39,7 @@ class FileArtifact(Artifact):
 
 class FileArtifactHandler(ArtifactHandler[FileArtifact]):
     type: str = "file"
-    directory_path: Path = Field(
-        description="Base directory path for storing artifacts"
-    )
+    directory_path: Path = Field(description="Base directory path for storing artifacts")
 
     def _detect_mime_type(self, file_path: str) -> str:
         mime_type, _ = mimetypes.guess_type(file_path)

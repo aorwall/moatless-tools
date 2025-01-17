@@ -1,1 +1,1 @@
-from moatless.completion.completion import CompletionModel
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat, CompletionResponse

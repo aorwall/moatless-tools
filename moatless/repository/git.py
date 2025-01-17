@@ -2,10 +2,10 @@ import logging
 import os
 from typing import Any, Dict, Optional, List
 
-from litellm.types.llms.openai import ChatCompletionUserMessage
 from pydantic import Field
 
-from moatless.completion.completion import CompletionModel
+from moatless.completion.base import BaseCompletionModel
+from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class GitRepository(FileRepository):
     repo_url: Optional[str] = Field(default=None, alias="git_repo_url")
     generate_commit_message: bool = Field(default=False)
-    completion: Optional[CompletionModel] = None
+    completion: Optional[BaseCompletionModel] = None
     current_commit: str = Field(default="")
     current_diff: Optional[str] = None
     initial_commit: str = Field(default="")
@@ -37,9 +37,7 @@ class GitRepository(FileRepository):
 
     @classmethod
     def from_repo(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
-        logger.info(
-            f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} "
-        )
+        logger.info(f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} ")
 
         if commit:
             clone_and_checkout(git_repo_url, repo_path, commit)
@@ -117,9 +115,7 @@ class GitRepository(FileRepository):
             )
             self.clean_untracked_files()  # Clean untracked files after commit
         except FileNotFoundError as e:
-            logger.error(
-                f"Error committing changes: Current working directory not found. {e}"
-            )
+            logger.error(f"Error committing changes: Current working directory not found. {e}")
             # Attempt to change to the repository directory
             try:
                 os.chdir(self.repo_path)
@@ -135,9 +131,7 @@ class GitRepository(FileRepository):
                     f"Successfully committed changes after changing directory. Commit hash: '{self.current_commit}'"
                 )
             except Exception as retry_error:
-                logger.error(
-                    f"Failed to commit changes after changing directory: {retry_error}"
-                )
+                logger.error(f"Failed to commit changes after changing directory: {retry_error}")
         except Exception as e:
             logger.error(f"Unexpected error during commit: {e}")
 

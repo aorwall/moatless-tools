@@ -2,16 +2,17 @@ import logging
 from abc import ABC
 from typing import List, Optional, Type, Any, ClassVar, Tuple
 
-from litellm.types.llms.openai import (
+from pydantic import Field, PrivateAttr, BaseModel, field_validator, model_validator
+
+from moatless.actions.action import Action
+from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
+from moatless.completion import BaseCompletionModel
+from moatless.completion.model import Completion
+from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
 )
-from pydantic import Field, PrivateAttr, BaseModel, field_validator
-
-from moatless.actions.action import Action
-from moatless.actions.model import ActionArguments, Observation, RewardScaleEntry
-from moatless.completion import CompletionModel
-from moatless.completion.model import Completion, StructuredOutput
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
@@ -61,18 +62,12 @@ class SearchBaseArgs(ActionArguments, ABC):
 
 
 class IdentifiedSpans(BaseModel):
-    file_path: str = Field(
-        description="The file path where the relevant code is found."
-    )
-    start_line: int = Field(
-        description="Starting line number of the relevant code section."
-    )
-    end_line: int = Field(
-        description="Ending line number of the relevant code section."
-    )
+    file_path: str = Field(description="The file path where the relevant code is found.")
+    start_line: int = Field(description="Starting line number of the relevant code section.")
+    end_line: int = Field(description="Ending line number of the relevant code section.")
 
 
-class Identify(StructuredOutput):
+class Identify(ResponseSchema):
     """Identify if the provided search result is relevant to the reported issue."""
 
     thoughts: Optional[str] = Field(
@@ -105,7 +100,7 @@ class SearchBaseAction(Action):
         10,
         description="The maximum number of search hits to display.",
     )
-    completion_model: CompletionModel = Field(
+    completion_model: BaseCompletionModel = Field(
         ...,
         description="The completion model used to identify relevant code sections in search results.",
     )
@@ -117,12 +112,18 @@ class SearchBaseAction(Action):
         self,
         repository: Repository = None,
         code_index: CodeIndex | None = None,
-        completion_model: CompletionModel = None,
+        completion_model: BaseCompletionModel = None,
         **data,
     ):
         super().__init__(completion_model=completion_model, **data)
         self._repository = repository
         self._code_index = code_index
+
+    @model_validator(mode="after")
+    def initalize_model(self):
+        if self.completion_model:
+            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
+        return self
 
     def execute(
         self,
@@ -131,9 +132,7 @@ class SearchBaseAction(Action):
         workspace: Workspace | None = None,
     ) -> Observation:
         if file_context is None:
-            raise ValueError(
-                "File context must be provided to execute the search action."
-            )
+            raise ValueError("File context must be provided to execute the search action.")
 
         properties = {"search_hits": [], "search_tokens": 0}
 
@@ -148,10 +147,7 @@ class SearchBaseAction(Action):
 
         completion = None
 
-        if (
-            search_result_context.span_count() == 1
-            and search_result_context.context_size() > self.max_identify_tokens
-        ):
+        if search_result_context.span_count() == 1 and search_result_context.context_size() > self.max_identify_tokens:
             logger.warning(
                 f"{self.name}: Conext for {search_result_context.create_summary()} is too large ({search_result_context.context_size()} tokens)."
             )
@@ -161,8 +157,7 @@ class SearchBaseAction(Action):
                 properties=properties,
             )
         elif (
-            search_result_context.context_size() > self.max_search_tokens
-            and search_result_context.span_count() > 1
+            search_result_context.context_size() > self.max_search_tokens and search_result_context.span_count() > 1
         ) or search_result_context.span_count() > self.max_hits:
             logger.info(
                 f"{self.name}: Search too large. {properties['search_tokens']} tokens and {search_result_context.span_count()} hits, will ask for clarification."
@@ -183,9 +178,7 @@ class SearchBaseAction(Action):
         new_span_ids = file_context.add_file_context(view_context)
 
         if view_context.is_empty():
-            search_result_str += (
-                "\n\nNone of the search results was relevant to the task."
-            )
+            search_result_str += "\n\nNone of the search results was relevant to the task."
             summary = "Didn't find any relevant code sections in the search results."
             message = search_result_str
         else:
@@ -232,9 +225,7 @@ class SearchBaseAction(Action):
         for hit in search_result.hits:
             span_count += len(hit.spans)
             for span in hit.spans:
-                search_result_context.add_span_to_context(
-                    hit.file_path, span.span_id, add_extra=True
-                )
+                search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=True)
 
         return search_result_context, alternative_suggestion
 
@@ -248,9 +239,7 @@ class SearchBaseAction(Action):
         search_result_context = FileContext(repo=self._repository)
         for hit in search_result.hits:
             for span in hit.spans:
-                search_result_context.add_span_to_context(
-                    hit.file_path, span.span_id, add_extra=False
-                )
+                search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=False)
 
         search_result_str = search_result_context.create_prompt(
             show_span_ids=False,
@@ -268,9 +257,7 @@ class SearchBaseAction(Action):
     def _search(self, args: SearchBaseArgs) -> SearchCodeResponse:
         raise NotImplementedError("Subclasses must implement this method.")
 
-    def _search_for_alternative_suggestion(
-        self, args: SearchBaseArgs
-    ) -> SearchCodeResponse:
+    def _search_for_alternative_suggestion(self, args: SearchBaseArgs) -> SearchCodeResponse:
         return SearchCodeResponse()
 
     def _identify_code(
@@ -297,11 +284,7 @@ class SearchBaseAction(Action):
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self.completion_model.create_completion(
-                messages=messages,
-                system_prompt=IDENTIFY_SYSTEM_PROMPT,
-                response_model=Identify,
-            )
+            completion_response = self.completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
@@ -324,14 +307,10 @@ class SearchBaseAction(Action):
             tokens = view_context.context_size()
 
             if tokens > self.max_identify_tokens:
-                logger.info(
-                    f"Identified code sections are too large ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are too large ({tokens} tokens).")
 
                 messages.append(
-                    ChatCompletionAssistantMessage(
-                        role="assistant", content=identified_code.model_dump_json()
-                    )
+                    ChatCompletionAssistantMessage(role="assistant", content=identified_code.model_dump_json())
                 )
 
                 messages.append(
@@ -342,9 +321,7 @@ class SearchBaseAction(Action):
                     )
                 )
             else:
-                logger.info(
-                    f"Identified code sections are within the token limit ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are within the token limit ({tokens} tokens).")
                 return view_context, completion_response.completion
 
         # If we've exhausted all retries and still too large

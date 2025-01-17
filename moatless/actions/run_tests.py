@@ -1,10 +1,10 @@
 import logging
 from typing import List, Any
 
-from pydantic import Field, PrivateAttr
+from pydantic import Field, PrivateAttr, ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.model import (
+from moatless.actions.schema import (
     ActionArguments,
     FewShotExample,
     Observation,
@@ -26,17 +26,14 @@ class RunTestsArgs(ActionArguments):
     thoughts: str = Field(..., description="Your reasoning on what tests to run.")
     test_files: List[str] = Field(..., description="The list of test files to run")
 
-    class Config:
-        title = "RunTests"
+    model_config = ConfigDict(title="RunTests")
 
     @property
     def log_name(self):
         return f"RunTests({', '.join(self.test_files)})"
 
     def to_prompt(self):
-        return f"Running tests for the following files:\n" + "\n".join(
-            f"* {file}" for file in self.test_files
-        )
+        return f"Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
 
 
 class RunTests(Action):
@@ -70,9 +67,7 @@ class RunTests(Action):
         Run all tests found in file context or provided in args.
         """
         if file_context is None:
-            raise ValueError(
-                "File context must be provided to execute the run tests action."
-            )
+            raise ValueError("File context must be provided to execute the run tests action.")
 
         # Separate non-existent files and directories from valid test files
         non_existent_files = []
@@ -90,13 +85,9 @@ class RunTests(Action):
         if not test_files:
             error_details = []
             if non_existent_files:
-                error_details.append(
-                    f"Files not found: {', '.join(non_existent_files)}"
-                )
+                error_details.append(f"Files not found: {', '.join(non_existent_files)}")
             if directories:
-                error_details.append(
-                    f"Directories provided instead of files: {', '.join(directories)}"
-                )
+                error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
 
             return Observation(
                 message="Unable to run tests: " + "; ".join(error_details),
@@ -182,9 +173,7 @@ class RunTests(Action):
             repository = obj.pop("repository")
             code_index = obj.pop("code_index")
             runtime = obj.pop("runtime")
-            return cls(
-                code_index=code_index, repository=repository, runtime=runtime, **obj
-            )
+            return cls(code_index=code_index, repository=repository, runtime=runtime, **obj)
         return super().model_validate(obj)
 
     @classmethod

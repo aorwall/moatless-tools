@@ -13,9 +13,7 @@ def get_embed_model(model_name: str) -> "BaseEmbedding":
             ) from e
 
         if "VOYAGE_API_KEY" not in os.environ:
-            raise ValueError(
-                "VOYAGE_API_KEY environment variable is not set. Please set it to your Voyage API key."
-            )
+            raise ValueError("VOYAGE_API_KEY environment variable is not set. Please set it to your Voyage API key.")
 
         return VoyageEmbeddingWithRetry(
             model_name=model_name,

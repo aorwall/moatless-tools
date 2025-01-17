@@ -111,11 +111,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         if not nodes:
             return []
 
-        vector_id = (
-            max([int(k) for k in self._data.vector_id_to_text_id])
-            if self._data.vector_id_to_text_id
-            else 0
-        )
+        vector_id = max([int(k) for k in self._data.vector_id_to_text_id]) if self._data.vector_id_to_text_id else 0
 
         logger.info(f"Adding {len(nodes)} nodes to index, start at id {vector_id}.")
 
@@ -128,9 +124,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             self._data.text_id_to_ref_doc_id[node.id_] = node.ref_doc_id or node.id_
             vector_id += 1
 
-            metadata = node_to_metadata_dict(
-                node, remove_text=True, flat_metadata=False
-            )
+            metadata = node_to_metadata_dict(node, remove_text=True, flat_metadata=False)
             metadata.pop("_node_content", None)
             self._data.metadata_dict[node.node_id] = metadata
 
@@ -171,15 +165,11 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             similarity_top_k (int): top k most similar nodes
 
         """
-        query_filter_fn = _build_metadata_filter_fn(
-            lambda node_id: self._data.metadata_dict[node_id], query.filters
-        )
+        query_filter_fn = _build_metadata_filter_fn(lambda node_id: self._data.metadata_dict[node_id], query.filters)
 
         query_embedding = cast(list[float], query.query_embedding)
         query_embedding_np = np.array(query_embedding, dtype="float32")[np.newaxis, :]
-        dists, indices = self._faiss_index.search(
-            query_embedding_np, query.similarity_top_k
-        )
+        dists, indices = self._faiss_index.search(query_embedding_np, query.similarity_top_k)
         dists = list(dists[0])
 
         if len(indices) == 0:
@@ -213,9 +203,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
                 f"Return {len(filtered_node_ids)} nodes ({not_found} not found, {duplicates} duplicates and {filtered_out} nodes)."
             )
 
-        return VectorStoreQueryResult(
-            similarities=filtered_dists, ids=filtered_node_ids
-        )
+        return VectorStoreQueryResult(similarities=filtered_dists, ids=filtered_node_ids)
 
     def persist(
         self,

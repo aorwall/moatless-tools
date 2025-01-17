@@ -44,18 +44,13 @@ def decide_badge(node_info):
 
         return ("circle", "green")
 
-    if (
-        node_info.get("context_status") in ["found_files"]
-        or node_info.get("patch_status") == "right_files"
-    ):
+    if node_info.get("context_status") in ["found_files"] or node_info.get("patch_status") == "right_files":
         return ("circle", "yellow")
 
     return None
 
 
-def build_graph(
-    root_node: Node, eval_result: dict | None = None, instance: dict | None = None
-):
+def build_graph(root_node: Node, eval_result: dict | None = None, instance: dict | None = None):
     G = nx.DiGraph()
 
     # Determine if this is a linear trajectory
@@ -87,13 +82,9 @@ def build_graph(
         # Sanitize node attributes to avoid Graphviz syntax errors
         if node.action:
             if node.action.name == "str_replace_editor":
-                action_name = (
-                    str(node.action.command).replace('"', '\\"').replace("\\", "\\\\")
-                )
+                action_name = str(node.action.command).replace('"', '\\"').replace("\\", "\\\\")
             else:
-                action_name = (
-                    str(node.action.name).replace('"', '\\"').replace("\\", "\\\\")
-                )
+                action_name = str(node.action.name).replace('"', '\\"').replace("\\", "\\\\")
         else:
             action_name = ""
 
@@ -107,17 +98,11 @@ def build_graph(
         if node.observation and node.observation.properties:
             if "test_results" in node.observation.properties:
                 test_results = node.observation.properties["test_results"]
-                failed_test_count = sum(
-                    1 for test in test_results if test["status"] in ["FAILED", "ERROR"]
-                )
+                failed_test_count = sum(1 for test in test_results if test["status"] in ["FAILED", "ERROR"])
                 if failed_test_count > 0:
                     warning = f"{failed_test_count} failed tests"
             if "fail_reason" in node.observation.properties:
-                error = (
-                    str(node.observation.properties["fail_reason"])
-                    .replace('"', '\\"')
-                    .replace("\\", "\\\\")
-                )
+                error = str(node.observation.properties["fail_reason"]).replace('"', '\\"').replace("\\", "\\\\")
 
         if node.observation and node.observation.expect_correction:
             warning += f"\nExpected correction"
@@ -129,14 +114,10 @@ def build_graph(
         if feedback_data:
             node_attrs.update(
                 {
-                    "feedback_analysis": str(feedback_data.analysis)
-                    .replace('"', '\\"')
-                    .replace("\\", "\\\\")
+                    "feedback_analysis": str(feedback_data.analysis).replace('"', '\\"').replace("\\", "\\\\")
                     if feedback_data.analysis
                     else "",
-                    "feedback_text": str(feedback_data.feedback)
-                    .replace('"', '\\"')
-                    .replace("\\", "\\\\")
+                    "feedback_text": str(feedback_data.feedback).replace('"', '\\"').replace("\\", "\\\\")
                     if feedback_data.feedback
                     else "",
                     "feedback_suggested_node": feedback_data.suggested_node_id,
@@ -158,12 +139,8 @@ def build_graph(
                     "error": error,
                     "resolved": resolved,
                     "context_status": context_stats.status if context_stats else None,
-                    "patch_status": context_stats.patch_status
-                    if context_stats
-                    else None,
-                    "explanation": str(node.reward.explanation)
-                    .replace('"', '\\"')
-                    .replace("\\", "\\\\")
+                    "patch_status": context_stats.patch_status if context_stats else None,
+                    "explanation": str(node.reward.explanation).replace('"', '\\"').replace("\\", "\\\\")
                     if node.reward
                     else "",
                 }
@@ -325,13 +302,9 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
             if node_info["name"] == "Pending":
                 node_labels.append(f"Start")
             elif node_info["name"] == "Finished":
-                node_labels.append(
-                    f"{node_info['name']}{node_info['id']}<br>{node_info.get('reward', '0')}"
-                )
+                node_labels.append(f"{node_info['name']}{node_info['id']}<br>{node_info.get('reward', '0')}")
             elif node_info["name"]:
-                node_labels.append(
-                    f"{node}<br>{node_info['name']}<br>{node_info.get('reward', '0')}"
-                )
+                node_labels.append(f"{node}<br>{node_info['name']}<br>{node_info.get('reward', '0')}")
             else:
                 node_labels.append(f"{node}<br>{node_info.get('reward', '0')}")
         else:
@@ -396,9 +369,7 @@ def create_graph_figure(G_subset, G, pos, is_linear=False):
             cmax=100,
             line=dict(width=node_line_widths, color=node_line_colors),
         ),
-        text=[
-            f'<span style="color: black">{label}</span>' for label in node_labels
-        ],  # Force black text using HTML
+        text=[f'<span style="color: black">{label}</span>' for label in node_labels],  # Force black text using HTML
         hovertext=node_text,
         textposition="middle center",
         textfont=dict(size=14, color="black"),
@@ -533,25 +504,19 @@ def update_visualization(
 
     container.empty()
     with container:
-        nodes_to_show = get_nodes_up_to_id(
-            search_tree.root, st.session_state.max_node_id
-        )
+        nodes_to_show = get_nodes_up_to_id(search_tree.root, st.session_state.max_node_id)
 
         is_linear = force_linear or getattr(search_tree.root, "max_expansions", 1) == 1
 
         if is_linear:
             # Use the new table visualization for linear trajectories
             nodes = search_tree.root.get_all_nodes()
-            create_linear_table(
-                nodes, st.session_state.max_node_id, eval_result, instance
-            )
+            create_linear_table(nodes, st.session_state.max_node_id, eval_result, instance)
         else:
             graph_col, info_col = st.columns([6, 3])
             with graph_col:
                 # Get nodes up to the current max_node_id
-                nodes_to_show = get_nodes_up_to_id(
-                    search_tree.root, st.session_state.max_node_id
-                )
+                nodes_to_show = get_nodes_up_to_id(search_tree.root, st.session_state.max_node_id)
 
                 # Original graph visualization code
                 G = build_graph(search_tree.root, eval_result, instance)
@@ -571,18 +536,12 @@ def update_visualization(
 
                 # Calculate the scaling factor based on the number of nodes
                 num_nodes = len(G.nodes())
-                height_scale = max(
-                    1, num_nodes / 20
-                )  # Increase height as nodes increase
+                height_scale = max(1, num_nodes / 20)  # Increase height as nodes increase
 
                 for node in pos:
                     x, y = pos[node]
-                    normalized_x = (
-                        0.5 if x_max == x_min else (x - x_min) / (x_max - x_min)
-                    )
-                    normalized_y = (
-                        0.5 if y_max == y_min else (y - y_min) / (y_max - y_min)
-                    )
+                    normalized_x = 0.5 if x_max == x_min else (x - x_min) / (x_max - x_min)
+                    normalized_y = 0.5 if y_max == y_min else (y - y_min) / (y_max - y_min)
                     pos[node] = (normalized_x, normalized_y * height_scale)
 
                 fig = create_graph_figure(G_subset, G, pos, is_linear=is_linear)
@@ -593,10 +552,7 @@ def update_visualization(
                         "⏪ Reset to 0",
                         on_click=lambda: setattr(st.session_state, "max_node_id", 0)
                         or setattr(st.session_state, "selected_node_id", 0),
-                        disabled=(
-                            st.session_state.max_node_id == 0
-                            or st.session_state.auto_play
-                        ),
+                        disabled=(st.session_state.max_node_id == 0 or st.session_state.auto_play),
                     )
                 with col2:
                     st.button(
@@ -626,10 +582,7 @@ def update_visualization(
                             "selected_node_id",
                             st.session_state.max_node_id,
                         ),
-                        disabled=(
-                            st.session_state.max_node_id
-                            >= st.session_state.total_nodes - 1
-                        ),
+                        disabled=(st.session_state.max_node_id >= st.session_state.total_nodes - 1),
                     )
                 with col4:
                     st.button(
@@ -644,10 +597,7 @@ def update_visualization(
                             "selected_node_id",
                             st.session_state.max_node_id,
                         ),
-                        disabled=(
-                            st.session_state.max_node_id
-                            == st.session_state.total_nodes - 1
-                        ),
+                        disabled=(st.session_state.max_node_id == st.session_state.total_nodes - 1),
                     )
                 with col5:
                     if st.session_state.auto_play:
@@ -660,9 +610,7 @@ def update_visualization(
 
                 with col6:
                     st.write(f"Showing nodes up to ID: {st.session_state.max_node_id}")
-                    st.write(
-                        "Auto-play: " + ("On" if st.session_state.auto_play else "Off")
-                    )
+                    st.write("Auto-play: " + ("On" if st.session_state.auto_play else "Off"))
 
                 chart_placeholder = st.empty()
                 event = chart_placeholder.plotly_chart(
@@ -678,29 +626,21 @@ def update_visualization(
                         point_index = selected_points[0]["point_index"]
                         if point_index in point_to_node_id:
                             node_id = point_to_node_id[point_index]
-                            st.session_state.selected_node_id = int(
-                                node_id.split("Node")[1]
-                            )
+                            st.session_state.selected_node_id = int(node_id.split("Node")[1])
 
             with info_col:
                 # Update the node selection dropdown
-                max_visible_node = min(
-                    int(st.session_state.max_node_id), st.session_state.total_nodes - 1
-                )
+                max_visible_node = min(int(st.session_state.max_node_id), st.session_state.total_nodes - 1)
                 node_options = [f"Node{i}" for i in range(max_visible_node + 1)]
 
                 selected_node_option = st.selectbox(
                     "Select Node",
                     node_options,
-                    index=node_options.index(
-                        f"Node{st.session_state.selected_node_id}"
-                    ),
+                    index=node_options.index(f"Node{st.session_state.selected_node_id}"),
                     key="selected_node_option",
                 )
                 if selected_node_option:
-                    st.session_state.selected_node_id = int(
-                        selected_node_option.split("Node")[1]
-                    )
+                    st.session_state.selected_node_id = int(selected_node_option.split("Node")[1])
 
                 # Display selected node information
                 if st.session_state.selected_node_id is not None:
@@ -715,24 +655,18 @@ def update_visualization(
                         if selected_node.file_context:
                             tabs.append("FileContext")
 
-                        if selected_node.action and selected_node.completions.get(
-                            "build_action"
-                        ):
+                        if selected_node.action and selected_node.completions.get("build_action"):
                             tabs.append("Build")
 
                         if selected_node.action and (
                             selected_node.completions.get("execute_action")
-                            or (
-                                selected_node.observation
-                                and selected_node.observation.execution_completion
-                            )
+                            or (selected_node.observation and selected_node.observation.execution_completion)
                         ):
                             tabs.append("Execution")
 
                         # Check for selector completion
                         has_selector = "selector" in selected_node.completions or (
-                            selected_node.parent
-                            and "selector" in selected_node.parent.completions
+                            selected_node.parent and "selector" in selected_node.parent.completions
                         )
                         if has_selector:
                             tabs.append("Selector")
@@ -776,19 +710,12 @@ def update_visualization(
                                     st.subheader("Feedback")
                                     st.write(selected_node.message)
 
-                                if (
-                                    hasattr(selected_node.action, "thoughts")
-                                    and selected_node.action.thoughts
-                                ):
+                                if hasattr(selected_node.action, "thoughts") and selected_node.action.thoughts:
                                     st.subheader("Thoughts")
                                     st.write(selected_node.action.thoughts)
 
                                 st.subheader(f"Action: {selected_node.action.name}")
-                                st.json(
-                                    selected_node.action.model_dump(
-                                        exclude={"thoughts"}
-                                    )
-                                )
+                                st.json(selected_node.action.model_dump(exclude={"thoughts"}))
 
                                 if selected_node.observation:
                                     st.subheader("Output")
@@ -801,31 +728,21 @@ def update_visualization(
 
                         if "Build" in tabs:
                             with tab_contents[tabs.index("Build")]:
-                                completion = selected_node.completions.get(
-                                    "build_action"
-                                )
+                                completion = selected_node.completions.get("build_action")
                                 show_completion(completion)
 
                         if "Execution" in tabs:
                             with tab_contents[tabs.index("Execution")]:
                                 if selected_node.observation.execution_completion:
-                                    completion = (
-                                        selected_node.observation.execution_completion
-                                    )
+                                    completion = selected_node.observation.execution_completion
                                 else:
-                                    completion = selected_node.completions.get(
-                                        "execute_action"
-                                    )
+                                    completion = selected_node.completions.get("execute_action")
                                 show_completion(completion)
 
                         if "Selector" in tabs:
                             with tab_contents[tabs.index("Selector")]:
-                                selector_completion = selected_node.completions.get(
-                                    "selector"
-                                ) or (
-                                    selected_node.parent.completions.get("selector")
-                                    if selected_node.parent
-                                    else None
+                                selector_completion = selected_node.completions.get("selector") or (
+                                    selected_node.parent.completions.get("selector") if selected_node.parent else None
                                 )
                                 if selector_completion:
                                     show_completion(selector_completion)
@@ -833,21 +750,13 @@ def update_visualization(
                         if "Reward" in tabs:
                             with tab_contents[tabs.index("Reward")]:
                                 if selected_node.reward:
-                                    st.subheader(
-                                        f"Reward: {selected_node.reward.value}"
-                                    )
+                                    st.subheader(f"Reward: {selected_node.reward.value}")
                                     st.write(selected_node.reward.explanation)
-                                show_completion(
-                                    selected_node.completions.get("value_function")
-                                )
+                                show_completion(selected_node.completions.get("value_function"))
 
                         if "JSON" in tabs:
                             with tab_contents[tabs.index("JSON")]:
-                                st.json(
-                                    selected_node.model_dump(
-                                        exclude={"parent", "children"}
-                                    )
-                                )
+                                st.json(selected_node.model_dump(exclude={"parent", "children"}))
 
                         if "Rerun" in tabs:
                             with tab_contents[tabs.index("Rerun")]:
@@ -871,14 +780,10 @@ def update_visualization(
                                 st.markdown(selected_node.feedback_data.feedback)
 
                                 # Access the feedback completion from the completions dictionary
-                                feedback_completion = selected_node.completions.get(
-                                    "feedback"
-                                )
+                                feedback_completion = selected_node.completions.get("feedback")
                                 if feedback_completion:
                                     # Debug logging
-                                    logger.debug(
-                                        f"Feedback completion type: {type(feedback_completion)}"
-                                    )
+                                    logger.debug(f"Feedback completion type: {type(feedback_completion)}")
 
                                     # Convert the completion to a dictionary first
                                     completion_data = (
@@ -891,9 +796,7 @@ def update_visualization(
 
                                     # System Prompt
                                     with st.expander("System Prompt"):
-                                        system_prompt = response_data.get(
-                                            "system_prompt"
-                                        )
+                                        system_prompt = response_data.get("system_prompt")
                                         if system_prompt:
                                             st.code(system_prompt)
                                         else:
@@ -907,12 +810,8 @@ def update_visualization(
                                             for msg in messages:
                                                 try:
                                                     # Debug logging
-                                                    logger.debug(
-                                                        f"Message type: {type(msg)}"
-                                                    )
-                                                    logger.debug(
-                                                        f"Message content: {msg}"
-                                                    )
+                                                    logger.debug(f"Message type: {type(msg)}")
+                                                    logger.debug(f"Message content: {msg}")
 
                                                     # Ensure we're working with a dictionary
                                                     msg_dict = (
@@ -926,23 +825,15 @@ def update_visualization(
                                                         }
                                                     )
 
-                                                    role = msg_dict.get(
-                                                        "role", "unknown"
-                                                    )
-                                                    content = msg_dict.get(
-                                                        "content", ""
-                                                    )
+                                                    role = msg_dict.get("role", "unknown")
+                                                    content = msg_dict.get("content", "")
 
                                                     st.markdown(f"**{role}**")
                                                     st.text(content)
                                                     st.markdown("---")
                                                 except Exception as msg_error:
-                                                    logger.exception(
-                                                        f"Error processing message: {msg_error}"
-                                                    )
-                                                    st.error(
-                                                        f"Error displaying message: {msg_error}"
-                                                    )
+                                                    logger.exception(f"Error processing message: {msg_error}")
+                                                    st.error(f"Error displaying message: {msg_error}")
                                         else:
                                             st.text("No input messages available")
 
@@ -984,15 +875,10 @@ def update_visualization(
                                         st.caption(f"Generated at: {timestamp}")
 
                     else:
-                        st.info(
-                            "Select a node in the graph or from the dropdown to view details"
-                        )
+                        st.info("Select a node in the graph or from the dropdown to view details")
 
             # Auto-play logic
-            if (
-                st.session_state.auto_play
-                and st.session_state.max_node_id < st.session_state.total_nodes - 1
-            ):
+            if st.session_state.auto_play and st.session_state.max_node_id < st.session_state.total_nodes - 1:
                 st.session_state.max_node_id += 1
                 st.session_state.selected_node_id = st.session_state.max_node_id
                 time.sleep(1)  # Delay between steps

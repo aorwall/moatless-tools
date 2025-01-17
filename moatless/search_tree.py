@@ -1,9 +1,9 @@
 import json
 import logging
-import os
 from datetime import datetime
-from typing import Optional, Dict, Any, List, Callable, Union
+from typing import Optional, Dict, Any, List, Callable
 
+from litellm import ConfigDict
 from pydantic import BaseModel, Field, model_validator
 
 from moatless.actions.action import Action
@@ -30,45 +30,25 @@ class SearchTree(BaseModel):
     root: Node = Field(..., description="The root node of the search tree.")
     selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
-    agent_settings: Optional[AgentSettings] = Field(
-        None, description="Agent settings for the search tree."
-    )
+    agent_settings: Optional[AgentSettings] = Field(None, description="Agent settings for the search tree.")
     actions: List[Action] = Field(
         default_factory=list,
         description="Actions that can be used by the agent in the search tree.",
     )
-    repository: Optional[Repository] = Field(
-        None, description="Repository for the search tree."
-    )
-    expander: Optional[Expander] = Field(
-        None, description="Expander for expanding nodes."
-    )
-    value_function: Optional[BaseValueFunction] = Field(
-        None, description="Value function for reward calculation."
-    )
-    feedback_generator: Optional[BaseFeedbackGenerator] = Field(
-        None, description="Feedback generator."
-    )
+    repository: Optional[Repository] = Field(None, description="Repository for the search tree.")
+    expander: Optional[Expander] = Field(None, description="Expander for expanding nodes.")
+    value_function: Optional[BaseValueFunction] = Field(None, description="Value function for reward calculation.")
+    feedback_generator: Optional[BaseFeedbackGenerator] = Field(None, description="Feedback generator.")
     discriminator: Optional[BaseDiscriminator] = Field(
         None, description="Discriminator for selecting the best trajectory."
     )
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata for the search tree."
-    )
-    persist_path: Optional[str] = Field(
-        None, description="Path to persist the search tree."
-    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the search tree.")
+    persist_path: Optional[str] = Field(None, description="Path to persist the search tree.")
     unique_id: int = Field(default=0, description="Unique ID counter for nodes.")
 
-    max_expansions: int = Field(
-        1, description="The maximum number of expansions of one state."
-    )
-    max_iterations: int = Field(
-        10, description="The maximum number of iterations to run the tree search."
-    )
-    max_cost: Optional[float] = Field(
-        None, description="The maximum cost spent on token before finishing."
-    )
+    max_expansions: int = Field(1, description="The maximum number of expansions of one state.")
+    max_iterations: int = Field(10, description="The maximum number of iterations to run the tree search.")
+    max_cost: Optional[float] = Field(None, description="The maximum cost spent on token before finishing.")
     min_finished_nodes: Optional[int] = Field(
         None,
         description="The minimum number of finished nodes to consider before finishing",
@@ -80,12 +60,8 @@ class SearchTree(BaseModel):
     reward_threshold: Optional[float] = Field(
         None, description="The min reward threshold to consider before finishing."
     )
-    max_depth: Optional[int] = Field(
-        None, description="The maximum depth for one trajectory in simulations."
-    )
-    finish_before_reexpanding: bool = Field(
-        False, description="Whether to reach a Finish state before reexpanding."
-    )
+    max_depth: Optional[int] = Field(None, description="The maximum depth for one trajectory in simulations.")
+    finish_before_reexpanding: bool = Field(False, description="Whether to reach a Finish state before reexpanding.")
     finish_before_reexpanding_depth: Optional[int] = Field(
         20, description="The depth to reach a Finish state before reexpanding."
     )
@@ -93,8 +69,7 @@ class SearchTree(BaseModel):
         default_factory=list, description="Event handlers for tree events", exclude=True
     )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
     def create(
@@ -132,7 +107,6 @@ class SearchTree(BaseModel):
                 file_context=file_context,
             )
 
-
         return cls(
             root=root,
             selector=selector,
@@ -163,21 +137,13 @@ class SearchTree(BaseModel):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
 
             if "value_function" in obj and isinstance(obj["value_function"], dict):
-                obj["value_function"] = BaseValueFunction.model_validate(
-                    obj["value_function"]
-                )
+                obj["value_function"] = BaseValueFunction.model_validate(obj["value_function"])
 
-            if "feedback_generator" in obj and isinstance(
-                obj["feedback_generator"], dict
-            ):
-                obj["feedback_generator"] = BaseFeedbackGenerator.model_validate(
-                    obj["feedback_generator"]
-                )
+            if "feedback_generator" in obj and isinstance(obj["feedback_generator"], dict):
+                obj["feedback_generator"] = BaseFeedbackGenerator.model_validate(obj["feedback_generator"])
 
             if "discriminator" in obj and isinstance(obj["discriminator"], dict):
-                obj["discriminator"] = BaseDiscriminator.model_validate(
-                    obj["discriminator"]
-                )
+                obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
 
             if "root" in obj and isinstance(obj["root"], dict):
                 obj["root"] = Node.reconstruct(obj["root"], repo=repository)
@@ -209,15 +175,11 @@ class SearchTree(BaseModel):
         return cls.model_validate(data, repository)
 
     @classmethod
-    def from_file(
-        cls, file_path: str, persist_path: str | None = None, **kwargs
-    ) -> "SearchTree":
+    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "SearchTree":
         with open(file_path, "r") as f:
             tree_data = json.load(f)
 
-        return cls.from_dict(
-            tree_data, persist_path=persist_path or file_path, **kwargs
-        )
+        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
 
     def run_search(self) -> Node | None:
         """Run the MCTS algorithm for a specified number of iterations."""
@@ -255,15 +217,10 @@ class SearchTree(BaseModel):
                     {
                         "iteration": len(self.root.get_all_nodes()),
                         "total_cost": total_cost,
-                        "best_reward": max(
-                            (n.reward.value if n.reward else 0)
-                            for n in self.root.get_all_nodes()
-                        ),
+                        "best_reward": max((n.reward.value if n.reward else 0) for n in self.root.get_all_nodes()),
                         "finished_nodes": len(self.get_finished_nodes()),
                         "total_nodes": len(self.root.get_all_nodes()),
-                        "best_node_id": self.get_best_trajectory().node_id
-                        if self.get_best_trajectory()
-                        else None,
+                        "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None,
                     },
                 )
             else:
@@ -301,10 +258,7 @@ class SearchTree(BaseModel):
 
             # Check if any node has exceeded the depth limit
             max_depth_exceeded = (
-                any(
-                    n.get_depth() >= self.finish_before_reexpanding_depth
-                    for n in all_nodes
-                )
+                any(n.get_depth() >= self.finish_before_reexpanding_depth for n in all_nodes)
                 if self.finish_before_reexpanding_depth is not None
                 else False
             )
@@ -326,15 +280,15 @@ class SearchTree(BaseModel):
 
         # Check if any action step was not executed, if so return the node
         if node.action_steps and node.has_unexecuted_actions():
-            self.log(
-                logger.info, f"Returning Node{node.node_id} with unexecuted actions"
-            )
+            self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
             return node
 
         child_node = self.expander.expand(node, self, force_expansion)
 
         if not node.action_steps and node.assistant_message:
-            child_node.user_message = "You're an autonomous AI agent that must respond with one of the provided functions"
+            child_node.user_message = (
+                "You're an autonomous AI agent that must respond with one of the provided functions"
+            )
 
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:
@@ -343,9 +297,7 @@ class SearchTree(BaseModel):
                 self.agent.actions,
             )
 
-        self.log(
-            logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}"
-        )
+        self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
     def _simulate(self, node: Node):
@@ -358,9 +310,7 @@ class SearchTree(BaseModel):
 
         if self.value_function and not node.is_duplicate and node.observation:
             try:
-                node.reward, completion_response = self.value_function.get_reward(
-                    node=node
-                )
+                node.reward, completion_response = self.value_function.get_reward(node=node)
                 node.completions["value_function"] = completion_response
                 self.log(
                     logger.info,
@@ -426,19 +376,13 @@ class SearchTree(BaseModel):
     def is_finished(self):
         # Check max cost
         total_cost = self.total_usage().completion_cost
-        if (
-            self.max_cost
-            and self.total_usage().completion_cost
-            and total_cost >= self.max_cost
-        ):
+        if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
             logger.info(f"Search finished: Reached max cost {self.max_cost}")
             return True
 
         # Check max iterations
         if len(self.root.get_all_nodes()) >= self.max_iterations:
-            logger.info(
-                f"Search finished: Reached max iterations {self.max_iterations}"
-            )
+            logger.info(f"Search finished: Reached max iterations {self.max_iterations}")
             return True
 
         finished_nodes = self.get_finished_nodes()
@@ -447,27 +391,16 @@ class SearchTree(BaseModel):
             unique_finished_parents.add(node.parent.node_id)
 
         # Check max finished nodes
-        if (
-            self.max_finished_nodes
-            and len(unique_finished_parents) >= self.max_finished_nodes
-        ):
-            logger.info(
-                f"Search finished: Reached max finished nodes {self.max_finished_nodes}"
-            )
+        if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
+            logger.info(f"Search finished: Reached max finished nodes {self.max_finished_nodes}")
             return True
 
         # Check reward threshold
         if self.reward_threshold and any(
-            node.reward and node.reward.value >= self.reward_threshold
-            for node in finished_nodes
+            node.reward and node.reward.value >= self.reward_threshold for node in finished_nodes
         ):
-            if (
-                not self.min_finished_nodes
-                or len(unique_finished_parents) >= self.min_finished_nodes
-            ):
-                logger.info(
-                    f"Search finished: Found solution meeting reward threshold {self.reward_threshold}"
-                )
+            if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
+                logger.info(f"Search finished: Found solution meeting reward threshold {self.reward_threshold}")
                 return True
 
         # Check if there are no more expandable nodes
@@ -523,9 +456,7 @@ class SearchTree(BaseModel):
             try:
                 json.dump(tree_data, f, indent=2)
             except Exception as e:
-                logger.exception(
-                    f"Error saving search tree to {file_path}: {tree_data}"
-                )
+                logger.exception(f"Error saving search tree to {file_path}: {tree_data}")
                 raise e
 
     def _generate_unique_id(self) -> int:
@@ -633,15 +564,11 @@ class SearchTree(BaseModel):
         return cls.model_validate(data, repository, runtime)
 
     @classmethod
-    def from_file(
-        cls, file_path: str, persist_path: str | None = None, **kwargs
-    ) -> "SearchTree":
+    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "SearchTree":
         with open(file_path, "r") as f:
             tree_data = json.load(f)
 
-        return cls.from_dict(
-            tree_data, persist_path=persist_path or file_path, **kwargs
-        )
+        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
 
     @model_validator(mode="after")
     def set_depth(self):
@@ -679,12 +606,8 @@ class SearchTree(BaseModel):
         data["selector"] = self.selector.model_dump(**kwargs)
         data["expander"] = self.expander.model_dump(**kwargs)
         data["agent"] = self.agent.model_dump(**kwargs)
-        data["agent_settings"] = (
-            self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
-        )
-        data["repository"] = (
-            self.repository.model_dump(**kwargs) if self.repository else None
-        )
+        data["agent_settings"] = self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
+        data["repository"] = self.repository.model_dump(**kwargs) if self.repository else None
 
         if self.value_function:
             data["value_function"] = self.value_function.model_dump(**kwargs)
