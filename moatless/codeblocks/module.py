@@ -16,12 +16,8 @@ class Module(CodeBlock):
     content: str = ""
     spans_by_id: Dict[str, BlockSpan] = field(default_factory=dict)
     language: Optional[str] = None
-    code_block: CodeBlock = field(
-        default_factory=lambda: CodeBlock(content="", type=CodeBlockType.MODULE)
-    )
-    _graph: DiGraph = field(
-        default_factory=DiGraph, init=False
-    )  # TODO: Move to central CodeGraph
+    code_block: CodeBlock = field(default_factory=lambda: CodeBlock(content="", type=CodeBlockType.MODULE))
+    _graph: DiGraph = field(default_factory=DiGraph, init=False)  # TODO: Move to central CodeGraph
 
     def __post_init__(self):
         if not self.code_block.type == CodeBlockType.MODULE:
@@ -78,10 +74,7 @@ class Module(CodeBlock):
 
         # Add imports from module
         for span in self.spans.values():
-            if (
-                span.span_type == SpanType.INITATION
-                and span.span_id not in checked_span_ids
-            ):
+            if span.span_type == SpanType.INITATION and span.span_id not in checked_span_ids:
                 span_ids_to_check.append(span.span_id)
 
         while span_ids_to_check:
@@ -94,9 +87,7 @@ class Module(CodeBlock):
             # TODO: Verify span token size
             for span in related_spans:
                 if span.tokens + tokens > max_tokens:
-                    logger.info(
-                        f"Max tokens reached: {span.tokens} + {tokens} > {max_tokens}"
-                    )
+                    logger.info(f"Max tokens reached: {span.tokens} + {tokens} > {max_tokens}")
                     return True
 
                 span.visible = True
@@ -140,10 +131,7 @@ class Module(CodeBlock):
 
         # Always add module initation span
         for span in self.spans_by_id.values():
-            if (
-                span.block_type == CodeBlockType.MODULE
-                and span.span_type == SpanType.INITATION
-            ):
+            if span.block_type == CodeBlockType.MODULE and span.span_type == SpanType.INITATION:
                 related_span_ids.add(span.span_id)
 
         return related_span_ids

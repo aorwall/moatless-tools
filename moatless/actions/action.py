@@ -6,10 +6,7 @@ from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
-from moatless.actions.schema import (
-    ActionArguments,
-    Observation, RewardScaleEntry, FewShotExample
-)
+from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry, FewShotExample
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
@@ -128,9 +125,7 @@ class Action(BaseModel, ABC):
         return []
 
     @classmethod
-    def get_action_by_args_class(
-        cls, args_class: Type[ActionArguments]
-    ) -> Optional[Type["Action"]]:
+    def get_action_by_args_class(cls, args_class: Type[ActionArguments]) -> Optional[Type["Action"]]:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -142,10 +137,7 @@ class Action(BaseModel, ABC):
         """
 
         def search_subclasses(current_class):
-            if (
-                hasattr(current_class, "args_schema")
-                and current_class.args_schema == args_class
-            ):
+            if hasattr(current_class, "args_schema") and current_class.args_schema == args_class:
                 return current_class
             for subclass in current_class.__subclasses__():
                 result = search_subclasses(subclass)

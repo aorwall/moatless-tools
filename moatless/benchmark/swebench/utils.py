@@ -20,9 +20,7 @@ from moatless.utils.repo import (
 logger = logging.getLogger(__name__)
 
 
-def load_instances(
-    dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"
-):
+def load_instances(dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"):
     from datasets import load_dataset
 
     data = load_dataset(dataset_name, split=split)
@@ -58,9 +56,7 @@ def get_repo_dir_name(repo: str):
 def found_in_expected_spans(instance: dict, spans: dict):
     for file_path, span_ids in instance["expected_spans"].items():
         if not span_ids:
-            logging.warning(
-                f"{instance['instance_id']} Expected spans for {file_path} is empty"
-            )
+            logging.warning(f"{instance['instance_id']} Expected spans for {file_path} is empty")
 
     missing_spans = get_missing_spans(instance["expected_spans"], spans)
     return not missing_spans
@@ -72,9 +68,7 @@ def found_in_alternative_spans(instance: dict, spans: dict):
     for alternative_spans in instance["alternative_spans"]:
         for file_path, span_ids in alternative_spans["spans"].items():
             if not span_ids:
-                logging.info(
-                    f"{instance['instance_id']} Alternative spans for {file_path} is empty"
-                )
+                logging.info(f"{instance['instance_id']} Alternative spans for {file_path} is empty")
 
         missing_spans = get_missing_spans(alternative_spans["spans"], spans)
         if not missing_spans:
@@ -89,9 +83,7 @@ def found_in_alternative_files(instance: dict, files: list):
     for alternative_spans in instance["alternative_spans"]:
         for file_path, span_ids in alternative_spans["spans"].items():
             if not span_ids:
-                logging.info(
-                    f"{instance['instance_id']} Alternative spans for {file_path} is empty"
-                )
+                logging.info(f"{instance['instance_id']} Alternative spans for {file_path} is empty")
 
         missing_spans = get_missing_files(alternative_spans["spans"], files)
         if not missing_spans:
@@ -105,9 +97,7 @@ def setup_swebench_repo(
     instance_id: str = None,
     repo_base_dir: Optional[str] = None,
 ) -> str:
-    assert (
-        instance_data or instance_id
-    ), "Either instance_data or instance_id must be provided"
+    assert instance_data or instance_id, "Either instance_data or instance_id must be provided"
     if not instance_data:
         instance_data = load_instance(instance_id)
 
@@ -122,11 +112,13 @@ def setup_swebench_repo(
         base_dir=repo_base_dir,
     )
 
+
 def instance_repo_path(instance_id: str, repo_base_dir: str | None = None) -> str:
     """Get the path to the repository for an instance."""
     if repo_base_dir is None:
         repo_base_dir = os.getenv("MOATLESS_REPO_DIR", "./repos")
     return os.path.join(repo_base_dir, f"swe-bench_{instance_id}")
+
 
 def create_repository(
     instance: Optional[dict] = None,
@@ -142,7 +134,7 @@ def create_repository(
 
     if not repo_base_dir:
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
-    
+
     # Convert to absolute path
     repo_base_dir = os.path.abspath(repo_base_dir)
 
@@ -171,14 +163,10 @@ def create_repository(
                 capture_output=True,
                 check=True,
             )
-            logger.info(
-                f"Found existing repo with commit {instance['base_commit']} at {repo_path}"
-            )
+            logger.info(f"Found existing repo with commit {instance['base_commit']} at {repo_path}")
             return GitRepository(repo_path=repo_path)
         except subprocess.CalledProcessError:
-            logger.warning(
-                f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}"
-            )
+            logger.warning(f"Existing repo at {repo_path} doesn't have commit {instance['base_commit']}")
             shutil.rmtree(repo_path)
         except Exception as e:
             logging.warning(f"Error checking repository: {e}")
@@ -202,9 +190,7 @@ def create_repository(
     # Use absolute path for file URL
     repo_url = f"file://{os.path.abspath(local_repo_path)}"
 
-    return GitRepository.from_repo(
-        git_repo_url=repo_url, repo_path=repo_path, commit=instance["base_commit"]
-    )
+    return GitRepository.from_repo(git_repo_url=repo_url, repo_path=repo_path, commit=instance["base_commit"])
 
 
 def create_index(

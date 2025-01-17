@@ -48,8 +48,7 @@ DEFAULT_CONFIG = {
 
 # Automatically get all model configs from model_config.py
 CONFIG_MAP = {
-    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config}
-    for model_name, config in MODEL_CONFIGS.items()
+    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config} for model_name, config in MODEL_CONFIGS.items()
 }
 
 
@@ -70,22 +69,14 @@ def setup_loggers(logs_dir: str):
     # Main log file (INFO and above)
     file_logger = logging.getLogger()  # Root logger
     file_logger.setLevel(logging.INFO)
-    file_handler = logging.FileHandler(
-        os.path.join(logs_dir, f"evaluation_{timestamp}.log")
-    )
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
+    file_handler = logging.FileHandler(os.path.join(logs_dir, f"evaluation_{timestamp}.log"))
+    file_handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     file_logger.addHandler(file_handler)
 
     # Error log file (ERROR and above)
-    error_handler = logging.FileHandler(
-        os.path.join(logs_dir, f"evaluation_errors_{timestamp}.log")
-    )
+    error_handler = logging.FileHandler(os.path.join(logs_dir, f"evaluation_errors_{timestamp}.log"))
     error_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n"
-        )
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s\n%(pathname)s:%(lineno)d\n")
     )
     error_handler.setLevel(logging.ERROR)
     file_logger.addHandler(error_handler)
@@ -99,6 +90,7 @@ def setup_loggers(logs_dir: str):
             logger.addHandler(logging.NullHandler())  # Prevent output to console
 
     return console_logger, file_logger
+
 
 def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
     """Load a dataset split from the datasets directory."""
@@ -114,6 +106,7 @@ def load_dataset_split(dataset_name: str) -> Optional[EvaluationDatasetSplit]:
     with open(dataset_path) as f:
         data = json.load(f)
         return EvaluationDatasetSplit(**data)
+
 
 class SimpleEvaluationMonitor:
     def __init__(self, repository, evaluation, console_logger, file_logger):
@@ -134,18 +127,12 @@ class SimpleEvaluationMonitor:
 
         self.console.info(f"Starting evaluation: {evaluation.evaluation_name}")
         self.console.info(f"Found {len(self.instances_data)} instances in evaluation")
-        self.logger.info(
-            f"[SimpleEvaluationMonitor] Starting evaluation: {evaluation.evaluation_name}"
-        )
-        self.logger.info(
-            f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances in evaluation"
-        )
+        self.logger.info(f"[SimpleEvaluationMonitor] Starting evaluation: {evaluation.evaluation_name}")
+        self.logger.info(f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances in evaluation")
 
     def _log_settings(self):
         """Log evaluation configuration and settings"""
-        eval_dir = os.path.join(
-            self.repository.evaluations_dir, self.evaluation.evaluation_name
-        )
+        eval_dir = os.path.join(self.repository.evaluations_dir, self.evaluation.evaluation_name)
         settings = self.evaluation.settings
 
         # Evaluation info
@@ -171,8 +158,6 @@ class SimpleEvaluationMonitor:
             self.console.info(line)
             self.logger.info(line)
 
-
-
     def handle_event(self, event):
         """Handle evaluation events by logging them"""
         event_type = event.event_type
@@ -195,9 +180,7 @@ class SimpleEvaluationMonitor:
             elif event_type == "instance_completed":
                 status = "✓" if instance.resolved else "✗"
                 self.console.info(f"Completed {instance_id} ({status})")
-                self.logger.info(
-                    f"Completed {instance_id} (resolved: {instance.resolved})"
-                )
+                self.logger.info(f"Completed {instance_id} (resolved: {instance.resolved})")
                 self._log_instance_summary(instance)
             elif event_type == "instance_error":
                 error_msg = f"Error in instance {instance_id}: {instance.error}"
@@ -219,11 +202,7 @@ class SimpleEvaluationMonitor:
         tokens = 0
         if instance.usage:
             cost = instance.usage.completion_cost
-            tokens = (
-                instance.usage.prompt_tokens
-                + instance.usage.completion_tokens
-                + instance.usage.cached_tokens
-            )
+            tokens = instance.usage.prompt_tokens + instance.usage.completion_tokens + instance.usage.cached_tokens
             self.total_cost += cost
             self.total_tokens += tokens
 
@@ -244,14 +223,8 @@ class SimpleEvaluationMonitor:
     def log_eval_summary(self):
         """Log total instances, completed, errors and resolved instances"""
         total = len(self.instances_data)
-        completed = sum(
-            1
-            for i in self.instances_data.values()
-            if i.status == InstanceStatus.COMPLETED
-        )
-        errors = sum(
-            1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR
-        )
+        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
         resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
         summary = (
             f"Evaluation progress summary:\n"
@@ -266,14 +239,8 @@ class SimpleEvaluationMonitor:
     def log_final_summary(self):
         """Log final evaluation summary"""
         duration = datetime.now() - self.start_time
-        completed = sum(
-            1
-            for i in self.instances_data.values()
-            if i.status == InstanceStatus.COMPLETED
-        )
-        errors = sum(
-            1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR
-        )
+        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
         resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
         total = len(self.instances_data)
 
@@ -362,7 +329,7 @@ def run_evaluation(config: dict):
         message_history = config.get("message_history")
         if isinstance(message_history, str):
             message_history = MessageHistoryType(message_history)
-        
+
         # Create evaluation name using the same logic as run_evaluation.py
         evaluation_name = create_evaluation_name(
             model=config["model"],
@@ -370,9 +337,7 @@ def run_evaluation(config: dict):
             date=datetime.now().strftime("%Y%m%d"),
             max_iterations=config["max_iterations"],
             max_expansions=config["max_expansions"],
-            response_format=LLMResponseFormat(config["response_format"])
-            if config.get("response_format")
-            else None,
+            response_format=LLMResponseFormat(config["response_format"]) if config.get("response_format") else None,
             message_history=message_history,
             thoughts_in_action=config.get("thoughts_in_action", False),
         )
@@ -446,9 +411,7 @@ def run_evaluation(config: dict):
     )
 
     # Create monitor with both loggers
-    monitor = SimpleEvaluationMonitor(
-        repository, evaluation, console_logger, file_logger
-    )
+    monitor = SimpleEvaluationMonitor(repository, evaluation, console_logger, file_logger)
 
     # Create runner with event handler
     runner = EvaluationRunner(
@@ -463,60 +426,60 @@ def run_evaluation(config: dict):
     runner.add_event_handler(monitor.handle_event)
 
     # TODO: Just testing to disable cache...
-    litellm.in_memory_llm_clients_cache = InMemoryCache(
-        max_size_in_memory=-1, default_ttl=-1
-    )
+    litellm.in_memory_llm_clients_cache = InMemoryCache(max_size_in_memory=-1, default_ttl=-1)
 
     try:
         # Run evaluation
         runner.run_evaluation(instance_ids=instance_ids)
-        
+
         # Log final summary
         monitor.log_final_summary()
     except Exception as e:
         error_msg = f"Fatal error in evaluation: {str(e)}"
         console_logger.error(error_msg)
         file_logger.error(error_msg, exc_info=True)
-        raise e 
-        
+        raise e
+
 
 def parse_args():
     """Parse command line arguments"""
-    parser = argparse.ArgumentParser(
-        description="Run evaluation with specified configuration"
-    )
-    
+    parser = argparse.ArgumentParser(description="Run evaluation with specified configuration")
+
     # Model selection
     parser.add_argument(
         "--model",
         choices=list(MODEL_CONFIGS.keys()),
         help="Model to evaluate (e.g., 'claude-3-5-sonnet-20241022')",
     )
-    
+
     # Model settings
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the model API")
     parser.add_argument("--response-format", choices=["tool_call", "react"], help="Response format for the model")
     parser.add_argument("--thoughts-in-action", action="store_true", help="Enable thoughts in action")
     parser.add_argument("--temperature", type=float, help="Temperature for model sampling")
-    
+
     # Dataset settings
     parser.add_argument("--split", help="Dataset split to use (overrides config)")
     parser.add_argument("--instance-ids", nargs="+", help="Specific instance IDs to evaluate (overrides split)")
-    
+
     # Tree search settings
     parser.add_argument("--max-iterations", type=int, help="Max iterations (overrides config)")
     parser.add_argument("--max-expansions", type=int, help="Max expansions (overrides config)")
     parser.add_argument("--max-cost", type=float, help="Max cost in dollars (overrides config)")
-    
+
     # Runner settings
     parser.add_argument("--num-workers", type=int, help="Number of workers (overrides config)")
-    parser.add_argument("--message-history", choices=["messages", "summary", "react", "messages_compact", "instruct"], help="Message history type")
-    
+    parser.add_argument(
+        "--message-history",
+        choices=["messages", "summary", "react", "messages_compact", "instruct"],
+        help="Message history type",
+    )
+
     # Evaluation settings
     parser.add_argument("--evaluation-name", help="Name for this evaluation run (overrides config)")
     parser.add_argument("--rerun-errors", action="store_true", help="Rerun instances that previously errored")
-    
+
     return parser.parse_args()
 
 
@@ -585,4 +548,3 @@ if __name__ == "__main__":
     # Get configuration
     config = get_config_from_args(args)
     run_evaluation(config)
-    

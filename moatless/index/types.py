@@ -29,9 +29,7 @@ class SpanHit(BaseModel):
 
 
 class SearchCodeHit(BaseModel):
-    file_path: str = Field(
-        description="The file path where the relevant code is found."
-    )
+    file_path: str = Field(description="The file path where the relevant code is found.")
     spans: list[SpanHit] = Field(
         default_factory=list,
         description="The spans of the relevant code in the file",
@@ -57,9 +55,7 @@ class SearchCodeHit(BaseModel):
 
 
 class SearchCodeResponse(BaseModel):
-    message: Optional[str] = Field(
-        default=None, description="A message to return to the user."
-    )
+    message: Optional[str] = Field(default=None, description="A message to return to the user.")
 
     hits: list[SearchCodeHit] = Field(
         default_factory=list,

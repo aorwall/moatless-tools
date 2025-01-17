@@ -23,18 +23,10 @@ class AgenticLoop(BaseModel):
 
     root: Node = Field(..., description="The root node of the action sequence.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata for the loop."
-    )
-    persist_path: Optional[str] = Field(
-        None, description="Path to persist the action sequence."
-    )
-    max_iterations: int = Field(
-        10, description="The maximum number of iterations to run."
-    )
-    max_cost: Optional[float] = Field(
-        None, description="The maximum cost spent on tokens before finishing."
-    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the loop.")
+    persist_path: Optional[str] = Field(None, description="Path to persist the action sequence.")
+    max_iterations: int = Field(10, description="The maximum number of iterations to run.")
+    max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
     event_handlers: List[Callable] = Field(
         default_factory=list, description="Event handlers for loop events", exclude=True
     )
@@ -147,11 +139,7 @@ class AgenticLoop(BaseModel):
     def is_finished(self) -> bool:
         """Check if the loop should finish."""
         total_cost = self.total_usage().completion_cost
-        if (
-            self.max_cost
-            and self.total_usage().completion_cost
-            and total_cost >= self.max_cost
-        ):
+        if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
             return True
 
         nodes = self.root.get_all_nodes()
@@ -260,9 +248,7 @@ class AgenticLoop(BaseModel):
         return cls.model_validate(data, repository=repository)
 
     @classmethod
-    def from_file(
-        cls, file_path: str, persist_path: str | None = None, **kwargs
-    ) -> "AgenticLoop":
+    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "AgenticLoop":
         """Load an AgenticLoop instance from a file."""
 
         try:

@@ -34,6 +34,7 @@ class CompletionError(MoatlessError):
         self.messages = messages or []
         self.accumulated_usage = accumulated_usage
 
+
 class CompletionRuntimeError(RuntimeError, CompletionError):
     """Exception raised when completion encounters an unrecoverable error."""
 

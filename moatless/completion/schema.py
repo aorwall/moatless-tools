@@ -17,28 +17,30 @@ class ChatCompletionToolParamFunctionChunk(TypedDict, total=False):
     description: str
     parameters: dict
 
+
 class ChatCompletionToolParam(TypedDict, total=False):
     cache_control: ChatCompletionCachedContent
     type: Union[Literal["function"], str]
     function: ChatCompletionToolParamFunctionChunk
+
 
 class ChatCompletionTextObject(TypedDict):
     type: Literal["text"]
     text: str
     cache_control: ChatCompletionCachedContent
 
+
 class ChatCompletionImageUrlObject(TypedDict, total=False):
     url: Required[str]
     detail: str
+
 
 class ChatCompletionImageObject(TypedDict):
     type: Literal["image_url"]
     image_url: Union[str, ChatCompletionImageUrlObject]
 
-MessageContentListBlock = Union[
-    ChatCompletionTextObject,
-    ChatCompletionImageObject
-]
+
+MessageContentListBlock = Union[ChatCompletionTextObject, ChatCompletionImageObject]
 
 MessageContent = Union[
     str,
@@ -99,6 +101,7 @@ AllMessageValues = Union[
     ChatCompletionSystemMessage,
 ]
 
+
 class NameDescriptor:
     def __get__(self, obj, cls=None) -> str:
         if hasattr(cls, "model_config") and "title" in cls.model_config:
@@ -119,7 +122,6 @@ class ResponseSchema(BaseModel):
     def tool_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
         return cls.openai_schema(thoughts_in_action=thoughts_in_action)
 
-
     @classmethod
     def openai_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
         """
@@ -130,8 +132,7 @@ class ResponseSchema(BaseModel):
         parameters = {
             k: v
             for k, v in schema.items()
-            if k not in ("title", "description")
-            and (thoughts_in_action or k != "thoughts")
+            if k not in ("title", "description") and (thoughts_in_action or k != "thoughts")
         }
 
         if not thoughts_in_action and parameters["properties"].get("thoughts"):
@@ -170,9 +171,7 @@ class ResponseSchema(BaseModel):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
                             # Create a new dict with all properties except $ref
-                            resolved = {
-                                k2: v2 for k2, v2 in obj.items() if k2 != "$ref"
-                            }
+                            resolved = {k2: v2 for k2, v2 in obj.items() if k2 != "$ref"}
                             # Merge with the referenced definition
                             referenced = defs[ref_name].copy()
                             referenced.update(resolved)
@@ -193,10 +192,7 @@ class ResponseSchema(BaseModel):
                 if isinstance(v, dict):
                     result[k] = resolve_refs(v, defs)
                 elif isinstance(v, list):
-                    result[k] = [
-                        resolve_refs(item, defs) if isinstance(item, dict) else item
-                        for item in v
-                    ]
+                    result[k] = [resolve_refs(item, defs) if isinstance(item, dict) else item for item in v]
                 else:
                     result[k] = v
 
@@ -211,9 +207,7 @@ class ResponseSchema(BaseModel):
             parameters = resolve_refs(parameters, defs)
 
         for param in docstring.params:
-            if (name := param.arg_name) in parameters["properties"] and (
-                description := param.description
-            ):
+            if (name := param.arg_name) in parameters["properties"] and (description := param.description):
                 if "description" not in parameters["properties"][name]:
                     parameters["properties"][name]["description"] = description
 
@@ -228,8 +222,7 @@ class ResponseSchema(BaseModel):
                 schema["description"] = docstring.short_description
             else:
                 schema["description"] = (
-                    f"Correctly extracted `{cls.__name__}` with all "
-                    f"the required parameters with correct types"
+                    f"Correctly extracted `{cls.__name__}` with all " f"the required parameters with correct types"
                 )
         name = cls.name
         return {
@@ -272,8 +265,14 @@ class ResponseSchema(BaseModel):
     def model_validate_xml(cls, xml_text: str) -> Self:
         """Parse XML format into model fields."""
         parsed_input = {}
-        # Fields that can be parsed from XML format
-        xml_fields = ["path", "old_str", "new_str", "file_text", "insert_line"]
+        # Get fields from the class's schema
+        schema = cls.model_json_schema()
+        properties = schema.get("properties", {})
+
+        if "thoughts" in properties:
+            del properties["thoughts"]
+
+        xml_fields = list(properties.keys())
 
         for field in xml_fields:
             start_tag = f"<{field}>"
@@ -324,13 +323,9 @@ class ResponseSchema(BaseModel):
 
             message = json_data
 
-            cleaned_message = "".join(
-                char for char in message if ord(char) >= 32 or char in "\n\r\t"
-            )
+            cleaned_message = "".join(char for char in message if ord(char) >= 32 or char in "\n\r\t")
             if cleaned_message != message:
-                logger.info(
-                    f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}"
-                )
+                logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
             message = cleaned_message
 
             # Replace None with null
@@ -340,9 +335,7 @@ class ResponseSchema(BaseModel):
             message, all_jsons = extract_json_from_message(message)
             if all_jsons:
                 if len(all_jsons) > 1:
-                    logger.warning(
-                        f"Found multiple JSON objects, using the first one. All found: {all_jsons}"
-                    )
+                    logger.warning(f"Found multiple JSON objects, using the first one. All found: {all_jsons}")
                 message = all_jsons[0]
 
             # Normalize line endings
@@ -351,9 +344,7 @@ class ResponseSchema(BaseModel):
 
             logger.info(f"Final message to validate: {repr(message)}")
 
-            return super().model_validate_json(
-                message if isinstance(message, str) else json.dumps(message), **kwarg
-            )
+            return super().model_validate_json(message if isinstance(message, str) else json.dumps(message), **kwarg)
 
     def format_args_for_llm(self) -> str:
         """
@@ -361,9 +352,7 @@ class ResponseSchema(BaseModel):
         Default implementation returns JSON format.
         """
         return json.dumps(
-            self.model_dump(
-                exclude={"thoughts"} if hasattr(self, "thoughts") else None
-            ),
+            self.model_dump(exclude={"thoughts"} if hasattr(self, "thoughts") else None),
             indent=2,
         )
 
@@ -439,9 +428,7 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
             try:
                 json_dict = json.loads(potential_json)
                 # Validate that this is a complete, non-truncated JSON object
-                if isinstance(json_dict, dict) and all(
-                    isinstance(k, str) for k in json_dict.keys()
-                ):
+                if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
                     all_found_jsons.append(json_dict)
             except json.JSONDecodeError:
                 pass
@@ -466,9 +453,7 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
                     potential_json = clean_json_string(message[start:end])
                     json_dict = json.loads(potential_json)
                     # Validate that this is a complete, non-truncated JSON object
-                    if isinstance(json_dict, dict) and all(
-                        isinstance(k, str) for k in json_dict.keys()
-                    ):
+                    if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
                         all_found_jsons.append(json_dict)
                     break
                 except json.JSONDecodeError:
@@ -485,4 +470,3 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
         logger.warning(f"Failed to extract raw JSON objects: {e}")
 
     return message, all_found_jsons
-

@@ -7,7 +7,7 @@ from moatless.selector import BaseSelector
 
 
 class SimpleSelector(BaseSelector):
-    """Select first not expanded node that is not terminal and didn't reach max depth. Then select root again if expandable. """
+    """Select first not expanded node that is not terminal and didn't reach max depth. Then select root again if expandable."""
 
     max_depth: int = Field(
         default=20,

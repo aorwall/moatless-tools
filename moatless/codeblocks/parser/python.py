@@ -40,10 +40,7 @@ class PythonParser(CodeParser):
         return "python"
 
     def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
-        if (
-            codeblock.type == CodeBlockType.FUNCTION
-            and codeblock.identifier == "__init__"
-        ):
+        if codeblock.type == CodeBlockType.FUNCTION and codeblock.identifier == "__init__":
             codeblock.type = CodeBlockType.CONSTRUCTOR
 
         # Handle line breaks after assignment without \
@@ -52,8 +49,7 @@ class PythonParser(CodeParser):
             and codeblock.content_lines[0].strip().endswith("=")
             and node_match.check_child
             and node_match.first_child
-            and node_match.check_child.start_point[0]
-            < node_match.first_child.start_point[0]
+            and node_match.check_child.start_point[0] < node_match.first_child.start_point[0]
         ):
             logger.debug(
                 f"Parsed block with type ASSIGNMENT with line break but no ending \\: {codeblock.content_lines[0]}"
@@ -61,9 +57,7 @@ class PythonParser(CodeParser):
             codeblock.content_lines[0] = codeblock.content_lines[0] + " \\"
 
     def post_process(self, codeblock: CodeBlock):
-        if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(
-            codeblock.content
-        ):
+        if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(codeblock.content):
             codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 
         if codeblock.type == CodeBlockType.ASSIGNMENT:
@@ -86,18 +80,12 @@ class PythonParser(CodeParser):
             if reference.path and reference.path[0] == "super()":
                 class_block = codeblock.find_type_in_parents(CodeBlockType.CLASS)
                 if class_block:
-                    is_a_rel = [
-                        rel
-                        for rel in class_block.relationships
-                        if rel.type == RelationshipType.IS_A
-                    ]
+                    is_a_rel = [rel for rel in class_block.relationships if rel.type == RelationshipType.IS_A]
                     if is_a_rel:
                         super_class = codeblock.module.find_by_path(is_a_rel[0].path)
 
                         if super_class:
-                            reference.path = (
-                                super_class.full_path() + reference.path[1:2]
-                            )
+                            reference.path = super_class.full_path() + reference.path[1:2]
                             reference.identifier = super_class.identifier
 
         codeblock.relationships.extend(new_references)
@@ -115,21 +103,13 @@ class PythonParser(CodeParser):
             if child.type == CodeBlockType.FUNCTION:
                 if child.identifier in function_names:
                     child.validation_errors.append(
-                        ValidationError(
-                            error=f"Duplicate function name: {child.identifier}"
-                        )
+                        ValidationError(error=f"Duplicate function name: {child.identifier}")
                     )
                 function_names.add(child.identifier)
             if child.type == CodeBlockType.CLASS:
                 if child.identifier in class_names:
-                    child.validation_errors.append(
-                        ValidationError(
-                            error=f"Duplicate class name: {child.identifier}"
-                        )
-                    )
+                    child.validation_errors.append(ValidationError(error=f"Duplicate class name: {child.identifier}"))
                 class_names.add(child.identifier)
 
     def is_outcommented_code(self, comment):
-        return comment.startswith("# ...") or any(
-            keyword in comment.lower() for keyword in commented_out_keywords
-        )
+        return comment.startswith("# ...") or any(keyword in comment.lower() for keyword in commented_out_keywords)

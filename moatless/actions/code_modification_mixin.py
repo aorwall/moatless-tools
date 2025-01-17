@@ -72,9 +72,7 @@ class CodeModificationMixin:
             file_context.add_test_file(file_path)
         elif self._code_index:
             # If the file is not a test file, find test files that might be related to the file
-            search_results = self._code_index.find_test_files(
-                file_path, query=file_path, max_results=2, max_spans=2
-            )
+            search_results = self._code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
 
             for search_result in search_results:
                 file_context.add_test_file(search_result.file_path)
@@ -99,7 +97,7 @@ class CodeModificationMixin:
         failure_details = file_context.get_test_failure_details()
         if failure_details:
             response_msg += f"\n{failure_details}"
-        
+
         summary = f"\n{file_context.get_test_summary()}"
         response_msg += summary
 
@@ -110,6 +108,4 @@ class CodeModificationMixin:
 
     def format_snippet_with_lines(self, snippet: str, start_line: int) -> str:
         """Format a code snippet with line numbers"""
-        return "\n".join(
-            f"{i + start_line:6}\t{line}" for i, line in enumerate(snippet.split("\n"))
-        )
+        return "\n".join(f"{i + start_line:6}\t{line}" for i, line in enumerate(snippet.split("\n")))

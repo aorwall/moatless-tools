@@ -5,6 +5,7 @@ from litellm.types.utils import ModelResponse, Usage, Message
 
 from moatless.actions.string_replace import StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs
+from moatless.actions.find_code_snippet import FindCodeSnippetArgs
 from moatless.completion.base import LLMResponseFormat
 from moatless.completion.react import ReActCompletionModel
 from moatless.exceptions import CompletionRejectError
@@ -194,8 +195,7 @@ Action: ViewCode
     )
     
     result = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy()
+        completion_response=mock_response
     )
     
     structured_outputs, text_response, flags = result
@@ -237,8 +237,7 @@ def new_function():
     )
     
     result = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy()
+        completion_response=mock_response
     )
     
     structured_outputs, text_response, flags = result
@@ -277,8 +276,7 @@ Action: StringReplace
     )
     
     result = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy()
+        completion_response=mock_response
     )
     
     structured_outputs, text_response, flags = result
@@ -317,8 +315,7 @@ Action: StringReplace
     )
     
     result = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy()
+        completion_response=mock_response
     )
     
     structured_outputs, text_response, flags = result
@@ -355,8 +352,7 @@ def test_validate_completion_invalid_action(mock_completion, mock_litellm_respon
     
     with pytest.raises(CompletionRejectError, match="Unknown action"):
         model._validate_completion(
-            completion_response=mock_response,
-            messages=test_messages.copy()
+            completion_response=mock_response
         )
 
 
@@ -381,8 +377,7 @@ def test_validate_completion_invalid_json(mock_completion, mock_litellm_response
     
     with pytest.raises(CompletionRejectError):
         model._validate_completion(
-            completion_response=mock_response,
-            messages=test_messages.copy()
+            completion_response=mock_response
         )
 
 
@@ -419,3 +414,41 @@ Action: StringReplace
     assert result.structured_outputs[0].old_str == "def old_function():\n    pass"
     assert result.structured_outputs[0].new_str == "def new_function():\n    return True"
     assert result.structured_outputs[0].thoughts == "I should update the function implementation" 
+
+
+@patch("litellm.completion")
+def test_validate_completion_find_code_snippet(mock_completion, mock_litellm_response):
+    """Test validating FindCodeSnippet ReAct format response"""
+    model = ReActCompletionModel(
+        model="test",
+        response_format=LLMResponseFormat.REACT,
+        thoughts_in_action=True,
+    )
+    model.initialize(response_schema=[FindCodeSnippetArgs], system_prompt="Test prompt")
+    
+    valid_response = """Thought: I need to locate the exact line in `django/contrib/admin/options.py` where the regex pattern is generated without escaping the prefix. The code snippet provided in the task description is `pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))`. I will use this exact snippet to find the relevant code.
+
+Action: FindCodeSnippet
+<code_snippet>
+pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))
+</code_snippet>
+<file_pattern>django/contrib/admin/options.py</file_pattern>"""
+    
+    mock_response = mock_litellm_response(
+        valid_response,
+        usage={"prompt_tokens": 25, "completion_tokens": 15, "total_tokens": 40}
+    )
+    
+    result = model._validate_completion(
+        completion_response=mock_response
+    )
+    
+    structured_outputs, text_response, flags = result
+    assert structured_outputs
+    assert len(structured_outputs) == 1
+    assert isinstance(structured_outputs[0], FindCodeSnippetArgs)
+    assert structured_outputs[0].file_pattern == "django/contrib/admin/options.py"
+    assert structured_outputs[0].code_snippet == "pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))"
+    assert structured_outputs[0].thoughts == "I need to locate the exact line in `django/contrib/admin/options.py` where the regex pattern is generated without escaping the prefix. The code snippet provided in the task description is `pk_pattern = re.compile(r'{}-\d+-{}$'.format(prefix, self.model._meta.pk.name))`. I will use this exact snippet to find the relevant code."
+    assert text_response is None
+    assert flags == [] 

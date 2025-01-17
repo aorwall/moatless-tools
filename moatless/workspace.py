@@ -8,20 +8,14 @@ from moatless.artifacts.artifact import Artifact, ArtifactHandler
 
 class Workspace(BaseModel):
     artifacts: List[Artifact] = Field(default_factory=list)
-    artifact_handlers: Dict[str, ArtifactHandler] = Field(
-        default_factory=dict, exclude=True
-    )
+    artifact_handlers: Dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
 
     _artifacts_by_id: Dict[str, Artifact] = PrivateAttr(default_factory=dict)
-    _artifacts_by_type: Dict[str, List[Artifact]] = PrivateAttr(
-        default_factory=lambda: defaultdict(list)
-    )
+    _artifacts_by_type: Dict[str, List[Artifact]] = PrivateAttr(default_factory=lambda: defaultdict(list))
 
     def __init__(self, artifact_handlers: List[ArtifactHandler], **data):
         super().__init__(**data)
-        self.artifact_handlers = {
-            handler.type: handler for handler in artifact_handlers
-        }
+        self.artifact_handlers = {handler.type: handler for handler in artifact_handlers}
 
     def add_artifact(self, artifact: Artifact) -> None:
         self.artifacts.append(artifact)
@@ -49,9 +43,7 @@ class Workspace(BaseModel):
             self._artifacts_by_id[artifact.id] = artifact
             self._artifacts_by_type[artifact.type].append(artifact)
 
-        self.artifact_handlers = {
-            handler.type: handler for handler in self.artifact_handlers.values()
-        }
+        self.artifact_handlers = {handler.type: handler for handler in self.artifact_handlers.values()}
 
     def dump_handlers(self) -> Dict[str, Any]:
         """Dump artifact handlers to a serializable format"""

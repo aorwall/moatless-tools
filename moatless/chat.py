@@ -23,23 +23,15 @@ logger = logging.getLogger(__name__)
 
 class Chat(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    current_node: Optional[Node] = Field(
-        None, description="The root node of the chat sequence."
-    )
+
+    current_node: Optional[Node] = Field(None, description="The root node of the chat sequence.")
     agent: ActionAgent = Field(..., description="Agent for generating responses.")
     artifact_handlers: List[ArtifactHandler] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata for the chat."
-    )
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the chat.")
     identifier_index: int = Field(0, description="")
-    persist_path: Optional[str] = Field(
-        None, description="Path to persist the chat sequence."
-    )
+    persist_path: Optional[str] = Field(None, description="Path to persist the chat sequence.")
 
-    def send_message(
-        self, message: str, attachments: Optional[List[Attachment]] = None
-    ) -> str:
+    def send_message(self, message: str, attachments: Optional[List[Attachment]] = None) -> str:
         """Send a message with optional attachments and get a response."""
 
         if not self.current_node:
@@ -97,27 +89,14 @@ class Chat(BaseModel):
     def get_messages(self) -> List[Message]:
         messages = []
         for node in self.current_node.get_trajectory():
-            user_artifacts = [
-                change.artifact_id
-                for change in node.artifact_changes
-                if change.actor == "user"
-            ]
+            user_artifacts = [change.artifact_id for change in node.artifact_changes if change.actor == "user"]
 
             if user_artifacts or node.user_message:
-                messages.append(
-                    UserMessage(content=node.user_message, artifact_ids=user_artifacts)
-                )
+                messages.append(UserMessage(content=node.user_message, artifact_ids=user_artifacts))
 
             if node.action_steps or node.assistant_message:
-                action_views = [
-                    ActionView(name=action_step.action.name)
-                    for action_step in node.action_steps
-                ]
-                messages.append(
-                    AssistantMessage(
-                        content=node.assistant_message, actions=action_views
-                    )
-                )
+                action_views = [ActionView(name=action_step.action.name) for action_step in node.action_steps]
+                messages.append(AssistantMessage(content=node.assistant_message, actions=action_views))
 
         return messages
 

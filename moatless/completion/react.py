@@ -14,36 +14,30 @@ logger = logging.getLogger(__name__)
 
 class ReActCompletionModel(BaseCompletionModel):
     """ReAct-specific implementation of the completion model.
-    
+
     This class handles:
     1. Converting response schemas into ReAct format instructions
     2. Parsing and validating ReAct format responses
     3. Managing thought inclusion in actions
     4. Validating action sequence format
     """
-    
-    def _prepare_system_prompt(
-        self,
-        system_prompt: str,
-        response_schema: List[Type[ResponseSchema]]
-    ) -> str:
+
+    def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
         """Add ReAct format instructions to system prompt.
-        
+
         This method appends the ReAct format instructions and available
         actions with their schemas to the base system prompt.
-        
+
         Args:
             system_prompt: Base system prompt
             response_schema: List of response schemas
-            
+
         Returns:
             System prompt with ReAct format instructions
         """
         action_input_schemas = []
         for action in response_schema:
-            action_input_schemas.append(
-                f" * {action.name} {action.format_schema_for_llm()}"
-            )
+            action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
 
         system_prompt += dedent(f"""\n# Response format
 
@@ -59,7 +53,7 @@ Use one of the following actions and provide input arguments matching the schema
 Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''} Action blocks. Do not include code blocks or additional text outside of this format.
 """)
         return system_prompt
-    
+
     def _get_completion_params(self, schema: ResponseSchema) -> Dict[str, str | Dict | List]:
         params = super()._get_completion_params(schema)
         params["stop"] = ["Observation:"]
@@ -70,22 +64,22 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         completion_response: Any,
     ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
         """Validate and parse ReAct format responses.
-        
+
         This method:
         1. Validates ReAct format structure
         2. Extracts thoughts and actions
         3. Parses action parameters
         4. Validates against schema
-        
+
         Args:
             completion_response: Raw response from the LLM
-        
+
         Returns:
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
             - List of flags indicating any special conditions
-        
+
         Raises:
             CompletionRejectError: For invalid format that should be retried
             CompletionRuntimeError: For fundamentally invalid responses
@@ -98,42 +92,25 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             thought, action_input = self._extract_thought_action(response_text)
             action_name, action_input = self._parse_action(action_input)
             action_class = self._get_action_class(action_name)
-            
-            try:
-                if action_input.strip().startswith("<") or action_input.strip().startswith("```xml"):
-                    try:
-                        action_request = action_class.model_validate_xml(action_input)
-                    except Exception as e:
-                        format_example = (
-                            action_class.format_schema_for_llm()
-                            if hasattr(action_class, "format_schema_for_llm")
-                            else ""
-                        )
-                        raise ValueError(
-                            f"Invalid XML format for {action_name}. Error: {e}\n\n"
-                            f"Expected format:\n{format_example}"
-                        )
-                else:
-                    try:
-                        action_request = action_class.model_validate_json(action_input)
-                    except Exception as e:
-                        schema = action_class.model_json_schema()
-                        if "thoughts" in schema["properties"]:
-                            del schema["properties"]["thoughts"]
-                        raise ValueError(
-                            f"Invalid format for {action_name}. Error: {e}\n\n"
-                            f"Expected JSON schema:\n{json.dumps(schema, indent=2)}"
-                        )
-            except Exception as e:
-                format_example = (
-                    action_class.format_schema_for_llm()
-                    if hasattr(action_class, "format_schema_for_llm")
-                    else ""
-                )
-                raise ValueError(
-                    f"Invalid format for {action_name}. Error: {e}\n\n"
-                    f"Expected format:\n{format_example}"
-                )
+
+            if action_input.strip().startswith("<") or action_input.strip().startswith("```xml"):
+                try:
+                    action_request = action_class.model_validate_xml(action_input)
+                except Exception as e:
+                    format_example = (
+                        action_class.format_schema_for_llm() if hasattr(action_class, "format_schema_for_llm") else ""
+                    )
+                    raise ValueError(
+                        f"Invalid XML format for {action_name}. Error: {e}\n\n" f"Expected format:\n{format_example}"
+                    )
+            else:
+                try:
+                    action_request = action_class.model_validate_json(action_input)
+                except Exception as e:
+                    raise ValueError(
+                        f"Invalid format for {action_name}. Error: {e}\n\n"
+                        f"Expected schema:\n{action_class.format_schema_for_llm()}"
+                    )
 
             action_request.thoughts = thought
             return [action_request], None, []
@@ -148,10 +125,10 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
     def _validate_react_format(self, response_text: str) -> None:
         """Validate the ReAct format structure.
-        
+
         Args:
             response_text: Raw response to validate
-            
+
         Raises:
             ValueError: If format is invalid
         """
@@ -164,9 +141,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         # Check for multiple action blocks
         if thought_count > 1 or action_count > 1:
-            logger.warning(
-                f"Multiple Thought or Action sections found in response: {response_text}"
-            )
+            logger.warning(f"Multiple Thought or Action sections found in response: {response_text}")
 
         # Check if all sections exist
         if not self.disable_thoughts and thought_count < 1:
@@ -176,29 +151,22 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         if not self.disable_thoughts:
             # Find the starting lines for each section
-            thought_line = next(
-                (i for i, line in enumerate(lines) if line.startswith("Thought:")), -1
-            )
-            action_line = next(
-                (i for i, line in enumerate(lines) if line.startswith("Action:")), -1
-            )
+            thought_line = next((i for i, line in enumerate(lines) if line.startswith("Thought:")), -1)
+            action_line = next((i for i, line in enumerate(lines) if line.startswith("Action:")), -1)
 
             # Check if sections are in correct order
             if not (thought_line < action_line):
                 raise ValueError("Sections must be in order: Thought, Action")
 
-    def _extract_thought_action(
-        self,
-        response_text: str
-    ) -> tuple[str, str]:
+    def _extract_thought_action(self, response_text: str) -> tuple[str, str]:
         """Extract thought and action from response text.
-        
+
         Args:
             response_text: Raw response text
-            
+
         Returns:
             Tuple of (thought, action_input)
-            
+
         Raises:
             ValueError: If sections can't be extracted
         """
@@ -222,13 +190,13 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
     def _parse_action(self, action_input: str) -> tuple[str, str]:
         """Parse action name and input from action text.
-        
+
         Args:
             action_input: Raw action text
-            
+
         Returns:
             Tuple of (action_name, action_parameters)
-            
+
         Raises:
             ValueError: If action format is invalid
         """
@@ -240,13 +208,13 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
     def _get_action_class(self, action_name: str) -> Optional[Type[ResponseSchema]]:
         """Get the action class for an action name.
-        
+
         Args:
             action_name: Name of the action
-            
+
         Returns:
             Matching ResponseSchema class
-            
+
         Raises:
             ValueError: If action name is invalid
         """
@@ -254,15 +222,10 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             schemas = [self.response_schema]
         else:
             schemas = self.response_schema
-            
-        action_class = next(
-            (a for a in schemas if a.name == action_name),
-            None
-        )
+
+        action_class = next((a for a in schemas if a.name == action_name), None)
         if not action_class:
             action_names = [a.name for a in schemas]
-            raise ValueError(
-                f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}"
-            )
-            
+            raise ValueError(f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}")
+
         return action_class

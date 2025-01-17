@@ -51,13 +51,9 @@ class CodeFile(BaseModel):
         try:
             full_file_path = os.path.join(self._repo_path, self.file_path)
             current_mod_time = datetime.fromtimestamp(os.path.getmtime(full_file_path))
-            is_modified = (
-                self._last_modified is None or current_mod_time > self._last_modified
-            )
+            is_modified = self._last_modified is None or current_mod_time > self._last_modified
             if is_modified and self._last_modified:
-                logger.debug(
-                    f"File {self.file_path} has been modified: {self._last_modified} -> {current_mod_time}"
-                )
+                logger.debug(f"File {self.file_path} has been modified: {self._last_modified} -> {current_mod_time}")
 
             return is_modified
         except FileNotFoundError:
@@ -222,9 +218,7 @@ class FileRepository(Repository):
         try:
             # If absolute path, log warning and remove first slash
             if file_pattern.startswith("/"):
-                logger.warning(
-                    f"Converting absolute path {file_pattern} to relative path"
-                )
+                logger.warning(f"Converting absolute path {file_pattern} to relative path")
                 file_pattern = file_pattern[1:]
 
             # Split pattern into directory and filename parts
@@ -242,10 +236,7 @@ class FileRepository(Repository):
                 # Prepend **/ only to the directory part if it exists
                 if len(pattern_parts) > 1:
                     dir_pattern = "/".join(pattern_parts[:-1])
-                    if (
-                        not dir_pattern.startswith(("/", "\\", "**/"))
-                        and "**/" not in dir_pattern
-                    ):
+                    if not dir_pattern.startswith(("/", "\\", "**/")) and "**/" not in dir_pattern:
                         file_pattern = f"**/{dir_pattern}/{filename}"
                     else:
                         file_pattern = f"{dir_pattern}/{filename}"
@@ -253,10 +244,7 @@ class FileRepository(Repository):
                     file_pattern = f"**/{filename}"
             else:
                 # Original behavior for patterns with wildcards
-                if (
-                    not file_pattern.startswith(("/", "\\", "**/"))
-                    and "**/" not in file_pattern
-                ):
+                if not file_pattern.startswith(("/", "\\", "**/")) and "**/" not in file_pattern:
                     file_pattern = f"**/{file_pattern}"
 
             # Reconstruct pattern if it was modified
@@ -270,9 +258,7 @@ class FileRepository(Repository):
                     # For exact filename matches, verify the filename matches exactly
                     if not has_wildcards and path.name != filename:
                         continue
-                    relative_path = str(path.relative_to(self.repo_path)).replace(
-                        os.sep, "/"
-                    )
+                    relative_path = str(path.relative_to(self.repo_path)).replace(os.sep, "/")
                     matched_files.append(relative_path)
         except Exception as e:
             logger.exception(f"Error finding files for pattern {file_pattern}:")
@@ -289,17 +275,13 @@ class FileRepository(Repository):
         return found_files
 
     def has_matching_files(self, file_pattern: str):
-        for _matched_file in glob.iglob(
-            file_pattern, root_dir=self.repo_path, recursive=True
-        ):
+        for _matched_file in glob.iglob(file_pattern, root_dir=self.repo_path, recursive=True):
             return True
         return False
 
     def file_match(self, file_pattern: str, file_path: str):
         match = False
-        for matched_file in glob.iglob(
-            file_pattern, root_dir=self.repo_path, recursive=True
-        ):
+        for matched_file in glob.iglob(file_pattern, root_dir=self.repo_path, recursive=True):
             if matched_file == file_path:
                 match = True
                 break
@@ -308,9 +290,7 @@ class FileRepository(Repository):
     def find_by_pattern(self, patterns: list[str]) -> List[str]:
         matched_files = []
         for pattern in patterns:
-            matched_files.extend(
-                glob.iglob(f"**/{pattern}", root_dir=self.repo_path, recursive=True)
-            )
+            matched_files.extend(glob.iglob(f"**/{pattern}", root_dir=self.repo_path, recursive=True))
         return matched_files
 
     def model_dump(self) -> Dict:
@@ -324,9 +304,7 @@ class FileRepository(Repository):
         repo = cls(repo_path=obj["path"])
         return repo
 
-    def find_exact_matches(
-        self, search_text: str, file_pattern: Optional[str] = None
-    ) -> List[tuple[str, int]]:
+    def find_exact_matches(self, search_text: str, file_pattern: Optional[str] = None) -> List[tuple[str, int]]:
         """
         Uses grep to search for exact text matches in files.
         """
@@ -362,14 +340,10 @@ class FileRepository(Repository):
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
 
-            result = subprocess.run(
-                cmd, cwd=self.repo_path, capture_output=True, text=True
-            )
+            result = subprocess.run(cmd, cwd=self.repo_path, capture_output=True, text=True)
 
             if result.returncode not in (0, 1):  # grep returns 1 if no matches found
-                logger.info(
-                    f"Grep returned non-standard exit code: {result.returncode}"
-                )
+                logger.info(f"Grep returned non-standard exit code: {result.returncode}")
                 if result.stderr:
                     logger.warning(f"Grep error output: {result.stderr}")
                 return []
@@ -383,10 +357,7 @@ class FileRepository(Repository):
                         logger.info(f"Skipping malformed line: {line}")
                         continue
 
-                    if (
-                        os.path.isfile(os.path.join(self.repo_path, file_pattern))
-                        and "/" not in parts[0]
-                    ):
+                    if os.path.isfile(os.path.join(self.repo_path, file_pattern)) and "/" not in parts[0]:
                         # Format: "5:def test_partitions():"
                         line_num = int(parts[0])
                         content = parts[1]
@@ -429,9 +400,7 @@ class FileRepository(Repository):
 
         for entry in os.listdir(full_path):
             entry_path = os.path.join(full_path, entry)
-            relative_path = os.path.relpath(entry_path, self.repo_path).replace(
-                os.sep, "/"
-            )
+            relative_path = os.path.relpath(entry_path, self.repo_path).replace(os.sep, "/")
 
             if os.path.isfile(entry_path):
                 files.append(relative_path)
@@ -457,9 +426,7 @@ def remove_duplicate_lines(replacement_lines, original_lines):
     return replacement_lines
 
 
-def do_diff(
-    file_path: str, original_content: str, updated_content: str
-) -> Optional[str]:
+def do_diff(file_path: str, original_content: str, updated_content: str) -> Optional[str]:
     return "".join(
         difflib.unified_diff(
             original_content.strip().splitlines(True),

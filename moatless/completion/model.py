@@ -8,36 +8,11 @@ logger = logging.getLogger(__name__)
 
 # Model costs per million tokens
 MODEL_COSTS = {
-    "claude-3-5-haiku-20241022": {
-        "input": 0.80,
-        "output": 4.0,
-        "cache": 0.08,
-        "cached_included": False
-    },
-    "claude-3-5-sonnet-20241022": {
-        "input": 3.0,
-        "output": 15.0,
-        "cache": 0.30,
-        "cached_included": False
-    },
-    "deepseek/deepseek-chat": {
-        "input": 0.14,
-        "output": 0.28,
-        "cache": 0.014,
-        "cached_included": True
-    },
-    "o1-mini-2024-09-12": {
-        "input": 3.0,
-        "output": 12.0,
-        "cache": 1.5,
-        "cached_included": True
-    },
-    "o1-preview-2024-09-12": {
-        "input": 15.0,
-        "output": 60.0,
-        "cache": 7.5,
-        "cached_included": True
-    }
+    "claude-3-5-haiku-20241022": {"input": 0.80, "output": 4.0, "cache": 0.08, "cached_included": False},
+    "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0, "cache": 0.30, "cached_included": False},
+    "deepseek/deepseek-chat": {"input": 0.14, "output": 0.28, "cache": 0.014, "cached_included": True},
+    "o1-mini-2024-09-12": {"input": 3.0, "output": 12.0, "cache": 1.5, "cached_included": True},
+    "o1-preview-2024-09-12": {"input": 15.0, "output": 60.0, "cache": 7.5, "cached_included": True},
 }
 
 
@@ -45,15 +20,19 @@ class Usage(BaseModel):
     version: int = Field(default=2, description="Version of the usage model")
     completion_cost: float = Field(default=0, description="Total cost of the completion in USD")
     completion_tokens: int = Field(default=0, description="Number of tokens in the completion/response")
-    prompt_tokens: int = Field(default=0, description="Total number of tokens in the prompt, including both cached and non-cached tokens")
+    prompt_tokens: int = Field(
+        default=0, description="Total number of tokens in the prompt, including both cached and non-cached tokens"
+    )
     cache_read_tokens: int = Field(default=0, description="Number of tokens read from cache, included in prompt_tokens")
-    cache_write_tokens: int = Field(default=0, description="Number of tokens written to cache, included in prompt_tokens")
+    cache_write_tokens: int = Field(
+        default=0, description="Number of tokens written to cache, included in prompt_tokens"
+    )
 
     def get_total_prompt_tokens(self, model: str) -> int:
         """Get total prompt tokens based on model's token counting behavior."""
         if model not in MODEL_COSTS:
             return self.prompt_tokens
-        
+
         # All tokens are already included in prompt_tokens
         return self.prompt_tokens
 
@@ -61,19 +40,14 @@ class Usage(BaseModel):
         """Get the calculated cost based on instance token counts and model."""
         if self.completion_cost > 0:
             return self.completion_cost
-        return self.calculate_cost(
-            model,
-            self.prompt_tokens,
-            self.completion_tokens,
-            self.cache_read_tokens
-        )
+        return self.calculate_cost(model, self.prompt_tokens, self.completion_tokens, self.cache_read_tokens)
 
     @staticmethod
     def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int, cache_read_tokens: int = 0) -> float:
         """Calculate cost based on token counts and model."""
         if model not in MODEL_COSTS:
             return 0.0
-                
+
         rates = MODEL_COSTS[model]
         non_cached_tokens = prompt_tokens - cache_read_tokens
         input_cost = non_cached_tokens * rates["input"] / 1_000_000
@@ -82,19 +56,13 @@ class Usage(BaseModel):
         return input_cost + output_cost + cache_cost
 
     @classmethod
-    def from_completion_response(
-        cls, completion_response: dict | BaseModel, model: str
-    ) -> Union["Usage", None]:
-        if isinstance(completion_response, BaseModel) and hasattr(
-            completion_response, "usage"
-        ):
+    def from_completion_response(cls, completion_response: dict | BaseModel, model: str) -> Union["Usage", None]:
+        if isinstance(completion_response, BaseModel) and hasattr(completion_response, "usage"):
             usage = completion_response.usage.model_dump()
         elif isinstance(completion_response, dict) and "usage" in completion_response:
             usage = completion_response["usage"]
         else:
-            logger.warning(
-                f"No usage info available in completion response: {completion_response}"
-            )
+            logger.warning(f"No usage info available in completion response: {completion_response}")
             return None
 
         logger.debug(f"Usage: {json.dumps(usage, indent=2)}")
@@ -104,9 +72,7 @@ class Usage(BaseModel):
         if usage.get("cache_creation_input_tokens"):
             prompt_tokens += usage["cache_creation_input_tokens"]
 
-        completion_tokens = usage.get("completion_tokens") or usage.get(
-            "output_tokens", 0
-        )
+        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens", 0)
 
         if usage.get("prompt_cache_hit_tokens"):
             cache_read_tokens = usage["prompt_cache_hit_tokens"]
@@ -121,9 +87,8 @@ class Usage(BaseModel):
 
         try:
             import litellm
-            cost = litellm.completion_cost(
-                completion_response=completion_response, model=model
-            )
+
+            cost = litellm.completion_cost(completion_response=completion_response, model=model)
         except Exception:
             # If cost calculation fails, fall back to calculating it manually
             try:
@@ -136,15 +101,11 @@ class Usage(BaseModel):
                 )
                 cost = prompt_cost + completion_cost
             except NotFoundError as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
+                logger.debug(f"Failed to calculate cost for completion response: {completion_response}. Error: {e}")
                 # Use our own cost calculation if litellm fails
                 cost = cls.calculate_cost(model, prompt_tokens, completion_tokens, cache_read_tokens)
             except Exception as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
+                logger.debug(f"Failed to calculate cost for completion response: {completion_response}. Error: {e}")
                 cost = 0
 
         return cls(
@@ -187,7 +148,7 @@ class Usage(BaseModel):
             # Handle backward compatibility for cached_tokens
             if "cached_tokens" in data:
                 data["cache_read_tokens"] = data.pop("cached_tokens")
-            
+
             # Set any null values to 0
             for key, value in data.items():
                 if not value:
@@ -257,9 +218,7 @@ class Completion(BaseModel):
         elif isinstance(completion_response, dict):
             response = completion_response
         else:
-            logger.error(
-                f"Unexpected completion response type: {type(completion_response)}"
-            )
+            logger.error(f"Unexpected completion response type: {type(completion_response)}")
             return None
 
         if not usage:
@@ -273,4 +232,3 @@ class Completion(BaseModel):
             usage=usage,
             flags=flags or [],
         )
-

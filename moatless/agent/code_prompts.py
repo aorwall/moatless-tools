@@ -2,6 +2,7 @@ AGENT_ROLE = """You are an autonomous AI assistant with superior programming ski
 you cannot communicate with the user but must rely on information you can get from the available functions.
 """
 
+
 def generate_react_guidelines(thoughts_in_action: bool = True) -> str:
     if not thoughts_in_action:
         return """# Action and ReAct Guidelines
@@ -47,6 +48,7 @@ def generate_react_guidelines(thoughts_in_action: bool = True) -> str:
    - You MUST wait for the observation (result) to be returned
    - You MUST NOT plan or execute any further actions until you receive and analyze the observation
    - Only after receiving and analyzing the observation can you proceed with your next action"""
+
 
 REACT_CORE_OPERATION_RULES = """
 # Core Operation Rules
@@ -226,6 +228,7 @@ def generate_workflow_prompt(actions, has_runtime: bool = False) -> str:
 
 
 WORKFLOW_PROMPT = None  # This will be set dynamically when creating the agent
+
 
 def generate_guideline_prompt(has_runtime: bool = False, thoughts_in_action: bool = True) -> str:
     prompt = """

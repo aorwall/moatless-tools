@@ -21,15 +21,9 @@ logger = logging.getLogger(__name__)
 
 
 class CodeSpan(BaseModel):
-    file_path: str = Field(
-        description="The file path where the relevant code is found."
-    )
-    start_line: Optional[int] = Field(
-        None, description="The start line of the code to add to context."
-    )
-    end_line: Optional[int] = Field(
-        None, description="The end line of the code to add to context."
-    )
+    file_path: str = Field(description="The file path where the relevant code is found.")
+    start_line: Optional[int] = Field(None, description="The start line of the code to add to context.")
+    end_line: Optional[int] = Field(None, description="The end line of the code to add to context.")
     span_ids: list[str] = Field(
         default_factory=list,
         description="Span IDs identiying the relevant code spans. A span id is a unique identifier for a code sippet. It can be a class name or function name. For functions in classes separete with a dot like 'class.function'.",
@@ -52,9 +46,7 @@ class ViewCodeArgs(ActionArguments):
     """View the code in a file or a specific code span."""
 
     thoughts: str = Field(..., description="Your thoughts on the code change.")
-    files: List[CodeSpan] = Field(
-        ..., description="The code that should be provided in the file context."
-    )
+    files: List[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
 
     model_config = ConfigDict(title="ViewCode")
 
@@ -112,9 +104,7 @@ class ViewCode(Action, IdentifyMixin):
         workspace: Workspace | None = None,
     ) -> Observation:
         if file_context is None:
-            raise ValueError(
-                "File context must be provided to execute the view action."
-            )
+            raise ValueError("File context must be provided to execute the view action.")
 
         properties = {"files": {}}
 
@@ -124,30 +114,22 @@ class ViewCode(Action, IdentifyMixin):
             if file_with_spans.file_path not in grouped_files:
                 grouped_files[file_with_spans.file_path] = file_with_spans
             else:
-                grouped_files[file_with_spans.file_path].span_ids.extend(
-                    file_with_spans.span_ids
-                )
+                grouped_files[file_with_spans.file_path].span_ids.extend(file_with_spans.span_ids)
 
         # Validate all file spans before processing
         for file_path, file_span in grouped_files.items():
-            logger.info(
-                f"Processing file {file_path} with span_ids {file_span.span_ids}"
-            )
+            logger.info(f"Processing file {file_path} with span_ids {file_span.span_ids}")
             file = file_context.get_file(file_path)
 
             if not file:
                 message = f"The requested file {file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
                 properties["fail_reason"] = "file_not_found"
-                return Observation(
-                    message=message, properties=properties, expect_correction=False
-                )
+                return Observation(message=message, properties=properties, expect_correction=False)
 
             if self._repository.is_directory(file_path):
                 message = f"The requested file {file_path} is a directory and not a file. Use the search functions to search for the code if you are unsure of the file path."
                 properties["fail_reason"] = "is_directory"
-                return Observation(
-                    message=message, properties=properties, expect_correction=False
-                )
+                return Observation(message=message, properties=properties, expect_correction=False)
 
         view_context = FileContext(repo=self._repository)
         completion = None
@@ -159,12 +141,8 @@ class ViewCode(Action, IdentifyMixin):
                 missing_span_ids = set()
                 found_span_ids = set()
                 if file_span.span_ids and not file.module:
-                    logger.warning(
-                        f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}."
-                    )
-                    message = self.create_retry_message(
-                        file, f"No span ids found. Is it empty?"
-                    )
+                    logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
+                    message = self.create_retry_message(file, f"No span ids found. Is it empty?")
                     properties["fail_reason"] = "invalid_file"
                     return Observation(
                         message=message,
@@ -177,9 +155,7 @@ class ViewCode(Action, IdentifyMixin):
                     if not block_span:
                         # Try to find the relevant code block by code block identifier
                         block_identifier = span_id.split(".")[-1]
-                        blocks = file.module.find_blocks_with_identifier(
-                            block_identifier
-                        )
+                        blocks = file.module.find_blocks_with_identifier(block_identifier)
 
                         if not blocks:
                             missing_span_ids.add(span_id)
@@ -194,13 +170,9 @@ class ViewCode(Action, IdentifyMixin):
                     elif block_span.initiating_block.type == CodeBlockType.CLASS:
                         class_block = block_span.initiating_block
                         found_span_ids.add(block_span.span_id)
-                        view_context.add_spans_to_context(
-                            file_path, class_block.get_all_span_ids()
-                        )
+                        view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
                     else:
-                        view_context.add_span_to_context(
-                            file_path, block_span.span_id, add_extra=False
-                        )
+                        view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
 
             if file_span.start_line:
                 view_context.add_line_span_to_context(
@@ -216,18 +188,14 @@ class ViewCode(Action, IdentifyMixin):
                     view_file.set_patch(file.patch)
 
             if view_context.context_size() > self.max_tokens:
-                view_context, completion = self._identify_code(
-                    args, view_context, self.max_tokens
-                )
+                view_context, completion = self._identify_code(args, view_context, self.max_tokens)
 
             new_span_ids = file_context.add_file_context(view_context)
             properties["files"][file_path] = {
                 "new_span_ids": list(new_span_ids),
             }
 
-        added_new_spans = any(
-            len(file["new_span_ids"]) > 0 for file in properties["files"].values()
-        )
+        added_new_spans = any(len(file["new_span_ids"]) > 0 for file in properties["files"].values())
 
         if view_context.is_empty():
             message = f"\nThe specified code spans wasn't found."
@@ -244,10 +212,7 @@ class ViewCode(Action, IdentifyMixin):
             )
 
             if added_new_spans:
-                summary = (
-                    f"Showed the following code spans:\n"
-                    + view_context.create_summary()
-                )
+                summary = f"Showed the following code spans:\n" + view_context.create_summary()
             else:
                 summary = "The specified code spans has already been viewed in a previous action."
 
@@ -286,11 +251,7 @@ class ViewCode(Action, IdentifyMixin):
                 user_input="Show me lines 50-75 of the database configuration file",
                 action=ViewCodeArgs(
                     thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
-                    files=[
-                        CodeSpan(
-                            file_path="config/database.py", start_line=50, end_line=75
-                        )
-                    ],
+                    files=[CodeSpan(file_path="config/database.py", start_line=50, end_line=75)],
                 ),
             ),
         ]

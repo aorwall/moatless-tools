@@ -41,9 +41,7 @@ class CreateFileArgs(ActionArguments):
 
     @classmethod
     def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema(
-            {"path": "file/path.py", "file_text": "\ncomplete file content\n"}
-        )
+        return cls.format_xml_schema({"path": "file/path.py", "file_text": "\ncomplete file content\n"})
 
 
 class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):

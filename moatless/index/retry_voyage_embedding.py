@@ -9,9 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class VoyageEmbeddingWithRetry(VoyageEmbedding):
-    @retry(
-        wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(6)
-    )
+    @retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(6))
     def _get_embedding(self, texts: List[str], input_type: str) -> List[List[float]]:
         try:
             return self._client.embed(

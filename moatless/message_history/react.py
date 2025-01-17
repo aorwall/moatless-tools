@@ -5,7 +5,9 @@ from litellm import Field
 
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
-    ChatCompletionUserMessage, AllMessageValues, )
+    ChatCompletionUserMessage,
+    AllMessageValues,
+)
 from moatless.message_history.compact import CompactMessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
@@ -16,14 +18,10 @@ logger = logging.getLogger(__name__)
 class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
     disable_thoughts: bool = Field(default=False, description="Do not include thoughts messages in the history")
 
-    def generate_messages(
-        self, node: Node
-    ) -> List[AllMessageValues]:
+    def generate_messages(self, node: Node) -> List[AllMessageValues]:
         previous_nodes = node.get_trajectory()
 
-        messages = [
-            ChatCompletionUserMessage(role="user", content=node.get_root().message)
-        ]
+        messages = [ChatCompletionUserMessage(role="user", content=node.get_root().message)]
 
         if len(previous_nodes) <= 1:
             return messages
@@ -36,11 +34,8 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
             if self.disable_thoughts:
                 thought = ""
             else:
-                thought = (
-                    f"Thought: {action.thoughts}" if hasattr(action, "thoughts") else ""
-                )
+                thought = f"Thought: {action.thoughts}" if hasattr(action, "thoughts") else ""
 
-                
             action_str = f"Action: {action.name}"
             action_input = action.format_args_for_llm()
 
@@ -52,26 +47,14 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
             if action_input:
                 assistant_content += f"\n{action_input}"
 
-            messages.append(
-                ChatCompletionAssistantMessage(
-                    role="assistant", content=assistant_content
-                )
-            )
-            messages.append(
-                ChatCompletionUserMessage(
-                    role="user", content=f"Observation: {observation}"
-                )
-            )
+            messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
+            messages.append(ChatCompletionUserMessage(role="user", content=f"Observation: {observation}"))
 
-        tokens = count_tokens(
-            "".join([m["content"] for m in messages if m.get("content")])
-        )
+        tokens = count_tokens("".join([m["content"] for m in messages if m.get("content")]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
         return messages
 
-    def _generate_summary_history(
-        self, node: Node, previous_nodes: List[Node]
-    ) -> List[AllMessageValues]:
+    def _generate_summary_history(self, node: Node, previous_nodes: List[Node]) -> List[AllMessageValues]:
         formatted_history: List[str] = []
         counter = 0
 
@@ -99,13 +82,9 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
                         and previous_node.observation.summary
                         and i < len(previous_nodes) - 1
                     ):
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.summary}"
-                        )
+                        formatted_state += f"\n\nObservation: {previous_node.observation.summary}"
                     else:
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.message}"
-                        )
+                        formatted_state += f"\n\nObservation: {previous_node.observation.message}"
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")
                     formatted_state += "\n\nObservation: No output found."
@@ -136,9 +115,8 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
                 content += "\n```"
 
         current_test_status = node.file_context.get_test_status()
-        
-        if node.file_context.has_patch() and node.file_context.test_files:
 
+        if node.file_context.has_patch() and node.file_context.test_files:
             response_msg = ""
             if node.file_context.has_test_patch():
                 response_msg = "The following tests have been run:\n"
@@ -152,7 +130,7 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
             failure_details = node.file_context.get_test_failure_details()
             if failure_details:
                 response_msg += f"\n{failure_details}"
-            
+
             summary = f"\n{node.file_context.get_test_summary()}"
             response_msg += summary
 

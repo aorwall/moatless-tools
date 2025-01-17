@@ -67,9 +67,7 @@ class FindFunction(SearchBaseAction):
             file_pattern=args.file_pattern,
         )
 
-    def _search_for_alternative_suggestion(
-        self, args: FindFunctionArgs
-    ) -> SearchCodeResponse:
+    def _search_for_alternative_suggestion(self, args: FindFunctionArgs) -> SearchCodeResponse:
         """Return methods in the same class or other methods in same file with the method name the method in class is not found."""
 
         if args.class_name and args.file_pattern:
@@ -79,15 +77,11 @@ class FindFunction(SearchBaseAction):
             if file and file.module:
                 class_block = file.module.find_by_identifier(args.class_name)
                 if class_block and class_block.type == CodeBlockType.CLASS:
-                    function_blocks = class_block.find_blocks_with_type(
-                        CodeBlockType.FUNCTION
-                    )
+                    function_blocks = class_block.find_blocks_with_type(CodeBlockType.FUNCTION)
                     for function_block in function_blocks:
                         span_ids.append(function_block.belongs_to_span.span_id)
 
-                function_blocks = file.module.find_blocks_with_identifier(
-                    args.function_name
-                )
+                function_blocks = file.module.find_blocks_with_identifier(args.function_name)
                 for function_block in function_blocks:
                     span_ids.append(function_block.belongs_to_span.span_id)
 
@@ -101,9 +95,7 @@ class FindFunction(SearchBaseAction):
                     ]
                 )
 
-            return self._code_index.find_class(
-                args.class_name, file_pattern=args.file_pattern
-            )
+            return self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
 
         return SearchCodeResponse()
 

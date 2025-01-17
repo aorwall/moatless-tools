@@ -23,10 +23,7 @@ class AppendStringArgs(ActionArguments):
     model_config = ConfigDict(title="AppendString")
 
     path: str = Field(..., description="Path to the file to append to")
-    new_str: str = Field(
-        ..., description="Text content to append at the end of the file"
-    )
-
+    new_str: str = Field(..., description="Text content to append at the end of the file")
 
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
@@ -36,9 +33,7 @@ class AppendStringArgs(ActionArguments):
 
     @classmethod
     def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema(
-            {"path": "file/path.py", "new_str": "\ncontent to append at end of file\n"}
-        )
+        return cls.format_xml_schema({"path": "file/path.py", "new_str": "\ncontent to append at end of file\n"})
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:

@@ -67,15 +67,11 @@ class CodingAgent(ActionAgent):
 
         action_completion_format = completion_model.response_format
         if action_completion_format != LLMResponseFormat.TOOLS:
-            logger.info(
-                "Default to JSON as Response format for action completion model"
-            )
+            logger.info("Default to JSON as Response format for action completion model")
             action_completion_format = LLMResponseFormat.JSON
 
         # Create action completion model by cloning the input model with JSON response format
-        action_completion_model = completion_model.clone(
-            response_format=action_completion_format
-        )
+        action_completion_model = completion_model.clone(response_format=action_completion_format)
 
         supports_anthropic_computer_use = completion_model.model.startswith("claude-3-5-sonnet")
 
@@ -86,7 +82,7 @@ class CodingAgent(ActionAgent):
                 completion_model=action_completion_model,
                 runtime=runtime,
             )
-            
+
             action_type = "Claude actions with computer use capability"
             use_few_shots = False
         else:
@@ -99,7 +95,6 @@ class CodingAgent(ActionAgent):
             action_type = "standard edit code actions"
             use_few_shots = True
 
-    
         # Generate workflow prompt based on available actions
         workflow_prompt = generate_workflow_prompt(actions, runtime is not None)
 
@@ -112,16 +107,23 @@ class CodingAgent(ActionAgent):
                 system_prompt += REACT_CORE_OPERATION_RULES_NO_THOUGHTS
             else:
                 system_prompt += REACT_CORE_OPERATION_RULES
-                
+
         elif completion_model.response_format == LLMResponseFormat.TOOLS:
             system_prompt += generate_react_guidelines(thoughts_in_action)
         else:
             raise ValueError(f"Unsupported response format: {completion_model.response_format}")
-            
+
         # Add workflow and guidelines
-        system_prompt += "\n" + workflow_prompt + "\n" + generate_guideline_prompt(runtime is not None, thoughts_in_action) + "\n" + ADDITIONAL_NOTES
-    
-        message_generator = MessageHistoryGenerator(
+        system_prompt += (
+            "\n"
+            + workflow_prompt
+            + "\n"
+            + generate_guideline_prompt(runtime is not None, thoughts_in_action)
+            + "\n"
+            + ADDITIONAL_NOTES
+        )
+
+        message_generator = MessageHistoryGenerator.create(
             message_history_type=message_history_type,
             include_file_context=True,
             thoughts_in_action=thoughts_in_action,
@@ -131,9 +133,7 @@ class CodingAgent(ActionAgent):
             "completion_model": completion_model.__class__.__name__,
             "code_index_enabled": code_index is not None,
             "runtime_enabled": runtime is not None,
-            "edit_completion_model": edit_completion_model.__class__.__name__
-            if edit_completion_model
-            else None,
+            "edit_completion_model": edit_completion_model.__class__.__name__ if edit_completion_model else None,
             "action_type": action_type,
             "actions": [a.__class__.__name__ for a in actions],
             "message_history_type": message_history_type.value,
@@ -141,9 +141,7 @@ class CodingAgent(ActionAgent):
             "file_context_enabled": True,
         }
 
-        logger.info(
-            f"Created CodingAgent with configuration: {json.dumps(config, indent=2)}"
-        )
+        logger.info(f"Created CodingAgent with configuration: {json.dumps(config, indent=2)}")
 
         return cls(
             completion=completion_model,

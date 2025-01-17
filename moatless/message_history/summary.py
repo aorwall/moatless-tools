@@ -2,7 +2,9 @@ import logging
 from typing import List
 
 from moatless.message_history.schema import (
-    ChatCompletionUserMessage, AllMessageValues, )
+    ChatCompletionUserMessage,
+    AllMessageValues,
+)
 
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
@@ -11,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
-
     def generate_messages(self, node: Node) -> List[AllMessageValues]:
         previous_nodes = node.get_trajectory()
 
@@ -38,17 +39,13 @@ class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
 
                 if previous_node.observation:
                     if (
-                            hasattr(previous_node.observation, "summary")
-                            and previous_node.observation.summary
-                            and i < len(previous_nodes) - 1
+                        hasattr(previous_node.observation, "summary")
+                        and previous_node.observation.summary
+                        and i < len(previous_nodes) - 1
                     ):
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.summary}"
-                        )
+                        formatted_state += f"\n\nObservation: {previous_node.observation.summary}"
                     else:
-                        formatted_state += (
-                            f"\n\nObservation: {previous_node.observation.message}"
-                        )
+                        formatted_state += f"\n\nObservation: {previous_node.observation.message}"
                 else:
                     logger.warning(f"No output found for Node{previous_node.node_id}")
                     formatted_state += "\n\nObservation: No output found."

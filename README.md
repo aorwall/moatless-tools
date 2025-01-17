@@ -146,10 +146,10 @@ Available dataset splits that can be specified with the `--split` argument:
 |------------|-------------|----------------|
 | lite | All instances from the lite dataset | 300 | 
 | verified | All instances from the verified dataset | 450 | 
-| verified_mini | A subset of SWEBench-verified that has approximately the same distribution of performance, test pass rates and difficulty as the original dataset ([source](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini)) | 50 |
+| verified_mini | [MariusHobbhahn/swe-bench-verified-mini](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini), a subset of SWE-Bench Verified  | 50 |
 | lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 80 |
 
-Default model configurations are provided for supported models. When specifying just the `--model` argument, the following configurations are used:
+Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. When specifying just the `--model` argument, the following configurations are used:
 
 | Model | Response Format | Message History | Thoughts in Action |
 |-------|----------------|-----------------|-------------------|
@@ -157,12 +157,8 @@ Default model configurations are provided for supported models. When specifying 
 | claude-3-5-haiku-20241022 | tool_call | messages | no |
 | gpt-4o-2024-11-20 | tool_call | messages | yes |
 | gpt-4o-mini-2024-07-18 | tool_call | messages | yes |
-| o1-preview-2024-09-12 | react | react | no |
-| o1-mini-2024-09-12 | react | react | no |
 | deepseek/deepseek-chat | react | react | yes |
-| gemini/gemini-exp-1206 | tool_call | messages | no |
 | gemini/gemini-2.0-flash-exp | tool_call | messages | yes |
-| gemini/gemini-2.0-flash-thinking-exp | react | react | no |
 | openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no |
 | openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | no |
 
@@ -178,7 +174,7 @@ poetry run python -m moatless.benchmark.run_evaluation \
 # Run specific instances with GPT-4
 poetry run python -m moatless.benchmark.run_evaluation \
   --model gpt-4o \
-  --instance-ids django__django-16379 django__django-16380
+  --instance-ids "django__django-16379"
 ```
 
 # Code Example

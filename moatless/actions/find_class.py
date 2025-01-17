@@ -33,9 +33,7 @@ class FindClassArgs(SearchBaseArgs):
         if "." in self.class_name:
             original_name = self.class_name
             self.class_name = self.class_name.split(".")[-1]
-            logger.info(
-                f"Using class name '{self.class_name}' from fully qualified name '{original_name}'"
-            )
+            logger.info(f"Using class name '{self.class_name}' from fully qualified name '{original_name}'")
         return self
 
     model_config = ConfigDict(title="FindClass")
@@ -57,12 +55,8 @@ class FindClass(SearchBaseAction):
         return prompt
 
     def _search(self, args: FindClassArgs) -> SearchCodeResponse:
-        logger.info(
-            f"{self.name}: {args.class_name} (file_pattern: {args.file_pattern})"
-        )
-        return self._code_index.find_class(
-            args.class_name, file_pattern=args.file_pattern
-        )
+        logger.info(f"{self.name}: {args.class_name} (file_pattern: {args.file_pattern})")
+        return self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         return (
@@ -70,9 +64,7 @@ class FindClass(SearchBaseAction):
             f"Use the function ViewCode and specify the SpanIDs of the relevant functions to view them.\n"
         )
 
-    def _search_for_alternative_suggestion(
-        self, args: FindClassArgs
-    ) -> SearchCodeResponse:
+    def _search_for_alternative_suggestion(self, args: FindClassArgs) -> SearchCodeResponse:
         if args.file_pattern:
             return self._code_index.find_class(args.class_name, file_pattern=None)
         return SearchCodeResponse()

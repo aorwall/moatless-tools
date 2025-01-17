@@ -29,9 +29,7 @@ class EvaluationRepository(ABC):
         pass
 
     @abstractmethod
-    def load_instance(
-        self, evaluation_name: str, instance_id: str
-    ) -> Optional[EvaluationInstance]:
+    def load_instance(self, evaluation_name: str, instance_id: str) -> Optional[EvaluationInstance]:
         """Load an instance."""
         pass
 
@@ -76,9 +74,7 @@ class EvaluationFileRepository(EvaluationRepository):
 
     def load_evaluation(self, evaluation_name: str) -> Evaluation | None:
         """Load an evaluation from disk."""
-        eval_path = os.path.join(
-            self.get_evaluation_dir(evaluation_name), "evaluation.json"
-        )
+        eval_path = os.path.join(self.get_evaluation_dir(evaluation_name), "evaluation.json")
         logger.debug(f"Attempting to load evaluation from: {eval_path}")
         if not os.path.exists(eval_path):
             logger.warning(f"Evaluation file not found: {eval_path}")
@@ -89,9 +85,7 @@ class EvaluationFileRepository(EvaluationRepository):
             with open(eval_path, "r") as f:
                 data = json.load(f)
                 evaluation = Evaluation.model_validate(data)
-                logger.debug(
-                    f"Successfully loaded evaluation {evaluation_name} with status {evaluation.status}"
-                )
+                logger.debug(f"Successfully loaded evaluation {evaluation_name} with status {evaluation.status}")
                 return evaluation
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in evaluation file {eval_path}: {e}")
@@ -106,17 +100,11 @@ class EvaluationFileRepository(EvaluationRepository):
             evaluation = self.load_evaluation(evaluation_name)
             # TODO: Add or update instance on evaluation
 
-    def load_instance(
-        self, evaluation_name: str, instance_id: str
-    ) -> Optional[EvaluationInstance]:
+    def load_instance(self, evaluation_name: str, instance_id: str) -> Optional[EvaluationInstance]:
         """Load an instance from disk."""
 
         evaluation = self.load_evaluation(evaluation_name)
-        return next(
-            instance
-            for instance in evaluation.instances
-            if instance.instance_id == instance_id
-        )
+        return next(instance for instance in evaluation.instances if instance.instance_id == instance_id)
 
     def delete_instance(self, evaluation_name: str, instance_id: str) -> None:
         """Delete an instance directory."""
@@ -131,9 +119,7 @@ class EvaluationFileRepository(EvaluationRepository):
     def list_evaluations(self) -> List[str]:
         """List all evaluation names from disk."""
         if not os.path.exists(self.evaluations_dir):
-            logger.debug(
-                f"Evaluations directory does not exist: {self.evaluations_dir}"
-            )
+            logger.debug(f"Evaluations directory does not exist: {self.evaluations_dir}")
             return []
 
         # Use os.listdir to get all directories and filter for those that have evaluation.json

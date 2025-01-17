@@ -32,15 +32,11 @@ class ActionArguments(ResponseSchema, ABC):
         return cls(**tool_args)
 
     def equals(self, other: "ActionArguments") -> bool:
-        return self.model_dump(exclude={"thoughts"}) == other.model_dump(
-            exclude={"thoughts"}
-        )
+        return self.model_dump(exclude={"thoughts"}) == other.model_dump(exclude={"thoughts"})
 
     def to_prompt(self):
         prompt = f"Action: {self.name}\n"
-        prompt += "\n".join(
-            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
-        )
+        prompt += "\n".join([f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()])
         return prompt
 
     def short_summary(self) -> str:
@@ -93,11 +89,7 @@ class ActionArguments(ResponseSchema, ABC):
             full_module_name = f"moatless.actions.{module_name}"
             module = importlib.import_module(full_module_name)
             for name, obj in module.__dict__.items():
-                if (
-                    isinstance(obj, type)
-                    and issubclass(obj, ActionArguments)
-                    and obj != ActionArguments
-                ):
+                if isinstance(obj, type) and issubclass(obj, ActionArguments) and obj != ActionArguments:
                     _action_args[name] = obj
 
     @classmethod
@@ -105,10 +97,7 @@ class ActionArguments(ResponseSchema, ABC):
         if isinstance(obj, dict):
             obj = obj.copy()
             action_args_class_path = obj.pop("action_args_class", None)
-            if (
-                action_args_class_path
-                == "moatless.actions.request_context.RequestMoreContextArgs"
-            ):
+            if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
                 action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
 
             if action_args_class_path:
@@ -117,6 +106,7 @@ class ActionArguments(ResponseSchema, ABC):
                 action_args_class = getattr(module, class_name)
                 return action_args_class.model_validate(obj)
         return super().model_validate(obj)
+
 
 class Observation(BaseModel):
     message: Optional[str] = Field(
@@ -127,19 +117,13 @@ class Observation(BaseModel):
         None,
         description="Summary of the observation, will be displayed in summarised message history.",
     )
-    terminal: bool = Field(
-        False, description="Indicates if this action results in a terminal state"
-    )
+    terminal: bool = Field(False, description="Indicates if this action results in a terminal state")
     expect_correction: bool = Field(
         False,
         description="Indicates that a the action arguments was inccorect and we expect a correction",
     )
-    properties: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Additional properties"
-    )
-    execution_completion: Optional[Completion] = Field(
-        None, description="Completion created when executing the action"
-    )
+    properties: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
+    execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
 
     @classmethod
     def create(cls, message: str, terminal: bool = False):
@@ -154,9 +138,7 @@ class RewardScaleEntry(BaseModel):
 
 class FewShotExample(BaseModel):
     user_input: str = Field(..., description="The user's input/question")
-    action: ActionArguments = Field(
-        ..., description="The expected response as ActionArguments"
-    )
+    action: ActionArguments = Field(..., description="The expected response as ActionArguments")
 
     @classmethod
     def create(cls, user_input: str, action: ActionArguments) -> "FewShotExample":

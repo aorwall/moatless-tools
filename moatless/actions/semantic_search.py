@@ -23,9 +23,7 @@ class SemanticSearchArgs(SearchBaseArgs):
     - Want to explore how certain features are implemented
     """
 
-    query: str = Field(
-        ..., description="Natural language description of what you're looking for."
-    )
+    query: str = Field(..., description="Natural language description of what you're looking for.")
     category: Optional[str] = Field(
         "implementation",
         description="The category of files to search for. This can be 'implementation' for core implementation files or 'test' for test files.",
@@ -63,9 +61,7 @@ class SemanticSearch(SearchBaseAction):
             category=args.category,
         )
 
-    def _search_for_alternative_suggestion(
-        self, args: SemanticSearchArgs
-    ) -> SearchCodeResponse:
+    def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
         if args.file_pattern:
             return self._code_index.semantic_search(
                 args.query,

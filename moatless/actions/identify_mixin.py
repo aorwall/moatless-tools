@@ -38,9 +38,7 @@ class IdentifyMixin:
             self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
         return self
 
-    def _identify_code(
-        self, args, view_context: FileContext, max_tokens: int
-    ) -> Tuple[FileContext, Completion]:
+    def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:
@@ -73,9 +71,7 @@ class IdentifyMixin:
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self.completion_model.create_completion(
-                messages=messages
-            )
+            completion_response = self.completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
@@ -98,14 +94,10 @@ class IdentifyMixin:
             tokens = identified_context.context_size()
 
             if tokens > self.max_identify_tokens:
-                logger.info(
-                    f"Identified code sections are too large ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are too large ({tokens} tokens).")
 
                 messages.append(
-                    ChatCompletionAssistantMessage(
-                        role="assistant", content=identified_code.model_dump_json()
-                    )
+                    ChatCompletionAssistantMessage(role="assistant", content=identified_code.model_dump_json())
                 )
 
                 messages.append(
@@ -116,13 +108,12 @@ class IdentifyMixin:
                     )
                 )
             else:
-                logger.info(
-                    f"Identified code sections are within the token limit ({tokens} tokens)."
-                )
+                logger.info(f"Identified code sections are within the token limit ({tokens} tokens).")
                 return identified_context, completion_response.completion
 
         # If we've exhausted all retries and still too large
         raise CompletionRejectError(
             f"Unable to reduce code selection to under {max_tokens} tokens after {MAX_RETRIES} attempts",
             last_completion=completion,
+            messages=messages,
         )

@@ -113,18 +113,17 @@ SUPPORTED_MODELS = [
     CLAUDE_35_HAIKU,
     GPT4O,
     GPT4O_MINI,
-    O1_MINI,
+    GEMINI_FLASH,
     DEEPSEEK_CHAT,
     LLAMA_31_70B,
     QWEN_25_CODER,
 ]
 
-MODEL_CONFIGS = {
-    config["model"]: config for config in SUPPORTED_MODELS
-}
+MODEL_CONFIGS = {config["model"]: config for config in SUPPORTED_MODELS}
+
 
 def get_model_config(model_name: str) -> dict:
     """Get the configuration for a specific model."""
     if model_name not in MODEL_CONFIGS:
         raise ValueError(f"Model {model_name} not found in supported models")
-    return MODEL_CONFIGS[model_name] 
+    return MODEL_CONFIGS[model_name]

@@ -1,1 +1,1 @@
-from moatless.message_history.message_history import MessageHistoryGenerator
+from moatless.message_history.message_history import MessageHistoryGenerator, MessageHistoryType

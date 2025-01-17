@@ -12,9 +12,7 @@ class AgentSettings(BaseModel):
     completion_model: BaseCompletionModel = Field(
         ..., description="Completion model to be used for generating completions"
     )
-    system_prompt: Optional[str] = Field(
-        None, description="System prompt to be used for generating completions"
-    )
+    system_prompt: Optional[str] = Field(None, description="System prompt to be used for generating completions")
     actions: List[str] = Field(default_factory=list)
     message_history_type: MessageHistoryType = Field(
         default=MessageHistoryType.MESSAGES,
@@ -44,8 +42,6 @@ class AgentSettings(BaseModel):
     def model_validate(cls, obj: Any) -> "AgentSettings":
         if isinstance(obj, dict):
             if "message_history_type" in obj:
-                obj["message_history_type"] = MessageHistoryType(
-                    obj["message_history_type"]
-                )
+                obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
 
         return super().model_validate(obj)

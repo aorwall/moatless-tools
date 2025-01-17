@@ -23,16 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 class ActionAgent(BaseModel):
-    system_prompt: str = Field(
-        ..., description="System prompt to be used for generating completions"
-    )
-    use_few_shots: bool = Field(
-        True, description="Whether to use few-shot examples for generating completions"
-    )
+    system_prompt: str = Field(..., description="System prompt to be used for generating completions")
+    use_few_shots: bool = Field(True, description="Whether to use few-shot examples for generating completions")
     thoughts_in_action: bool = Field(True, description="")
     actions: List[Action] = Field(default_factory=list)
     message_generator: MessageHistoryGenerator = Field(
-        default_factory=lambda: MessageHistoryGenerator(),
         description="Generator for message history",
     )
 
@@ -59,15 +54,9 @@ class ActionAgent(BaseModel):
         self.set_actions(actions)
 
     @classmethod
-    def from_agent_settings(
-        cls, agent_settings: AgentSettings, actions: List[Action] | None = None
-    ):
+    def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
         if agent_settings.actions:
-            actions = [
-                action
-                for action in actions
-                if action.__class__.__name__ in agent_settings.actions
-            ]
+            actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
 
         return cls(
             completion=agent_settings.completion_model,
@@ -86,13 +75,9 @@ class ActionAgent(BaseModel):
     def verify_actions(self) -> "ActionAgent":
         for action in self.actions:
             if not isinstance(action, Action):
-                raise ValidationError(
-                    f"Invalid action type: {type(action)}. Expected Action subclass."
-                )
+                raise ValidationError(f"Invalid action type: {type(action)}. Expected Action subclass.")
             if not hasattr(action, "args_schema"):
-                raise ValidationError(
-                    f"Action {action.__class__.__name__} is missing args_schema attribute"
-                )
+                raise ValidationError(f"Action {action.__class__.__name__} is missing args_schema attribute")
         return self
 
     def run(self, node: Node):
@@ -114,29 +99,33 @@ class ActionAgent(BaseModel):
             node.completions["build_action"] = completion_response.completion
 
             if completion_response.structured_outputs:
-                node.action_steps = [
-                    ActionStep(action=action)
-                    for action in completion_response.structured_outputs
-                ]
+                node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
 
             node.assistant_message = completion_response.text_response
-        except Exception as e:
+        except CompletionError as e:
             node.terminal = True
             node.error = traceback.format_exc()
-            logger.error(f"Node{node.node_id}: Build action failed with error: {e}") 
-            if hasattr(e, "last_completion") and e.last_completion:
+            if e.last_completion:
+                logger.error(f"Node{node.node_id}: Build action failed with completion error: {e}")
+
                 node.completions["build_action"] = Completion.from_llm_completion(
                     input_messages=e.messages if hasattr(e, "messages") else [],
                     completion_response=e.last_completion,
                     model=self.completion.model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
-                logger.warning(
-                    f"Node{node.node_id}: Build action failed with error: {e}"
-                )
-                if isinstance(e, CompletionRejectError):
-                    return
-            
+            else:
+                logger.error(f"Node{node.node_id}: Build action failed with error: {e}")
+
+            if isinstance(e, CompletionRejectError):
+                return
+            else:
+                raise e
+        except Exception as e:
+            node.terminal = True
+            node.error = traceback.format_exc()
+            logger.error(f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}")
+
             raise e
 
         if node.action is None:
@@ -145,9 +134,7 @@ class ActionAgent(BaseModel):
         duplicate_node = node.find_duplicate()
         if duplicate_node:
             node.is_duplicate = True
-            logger.info(
-                f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
-            )
+            logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution.")
             return
 
         logger.info(f"Node{node.node_id}: Execute {len(node.action_steps)} actions")
@@ -164,19 +151,13 @@ class ActionAgent(BaseModel):
             raise RuntimeError(f"Action {type(node.action)} not found in action map.")
 
         try:
-            action_step.observation = action.execute(
-                action_step.action, node.file_context, node.workspace
-            )
+            action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
             if not action_step.observation:
-                logger.warning(
-                    f"Node{node.node_id}: Action {action_step.action.name} returned no observation"
-                )
+                logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:
                 node.terminal = action_step.observation.terminal
                 if action_step.observation.execution_completion:
-                    action_step.completion = (
-                        action_step.observation.execution_completion
-                    )
+                    action_step.completion = action_step.observation.execution_completion
 
             logger.info(
                 f"Executed action: {action_step.action.name}. "
@@ -186,11 +167,16 @@ class ActionAgent(BaseModel):
 
         except CompletionRejectError as e:
             logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
-            action_step.completion = e.last_completion
+            action_step.completion = Completion.from_llm_completion(
+                input_messages=e.messages,
+                completion_response=e.last_completion,
+                model=self.completion.model,
+                usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
+            )
             node.error = traceback.format_exc()
             node.terminal = True
             raise e
-            
+
     def generate_system_prompt(self) -> str:
         """Generate a system prompt for the agent."""
 
@@ -222,6 +208,7 @@ class ActionAgent(BaseModel):
                         "CreateFileArgs",
                         "AppendStringArgs",
                         "InsertLinesArgs",
+                        "FindCodeSnippetArgs",
                     ]:
                         prompt += f"\nTask: {example.user_input}"
                         if self.thoughts_in_action:
@@ -230,26 +217,22 @@ class ActionAgent(BaseModel):
 
                         if example.action.__class__.__name__ == "StringReplaceArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += (
-                                f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
-                            )
-                            prompt += (
-                                f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                            )
+                            prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
                         elif example.action.__class__.__name__ == "AppendStringArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += (
-                                f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                            )
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
                         elif example.action.__class__.__name__ == "CreateFileArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
                             prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
                         elif example.action.__class__.__name__ == "InsertLinesArgs":
                             prompt += f"<path>{action_data['path']}</path>\n"
                             prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
-                            prompt += (
-                                f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                            )
+                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                        elif example.action.__class__.__name__ == "FindCodeSnippetArgs":
+                            if "file_pattern" in action_data:
+                                prompt += f"<file_pattern>{action_data['file_pattern']}</file_pattern>\n"
+                            prompt += f"<code_snippet>{action_data['code_snippet']}</code_snippet>\n"
                     else:
                         # Original JSON format for other actions
                         prompt += (
@@ -264,16 +247,16 @@ class ActionAgent(BaseModel):
                         "action": example.action.model_dump(),
                         "action_type": example.action.name,
                     }
-                    prompt += f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
+                    prompt += (
+                        f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
+                    )
 
                 elif self.completion.response_format == LLMResponseFormat.TOOLS:
                     tools_json = {"tool": example.action.name}
                     if self.thoughts_in_action:
                         tools_json.update(example.action.model_dump())
                     else:
-                        tools_json.update(
-                            example.action.model_dump(exclude={"thoughts"})
-                        )
+                        tools_json.update(example.action.model_dump(exclude={"thoughts"}))
 
                     prompt += f"Task: {example.user_input}\n"
                     if not self.thoughts_in_action:
@@ -307,9 +290,7 @@ class ActionAgent(BaseModel):
 
             message_generator_data = obj.get("message_generator", {})
             if message_generator_data:
-                obj["message_generator"] = MessageHistoryGenerator.model_validate(
-                    message_generator_data
-                )
+                obj["message_generator"] = MessageHistoryGenerator.model_validate(message_generator_data)
 
             if completion_data:
                 obj["completion"] = BaseCompletionModel.model_validate(completion_data)
@@ -371,9 +352,7 @@ class ActionAgent(BaseModel):
 
         # Handle message generator
         if "message_generator" in data and isinstance(data["message_generator"], dict):
-            data["message_generator"] = MessageHistoryGenerator.model_validate(
-                data["message_generator"]
-            )
+            data["message_generator"] = MessageHistoryGenerator.model_validate(data["message_generator"])
 
         # Handle agent class if specified
         if "agent_class" in data:

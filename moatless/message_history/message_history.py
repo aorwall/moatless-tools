@@ -3,9 +3,7 @@ from typing import List
 
 from pydantic import BaseModel, Field, model_serializer
 
-from moatless.completion.schema import (
-    ChatCompletionUserMessage, AllMessageValues
-)
+from moatless.completion.schema import ChatCompletionUserMessage, AllMessageValues
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
@@ -18,16 +16,9 @@ class MessageHistoryGenerator(BaseModel):
         default=MessageHistoryType.MESSAGES,
         description="Type of message history to generate",
     )
-    max_tokens: int = Field(
-        default=20000, description="Maximum number of tokens allowed in message history"
-    )
-    include_file_context: bool = Field(
-        default=True, description="Whether to include file context in messages"
-    )
-    include_git_patch: bool = Field(
-        default=True, description="Whether to include git patch in messages"
-    )
-
+    max_tokens: int = Field(default=20000, description="Maximum number of tokens allowed in message history")
+    include_file_context: bool = Field(default=True, description="Whether to include file context in messages")
+    include_git_patch: bool = Field(default=True, description="Whether to include git patch in messages")
     thoughts_in_action: bool = Field(
         default=False,
         description="Whether to include thoughts in the action or in the message",
@@ -57,28 +48,20 @@ class MessageHistoryGenerator(BaseModel):
 
                 if previous_node.artifact_changes:
                     for change in previous_node.artifact_changes:
-                        artifact = previous_node.workspace.get_artifact_by_id(
-                            change.artifact_id
-                        )
+                        artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
                         if artifact:
                             message = f"{artifact.type} artifact: {artifact.id}"
                             message_content.append({"type": "text", "text": message})
                             message_content.append(artifact.to_prompt_format())
 
-                messages.append(
-                    ChatCompletionUserMessage(role="user", content=message_content)
-                )
+                messages.append(ChatCompletionUserMessage(role="user", content=message_content))
                 tokens += count_tokens(previous_node.user_message)
 
             tool_calls = []
             tool_responses = []
 
             if previous_node.feedback_data:
-                messages.append(
-                    ChatCompletionUserMessage(
-                        role="user", content=previous_node.feedback_data.feedback
-                    )
-                )
+                messages.append(ChatCompletionUserMessage(role="user", content=previous_node.feedback_data.feedback))
 
             if not previous_node.assistant_message and not previous_node.action_steps:
                 continue
@@ -97,16 +80,12 @@ class MessageHistoryGenerator(BaseModel):
                         "type": "function",
                         "function": {
                             "name": action_step.action.name,
-                            "arguments": action_step.action.model_dump_json(
-                                exclude=exclude
-                            ),
+                            "arguments": action_step.action.model_dump_json(exclude=exclude),
                         },
                     }
                 )
 
-                tokens += count_tokens(
-                    action_step.action.model_dump_json(exclude=exclude)
-                )
+                tokens += count_tokens(action_step.action.model_dump_json(exclude=exclude))
 
                 tool_responses.append(
                     {
@@ -137,21 +116,30 @@ class MessageHistoryGenerator(BaseModel):
         return messages
 
     @classmethod
+    def create(cls, message_history_type: MessageHistoryType, **obj):
+        obj["message_history_type"] = message_history_type
+
+        if message_history_type == MessageHistoryType.REACT:
+            from moatless.message_history.react import ReactMessageHistoryGenerator
+
+            return ReactMessageHistoryGenerator(**obj)
+
+        elif message_history_type == MessageHistoryType.MESSAGES_COMPACT:
+            from moatless.message_history.compact import CompactMessageHistoryGenerator
+
+            return CompactMessageHistoryGenerator(**obj)
+
+        elif message_history_type == MessageHistoryType.SUMMARY:
+            from moatless.message_history.summary import SummaryMessageHistoryGenerator
+
+            return SummaryMessageHistoryGenerator(**obj)
+        else:
+            raise ValueError(f"Invalid message_history_type: {message_history_type}")
+
+    @classmethod
     def model_validate(cls, obj):
         if isinstance(obj, dict) and "message_history_type" in obj:
-            message_history_type = MessageHistoryType(obj["message_history_type"])
-            obj["message_history_type"] = message_history_type
+            obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
+            return cls.create(**obj)
 
-            if message_history_type == MessageHistoryType.REACT:
-                from moatless.message_history.react import ReactMessageHistoryGenerator
-                return ReactMessageHistoryGenerator(**obj)
-
-            elif message_history_type == MessageHistoryType.MESSAGES_COMPACT:
-                from moatless.message_history.compact import CompactMessageHistoryGenerator
-                return CompactMessageHistoryGenerator(**obj)
-
-            elif message_history_type == MessageHistoryType.SUMMARY:
-                from moatless.message_history.summary import SummaryMessageHistoryGenerator
-                return SummaryMessageHistoryGenerator(**obj)
-
-        return cls(**obj)
+        return obj

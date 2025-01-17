@@ -211,9 +211,7 @@ def create_trajectory_stats(
     else:
         context_stats = None
 
-    result = TrajectoryStats(
-        state_id=trajectory_state.node_id, context_stats=context_stats
-    )
+    result = TrajectoryStats(state_id=trajectory_state.node_id, context_stats=context_stats)
     nodes = trajectory_state.get_trajectory()
 
     last_action = None
@@ -237,9 +235,7 @@ def create_trajectory_stats(
                 current_repeated = 1
             else:
                 current_repeated += 1
-                result.max_repeated_actions = max(
-                    result.max_repeated_actions, current_repeated
-                )
+                result.max_repeated_actions = max(result.max_repeated_actions, current_repeated)
 
             if action_name not in result.actions:
                 result.actions[action_name] = 0
@@ -268,7 +264,7 @@ def create_trajectory_stats(
                         result.flags.append("failed_tests")
 
             if node.observation and node.observation.properties:
-                #if "flags" in node.observation.properties:
+                # if "flags" in node.observation.properties:
                 #    for flag in node.observation.properties["flags"]:
                 #        if flag not in result.flags:
                 #            result.flags.append(flag)
@@ -279,7 +275,20 @@ def create_trajectory_stats(
                     if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large"]:
                         result.failed_actions += 1
 
-                    if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large", "no_spans_found", "no_changes", "no_test_files", "file_exists", "file_not_found", "file_not_in_context", "string_already_exists", "string_not_found", "invalid_path"]:
+                    if fail_reason not in [
+                        "no_spans_added",
+                        "no_search_hits",
+                        "search_too_large",
+                        "no_spans_found",
+                        "no_changes",
+                        "no_test_files",
+                        "file_exists",
+                        "file_not_found",
+                        "file_not_in_context",
+                        "string_already_exists",
+                        "string_not_found",
+                        "invalid_path",
+                    ]:
                         if fail_reason not in result.flags:
                             result.flags.append(fail_reason)
 
@@ -301,10 +310,10 @@ def create_trajectory_stats(
                 if completion and completion.usage:
                     result.max_build_tokens = max(
                         result.max_build_tokens,
-                        completion.usage.get_total_prompt_tokens(completion.model) + completion.usage.completion_tokens
+                        completion.usage.get_total_prompt_tokens(completion.model) + completion.usage.completion_tokens,
                     )
 
-                if node.completions["build_action"].retries:
+                if node.completions["build_action"].retries and node.completions["build_action"].retries > 1:
                     result.retries += node.completions["build_action"].retries
 
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
@@ -314,17 +323,12 @@ def create_trajectory_stats(
             else:
                 action_dumps.add(dump_str)
 
-            
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
         result.missing_test_files = len(missing_test_files)
 
     if evaluation_result:
-        result.resolved = (
-            evaluation_result.get("resolved")
-            if evaluation_result.get("resolved") is not None
-            else None
-        )
+        result.resolved = evaluation_result.get("resolved") if evaluation_result.get("resolved") is not None else None
 
     if trajectory_state.file_context:
         patch = trajectory_state.file_context.generate_git_patch()
@@ -337,16 +341,12 @@ def create_trajectory_stats(
             filtered_diff = filter_test_code_from_diff(patch)
             filtered_diff_hash = create_sha256_hash(filtered_diff)
 
-            for patch_hash in instance.get("llm_monkeys", {}).get(
-                "resolved_patches", []
-            ):
+            for patch_hash in instance.get("llm_monkeys", {}).get("resolved_patches", []):
                 if patch_hash == diff_hash or patch_hash == filtered_diff_hash:
                     result.llm_monkey_status = "resolved"
 
             if not result.llm_monkey_status:
-                for patch_hash in instance.get("llm_monkeys", {}).get(
-                    "unresolved_patches", []
-                ):
+                for patch_hash in instance.get("llm_monkeys", {}).get("unresolved_patches", []):
                     if patch_hash == diff_hash or patch_hash == filtered_diff_hash:
                         result.llm_monkey_status = "unresolved"
 
@@ -397,9 +397,7 @@ def to_result(
             best_node = agentic_loop.get_last_node()
             if not best_node:
                 status = "pending"
-            elif (
-                best_node.action and best_node.action.name == "Error"
-            ) or best_node.error:
+            elif (best_node.action and best_node.action.name == "Error") or best_node.error:
                 status = "error"
             elif not best_node.file_context.generate_git_patch(ignore_tests=True):
                 status = "no_patch"
@@ -412,11 +410,7 @@ def to_result(
         elif eval_report:
             best_node = agentic_loop.get_last_node()
             if best_node:
-                resolved = (
-                    eval_report.get("node_results", {})
-                    .get(str(best_node.node_id), {})
-                    .get("resolved", None)
-                )
+                resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:
                 logger.warning(f"No best node found for {info['instance_id']}")
 
@@ -462,39 +456,24 @@ def to_result(
         for action, count in traj.actions.items():
             result.actions[action] = result.actions.get(action, 0) + count
 
-        result.max_repeated_actions = max(
-            result.max_repeated_actions, traj.max_repeated_actions
-        )
+        result.max_repeated_actions = max(result.max_repeated_actions, traj.max_repeated_actions)
 
         if traj.status == "finished":
             result.solutions += 1
-            if traj.reward and (
-                result.max_reward is None or traj.reward > result.max_reward
-            ):
+            if traj.reward and (result.max_reward is None or traj.reward > result.max_reward):
                 result.max_reward = traj.reward
         elif traj.status == "rejected":
             result.rejected_solutions += 1
 
         if eval_report and "node_results" in eval_report:
-            if (
-                eval_report["node_results"]
-                .get(str(traj.state_id), {})
-                .get("resolved")
-                is not None
-            ):
+            if eval_report["node_results"].get(str(traj.state_id), {}).get("resolved") is not None:
                 if traj.resolved is True:
                     result.resolved_solutions += 1
-                    if traj.reward and (
-                        result.resolved_max_reward is None
-                        or traj.reward > result.resolved_max_reward
-                    ):
+                    if traj.reward and (result.resolved_max_reward is None or traj.reward > result.resolved_max_reward):
                         result.resolved_max_reward = traj.reward
                 elif traj.resolved is False:
                     result.failed_solutions += 1
-                    if traj.reward and (
-                        result.failed_max_reward is None
-                        or traj.reward > result.failed_max_reward
-                    ):
+                    if traj.reward and (result.failed_max_reward is None or traj.reward > result.failed_max_reward):
                         result.failed_max_reward = traj.reward
 
         if traj.edits > 0:
@@ -510,9 +489,7 @@ def to_result(
             if flag not in result.flags:
                 result.flags.append(flag)
 
-        result.max_build_tokens = max(
-            result.max_build_tokens, traj.max_build_tokens
-        )
+        result.max_build_tokens = max(result.max_build_tokens, traj.max_build_tokens)
 
         result.duplicated_actions += traj.duplicated_actions
 
@@ -522,10 +499,7 @@ def to_result(
         else:
             result.error = ""
 
-        if (
-            result.duplicated_actions > 0
-            and "duplicated_actions" not in result.flags
-        ):
+        if result.duplicated_actions > 0 and "duplicated_actions" not in result.flags:
             result.flags.append("duplicated_actions")
         if result.test_edits == 0 and "no_test_patch" not in result.flags:
             result.flags.append("no_test_patch")
@@ -546,10 +520,7 @@ def analyse_file_context(instance: dict, file_context: FileContext) -> FileConte
     expected_spans = instance.get("expected_spans", {})
     solutions = [expected_spans]
     for resolved_by in instance.get("resolved_by", []):
-        if (
-            "alternative_spans" in resolved_by
-            and resolved_by["alternative_spans"] not in solutions
-        ):
+        if "alternative_spans" in resolved_by and resolved_by["alternative_spans"] not in solutions:
             solutions.append(resolved_by["alternative_spans"])
 
     identified_spans = {}
@@ -587,9 +558,7 @@ def analyse_file_context(instance: dict, file_context: FileContext) -> FileConte
     )
 
 
-def set_found_status(
-    expected_spans, alternative_solutions, identified_spans, result_stats
-):
+def set_found_status(expected_spans, alternative_solutions, identified_spans, result_stats):
     result_stats.result_spans = sum(len(spans) for spans in identified_spans.values())
     result_stats.result_spans = len(identified_spans)
     result_stats.found_files = count_identified_files(expected_spans, identified_spans)
@@ -617,9 +586,7 @@ def read_reports(report_path: str) -> List[BenchmarkResult]:
     return results
 
 
-def trajs_to_df(
-    trajectories: List[Node], report_mode: str | None = None
-) -> pd.DataFrame:
+def trajs_to_df(trajectories: List[Node], report_mode: str | None = None) -> pd.DataFrame:
     results = [to_result(None, trajectory) for trajectory in trajectories]
     return to_dataframe(results, report_mode)
 
@@ -692,10 +659,7 @@ def to_dataframe(
 
     if rename_columns:
         df.columns = [
-            col.replace(f"{report_mode}_", "")
-            if col.startswith(f"{report_mode}_")
-            else col
-            for col in df.columns
+            col.replace(f"{report_mode}_", "") if col.startswith(f"{report_mode}_") else col for col in df.columns
         ]
 
     if report_mode == "mcts":

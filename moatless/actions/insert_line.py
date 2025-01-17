@@ -36,12 +36,10 @@ class InsertLinesArgs(ActionArguments):
         ...,
         description="Line number after which to insert the new text (indexing starts at 1)",
     )
-    new_str: str = Field(
-        ..., description="Text content to insert at the specified line"
-    )
+    new_str: str = Field(..., description="Text content to insert at the specified line")
 
     model_config = ConfigDict(title="InsertLines")
-    
+
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
 <insert_line>{self.insert_line}</insert_line>
@@ -116,11 +114,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             )
 
         new_str_lines = new_str.split("\n")
-        new_file_text_lines = (
-            file_text_lines[: args.insert_line]
-            + new_str_lines
-            + file_text_lines[args.insert_line :]
-        )
+        new_file_text_lines = file_text_lines[: args.insert_line] + new_str_lines + file_text_lines[args.insert_line :]
         snippet_lines = (
             file_text_lines[max(0, args.insert_line - SNIPPET_LINES) : args.insert_line]
             + new_str_lines
