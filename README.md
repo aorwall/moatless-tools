@@ -93,6 +93,21 @@ export TESTBED_API_KEY="<your-key>"
 export TESTBED_BASE_URL="<your-base-url>"
 ```
 
+## Verified Models
+
+Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. When specifying just the `--model` argument, the following configurations are used:
+
+| Model | Response Format | Message History | Thoughts in Action |
+|-------|----------------|-----------------|-------------------|
+| claude-3-5-sonnet-20241022 | tool_call | messages | no |
+| claude-3-5-haiku-20241022 | tool_call | messages | no |
+| gpt-4o-2024-11-20 | tool_call | messages | yes |
+| gpt-4o-mini-2024-07-18 | tool_call | messages | yes |
+| deepseek/deepseek-chat | react | react | yes |
+| gemini/gemini-2.0-flash-exp | tool_call | messages | yes |
+| openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no |
+| openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | no |
+
 ## Verify Setup
 
 Before running the full evaluation, you can verify your setup using the integration test script:
@@ -105,6 +120,7 @@ poetry run scripts/run_integration_tests.py --model claude-3-5-sonnet-20241022
 The script will run the model against a sample SWE-Bench instance
 
 Results are saved in `test_results/integration_test_<timestamp>/` .
+
 
 ## Run evaluation
 
@@ -148,19 +164,6 @@ Available dataset splits that can be specified with the `--split` argument:
 | verified | All instances from the verified dataset | 450 | 
 | verified_mini | [MariusHobbhahn/swe-bench-verified-mini](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini), a subset of SWE-Bench Verified  | 50 |
 | lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 80 |
-
-Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. When specifying just the `--model` argument, the following configurations are used:
-
-| Model | Response Format | Message History | Thoughts in Action |
-|-------|----------------|-----------------|-------------------|
-| claude-3-5-sonnet-20241022 | tool_call | messages | no |
-| claude-3-5-haiku-20241022 | tool_call | messages | no |
-| gpt-4o-2024-11-20 | tool_call | messages | yes |
-| gpt-4o-mini-2024-07-18 | tool_call | messages | yes |
-| deepseek/deepseek-chat | react | react | yes |
-| gemini/gemini-2.0-flash-exp | tool_call | messages | yes |
-| openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no |
-| openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | no |
 
 Example usage:
 ```bash
