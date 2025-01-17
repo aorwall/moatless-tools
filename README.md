@@ -161,9 +161,9 @@ Available dataset splits that can be specified with the `--split` argument:
 | Split Name | Description | Instance Count |
 |------------|-------------|----------------|
 | lite | All instances from the lite dataset | 300 | 
-| verified | All instances from the verified dataset | 450 | 
+| verified | All instances from the verified dataset | 500 | 
 | verified_mini | [MariusHobbhahn/swe-bench-verified-mini](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini), a subset of SWE-Bench Verified  | 50 |
-| lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 80 |
+| lite_and_verified_solvable | Instances that exist in both lite and verified datasets and have at least one solved submission to SWE-Bench | 84 |
 
 Example usage:
 ```bash
