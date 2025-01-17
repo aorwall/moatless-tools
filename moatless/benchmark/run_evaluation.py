@@ -56,11 +56,11 @@ def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
 
     # Setup console logger (only for this script)
-    console_logger = logging.getLogger("scripts.run_evaluation_simple")
+    console_logger = logging.getLogger("scripts.run_evaluation")
     console_logger.setLevel(logging.INFO)
     console_logger.propagate = False  # Don't propagate to root logger
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
+    console_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
     console_logger.addHandler(console_handler)
 
     # Setup file logger (for all logs)
@@ -82,7 +82,9 @@ def setup_loggers(logs_dir: str):
     file_logger.addHandler(error_handler)
 
     # Suppress other loggers from console output
-    logging.getLogger("moatless").setLevel(logging.INFO)  # Set level for moatless logs
+    logging.getLogger("moatless").setLevel(logging.INFO) 
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)  
+
     for logger_name in logging.root.manager.loggerDict:
         if logger_name != "scripts.run_evaluation_simple":
             logger = logging.getLogger(logger_name)
@@ -120,15 +122,10 @@ class SimpleEvaluationMonitor:
         self.logger = file_logger
 
         # Load initial instances
-        for instance in self.evaluation.instances:
-            self.instances_data[instance.instance_id] = instance
-
         self._log_settings()
 
-        self.console.info(f"Starting evaluation: {evaluation.evaluation_name}")
-        self.console.info(f"Found {len(self.instances_data)} instances in evaluation")
-        self.logger.info(f"[SimpleEvaluationMonitor] Starting evaluation: {evaluation.evaluation_name}")
-        self.logger.info(f"[SimpleEvaluationMonitor] Found {len(self.instances_data)} instances in evaluation")
+        print(f"Starting evaluation: {evaluation.evaluation_name}")
+        print(f"Found {len(evaluation.instances)} instances in evaluation")
 
     def _log_settings(self):
         """Log evaluation configuration and settings"""
@@ -155,109 +152,76 @@ class SimpleEvaluationMonitor:
         ]
 
         for line in info_lines:
-            self.console.info(line)
+            print(line)
             self.logger.info(line)
 
     def handle_event(self, event):
         """Handle evaluation events by logging them"""
         event_type = event.event_type
         data = event.data if event.data else {}
-
         instance_id = data.get("instance_id")
-
-        if event_type == "evaluation_started":
-            self.console.info("Evaluation started")
-            self.logger.info("Evaluation started")
-            return
-
-        if instance_id:
+        
+        # Format log message based on event type
+        log_msg = None
+    
+        if event_type == "instance_started":
+            log_msg = f"{instance_id}: Started processing"
+            
+        elif event_type == "instance_completed":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
             instance = self.evaluation.get_instance(instance_id)
-            self.instances_data[instance_id] = instance
+            log_msg = f"\n{instance_id}: ✨ Completed [{status}] - Iterations: {instance.iterations}"
+            self.log_eval_summary()
 
-            if event_type == "instance_started":
-                self.console.info(f"Started instance: {instance_id}")
-                self.logger.info(f"Started instance: {instance_id}")
-            elif event_type == "instance_completed":
-                status = "✓" if instance.resolved else "✗"
-                self.console.info(f"Completed {instance_id} ({status})")
-                self.logger.info(f"Completed {instance_id} (resolved: {instance.resolved})")
-                self._log_instance_summary(instance)
-            elif event_type == "instance_error":
-                error_msg = f"Error in instance {instance_id}: {instance.error}"
-                self.console.error(error_msg)
-                self.logger.error(error_msg)
-            elif event_type == "tree_progress":
-                self.console.info(f"Tree progress: {instance_id}")
-                self.logger.info(f"Tree progress: {instance_id}")
-            else:
-                self.console.info(f"Unknown event: {event_type}: {data}")
-                self.logger.info(f"Unknown event: {event_type}: {data}")
-        else:
-            self.console.info(f"Unknown event: {event_type}: {data}")
-            self.logger.info(f"Unknown event: {event_type}: {data}")
+        elif event_type == "instance_error":
+            error = data.get("error", "Unknown error")
+            log_msg = f"{instance_id}: Error - {error}"
+            self.log_eval_summary()
+            
+        elif event_type == "loop_started":
+            log_msg = f"{instance_id}: Started agentic loop"
+            
+        elif event_type == "loop_iteration":
+            action = data.get("action", "Unknown")
+            node_id = data.get("current_node_id", 0)
+            log_msg = f"{instance_id}: → Node{node_id} - {action}"
+            
+        elif event_type == "loop_completed":
+            duration = data.get("duration", 0)
+            log_msg = f"{instance_id}: Completed loop in {duration:.1f}s"
+            
+        elif event_type == "instance_evaluation_started":
+            log_msg = f"{instance_id}: Started evaluation"
+            
+        elif event_type == "instance_evaluation_result":
+            resolved = data.get("resolved")
+            status = "✓" if resolved is True else "✗" if resolved is False else "-"
+            node_id = data.get("node_id")
+            log_msg = f"\n{instance_id}: 🎯 Evaluated node {node_id} [{status}] - Duration: {data.get('duration', 0):.1f}s"
+            
+        elif event_type == "instance_evaluation_error":
+            error = data.get("error", "Unknown error")
+            node_id = data.get("node_id")
+            log_msg = f"{instance_id}: Evaluation error on node {node_id} - {error}"
+        
+        if log_msg:
+            self.console.info(log_msg)
+            self.logger.info(log_msg)
 
-    def _log_instance_summary(self, instance):
-        """Log summary for a completed instance"""
-        cost = 0.0
-        tokens = 0
-        if instance.usage:
-            cost = instance.usage.completion_cost
-            tokens = instance.usage.prompt_tokens + instance.usage.completion_tokens + instance.usage.cached_tokens
-            self.total_cost += cost
-            self.total_tokens += tokens
-
-        summary = (
-            f"Instance {instance.instance_id} summary:\n"
-            f"  - Resolved: {instance.resolved}\n"
-            f"  - Duration: {instance.duration}s\n"
-            f"  - Iterations: {instance.iterations}\n"
-            f"  - Cost: ${cost:.2f}\n"
-            f"  - Tokens: {tokens:,}"
-        )
-
-        self.console.info(summary)
-        self.logger.info(summary)
-
-        self.log_eval_summary()
 
     def log_eval_summary(self):
         """Log total instances, completed, errors and resolved instances"""
-        total = len(self.instances_data)
-        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
-        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
-        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
-        summary = (
-            f"Evaluation progress summary:\n"
-            f"  - Total Instances: {total}\n"
-            f"  - Completed: {completed}\n"
-            f"  - Errors: {errors}\n"
-            f"  - Resolved: {resolved}"
-        )
+        total = len(self.evaluation.instances)
+        completed = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.COMPLETED)
+        errors = sum(1 for i in self.evaluation.instances if i.status == InstanceStatus.ERROR)
+        resolved = sum(1 for i in self.evaluation.instances if i.resolved is True)
+        resolved_rate = (resolved / (completed + errors)) * 100 if completed + errors > 0 else 0
+        summary = f"""
+📊 Evaluation Progress:
+Total = {total} | Completed = {completed} ({completed/total*100:.1f}%) | Errors = {errors} ({errors/total*100:.1f}%) | Resolved = {resolved} ({resolved_rate:.1f}%)"""
         self.console.info(summary)
         self.logger.info(summary)
-
-    def log_final_summary(self):
-        """Log final evaluation summary"""
-        duration = datetime.now() - self.start_time
-        completed = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.COMPLETED)
-        errors = sum(1 for i in self.instances_data.values() if i.status == InstanceStatus.ERROR)
-        resolved = sum(1 for i in self.instances_data.values() if i.resolved is True)
-        total = len(self.instances_data)
-
-        summary_lines = [
-            "\nFinal Evaluation Summary:",
-            f"Total Instances: {total}",
-            f"Completed: {completed}",
-            f"Errors: {errors}",
-            f"Success Rate: {(resolved/total*100 if total > 0 else 0):.1f}%",
-            f"Total Cost: ${self.total_cost:.2f}",
-            f"Total Tokens: {self.total_tokens:,}",
-            f"Total Duration: {duration}",
-        ]
-
-        for line in summary_lines:
-            self.console.info(line)
-            self.logger.info(line)
 
 
 def print_config(config: dict, console_logger: logging.Logger):
@@ -295,12 +259,12 @@ def print_config(config: dict, console_logger: logging.Logger):
         ],
     }
 
-    console_logger.info("\nConfiguration Settings:")
-    console_logger.info("=" * 50)
+    print("\nConfiguration Settings:")
+    print("=" * 50)
 
     for section, settings in config_sections.items():
-        console_logger.info(f"\n{section}:")
-        console_logger.info("-" * 50)
+        print(f"\n{section}:")
+        print("-" * 50)
         for label, key in settings:
             if section == "Environment Settings":
                 value = os.getenv(key)
@@ -310,11 +274,11 @@ def print_config(config: dict, console_logger: logging.Logger):
             if value is not None:
                 if isinstance(value, list) and len(value) > 3:
                     value = f"{value[:3]} ... ({len(value)} items)"
-                console_logger.info(f"{label:20}: {value}")
+                print(f"{label:20}: {value}")
             else:
-                console_logger.info(f"{label:20}: N/A")
+                print(f"{label:20}: N/A")
 
-    console_logger.info("\n" + "=" * 50 + "\n")
+    print("\n" + "=" * 50 + "\n")
 
 
 def run_evaluation(config: dict):
@@ -433,7 +397,7 @@ def run_evaluation(config: dict):
         runner.run_evaluation(instance_ids=instance_ids)
 
         # Log final summary
-        monitor.log_final_summary()
+        monitor.log_eval_summary()
     except Exception as e:
         error_msg = f"Fatal error in evaluation: {str(e)}"
         console_logger.error(error_msg)

@@ -168,16 +168,16 @@ Available dataset splits that can be specified with the `--split` argument:
 Example usage:
 ```bash
 # Run evaluation with Claude 3.5 Sonnet using the ReACT format
-poetry run python -m moatless.benchmark.run_evaluation \
+poetry run scripts/run_evaluation.py \
   --model claude-3-5-sonnet-20241022 \
   --response-format react \
   --message-history react \
   --num-workers 10
 
 # Run specific instances with GPT-4
-poetry run python -m moatless.benchmark.run_evaluation \
-  --model gpt-4o \
-  --instance-ids "django__django-16379"
+poetry run scripts/run_evaluation.py \
+  --model gpt-4o-2024-11-20 \
+  --instance-ids "django__django-16527"
 ```
 
 # Code Example
