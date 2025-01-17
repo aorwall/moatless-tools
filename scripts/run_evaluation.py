@@ -171,7 +171,7 @@ class SimpleEvaluationMonitor:
             resolved = data.get("resolved")
             status = "✓" if resolved is True else "✗" if resolved is False else "-"
             instance = self.evaluation.get_instance(instance_id)
-            log_msg = f"{instance_id}: Completed [{status}] - Cost: ${instance.usage.completion_cost:.2f}, Iterations: {instance.iterations}"
+            log_msg = f"{instance_id}: Completed [{status}] - Iterations: {instance.iterations}"
             
         elif event_type == "instance_error":
             error = data.get("error", "Unknown error")
