@@ -1,9 +1,6 @@
-import json
 import logging
 from textwrap import dedent
 from typing import List, Dict, Any, Type, Optional
-
-from litellm import Field
 
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
@@ -39,6 +36,8 @@ class ReActCompletionModel(BaseCompletionModel):
         for action in response_schema:
             action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
 
+        input_schemas = "\n\n".join(action_input_schemas)
+
         system_prompt += dedent(f"""\n# Response format
 
 Use the following format:
@@ -48,7 +47,7 @@ Action: The action to take followed by the input arguments based on the schema b
 
 Use one of the following actions and provide input arguments matching the schema.
                             
-{'\n\n'.join(action_input_schemas)}
+{input_schemas}
 
 Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''} Action blocks. Do not include code blocks or additional text outside of this format.
 """)

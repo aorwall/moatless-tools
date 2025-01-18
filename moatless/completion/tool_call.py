@@ -2,12 +2,11 @@ import json
 import logging
 from typing import List, Dict, Any, Type, Union, Optional
 
-from litellm import ChatCompletionToolMessage
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
-from moatless.completion.schema import ResponseSchema
+from moatless.completion.schema import ResponseSchema, ChatCompletionToolMessage
 
 logger = logging.getLogger(__name__)
 

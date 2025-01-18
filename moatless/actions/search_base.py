@@ -112,10 +112,9 @@ class SearchBaseAction(Action):
         self,
         repository: Repository = None,
         code_index: CodeIndex | None = None,
-        completion_model: BaseCompletionModel = None,
         **data,
     ):
-        super().__init__(completion_model=completion_model, **data)
+        super().__init__(**data)
         self._repository = repository
         self._code_index = code_index
 
@@ -413,5 +412,7 @@ class SearchBaseAction(Action):
             obj = obj.copy()
             repository = obj.pop("repository")
             code_index = obj.pop("code_index")
-            return cls(code_index=code_index, repository=repository, **obj)
+            completion_model = BaseCompletionModel.model_validate(obj.pop("completion_model"))
+
+            return cls(code_index=code_index, repository=repository, completion_model=completion_model, **obj)
         return super().model_validate(obj)

@@ -3,7 +3,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, Optional
 
-from llama_index.core.bridge.pydantic import Field, PrivateAttr
+from llama_index.core.bridge.pydantic import Field
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSplitter
 from llama_index.core.node_parser.node_utils import logger
@@ -39,35 +39,24 @@ SPLIT_BLOCK_TYPES = [
 
 
 class EpicSplitter(NodeParser):
+    """Epic code splitter that uses tree-sitter to parse code into nodes."""
+
     language: str = Field(default="python", description="Language of the code blocks to parse.")
-
     text_splitter: TextSplitter = Field(description="Text splitter to use for splitting non code documents into nodes.")
-
     include_non_code_files: bool = Field(default=True, description="Whether or not to include non code files.")
-
     non_code_file_extensions: list[str] = Field(
         default=["md", "txt"],
         description="File extensions to consider as non code files.",
     )
-
     comment_strategy: CommentStrategy = Field(default=CommentStrategy.INCLUDE, description="Comment strategy to use.")
-
     chunk_size: int = Field(default=1500, description="Chunk size to use for splitting code documents.")
-
     max_chunks: int = Field(default=100, description="Max number of chunks to split a document into.")
-
     min_chunk_size: int = Field(default=256, description="Min tokens to split code.")
-
     max_chunk_size: int = Field(default=2000, description="Max tokens in one chunk.")
-
     hard_token_limit: int = Field(default=6000, description="Hard token limit for a chunk.")
-
     repo_path: str = Field(default=None, description="Path to the repository.")
-
     index_callback: Optional[Callable] = Field(default=None, description="Callback to call when indexing a code block.")
-
-    _parser: CodeParser = PrivateAttr()
-    # _fallback_code_splitter: Optional[TextSplitter] = PrivateAttr() TODO: Implement fallback when tree sitter fails
+    parser: CodeParser = Field(default=None, description="Code parser to use", exclude=True)
 
     def __init__(
         self,
@@ -84,7 +73,6 @@ class EpicSplitter(NodeParser):
         repo_path: Optional[str] = None,
         comment_strategy: CommentStrategy = CommentStrategy.ASSOCIATE,
         min_lines_to_parse_block: int = 25,
-        # fallback_code_splitter: Optional[TextSplitter] = None,
         include_non_code_files: bool = True,
         tokenizer: Optional[Callable] = None,
         non_code_file_extensions: list[str] | None = None,
@@ -94,16 +82,14 @@ class EpicSplitter(NodeParser):
             non_code_file_extensions = ["md", "txt"]
         callback_manager = callback_manager or CallbackManager([])
 
-        self._parser = create_parser(
+        parser = create_parser(
             language=language,
             index_callback=index_callback,
             min_lines_to_parse_block=min_lines_to_parse_block,
             enable_code_graph=False,
         )
-        # self._fallback_code_splitter = fallback_code_splitter
 
         super().__init__(
-            # _parser=parser,
             language=language,
             chunk_size=chunk_size,
             chunk_overlap=0,
@@ -120,6 +106,7 @@ class EpicSplitter(NodeParser):
             include_metadata=include_metadata,
             include_prev_next_rel=include_prev_next_rel,
             callback_manager=callback_manager,
+            parser=parser,
         )
 
     @classmethod
@@ -138,22 +125,20 @@ class EpicSplitter(NodeParser):
 
         for node in nodes_with_progress:
             file_path = node.metadata.get("file_path")
-            content = node.content()
+            content = node.get_content()
 
             try:
                 starttime = time.time_ns()
 
                 # TODO: Derive language from file extension
-                codeblock = self._parser.parse(content, file_path=file_path)
+                codeblock = self.parser.parse(content, file_path=file_path)
 
                 parse_time = time.time_ns() - starttime
                 if parse_time > 1e9:
                     logger.warning(f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds.")
 
             except Exception as e:
-                logger.warning(
-                    f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split(). Error: {e}"
-                )
+                logger.exception(f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split().")
                 # TODO: Fall back to treesitter or text split
                 continue
 
@@ -163,7 +148,7 @@ class EpicSplitter(NodeParser):
             if parse_time > 1e8:
                 logger.warning(f"Splitting file {file_path} took {parse_time / 1e9:.2f} seconds.")
             if len(chunks) > 100:
-                logger.info(f"Splitting file {file_path} in {len(chunks)} chunks")
+                logger.debug(f"Splitting file {file_path} in {len(chunks)} chunks")
 
             starttime = time.time_ns()
             for chunk in chunks:
@@ -405,7 +390,7 @@ class EpicSplitter(NodeParser):
         metadata = {}
         metadata.update(node.metadata)
 
-        node_id = node.id_
+        node_id = node.id_.replace(self.repo_path + "/", "", 1)
 
         if chunk:
             metadata["start_line"] = chunk[0].start_line
@@ -440,9 +425,7 @@ class EpicSplitter(NodeParser):
             metadata=metadata,
             excluded_embed_metadata_keys=excluded_embed_metadata_keys,
             excluded_llm_metadata_keys=node.excluded_llm_metadata_keys,
-            metadata_seperator=node.metadata_seperator,
             metadata_template=node.metadata_template,
-            text_template=node.text_template,
             # relationships={NodeRelationship.SOURCE: node.as_related_node_info()},
         )
 

@@ -445,28 +445,37 @@ class CodeParser:
 
         return None
 
+    def _find_root_node(self, node: Node, matches: tuple[int, list[Node]]) -> dict | None:
+        for idx, match in matches:
+            if "root" in match:
+                for root in match["root"]:
+                    if root == node:
+                        return match
+        return None
+
     def _find_match(self, node: Node, query, label: str, capture_from_parent: bool = False) -> NodeMatch | None:
         if capture_from_parent:
-            captures = query.captures(node.parent)
+            matches = query.matches(node.parent)
         else:
-            captures = query.captures(node)
+            matches = query.matches(node)
 
         node_match = NodeMatch()
 
+        if not matches:
+            return None
+
+        captures = self._find_root_node(node, matches)
         if not captures:
             return None
 
-        root_node = None
-
-        for found_node, tag in captures:
+        root_node = captures["root"]
+        for tag, found_nodes in captures.items():
+            found_node = found_nodes[0]
             self.debug_log(f"[{label}] Found tag {tag} on node {found_node}")
 
-            if tag == "root" and not root_node and node == found_node:
+            if tag == "root" and root_node and node == found_node:
                 self.debug_log(f"[{label}] Root node {found_node}")
                 root_node = found_node
-
-            if not root_node:
-                continue
 
             if tag == "no_children" and found_node.children:
                 return None
@@ -512,7 +521,8 @@ class CodeParser:
                 node_match.parameters[-1] = (node_match.parameters[-1][0], found_node)
 
             if root_node and tag.startswith("reference"):
-                node_match.relationships.append((found_node, tag))
+                for ref_node in found_nodes:
+                    node_match.relationships.append((ref_node, tag))
 
             if not node_match.block_type:
                 node_match.block_type = CodeBlockType.from_string(tag)

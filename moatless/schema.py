@@ -30,6 +30,20 @@ class MessageHistoryType(Enum):
         return self.value
 
 
+class CompletionModelSettings(BaseModel):
+    model: str = Field(..., description="The model to use for completion")
+    temperature: float = Field(0.0, description="The temperature to use for completion")
+    max_tokens: int = Field(2000, description="The maximum number of tokens to generate")
+    timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
+    model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
+    model_api_key: Optional[str] = Field(default=None, description="The API key for the model", exclude=True)
+    response_format: str = Field(..., description="The response format expected from the LLM")
+    thoughts_in_action: bool = Field(
+        default=False,
+        description="Whether to include thoughts in the action or in the message",
+    )
+
+
 class FileWithSpans(BaseModel):
     file_path: str = Field(description="The file path where the relevant code is found.")
     span_ids: list[str] = Field(

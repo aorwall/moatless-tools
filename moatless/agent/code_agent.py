@@ -72,6 +72,7 @@ class CodingAgent(ActionAgent):
 
         # Create action completion model by cloning the input model with JSON response format
         action_completion_model = completion_model.clone(response_format=action_completion_format)
+        action_completion_model.message_cache = False
 
         supports_anthropic_computer_use = completion_model.model.startswith("claude-3-5-sonnet")
 
@@ -164,24 +165,24 @@ def create_base_actions(
         SemanticSearch(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model,
+            completion_model=completion_model.clone(),
         ),
         FindClass(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model,
+            completion_model=completion_model.clone(),
         ),
         FindFunction(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model,
+            completion_model=completion_model.clone(),
         ),
         FindCodeSnippet(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model,
+            completion_model=completion_model.clone(),
         ),
-        ViewCode(repository=repository, completion_model=completion_model),
+        ViewCode(repository=repository, completion_model=completion_model.clone()),
     ]
 
 
@@ -192,7 +193,7 @@ def create_edit_code_actions(
     runtime: RuntimeEnvironment | None = None,
 ) -> List[Action]:
     """Create a list of simple code modification actions."""
-    actions = create_base_actions(repository, code_index, completion_model)
+    actions = create_base_actions(repository, code_index, completion_model.clone())
 
     edit_actions = [
         StringReplace(repository=repository, code_index=code_index),
@@ -215,12 +216,12 @@ def create_claude_coding_actions(
     completion_model: BaseCompletionModel | None = None,
     runtime: RuntimeEnvironment | None = None,
 ) -> List[Action]:
-    actions = create_base_actions(repository, code_index, completion_model)
+    actions = create_base_actions(repository, code_index, completion_model.clone())
     actions.append(
         ClaudeEditTool(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model,
+            completion_model=completion_model.clone(),
         ),
     )
     actions.append(ListFiles())
@@ -235,7 +236,9 @@ def create_all_actions(
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
 ) -> List[Action]:
-    actions = create_base_actions(repository, code_index, completion_model)
-    actions.extend(create_edit_code_actions(repository, code_index, completion_model))
-    actions.append(ClaudeEditTool(code_index=code_index, repository=repository))
+    actions = create_base_actions(repository, code_index, completion_model.clone())
+    actions.extend(create_edit_code_actions(repository, code_index, completion_model.clone()))
+    actions.append(
+        ClaudeEditTool(code_index=code_index, repository=repository, completion_model=completion_model.clone())
+    )
     return actions

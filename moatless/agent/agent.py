@@ -4,7 +4,7 @@ import logging
 import traceback
 from typing import List, Type, Dict, Any
 
-from pydantic import BaseModel, Field, PrivateAttr, model_validator, ValidationError
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -59,7 +59,7 @@ class ActionAgent(BaseModel):
             actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
 
         return cls(
-            completion=agent_settings.completion_model,
+            completion_model=agent_settings.completion_model,
             system_prompt=agent_settings.system_prompt,
             actions=actions,
         )
@@ -75,9 +75,9 @@ class ActionAgent(BaseModel):
     def verify_actions(self) -> "ActionAgent":
         for action in self.actions:
             if not isinstance(action, Action):
-                raise ValidationError(f"Invalid action type: {type(action)}. Expected Action subclass.")
+                raise ValueError(f"Invalid action type: {type(action)}. Expected Action subclass.")
             if not hasattr(action, "args_schema"):
-                raise ValidationError(f"Action {action.__class__.__name__} is missing args_schema attribute")
+                raise ValueError(f"Action {action.__class__.__name__} is missing args_schema attribute")
         return self
 
     def run(self, node: Node):
@@ -115,7 +115,7 @@ class ActionAgent(BaseModel):
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             else:
-                logger.error(f"Node{node.node_id}: Build action failed with error: {e}")
+                logger.exception(f"Node{node.node_id}: Build action failed with error")
 
             if isinstance(e, CompletionRejectError):
                 return

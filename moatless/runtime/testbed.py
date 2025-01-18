@@ -1,7 +1,9 @@
 import hashlib
 import json
 import logging
+import random
 import re
+import string
 from datetime import datetime
 from typing import List
 
@@ -26,7 +28,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         instance: dict | None = None,
         log_dir: str | None = None,
         enable_cache: bool = False,
-        run_id: str = "default",
+        run_id: str | None = None,
     ):
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
@@ -34,7 +36,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
-        self.run_id = run_id
+        self.run_id = run_id or "".join(random.choices(string.ascii_lowercase, k=6))
 
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
@@ -115,7 +117,7 @@ class TestbedEnvironment(RuntimeEnvironment):
             with self.testbed_sdk.create_client(
                 instance_id=self.instance["instance_id"],
                 log_dir=self.log_dir,
-                # run_id=self.run_id,
+                run_id=self.run_id,
             ) as testbed:
                 response = testbed.run_tests(test_files=test_files, patch=patch, timeout=600)
 

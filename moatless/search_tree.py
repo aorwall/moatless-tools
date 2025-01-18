@@ -3,8 +3,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 
-from litellm import ConfigDict
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
@@ -127,6 +126,9 @@ class SearchTree(BaseModel):
         if isinstance(obj, dict):
             obj = obj.copy()
 
+            # Remove repository from validation since it's handled separately
+            obj.pop("repository", None)
+
             if "selector" in obj and isinstance(obj["selector"], dict):
                 obj["selector"] = BaseSelector.model_validate(obj["selector"])
 
@@ -145,7 +147,9 @@ class SearchTree(BaseModel):
             if "root" in obj and isinstance(obj["root"], dict):
                 obj["root"] = Node.reconstruct(obj["root"], repo=repository)
 
-        return super().model_validate(obj)
+        instance = super().model_validate(obj)
+        instance.repository = repository
+        return instance
 
     @classmethod
     def from_dict(
@@ -160,6 +164,9 @@ class SearchTree(BaseModel):
         if persist_path:
             data["persist_path"] = persist_path
 
+        logger.info(f"Repository: {repository}")
+        logger.info(f"Code index: {code_index}")
+        logger.info(f"Runtime: {runtime}")
         if "agent" in data and isinstance(data["agent"], dict):
             agent_data = data["agent"]
             data["agent"] = ActionAgent.model_validate(
@@ -274,17 +281,27 @@ class SearchTree(BaseModel):
 
         child_node = self.expander.expand(node, self, force_expansion)
 
-        if not node.action_steps and node.assistant_message:
-            child_node.user_message = (
-                "You're an autonomous AI agent that must respond with one of the provided functions"
-            )
-
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:
-            child_node.feedback_data = self.feedback_generator.generate_feedback(
+            feedback_data = self.feedback_generator.generate_feedback(
                 child_node,
                 self.agent.actions,
             )
+
+            if feedback_data:
+                child_node.feedback_data = feedback_data
+                child_node.user_message = feedback_data.feedback
+
+                self.emit_event(
+                    "feedback_generated",
+                    {
+                        "node_id": child_node.node_id,
+                        "parent_id": node.node_id,
+                        "feedback": child_node.feedback_data.model_dump(),
+                        "action": child_node.action.name if child_node.action else None,
+                        "depth": child_node.get_depth(),
+                    },
+                )
 
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
@@ -306,7 +323,7 @@ class SearchTree(BaseModel):
             try:
                 logger.info(f"Node{node.node_id}: Evaluating value function")
                 node.reward, completion_response = self.value_function.get_reward(node=node)
-                
+
                 if completion_response:
                     node.completions["value_function"] = completion_response
 
@@ -314,6 +331,16 @@ class SearchTree(BaseModel):
                     self.log(
                         logger.info,
                         f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
+                    )
+                    # Emit reward generated event
+                    self.emit_event(
+                        "reward_generated",
+                        {
+                            "node_id": node.node_id,
+                            "reward": node.reward.value,
+                            "action": node.action.name if node.action else None,
+                            "depth": node.get_depth(),
+                        },
                     )
                 else:
                     self.log(
@@ -332,7 +359,6 @@ class SearchTree(BaseModel):
                     f"Node{node.node_id}: Value function runtime error: {e.message}",
                 )
                 raise  # Re-raise to abort the entire search
-            
 
     def _backpropagate(self, node: Node):
         """Backpropagate the reward up the tree."""

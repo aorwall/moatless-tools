@@ -1,6 +1,5 @@
 import concurrent.futures
 import gc
-import hashlib
 import json
 import logging
 import os
@@ -11,9 +10,6 @@ from datetime import datetime, timezone
 from typing import Any, Union, Callable, List
 
 from moatless.agent.code_agent import CodingAgent
-from moatless.benchmark.report import (
-    create_sha256_hash,
-)
 from moatless.benchmark.schema import (
     TreeSearchSettings,
     Evaluation,
@@ -28,7 +24,7 @@ from moatless.benchmark.swebench import (
 )
 from moatless.benchmark.swebench.utils import instance_repo_path
 from moatless.benchmark.utils import get_moatless_instance, load_moatless_datasets
-from moatless.exceptions import RuntimeError
+from moatless.completion import BaseCompletionModel
 from moatless.loop import AgenticLoop
 from moatless.runtime.testbed import TestbedEnvironment
 
@@ -61,7 +57,7 @@ class EvaluationRunner:
         num_workers: int = 1,
         use_testbed: bool = False,
         rerun_errors: bool = True,
-        remove_repo_after_evaluation: bool = True,
+        remove_repo_after_evaluation: bool = False,
     ):
         self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
 
@@ -239,11 +235,9 @@ class EvaluationRunner:
         if self.use_testbed:
             from moatless.runtime.testbed import TestbedEnvironment
 
-            run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
             runtime = TestbedEnvironment(
                 repository=repository,
                 instance=moatless_instance,
-                run_id=run_id,
             )
 
         # Load search tree from file again and set repository, runtime and code index
@@ -254,7 +248,9 @@ class EvaluationRunner:
                 runtime=runtime,
                 code_index=code_index,
             )
-            completion_model = self.evaluation.settings.agent_settings.completion_model.clone()
+            completion_model = BaseCompletionModel.model_validate(
+                self.evaluation.settings.agent_settings.completion_model.model_dump()
+            )
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             agentic_loop.agent = CodingAgent.create(
@@ -266,7 +262,9 @@ class EvaluationRunner:
                 thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
             )
         else:
-            completion_model = self.evaluation.settings.agent_settings.completion_model.clone()
+            completion_model = BaseCompletionModel.model_validate(
+                self.evaluation.settings.agent_settings.completion_model.model_dump()
+            )
             completion_model.metadata = {"instance_id": instance.instance_id}
 
             agent = CodingAgent.create(
@@ -296,14 +294,15 @@ class EvaluationRunner:
                 logger.info(
                     f"Removed error node {last_node.node_id} from parent {last_node.parent.node_id} on instance {instance.instance_id}"
                 )
-        
 
         # Remove the last node if it has action steps without observation
         last_node = agentic_loop.get_last_node()
         no_observation = all(not step.observation for step in last_node.action_steps)
         if last_node.action and no_observation:
             last_node.parent.children = [c for c in last_node.parent.children if c.node_id != last_node.node_id]
-            logger.info(f"Removed last node {last_node.node_id} from instance {instance.instance_id} because it has no observation")
+            logger.info(
+                f"Removed last node {last_node.node_id} from instance {instance.instance_id} because it has no observation"
+            )
 
         def tree_event_handler(event):
             logger.info(f"Got event {event['event_type']}")
@@ -331,14 +330,9 @@ class EvaluationRunner:
 
         return agentic_loop
 
-    def evaluate_nodes(
-        self,
-        instance: dict,
-        agentic_loop: AgenticLoop
-    ) -> bool | None:
-        
+    def evaluate_nodes(self, instance: dict, agentic_loop: AgenticLoop) -> bool | None:
         instance_id = instance["instance_id"]
-    
+
         eval_result = None
         instance_dir = os.path.join(self.get_evaluation_dir(), instance_id)
         eval_result_path = os.path.join(instance_dir, "eval_result.json")
@@ -370,14 +364,16 @@ class EvaluationRunner:
                 "node_results": {},
                 "start_time": datetime.now(timezone.utc).isoformat(),
             }
-            
+
         """Evaluate leaf node using the testbed."""
         leaf_node = agentic_loop.get_last_node()
 
         if str(leaf_node.node_id) in eval_result.get("node_results", {}):
             result = eval_result.get("node_results", {})[str(leaf_node.node_id)]
             if result.get("resolved") is not None:
-                logger.info(f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated with resolved: {result['resolved']}")
+                logger.info(
+                    f"Leaf node {leaf_node.node_id} for instance {instance_id} have already been evaluated with resolved: {result['resolved']}"
+                )
                 return result.get("resolved")
 
         logger.info(f"Evaluate Node{leaf_node.node_id} for instance {instance_id}.")
@@ -386,12 +382,10 @@ class EvaluationRunner:
             start_time = time.time()
             try:
                 repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
-                # TODO: Set run_id on testbed environment
-                run_id = hashlib.sha256(self.evaluation.evaluation_name.encode()).hexdigest()[:8]
+
                 runtime = TestbedEnvironment(
                     repository=repository,
                     instance=instance,
-                    # run_id=run_id,
                 )
 
                 result = runtime.evaluate(patch=patch)
@@ -404,7 +398,7 @@ class EvaluationRunner:
                     f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
                 )
                 return result.resolved
-        
+
             except Exception as e:
                 logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
                 eval_result["error"] = traceback.format_exc()

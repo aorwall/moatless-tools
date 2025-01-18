@@ -7,6 +7,7 @@ from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 from pydantic import BaseModel, ConfigDict
 
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry, FewShotExample
+from moatless.completion.base import BaseCompletionModel
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
@@ -21,9 +22,6 @@ class Action(BaseModel, ABC):
     args_schema: ClassVar[Type[ActionArguments]]
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def __init__(self, **data):
-        super().__init__(**data)
 
     def execute(
         self,
@@ -182,9 +180,13 @@ class Action(BaseModel, ABC):
     ) -> "Action":
         if isinstance(obj, dict):
             obj = obj.copy()
-            action_class_path = obj.pop("action_class", None)
 
-            if action_class_path:
+            if obj.get("action_class"):
+                action_class_path = obj["action_class"]
+
+                if action_class_path == "moatless.actions.edit":
+                    action_class_path = "moatless.actions.claude_text_editor"
+
                 module_name, class_name = action_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 action_class = getattr(module, class_name)
@@ -196,9 +198,14 @@ class Action(BaseModel, ABC):
                 if runtime and hasattr(action_class, "_runtime"):
                     obj["runtime"] = runtime
 
-                return action_class(**obj)
+                if "completion_model" in obj:
+                    obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
 
-        return cls(**obj)
+                return action_class(**obj)
+            else:
+                raise ValueError(f"action_class is required in {obj}")
+
+        return super().model_validate(obj)
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)

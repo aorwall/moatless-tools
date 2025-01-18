@@ -2,14 +2,14 @@ from typing import Optional, List, Dict, Any
 
 from pydantic import BaseModel, Field
 
-from moatless.completion import BaseCompletionModel
+from moatless.schema import CompletionModelSettings
 from moatless.schema import MessageHistoryType
 
 
 class AgentSettings(BaseModel):
     model_config = {"frozen": True}
 
-    completion_model: BaseCompletionModel = Field(
+    completion_model: CompletionModelSettings = Field(
         ..., description="Completion model to be used for generating completions"
     )
     system_prompt: Optional[str] = Field(None, description="System prompt to be used for generating completions")

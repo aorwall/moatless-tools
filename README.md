@@ -114,7 +114,7 @@ Before running the full evaluation, you can verify your setup using the integrat
 
 ```bash
 # Run a single model test
-poetry run scripts/run_integration_tests.py --model claude-3-5-sonnet-20241022
+poetry run python -m moatless.validation.validate_simple_code_flow --model claude-3-5-sonnet-20241022
 ```
 
 The script will run the model against a sample SWE-Bench instance

@@ -7,6 +7,7 @@ from typing import Optional
 from moatless.benchmark.utils import (
     get_missing_files,
     get_missing_spans,
+    get_moatless_instance,
 )
 from moatless.index import CodeIndex
 from moatless.repository import GitRepository
@@ -18,22 +19,6 @@ from moatless.utils.repo import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def load_instances(dataset_name: str = "princeton-nlp/SWE-bench_Lite", split: str = "test"):
-    from datasets import load_dataset
-
-    data = load_dataset(dataset_name, split=split)
-    return {d["instance_id"]: d for d in data}
-
-
-def load_instance(
-    instance_id: str,
-    dataset_name: str = "princeton-nlp/SWE-bench_Lite",
-    split: str = "test",
-):
-    data = load_instances(dataset_name, split=split)
-    return data[instance_id]
 
 
 def sorted_instances(
@@ -99,7 +84,7 @@ def setup_swebench_repo(
 ) -> str:
     assert instance_data or instance_id, "Either instance_data or instance_id must be provided"
     if not instance_data:
-        instance_data = load_instance(instance_id)
+        instance_data = get_moatless_instance(instance_id)
 
     if not repo_base_dir:
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
@@ -130,7 +115,7 @@ def create_repository(
     """
     assert instance or instance_id, "Either instance or instance_id must be provided"
     if not instance:
-        instance = load_instance(instance_id)
+        instance = get_moatless_instance(instance_id)
 
     if not repo_base_dir:
         repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")

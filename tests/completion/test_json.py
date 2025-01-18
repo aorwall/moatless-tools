@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 from litellm.types.utils import ModelResponse, Usage, Message
 
-from moatless.completion.base import LLMResponseFormat
+from moatless.completion.base import LLMResponseFormat, CompletionRetryError
 from moatless.completion.json import JsonCompletionModel
 from moatless.exceptions import CompletionRejectError
 
@@ -45,41 +45,6 @@ def mock_litellm_json_response():
     return _create_mock
 
 
-def test_prepare_schema_single(test_schema, mock_litellm_json_response):
-    """Test preparing single schema"""
-    model = JsonCompletionModel(
-        model="test",
-        response_format=LLMResponseFormat.JSON,
-    )
-    model.initialize(test_schema, "test")
-
-    # Schema should be prepared during first completion
-    assert model.response_schema == [test_schema]
-    assert model._completion_params == {"response_format": {"type": "json_object"}}
-
-
-def test_get_completion_params(test_schema, mock_litellm_json_response):
-    """Test getting JSON completion parameters"""
-    model = JsonCompletionModel(
-        model="test",
-        response_format=LLMResponseFormat.JSON,
-    )
-    model.initialize(test_schema, "test")
-    
-    # Create completion to trigger schema preparation
-    with patch("litellm.completion") as mock_completion:
-        mock_completion.return_value = mock_litellm_json_response(json.dumps({
-            "command": "test",
-            "args": ["--flag"]
-        }))
-        
-        model.create_completion(
-            messages=[{"role": "user", "content": "test"}],
-        )
-    
-    assert model._completion_params == {"response_format": {"type": "json_object"}}
-
-
 @patch("litellm.completion")
 def test_validate_completion_valid_json(mock_completion, mock_litellm_json_response, test_schema, test_messages):
     """Test validating valid JSON response"""
@@ -101,10 +66,9 @@ def test_validate_completion_valid_json(mock_completion, mock_litellm_json_respo
     )
     
     result = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy()
+        completion_response=mock_response
     )
-    
+
     structured_outputs, text_response, flags = result
     assert structured_outputs
     assert len(structured_outputs) == 1
@@ -130,10 +94,9 @@ def test_validate_completion_invalid_json(mock_completion, mock_litellm_json_res
         usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}
     )
     
-    with pytest.raises(CompletionRejectError):
+    with pytest.raises(CompletionRetryError):
         model._validate_completion(
             completion_response=mock_response,
-            messages=test_messages.copy()
         )
 
 
@@ -155,10 +118,9 @@ def test_validate_completion_missing_required(mock_completion, mock_litellm_json
         usage={"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 11}
     )
     
-    with pytest.raises(CompletionRejectError):
+    with pytest.raises(CompletionRetryError):
         model._validate_completion(
             completion_response=mock_response,
-            messages=test_messages.copy()
         )
 
 
@@ -183,6 +145,7 @@ def test_end_to_end_completion(mock_completion, mock_litellm_json_response, test
     mock_completion.return_value = mock_response
     
     result = model.create_completion(messages=test_messages)
+    print(result)
     
     assert result.structured_outputs
     assert len(result.structured_outputs) == 1
@@ -193,6 +156,4 @@ def test_end_to_end_completion(mock_completion, mock_litellm_json_response, test
     # Verify correct parameters were passed
     mock_completion.assert_called_once()
     call_kwargs = mock_completion.call_args.kwargs
-    assert call_kwargs["response_format"] == {"type": "json_object"}
-    # We expect 3 messages: system prompt, user message, and assistant response
-    assert len(call_kwargs["messages"]) == 3 
+    assert len(call_kwargs["messages"]) == 2

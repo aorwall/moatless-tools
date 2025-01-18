@@ -112,7 +112,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         # Normal append logic
         if file_text:
             file_text = file_text.rstrip("\n")
-            new_str = f"\n\n{new_str.lstrip('\n')}"
+            new_str = "\n\n" + new_str.lstrip("\n")
         else:
             new_str = new_str.lstrip("\n")
 

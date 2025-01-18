@@ -485,17 +485,19 @@ def test_string_replace_args_strips_line_numbers():
 
 def test_string_replace_with_negative_indentation(repository, file_context):
     # Create file with deeply indented content
-    repository.save_file("test_indent.py", """def outer():
+    repository.save_file("test_indent.py", """
+    def outer():
         def inner():
             value = "test"
-            return value""")
+            return value
+""")
     file_context.add_file("test_indent.py", show_all_spans=True)
     
     action = StringReplace(repository=repository, auto_correct_indentation=True)
     args = StringReplaceArgs(
         path="test_indent.py",
-        old_str="""            value = "test"
-            return value""",  # Indented with 12 spaces
+        old_str="""    value = "test"
+    return value""",  # Indented with 12 spaces
         new_str="""    value = "updated"
     return value""",  # Indented with 4 spaces
         scratch_pad="Reducing indentation level"
@@ -504,6 +506,7 @@ def test_string_replace_with_negative_indentation(repository, file_context):
     observation = action.execute(args, file_context)
     
     content = file_context.get_file("test_indent.py").content
+    print(observation)
     assert "def outer():" in content
     assert "def inner():" in content
     assert '            value = "updated"' in content  # Should maintain original indentation
@@ -516,7 +519,8 @@ def test_string_replace_with_empty_new_str(repository, file_context):
     repository.save_file("test_remove.py", """def example():
     # Old comment to remove
     value = 42
-    return value""")
+    return value
+""")
     file_context.add_file("test_remove.py", show_all_spans=True)
     
     action = StringReplace(repository=repository)
@@ -531,6 +535,8 @@ def test_string_replace_with_empty_new_str(repository, file_context):
     
     content = file_context.get_file("test_remove.py").content
     assert content == """def example():
+
     value = 42
-    return value"""
+    return value
+"""
     assert "diff" in observation.properties

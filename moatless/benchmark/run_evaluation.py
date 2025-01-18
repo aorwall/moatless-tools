@@ -11,7 +11,6 @@ from typing import Optional
 
 import litellm
 from dotenv import load_dotenv
-from litellm import InMemoryCache
 
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import (
@@ -25,11 +24,11 @@ from moatless.benchmark.schema import (
     InstanceStatus,
     TreeSearchSettings,
 )
-from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
+from moatless.completion.base import LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
 from moatless.model_config import MODEL_CONFIGS
+from moatless.schema import CompletionModelSettings
 from moatless.schema import MessageHistoryType
-from swesearch.evaluation_setups import create_evaluation_setup
 
 # Default evaluation settings
 DEFAULT_CONFIG = {
@@ -83,8 +82,8 @@ def setup_loggers(logs_dir: str):
     file_logger.addHandler(error_handler)
 
     # Suppress other loggers from console output
-    logging.getLogger("moatless").setLevel(logging.INFO) 
-    logging.getLogger("LiteLLM").setLevel(logging.WARNING)  
+    logging.getLogger("moatless").setLevel(logging.INFO)
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
     for logger_name in logging.root.manager.loggerDict:
         if logger_name != "scripts.run_evaluation_simple":
@@ -146,7 +145,7 @@ class SimpleEvaluationMonitor:
             f"  Max Cost: ${settings.max_cost}",
             "\nAgent Settings:",
             f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
-            f"  Response Format: {settings.model.response_format.value if settings.model.response_format else 'default'}",
+            f"  Response Format: {settings.model.response_format if settings.model.response_format else 'default'}",
             f"  Message History: {settings.agent_settings.message_history_type.value}",
             f"  Thoughts in Action: {settings.model.thoughts_in_action}",
             f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
@@ -161,13 +160,13 @@ class SimpleEvaluationMonitor:
         event_type = event.event_type
         data = event.data if event.data else {}
         instance_id = data.get("instance_id")
-        
+
         # Format log message based on event type
         log_msg = None
-    
+
         if event_type == "instance_started":
             log_msg = f"{instance_id}: Started processing"
-            
+
         elif event_type == "instance_completed":
             resolved = data.get("resolved")
             status = "✓" if resolved is True else "✗" if resolved is False else "-"
@@ -179,37 +178,38 @@ class SimpleEvaluationMonitor:
             error = data.get("error", "Unknown error")
             log_msg = f"{instance_id}: Error - {error}"
             self.log_eval_summary()
-            
+
         elif event_type == "loop_started":
             log_msg = f"{instance_id}: Started agentic loop"
-            
+
         elif event_type == "loop_iteration":
             action = data.get("action", "Unknown")
             node_id = data.get("current_node_id", 0)
             log_msg = f"{instance_id}: → Node{node_id} - {action}"
-            
+
         elif event_type == "loop_completed":
             duration = data.get("duration", 0)
             log_msg = f"{instance_id}: Completed loop in {duration:.1f}s"
-            
+
         elif event_type == "instance_evaluation_started":
             log_msg = f"{instance_id}: Started evaluation"
-            
+
         elif event_type == "instance_evaluation_result":
             resolved = data.get("resolved")
             status = "✓" if resolved is True else "✗" if resolved is False else "-"
             node_id = data.get("node_id")
-            log_msg = f"\n{instance_id}: 🎯 Evaluated node {node_id} [{status}] - Duration: {data.get('duration', 0):.1f}s"
-            
+            log_msg = (
+                f"\n{instance_id}: 🎯 Evaluated node {node_id} [{status}] - Duration: {data.get('duration', 0):.1f}s"
+            )
+
         elif event_type == "instance_evaluation_error":
             error = data.get("error", "Unknown error")
             node_id = data.get("node_id")
             log_msg = f"{instance_id}: Evaluation error on node {node_id} - {error}"
-        
+
         if log_msg:
             self.console.info(log_msg)
             self.logger.info(log_msg)
-
 
     def log_eval_summary(self):
         """Log total instances, completed, errors and resolved instances"""
@@ -343,14 +343,33 @@ def run_evaluation(config: dict):
     if not instance_ids:
         raise ValueError("No instance IDs provided")
 
-    # Create tree search settings using the evaluation setup function
-    tree_search_settings = create_evaluation_setup(config)
+    model_settings = CompletionModelSettings(
+        model=config["model"],
+        temperature=config.get("temperature", 0.0),
+        max_tokens=4000,
+        model_api_key=config.get("api_key"),
+        model_base_url=config.get("base_url"),
+        response_format=config.get("response_format"),
+        thoughts_in_action=config.get("thoughts_in_action", False),
+    )
+
+    agent_settings = AgentSettings(
+        completion_model=model_settings,
+        message_history_type=config.get("message_history_type", MessageHistoryType.MESSAGES),
+        system_prompt=None,
+        thoughts_in_action=config.get("thoughts_in_action", False),
+    )
+
+    tree_search_settings = TreeSearchSettings(
+        max_iterations=config["max_iterations"],
+        max_expansions=config["max_expansions"],
+        max_cost=config["max_cost"],
+        model=model_settings,
+        agent_settings=agent_settings,
+    )
 
     evaluation = create_evaluation(
-        repository=repository,
-        evaluation_name=evaluation_name,
-        settings=tree_search_settings,
-        instance_ids=instance_ids,
+        repository=repository, evaluation_name=evaluation_name, settings=tree_search_settings, instance_ids=instance_ids
     )
 
     # Create monitor with both loggers
@@ -367,9 +386,6 @@ def run_evaluation(config: dict):
 
     # Add event handler
     runner.add_event_handler(monitor.handle_event)
-
-    # TODO: Just testing to disable cache...
-    litellm.in_memory_llm_clients_cache = InMemoryCache(max_size_in_memory=-1, default_ttl=-1)
 
     try:
         # Run evaluation

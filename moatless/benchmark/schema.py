@@ -2,17 +2,16 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Any, List
+from typing import Dict, Optional, Any, List
 
 from pydantic import BaseModel, Field, ConfigDict
 
 from moatless.agent.settings import AgentSettings
 from moatless.benchmark.report import BenchmarkResult
-from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.feedback import BaseFeedbackGenerator
-from moatless.schema import MessageHistoryType
+from moatless.schema import MessageHistoryType, CompletionModelSettings
 from moatless.selector import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
@@ -64,7 +63,7 @@ class TreeSearchSettings(BaseModel):
         description="The maximum depth for one trajectory in simulations.",
     )
 
-    model: Optional[BaseCompletionModel] = Field(
+    model: Optional[CompletionModelSettings] = Field(
         default=None,
         description="The default model.",
     )
@@ -133,6 +132,7 @@ class EvaluationInstance(BaseModel):
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
+    benchmark_result: Optional[Dict[str, Any]] = Field(default=None, description="Benchmark result")
 
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
 
@@ -153,7 +153,7 @@ class EvaluationInstance(BaseModel):
         if self.started_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
         if benchmark_result:
-            self.benchmark_result = benchmark_result
+            self.benchmark_result = benchmark_result.model_dump()
 
     def fail(self, error: str):
         self.status = InstanceStatus.ERROR
@@ -173,11 +173,11 @@ class Evaluation(BaseModel):
 
     evaluations_dir: str = Field(description="Directory where evaluations are stored")
     evaluation_name: str = Field(description="Name of the evaluation")
-    settings: TreeSearchSettings = Field(description="Tree search settings")
     start_time: Optional[datetime] = Field(default=None, description="When the evaluation started")
     finish_time: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
     instances: List[EvaluationInstance] = Field(default_factory=list)
+    settings: Optional[TreeSearchSettings] = Field(default=None, description="Settings for the evaluation")
 
     def get_instance(self, instance_id: str) -> EvaluationInstance | None:
         for instance in self.instances:

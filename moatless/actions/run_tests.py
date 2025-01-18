@@ -171,8 +171,16 @@ class RunTests(Action):
         if isinstance(obj, dict):
             obj = obj.copy()
             repository = obj.pop("repository")
-            code_index = obj.pop("code_index")
-            runtime = obj.pop("runtime")
+            if "code_index" in obj:
+                code_index = obj.pop("code_index")
+            else:
+                code_index = None
+
+            if "runtime" in obj:
+                runtime = obj.pop("runtime")
+            else:
+                runtime = None
+
             return cls(code_index=code_index, repository=repository, runtime=runtime, **obj)
         return super().model_validate(obj)
 

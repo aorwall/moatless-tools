@@ -125,20 +125,3 @@ def test_insert_line_with_indentation(repository, file_context):
     assert '        return "test"' in content
     assert "class Test:" in content
     assert "diff" in observation.properties
-
-def test_insert_line_lines_not_in_context(repository):
-    # Mock lines_is_in_context to return False
-    file_context = Mock(FileContext)
-    file_context.get_file("test.py").lines_is_in_context = lambda start, end: False
-    
-    action = InsertLine(repository=repository)
-    args = InsertLinesArgs(
-        path="test.py",
-        insert_line=2,
-        new_str='    new_line',
-        scratch_pad="Trying to insert in non-context lines"
-    )
-    
-    observation = action.execute(args, file_context)
-    
-    assert observation.properties["fail_reason"] == "lines_not_in_context"

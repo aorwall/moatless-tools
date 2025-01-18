@@ -3,8 +3,7 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable, List
 
-from litellm import ConfigDict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage

@@ -60,9 +60,6 @@ class MessageHistoryGenerator(BaseModel):
             tool_calls = []
             tool_responses = []
 
-            if previous_node.feedback_data:
-                messages.append(ChatCompletionUserMessage(role="user", content=previous_node.feedback_data.feedback))
-
             if not previous_node.assistant_message and not previous_node.action_steps:
                 continue
 
@@ -133,9 +130,8 @@ class MessageHistoryGenerator(BaseModel):
             from moatless.message_history.summary import SummaryMessageHistoryGenerator
 
             return SummaryMessageHistoryGenerator(**obj)
-        
+
         elif message_history_type == MessageHistoryType.MESSAGES:
-            
             return cls(**obj)
         else:
             raise ValueError(f"Invalid message_history_type: {message_history_type}")

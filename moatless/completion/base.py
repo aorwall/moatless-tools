@@ -6,7 +6,6 @@ from enum import Enum
 from typing import Optional, List, Union, Any, Dict
 
 import tenacity
-from litellm.types.utils import ModelResponse
 from pydantic import BaseModel, Field, model_validator
 
 from moatless.completion.model import Completion, Usage
@@ -119,10 +118,20 @@ class BaseCompletionModel(BaseModel, ABC):
         else:
             schemas = [response_schema]
 
+        if self.response_format == LLMResponseFormat.REACT and self.message_cache:
+            logger.info("Disabling message cache for ReAct model")
+            self.message_cache = False
+
         # Validate all schemas are subclasses of ResponseSchema
         for schema in schemas:
             if not issubclass(schema, ResponseSchema):
                 raise CompletionRuntimeError(f"Schema {schema.__name__} must be a subclass of ResponseSchema")
+
+        if self.response_schema and self.response_schema != schemas:
+            raise ValueError("Response schema cannot be changed after initialization")
+
+        if self.system_prompt and self.system_prompt != system_prompt:
+            raise ValueError("System prompt cannot be changed after initialization")
 
         self.response_schema = schemas
         self._completion_params = self._get_completion_params(self.response_schema)
@@ -216,7 +225,10 @@ class BaseCompletionModel(BaseModel, ABC):
             else:
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
-            if not completion_response.choices[0].message.content and not completion_response.choices[0].message.tool_calls:
+            if (
+                not completion_response.choices[0].message.content
+                and not completion_response.choices[0].message.tool_calls
+            ):
                 raise CompletionRuntimeError(
                     "Completion response is empty",
                     messages=messages,
@@ -278,7 +290,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def _execute_completion(
         self,
         messages: List[Dict[str, str]],
-    ) -> ModelResponse:
+    ):
         """Execute a single completion attempt with LiteLLM.
 
         This method:
@@ -295,13 +307,13 @@ class BaseCompletionModel(BaseModel, ABC):
             CompletionRuntimeError: For provider errors
         """
         import litellm
-        from litellm import BadRequestError, RateLimitError, APIConnectionError
+        from litellm import BadRequestError, RateLimitError, APIConnectionError, ServiceUnavailableError
         from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
         params = self._completion_params.copy()
 
         @retry(
-            retry=retry_if_exception_type((RateLimitError, APIConnectionError)),
+            retry=retry_if_exception_type((RateLimitError, APIConnectionError, ServiceUnavailableError)),
             wait=wait_exponential(multiplier=5, min=5, max=60),
             stop=stop_after_attempt(3),
             reraise=True,
@@ -321,6 +333,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
                 if betas:
                     extra_headers = {"anthropic-beta": ",".join(betas)}
+                    logger.info(f"Using betas: {extra_headers}")
                 else:
                     extra_headers = None
 
@@ -373,10 +386,13 @@ class BaseCompletionModel(BaseModel, ABC):
         if messages[0]["role"] == "system":
             messages[0]["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
 
-        breakpoints_remaining = 3
+        if not self.message_cache:
+            return
+
+        breakpoints_remaining = 2
         for message in reversed(messages):
             if breakpoints_remaining:
-                if isinstance(message["content"], list):
+                if isinstance(message.get("content"), list):
                     if breakpoints_remaining:
                         breakpoints_remaining -= 1
                         message["content"][-1]["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
@@ -443,6 +459,8 @@ class BaseCompletionModel(BaseModel, ABC):
     @classmethod
     def model_validate(cls, obj):
         if isinstance(obj, dict) and "response_format" in obj:
+            if isinstance(obj["response_format"], str):
+                obj["response_format"] = LLMResponseFormat(obj["response_format"])
             return cls.create(**obj)
 
         return obj

@@ -5,7 +5,6 @@ from moatless.completion.schema import (
     ChatCompletionUserMessage,
     AllMessageValues,
 )
-
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 

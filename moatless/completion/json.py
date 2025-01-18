@@ -1,12 +1,12 @@
 import json
 import logging
 from textwrap import dedent
-from typing import Union, List, Dict, Any, Type, Optional
+from typing import List, Any, Type, Optional
 
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel
-from moatless.completion.base import CompletionRetryError, LLMResponseFormat
+from moatless.completion.base import CompletionRetryError
 from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,6 @@ class JsonCompletionModel(BaseCompletionModel):
     2. Configuring the LLM to output valid JSON
     3. Validating and parsing JSON responses
     """
-
 
     def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
         """Add JSON schema instructions to system prompt.
@@ -46,15 +45,6 @@ You must respond with only a JSON object that match the following json_schema:\n
 
 Make sure to return an instance of the JSON, not the schema itself.""")
         return system_prompt
-
-    def _get_completion_params(self, schema: Type[ResponseSchema]) -> Dict[str, Union[str, Dict, List]]:
-        """Get JSON-specific completion parameters.
-
-        This method configures the LLM to:
-        1. Output responses in JSON format
-        2. Include proper JSON schema validation
-        """
-        return {"response_format": {"type": "json_object"}}
 
     def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
         """Validate and parse JSON completion response.

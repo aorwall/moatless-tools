@@ -10,7 +10,6 @@ from anthropic.types.beta import (
     BetaToolUseBlock,
     BetaTextBlock,
 )
-from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel, CompletionResponse
@@ -62,6 +61,7 @@ class AnthtropicCompletionModel(BaseCompletionModel):
                     tools.append(schema)
 
         system_message = {"text": system_prompt, "type": "text"}
+        from litellm.litellm_core_utils.prompt_templates.factory import anthropic_messages_pt
 
         anthropic_messages = anthropic_messages_pt(
             model=self.model,

@@ -6,7 +6,7 @@ from litellm.types.utils import ModelResponse, Usage, Message, Function, ChatCom
 from pydantic import Field
 
 from moatless.actions.schema import ActionArguments
-from moatless.completion.base import LLMResponseFormat
+from moatless.completion.base import LLMResponseFormat, CompletionRetryError
 from moatless.completion.tool_call import ToolCallCompletionModel
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 
@@ -165,9 +165,7 @@ def test_validate_completion_valid_tool(mock_completion, mock_litellm_tool_respo
     )
     
     structured_outputs, text_response, flags = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy(),
-        retry_count=0
+        completion_response=mock_response
     )
     
     assert structured_outputs
@@ -198,11 +196,9 @@ def test_validate_completion_invalid_tool_name(mock_completion, mock_litellm_too
         ]
     )
     
-    with pytest.raises(CompletionRejectError):
+    with pytest.raises(CompletionRetryError):
         model._validate_completion(
-            completion_response=mock_response,
-            messages=test_messages.copy(),
-            retry_count=0
+            completion_response=mock_response
         )
 
 
@@ -226,11 +222,9 @@ def test_validate_completion_invalid_args(mock_completion, mock_litellm_tool_res
         ]
     )
     
-    with pytest.raises(CompletionRejectError):
+    with pytest.raises(CompletionRetryError):
         model._validate_completion(
-            completion_response=mock_response,
-            messages=test_messages.copy(),
-            retry_count=0
+            completion_response=mock_response
         )
 
 
@@ -257,9 +251,7 @@ def test_validate_completion_duplicate_calls(mock_completion, mock_litellm_tool_
     )
     
     structured_outputs, text_response, flags = model._validate_completion(
-        completion_response=mock_response,
-        messages=test_messages.copy(),
-        retry_count=0
+        completion_response=mock_response
     )
     
     assert "duplicate_tool_call" in flags
@@ -394,7 +386,7 @@ def test_retry_max_attempts_exceeded(mock_completion, mock_litellm_tool_response
     assert all(m == messages_used[0] for m in messages_used)
     
     # Verify the error message contains the validation error
-    assert "Tool args validation failed" in str(exc_info.value)
+    assert "Tool arguments is invalid." in str(exc_info.value)
     assert "command" in str(exc_info.value)  # The missing required field 
 
 

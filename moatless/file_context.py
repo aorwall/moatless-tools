@@ -288,7 +288,9 @@ class ContextFile(BaseModel):
                 for line in hunk:
                     if line.is_context:
                         if line_no >= len(content_lines):
-                            raise Exception(f"Patch context mismatch: Line {line_no} is beyond end of file ({len(content_lines)} lines)")
+                            raise Exception(
+                                f"Patch context mismatch: Line {line_no} is beyond end of file ({len(content_lines)} lines)"
+                            )
                         elif line.value.strip() and content_lines[line_no].strip() != line.value.strip():
                             raise Exception(
                                 f'Patch context mismatch at line {line_no}: Expected "{line.value.strip()}", got "{content_lines[line_no].strip()}"'
@@ -1501,7 +1503,7 @@ class FileContext(BaseModel):
                     test_result_tokens = count_tokens(test_result_str)
                     if sum_tokens + test_result_tokens > max_tokens:
                         break
-                    
+
                     sum_tokens += test_result_tokens
                     test_result_strings.append(test_result_str)
 

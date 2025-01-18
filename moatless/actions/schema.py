@@ -97,10 +97,14 @@ class ActionArguments(ResponseSchema, ABC):
         if isinstance(obj, dict):
             obj = obj.copy()
             action_args_class_path = obj.pop("action_args_class", None)
-            if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
-                action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
 
             if action_args_class_path:
+                if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
+                    action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
+
+                if action_args_class_path.startswith("moatless.actions.edit"):
+                    action_args_class_path = "moatless.actions.claude_text_editor.EditActionArguments"
+
                 module_name, class_name = action_args_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 action_args_class = getattr(module, class_name)

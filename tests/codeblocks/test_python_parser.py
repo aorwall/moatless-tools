@@ -1,4 +1,5 @@
-from moatless.benchmark.swebench import setup_swebench_repo, load_instance
+from moatless.benchmark.swebench import setup_swebench_repo
+from moatless.benchmark.utils import get_moatless_instances, get_moatless_instance
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import (
     Relationship,
@@ -87,6 +88,7 @@ def pytest_terminal_summary(terminalreporter):
     # ... existing code"""
 
     def assertion(codeblock):
+        print([child.identifier for child in codeblock.children])
         assert len(codeblock.children) == 4
         assert [child.identifier for child in codeblock.children] == [
             "pytest_configure",
@@ -767,29 +769,6 @@ def test_invalid_content():
         placeholders = codeblock.find_blocks_with_type(CodeBlockType.COMMENTED_OUT_CODE)
 
         assert len(placeholders) == 2
-
-    _verify_parsing(content, assertion, debug=False)
-
-
-def test_ignored_spans():
-    instance = load_instance("psf__requests-2674")
-    repo_dir = setup_swebench_repo(instance)
-    file_path = f"{repo_dir}/requests/adapters.py"
-    with open(file_path, "r") as file:
-        content = file.read()
-
-    # def assertion(codeblock):
-    #    print(codeblock.to_tree(show_spans=True))
-
-    # _verify_parsing(content, assertion, debug=False)
-
-    file_path = f"{repo_dir}/requests/sessions.py"
-    with open(file_path, "r") as file:
-        content = file.read()
-
-    def assertion(codeblock):
-        print(codeblock.to_tree(show_spans=True))
-        assert "imports" in codeblock.span_ids
 
     _verify_parsing(content, assertion, debug=False)
 

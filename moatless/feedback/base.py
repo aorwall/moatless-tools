@@ -6,6 +6,7 @@ from typing import Any, List
 from pydantic import BaseModel
 
 from moatless.actions.schema import ActionArguments
+from moatless.completion.base import BaseCompletionModel
 from moatless.node import Node, FeedbackData
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,11 @@ class BaseFeedbackGenerator(BaseModel, ABC):
                 module_name, class_name = feedback_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 feedback_class = getattr(module, class_name)
-                return feedback_class(**obj)
+
+                if "completion_model" in obj:
+                    obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
+
+                return feedback_class.model_validate(obj)
             except (ImportError, AttributeError) as e:
                 logger.warning(
                     f"Failed to load feedback generator class {feedback_class_path}, defaulting to RewardFeedbackGenerator: {e}"

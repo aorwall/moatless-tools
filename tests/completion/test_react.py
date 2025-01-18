@@ -6,7 +6,7 @@ from litellm.types.utils import ModelResponse, Usage, Message
 from moatless.actions.string_replace import StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs
 from moatless.actions.find_code_snippet import FindCodeSnippetArgs
-from moatless.completion.base import LLMResponseFormat
+from moatless.completion.base import LLMResponseFormat, CompletionRetryError
 from moatless.completion.react import ReActCompletionModel
 from moatless.exceptions import CompletionRejectError
 
@@ -85,6 +85,7 @@ def test_validate_react_format_valid():
     model = ReActCompletionModel(
         model="test",
         response_format=LLMResponseFormat.REACT,
+        disable_thoughts=True,
     )
     
     valid_response = """Action: StringReplace
@@ -127,7 +128,7 @@ def test_validate_react_format_invalid_missing_action():
     
     invalid_response = """Some random text without proper format"""
     
-    with pytest.raises(ValueError, match="Response must have one 'Action:' section"):
+    with pytest.raises(ValueError, match="The response is incorrect, it should start with 'Thought:'"):
         model._validate_react_format(invalid_response)
 
 
@@ -144,7 +145,7 @@ def test_validate_react_format_invalid_missing_thought():
 <old_str>old code</old_str>
 <new_str>new code</new_str>"""
     
-    with pytest.raises(ValueError, match="Response must have one 'Thought:' section"):
+    with pytest.raises(ValueError, match="The response is incorrect, it should start with 'Thought:'"):
         model._validate_react_format(invalid_response)
 
 
@@ -339,7 +340,8 @@ def test_validate_completion_invalid_action(mock_completion, mock_litellm_respon
     )
     model.initialize(response_schema=test_schema, system_prompt="Test prompt")
     
-    invalid_response = """Action: invalid_action
+    invalid_response = """Thought: thinking
+Action: invalid_action
 {
     "command": "test",
     "args": ["--flag"]
@@ -350,7 +352,7 @@ def test_validate_completion_invalid_action(mock_completion, mock_litellm_respon
         usage={"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12}
     )
     
-    with pytest.raises(CompletionRejectError, match="Unknown action"):
+    with pytest.raises(CompletionRetryError, match="Unknown action"):
         model._validate_completion(
             completion_response=mock_response
         )
@@ -375,7 +377,7 @@ def test_validate_completion_invalid_json(mock_completion, mock_litellm_response
         usage={"prompt_tokens": 6, "completion_tokens": 3, "total_tokens": 9}
     )
     
-    with pytest.raises(CompletionRejectError):
+    with pytest.raises(CompletionRetryError):
         model._validate_completion(
             completion_response=mock_response
         )

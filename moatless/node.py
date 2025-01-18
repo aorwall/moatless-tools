@@ -413,7 +413,7 @@ class Node(BaseModel):
                     }
                 ]
 
-        if "message" in node_data and not "user_message" in node_data:
+        if not "user_message" in node_data and node_data.get("message"):
             node_data["user_message"] = node_data.pop("message")
 
         if node_data.get("action_steps"):

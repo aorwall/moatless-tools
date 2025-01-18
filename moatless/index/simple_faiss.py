@@ -45,25 +45,17 @@ class SimpleVectorStoreData(DataClassJsonMixin):
 
 
 class SimpleFaissVectorStore(BasePydanticVectorStore):
-    """Simple Vector Store using Faiss as .
+    """Simple Vector Store using Faiss."""
 
-    In this vector store, embeddings are stored within a simple, in-memory dictionary.
-
-    Args:
-        simple_vector_store_data_dict (Optional[dict]): data dict
-            containing the embeddings and doc_ids. See SimpleVectorStoreData
-            for more details.
-    """
+    stores_text: bool = False
+    d: int = 1536  # Add this as a model field instead of private attr
 
     _data: SimpleVectorStoreData = PrivateAttr()
     _fs: fsspec.AbstractFileSystem = PrivateAttr()
     _faiss_index: Any = PrivateAttr()
-    _d: int = PrivateAttr()
 
     _vector_ids_to_delete: list[int] = PrivateAttr(default_factory=list)
     _text_ids_to_delete: set[str] = PrivateAttr(default_factory=set)
-
-    stores_text: bool = False
 
     def __init__(
         self,
@@ -74,6 +66,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         **kwargs: Any,
     ) -> None:
         """Initialize params."""
+        super().__init__(d=d, **kwargs)  # Pass d to parent constructor
 
         import_err_msg = """
             `faiss` package not found. For instructions on
@@ -85,11 +78,9 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         except ImportError as e:
             raise ImportError(import_err_msg) from e
 
-        self._d = d
         self._faiss_index = cast(faiss.Index, faiss_index)
         self._data = data or SimpleVectorStoreData()
         self._fs = fs or fsspec.filesystem("file")
-        super().__init__(**kwargs)
 
     @classmethod
     def from_defaults(cls, d: int = 1536):

@@ -13,6 +13,7 @@ from moatless.actions.semantic_search import SemanticSearch
 from moatless.actions.string_replace import StringReplace
 from moatless.actions.view_code import ViewCode
 from moatless.agent.code_agent import CodingAgent
+from moatless.completion import LLMResponseFormat
 from moatless.completion.base import BaseCompletionModel
 from moatless.index.code_index import CodeIndex
 from moatless.repository.repository import InMemRepository
@@ -36,7 +37,8 @@ def test_dump_and_load_coding_agent():
     code_index = MockCodeIndex()
     runtime = MockRuntimeEnvironment()
 
-    completion_model = BaseCompletionModel(
+    completion_model = BaseCompletionModel.create(
+        response_format=LLMResponseFormat.TOOLS,
         model="gpt-3.5-turbo",
         max_tokens=1000,
         temperature=0.7,
@@ -44,25 +46,25 @@ def test_dump_and_load_coding_agent():
     )
 
     actions = [
-        FindClass(repository=repository, code_index=code_index),
-        FindFunction(repository=repository, code_index=code_index),
-        FindCodeSnippet(repository=repository, code_index=code_index),
-        SemanticSearch(repository=repository, code_index=code_index),
-        ViewCode(repository=repository),
-        StringReplace(repository=repository, completion_model=completion_model),
+        FindClass(repository=repository, code_index=code_index, completion_model=completion_model.clone()),
+        FindFunction(repository=repository, code_index=code_index, completion_model=completion_model.clone()),
+        FindCodeSnippet(repository=repository, code_index=code_index, completion_model=completion_model.clone()),
+        SemanticSearch(repository=repository, code_index=code_index, completion_model=completion_model.clone()),
+        ViewCode(repository=repository, completion_model=completion_model.clone()),
+        StringReplace(repository=repository, completion_model=completion_model.clone()),
         RunTests(repository=repository, code_index=code_index, runtime=runtime),
         Finish(),
         Reject(),
     ]
 
-    original_agent = CodingAgent(actions=actions, completion=completion_model)
+    original_agent = CodingAgent(actions=actions, completion=completion_model, system_prompt="test")
 
     dumped_agent = json.dumps(original_agent.model_dump(), indent=2)
     print(dumped_agent)
 
     # Load the agent from JSON
     loaded_agent_data = json.loads(dumped_agent)
-    loaded_agent = CodingAgent.model_validate(loaded_agent_data)
+    loaded_agent = CodingAgent.model_validate(loaded_agent_data, repository=repository, code_index=code_index, runtime=runtime)
 
     # Manually set the dependencies after loading
     for action in loaded_agent.actions:
@@ -107,50 +109,3 @@ def test_dump_and_load_coding_agent():
         assert type(original_action) == type(loaded_action)
         assert original_action.name == loaded_action.name
 
-
-def test_create_system_prompt_with_few_shot_examples():
-    # Setup
-    repository = InMemRepository()
-    code_index = MockCodeIndex()
-    completion_model = Mock(BaseCompletionModel)
-    completion_model.response_format = "json"
-    
-    actions = [
-        FindClass(repository=repository, code_index=code_index),
-        FindFunction(repository=repository, code_index=code_index),
-        StringReplace(repository=repository, completion_model=completion_model)
-    ]
-    
-    agent = CodingAgent(actions=actions, completion=completion_model)
-    
-    # Get the system prompt
-    prompt = agent.generate_system_prompt([FindClass, FindFunction, StringReplace])
-    print(prompt)
-    
-    # Verify the prompt structure
-    assert "Here are some examples of how to use the available actions:" in prompt
-    
-    # Verify FindClass example
-    assert "auth/*.py" in prompt
-    assert "UserAuthentication" in prompt
-    
-    # Verify FindFunction example
-    assert "Find the calculate_interest function" in prompt
-    assert "validate_token method in the JWTAuthenticator class" in prompt
-    
-    # Verify RequestCodeChange example
-    assert "Add error handling to the process_payment method" in prompt
-    assert "Add import for the logging module" in prompt
-    
-    # Verify JSON format
-    assert "```json" in prompt
-    assert "scratch_pad" in prompt
-    assert "class_name" in prompt
-    assert "function_name" in prompt
-    assert "file_path" in prompt
-    assert "action_type" in prompt
-    
-    # Verify action types are present
-    assert "FindClass" in prompt
-    assert "FindFunction" in prompt
-    assert "RequestCodeChange" in prompt

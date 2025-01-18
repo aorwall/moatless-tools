@@ -26,9 +26,11 @@ if TYPE_CHECKING:
     from llama_index.core import SimpleDirectoryReader
     from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
     from llama_index.core.storage.docstore import SimpleDocumentStore
-    from llama_index.core.storage import docstore
 
 logger = logging.getLogger(__name__)
+
+# Add constant for persist filename outside TYPE_CHECKING
+DEFAULT_PERSIST_FNAME = "docstore.json"
 
 
 def default_vector_store(settings: IndexSettings):
@@ -73,6 +75,7 @@ class CodeIndex:
         self._blocks_by_function_name = blocks_by_function_name or {}
 
         from moatless.index.embed_model import get_embed_model
+        from llama_index.core.storage.docstore import SimpleDocumentStore
 
         self._embed_model = embed_model or get_embed_model(self._settings.embed_model)
         self._vector_store = vector_store or default_vector_store(self._settings)
@@ -832,7 +835,7 @@ class CodeIndex:
 
     def persist(self, persist_dir: str):
         self._vector_store.persist(persist_dir)
-        self._docstore.persist(os.path.join(persist_dir, docstore.types.DEFAULT_PERSIST_FNAME))
+        self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
         self._settings.persist(persist_dir)
 
         with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "w") as f:
