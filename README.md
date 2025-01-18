@@ -9,8 +9,8 @@ I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my
 ### Version 0.0.4: Deepseek V3
 With version 0.0.4 I get 30.7% solve rate (92 instances) using the open-source Deepseek V3 model. The most notable aspect of this is the extremely low cost - the entire evaluation run costs less than $4 ($0.0127 per instance), achieving **24 resolved instances per dollar spent**.
 
-* [Deepseek V3 evaluation results](https://experiments.moatless.ai/evaluations/moatless_tools_v4_deepseek_chat_3_temp_0_iter_20_fmt_react)  
-* [Claude 3.5 Sonnet v20241022 evaluation results](https://experiments.moatless.ai/evaluations/moatless_tools_v4_claude_3_5_sonnet_20241022_temp_0_iter_20_fmt_tool_call)
+* [Deepseek V3 evaluation results](https://experiments.moatless.ai/evaluations/20250111_deepseek_chat_v3_temp_0_0_iter_20_fmt_react_hist_react)  
+* [Claude 3.5 Sonnet v20241022 evaluation results](https://experiments.moatless.ai/evaluations/20250113_claude_3_5_sonnet_20241022_temp_0_0_iter_20_fmt_tool_call_hist_messages)
 
 ### Version 0.0.3: Claude 3.5 Sonnet v20241022
 With version 0.0.3 I get 38.3% solve rate with Claude 3.5 Sonnet v20241022. Average cost per instance is $0.30.
@@ -168,14 +168,14 @@ Available dataset splits that can be specified with the `--split` argument:
 Example usage:
 ```bash
 # Run evaluation with Claude 3.5 Sonnet using the ReACT format
-poetry run scripts/run_evaluation.py \
+poetry run python -m moatless.benchmark.run_evaluation \
   --model claude-3-5-sonnet-20241022 \
   --response-format react \
   --message-history react \
   --num-workers 10
 
 # Run specific instances with GPT-4
-poetry run scripts/run_evaluation.py \
+poetry run python -m moatless.benchmark.run_evaluation \
   --model gpt-4o-2024-11-20 \
   --instance-ids "django__django-16527"
 ```
