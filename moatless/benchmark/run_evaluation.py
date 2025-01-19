@@ -51,6 +51,7 @@ CONFIG_MAP = {
     model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config} for model_name, config in MODEL_CONFIGS.items()
 }
 
+litellm.drop_params = True
 
 def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
@@ -346,11 +347,12 @@ def run_evaluation(config: dict):
     model_settings = CompletionModelSettings(
         model=config["model"],
         temperature=config.get("temperature", 0.0),
-        max_tokens=4000,
+        max_tokens=config.get("max_tokens", 4000),
         model_api_key=config.get("api_key"),
         model_base_url=config.get("base_url"),
         response_format=config.get("response_format"),
         thoughts_in_action=config.get("thoughts_in_action", False),
+        disable_thoughts=config.get("disable_thoughts", False),
     )
 
     agent_settings = AgentSettings(
@@ -358,6 +360,7 @@ def run_evaluation(config: dict):
         message_history_type=config.get("message_history_type", MessageHistoryType.MESSAGES),
         system_prompt=None,
         thoughts_in_action=config.get("thoughts_in_action", False),
+        disable_thoughts=config.get("disable_thoughts", False),
     )
 
     tree_search_settings = TreeSearchSettings(
@@ -407,7 +410,6 @@ def parse_args():
     # Model selection
     parser.add_argument(
         "--model",
-        choices=list(MODEL_CONFIGS.keys()),
         help="Model to evaluate (e.g., 'claude-3-5-sonnet-20241022')",
     )
 
@@ -449,15 +451,10 @@ def get_config_from_args(args):
 
     # If model specified, update with model config
     if args.model:
-        if args.model not in MODEL_CONFIGS:
-            print(f"Error: Model '{args.model}' not found in supported models.")
-            print("\nAvailable models and their configurations:")
-            for model, cfg in MODEL_CONFIGS.items():
-                print(f"\n{model}:")
-                for key, value in cfg.items():
-                    print(f"  {key}: {value}")
-            sys.exit(1)
-        config.update(MODEL_CONFIGS[args.model])
+        if args.model in MODEL_CONFIGS:
+            config.update(MODEL_CONFIGS[args.model])
+        else:
+            config["model"] = args.model
     else:
         print("\nNo model specified. Available models and their configurations:")
         for model, cfg in MODEL_CONFIGS.items():

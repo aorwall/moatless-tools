@@ -19,7 +19,7 @@ def get_embed_model(model_name: str) -> "BaseEmbedding":
             model_name=model_name,
             voyage_api_key=os.environ.get("VOYAGE_API_KEY"),
             truncation=True,
-            embed_batch_size=80,
+            embed_batch_size=60,
         )
     else:
         # Assumes OpenAI otherwise

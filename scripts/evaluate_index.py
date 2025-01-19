@@ -7,6 +7,7 @@ import mimetypes
 import os
 import pstats
 import difflib
+import traceback
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.storage.docstore import SimpleDocumentStore
@@ -78,9 +79,8 @@ def evaluate_index(code_index: CodeIndex, instance: dict):
 
 def evaluate_instance(instance_id: str) -> dict:
     instance = get_moatless_instance(instance_id)
-    repository = create_repository(instance)
     
-    code_index = CodeIndex.from_persist_dir(get_persist_dir(instance), file_repo=repository)
+    code_index = CodeIndex.from_persist_dir(get_persist_dir(instance))
 
     expected_changes, all_matching_context_window, any_matching_context_window = evaluate_index(code_index, instance)
     print(f"All matching context window: {all_matching_context_window}")
@@ -103,7 +103,15 @@ def evaluate_instances(instance_ids: list[str]) -> list[dict]:
 
     results = []
     for instance_id in instance_ids:
-        result = evaluate_instance(instance_id)
+        try:
+            result = evaluate_instance(instance_id)
+        except Exception as e:
+            print(f"Error evaluating instance {instance_id}: {e}")
+            # print the traceback
+            import traceback
+            print(traceback.format_exc())
+            continue
+
         results.append(result)
         with open(output_file, "a") as f:
             f.write(f"{instance_id},{result['resolved_by']},{result['all_matching_context_window']},{result['any_matching_context_window']}\n")

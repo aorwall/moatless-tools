@@ -50,7 +50,7 @@ def default_vector_store(settings: IndexSettings):
 class CodeIndex:
     def __init__(
         self,
-        file_repo: Repository,
+        file_repo: Repository | None = None,
         index_name: Optional[str] = None,
         vector_store: "BasePydanticVectorStore | None" = None,
         docstore: "DocumentStore | None" = None,
@@ -86,11 +86,11 @@ class CodeIndex:
             f" * {len(self._blocks_by_class_name)} classes\n"
             f" * {len(self._blocks_by_function_name)} functions\n"
             f" * {len(self._docstore.docs)} vectors\n"
-            f"Using file repository at {self._file_repo.repo_dir}\n"
+            f"Using file repository at {self._file_repo.repo_dir if self._file_repo else 'None'}\n"
         )
 
     @classmethod
-    def from_persist_dir(cls, persist_dir: str, file_repo: Repository, **kwargs):
+    def from_persist_dir(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
         from moatless.index.simple_faiss import SimpleFaissVectorStore
         from llama_index.core.storage.docstore import SimpleDocumentStore
 

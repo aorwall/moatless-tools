@@ -21,7 +21,6 @@ from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 logger = logging.getLogger(__name__)
 
 
-# TODO: Add necessary functionality for Anthropic in other CompletionModel implementations and remove this
 class AnthtropicCompletionModel(BaseCompletionModel):
     def create_completion(
         self,

@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional, List
 
-from pydantic import Field, PrivateAttr, field_validator, ConfigDict
+from pydantic import Field, PrivateAttr, field_validator, ConfigDict, model_validator
 
 from moatless.actions import RunTests, CreateFile, ViewCode
 from moatless.actions.action import Action
@@ -71,11 +71,10 @@ class EditActionArguments(ActionArguments):
     @field_validator("new_str")
     @classmethod
     def validate_new_str(cls, v, info):
-        # TODO: To keep backward compatibility, but would like to uncomment this
-        # if info.data.get("command") == "str_replace" and v is None:
-        #    raise ValueError(
-        #        "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
-        #    )
+        if info.data.get("command") == "str_replace" and v is None:
+            raise ValueError(
+                "Parameter `new_str` cannot be null for command: str_replace. Return an empty string if your intention was to remove old_str."
+            )
         if info.data.get("command") == "insert" and v is None:
             raise ValueError("Parameter `new_str` is required for command: insert")
         return v
@@ -101,6 +100,39 @@ class EditActionArguments(ActionArguments):
         if v not in valid_commands:
             raise ValueError(f"Unknown command: {v}")
         return v
+
+    def create_args(self):
+        if self.command == "str_replace":
+            return StringReplaceArgs(
+                path=self.path,
+                old_str=self.old_str,
+                new_str=self.new_str,
+                thoughts=self.thoughts,
+            )
+        elif self.command == "create":
+            return CreateFileArgs(
+                path=self.path,
+                file_text=self.file_text,
+                thoughts=self.thoughts,
+            )
+        
+        return None
+
+    @model_validator(mode="after")
+    def validate_args(self, **kwargs):
+        if self.command == "str_replace":
+            StringReplaceArgs.model_validate(self.model_dump())
+
+        # TODO: Validate all other commands
+        return self
+
+    def _short_str(self, str: str):
+        str_split = str.split("\n")
+        return str_split[0][:20]
+
+    def short_summary(self) -> str:
+        param_str = f'command="{self.command}", path="{self.path}"'
+        return f"{self.name}({param_str})"
 
 
 class ClaudeEditTool(Action, CodeModificationMixin):

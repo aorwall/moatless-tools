@@ -285,18 +285,26 @@ class Node(BaseModel):
         return sum(rewards) / len(rewards) if rewards else 0
 
     def total_usage(self) -> Usage:
+        """Calculate total token usage all nodes."""
         total_usage = Usage()
+        for node in self.get_all_nodes():
+            total_usage += node.usage()
+        return total_usage
+    
+    def usage(self) -> Usage:
+        """Calculate total token usage for this node."""
+        usage = Usage()
 
         # Sum usage across all action steps
         for step in self.action_steps:
             if step.completion:
-                total_usage += step.completion.usage
+                usage += step.completion.usage
 
         for completion in self.completions.values():
             if completion:
-                total_usage += completion.usage
+                usage += completion.usage
 
-        return total_usage
+        return usage
 
     def equals(self, other: "Node"):
         if self.action and not other.action:

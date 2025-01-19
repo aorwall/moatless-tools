@@ -374,15 +374,30 @@ def create_trajectory_stats(
 
 
 def to_result(
-    agentic_loop: AgenticLoop,
+    agentic_loop: AgenticLoop | None = None,
+    root_node: Node | None = None,
+    instance_id: str | None = None,
+    model: str | None = None,
     eval_report: dict | None = None,
     external_result: dict | None = None,
 ) -> BenchmarkResult:
-    info = agentic_loop.metadata
-    instance = get_moatless_instance(info["instance_id"])
+    if not root_node:
+        if not agentic_loop:
+            raise ValueError("Either agentic_loop or root_node must be provided")
+        root_node = agentic_loop.root
+      
+    if not instance_id:
+        info = agentic_loop.metadata
+        instance_id = info["instance_id"]
+    else:
+        info = None
+    
+    instance = get_moatless_instance(instance_id)
 
+    if not model and agentic_loop:
+        model = agentic_loop.agent._completion.model
     if not eval_report:
-        logger.info(f"No eval report for {info['instance_id']}")
+        logger.info(f"No eval report for {instance_id}")
         eval_report = {}
 
     try:
@@ -391,13 +406,19 @@ def to_result(
         best_node = None
         actions_counter: Dict[str, int] = {}
 
-        if not agentic_loop.is_finished():
+        if agentic_loop and not agentic_loop.is_finished():
             status = "running"
         else:
-            best_node = agentic_loop.get_last_node()
-            if not best_node:
-                status = "pending"
-            elif (best_node.action and best_node.action.name == "Error") or best_node.error:
+
+            leaf_nodes = root_node.get_leaf_nodes()
+
+            if len(leaf_nodes) > 0:
+                best_node = leaf_nodes[0]
+            else:
+                # pick the node with the highest reward
+                best_node = max(leaf_nodes, key=lambda x: x.reward.value if x.reward else 0)
+
+            if (best_node.action and best_node.action.name == "Error") or best_node.error:
                 status = "error"
             elif not best_node.file_context.generate_git_patch(ignore_tests=True):
                 status = "no_patch"
@@ -405,17 +426,16 @@ def to_result(
                 status = "completed"
 
         if external_result:
-            resolved = info.get("instance_id", "") in external_result["resolved_ids"]
+            resolved = instance_id in external_result["resolved_ids"]
 
         elif eval_report:
-            best_node = agentic_loop.get_last_node()
             if best_node:
                 resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:
-                logger.warning(f"No best node found for {info['instance_id']}")
+                logger.warning(f"No best node found for {instance_id}")
 
-        total_usage = agentic_loop.total_usage()
-        model = agentic_loop.agent._completion.model
+        total_usage = root_node.total_usage()
+        
         total_prompt_tokens = total_usage.get_total_prompt_tokens(model)
 
         result = BenchmarkResult(
@@ -423,15 +443,15 @@ def to_result(
             trajectories=[],
             status=status,
             resolved=resolved,
-            duration=info.get("duration", 0),
-            total_cost=total_usage.get_calculated_cost(model),
+            duration=info.get("duration", 0) if info else 0,
+            total_cost=total_usage.completion_cost,
             prompt_tokens=total_prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
             cached_tokens=total_usage.cache_read_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,
-            all_transitions=len(agentic_loop.root.get_all_nodes()),
+            all_transitions=len(root_node.get_all_nodes()),
             solutions=0,
             rejected_solutions=0,
             resolved_solutions=0,
@@ -444,69 +464,69 @@ def to_result(
             flags=[],
         )
 
-        leaf_node = agentic_loop.get_last_node()
-        traj = create_trajectory_stats(
-            leaf_node,
-            instance,
-            eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
-        )
-        result.trajectories.append(traj)
-        result.retries += traj.retries
+        for leaf_node in leaf_nodes:
+            traj = create_trajectory_stats(
+                leaf_node,
+                instance,
+                eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
+            )
+            result.trajectories.append(traj)
+            result.retries += traj.retries
 
-        for action, count in traj.actions.items():
-            result.actions[action] = result.actions.get(action, 0) + count
+            for action, count in traj.actions.items():
+                result.actions[action] = result.actions.get(action, 0) + count
 
-        result.max_repeated_actions = max(result.max_repeated_actions, traj.max_repeated_actions)
+            result.max_repeated_actions = max(result.max_repeated_actions, traj.max_repeated_actions)
 
-        if traj.status == "finished":
-            result.solutions += 1
-            if traj.reward and (result.max_reward is None or traj.reward > result.max_reward):
-                result.max_reward = traj.reward
-        elif traj.status == "rejected":
-            result.rejected_solutions += 1
+            if traj.status == "finished":
+                result.solutions += 1
+                if traj.reward and (result.max_reward is None or traj.reward > result.max_reward):
+                    result.max_reward = traj.reward
+            elif traj.status == "rejected":
+                result.rejected_solutions += 1
 
-        if eval_report and "node_results" in eval_report:
-            if eval_report["node_results"].get(str(traj.state_id), {}).get("resolved") is not None:
-                if traj.resolved is True:
-                    result.resolved_solutions += 1
-                    if traj.reward and (result.resolved_max_reward is None or traj.reward > result.resolved_max_reward):
-                        result.resolved_max_reward = traj.reward
-                elif traj.resolved is False:
-                    result.failed_solutions += 1
-                    if traj.reward and (result.failed_max_reward is None or traj.reward > result.failed_max_reward):
-                        result.failed_max_reward = traj.reward
+            if eval_report and "node_results" in eval_report:
+                if eval_report["node_results"].get(str(traj.state_id), {}).get("resolved") is not None:
+                    if traj.resolved is True:
+                        result.resolved_solutions += 1
+                        if traj.reward and (result.resolved_max_reward is None or traj.reward > result.resolved_max_reward):
+                            result.resolved_max_reward = traj.reward
+                    elif traj.resolved is False:
+                        result.failed_solutions += 1
+                        if traj.reward and (result.failed_max_reward is None or traj.reward > result.failed_max_reward):
+                            result.failed_max_reward = traj.reward
 
-        if traj.edits > 0:
-            result.edits += 1
+            if traj.edits > 0:
+                result.edits += 1
 
-        if traj.test_edits > 0:
-            result.test_edits += 1
+            if traj.test_edits > 0:
+                result.test_edits += 1
 
-        result.failed_actions += traj.failed_actions
-        result.expect_corrections += traj.expect_corrections
+            result.failed_actions += traj.failed_actions
+            result.expect_corrections += traj.expect_corrections
 
-        for flag in traj.flags:
-            if flag not in result.flags:
-                result.flags.append(flag)
+            for flag in traj.flags:
+                if flag not in result.flags:
+                    result.flags.append(flag)
 
-        result.max_build_tokens = max(result.max_build_tokens, traj.max_build_tokens)
+            result.max_build_tokens = max(result.max_build_tokens, traj.max_build_tokens)
 
-        result.duplicated_actions += traj.duplicated_actions
+            result.duplicated_actions += traj.duplicated_actions
 
-        if eval_report.get("error"):
-            result.error = eval_report["error"]
-            result.status = "eval_error"
-        else:
-            result.error = ""
+            if eval_report.get("error"):
+                result.error = eval_report["error"]
+                result.status = "eval_error"
+            else:
+                result.error = ""
 
-        if result.duplicated_actions > 0 and "duplicated_actions" not in result.flags:
-            result.flags.append("duplicated_actions")
-        if result.test_edits == 0 and "no_test_patch" not in result.flags:
-            result.flags.append("no_test_patch")
-        if result.failed_actions > 0 and "failed_actions" not in result.flags:
-            result.flags.append("failed_actions")
-        if result.retries > 0:
-            result.flags.append("retries")
+            if result.duplicated_actions > 0 and "duplicated_actions" not in result.flags:
+                result.flags.append("duplicated_actions")
+            if result.test_edits == 0 and "no_test_patch" not in result.flags:
+                result.flags.append("no_test_patch")
+            if result.failed_actions > 0 and "failed_actions" not in result.flags:
+                result.flags.append("failed_actions")
+            if result.retries > 0:
+                result.flags.append("retries")
 
     except Exception as e:
         raise e

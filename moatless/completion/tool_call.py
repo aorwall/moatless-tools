@@ -77,6 +77,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
         valid_names = [s.name for s in self.response_schema]
         invalid_function_names = []
 
+        retry_messages = []
+        retry = False
+
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
 
@@ -84,10 +87,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 retry_message = self._create_retry_message(
                     tool_call, f"Tool {tool_name} not found. Available tools: {valid_names}"
                 )
-                raise CompletionRetryError(
-                    message=f"Tool {tool_name} not found. Available tools: {valid_names}",
-                    retry_message=retry_message,
-                )
+                retry_messages.append(retry_message)
+                retry = True
+                continue
 
             # Check for duplicate arguments
             if tool_call.function.arguments in seen_arguments:
@@ -102,10 +104,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 args = json.loads(tool_call.function.arguments)
             except json.JSONDecodeError as e:
                 retry_message = self._create_retry_message(tool_call, f"Invalid JSON in tool args: {e}")
-                raise CompletionRetryError(
-                    message=f"Invalid JSON in tool args: {e}",
-                    retry_message=retry_message,
-                ) from e
+                retry_messages.append(retry_message)
+                retry = True
+                continue
 
             # Find matching schema for tool
             schema = None
@@ -116,20 +117,28 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
             if not schema:
                 retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} not found.")
-                raise CompletionRetryError(
-                    message=f"Tool {tool_name} not found.",
-                    retry_message=retry_message,
-                )
+                retry_messages.append(retry_message)
+                retry = True
+                continue
 
             try:
                 validated = schema.model_validate(args)
                 structured_outputs.append(validated)
             except ValidationError as e:
                 retry_message = self._create_retry_message(tool_call, f"Tool arguments is invalid. Error: {e}")
-                raise CompletionRetryError(
-                    message=f"Tool arguments is invalid. Error: {e}",
-                    retry_message=retry_message,
-                ) from e
+                retry_messages.append(retry_message)
+                retry = True
+                continue
+
+            # Just in case we need to retry
+            retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} could not be executed as other tools failed.")
+            retry_messages.append(retry_message)
+
+        if retry:
+            raise CompletionRetryError(
+                message=f"Tool calls failed. Retry messages: {retry_messages}",
+                retry_messages=retry_messages,
+            )
 
         return structured_outputs, content, flags
 

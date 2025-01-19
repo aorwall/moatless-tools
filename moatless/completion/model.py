@@ -218,8 +218,9 @@ class Completion(BaseModel):
         elif isinstance(completion_response, dict):
             response = completion_response
         else:
-            logger.error(f"Unexpected completion response type: {type(completion_response)}")
-            return None
+            response = {
+                "text": completion_response,
+            }
 
         if not usage:
             usage = Usage.from_completion_response(completion_response, model)

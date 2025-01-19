@@ -22,6 +22,10 @@ class AgentSettings(BaseModel):
         default=False,
         description="Whether to include thoughts in the action or in the message",
     )
+    disable_thoughts: bool = Field(
+        default=False,
+        description="Whether to disable to use thoughts at all.",
+    )
 
     def __eq__(self, other):
         if not isinstance(other, AgentSettings):

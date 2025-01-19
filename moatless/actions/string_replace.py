@@ -2,7 +2,7 @@ import logging
 import re
 from typing import List
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import Field, field_validator, model_validator, ConfigDict
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
@@ -82,6 +82,14 @@ class StringReplaceArgs(ActionArguments):
         self.new_str = remove_line_numbers(self.new_str.rstrip("\n"))
 
         return self
+    
+    @field_validator("new_str")
+    @classmethod
+    def validate_new_str(cls, v):
+        if v is None:
+            raise ValueError("Parameter `new_str` cannot be null. Return an empty string if your intention was to remove old_str."
+)
+        return v
 
     def format_args_for_llm(self) -> str:
         return f"""<path>{self.path}</path>
@@ -271,12 +279,13 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     )
 
                 # If no matches found at all
-                new_str_occurrences = file_content.count(new_str)
-                if new_str_occurrences > 0:
-                    return Observation(
-                        message=f"New string '{new_str}' already exists in {path}. No changes were made.",
-                        properties={"fail_reason": "string_already_exists"},
-                    )
+                if new_str:
+                    new_str_occurrences = file_content.count(new_str)
+                    if new_str_occurrences > 0:
+                        return Observation(
+                            message=f"New string '{new_str}' already exists in {path}. No changes were made.",
+                            properties={"fail_reason": "string_already_exists"},
+                        )
 
                 return Observation(
                     message=f"String '{old_str}' not found in {path}.\n\nRemember to write out the exact string you want to replace with the same indentation and no placeholders.",

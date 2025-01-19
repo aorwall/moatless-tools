@@ -3,27 +3,15 @@ from typing import Dict, Literal, Optional, Union, TypeVar, Generic
 
 from pydantic import BaseModel, Field
 
+from moatless.completion.schema import MessageContentListBlock
 
-class TextPromptModel(BaseModel):
-    type: Literal["text"]
-    text: str
-
-
-class ImageURLPromptModel(BaseModel):
-    type: Literal["image_url"]
-    image_url: Dict[str, str]
-
-
-PromptModel = Union[TextPromptModel, ImageURLPromptModel]
-
-
-class Artifact(BaseModel):
+class Artifact(BaseModel, ABC):
     id: str = Field(description="Unique identifier for the artifact")
     type: str = Field(description="Type of artifact (e.g., 'receipt')")
     name: str = Field(description="Name of the artifact")
 
     @abstractmethod
-    def to_prompt_format(self) -> PromptModel:
+    def to_prompt_message_content(self) -> MessageContentListBlock:
         pass
 
 

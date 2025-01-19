@@ -260,6 +260,7 @@ class EvaluationRunner:
                 runtime=runtime,
                 message_history_type=self.evaluation.settings.agent_settings.message_history_type,
                 thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
+                disable_thoughts=self.evaluation.settings.agent_settings.disable_thoughts,
             )
         else:
             completion_model = BaseCompletionModel.model_validate(

@@ -42,6 +42,10 @@ class CompletionModelSettings(BaseModel):
         default=False,
         description="Whether to include thoughts in the action or in the message",
     )
+    disable_thoughts: bool = Field(
+        default=False,
+        description="Whether to disable to use thoughts at all.",
+    )
 
 
 class FileWithSpans(BaseModel):

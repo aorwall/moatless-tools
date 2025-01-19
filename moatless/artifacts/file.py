@@ -7,11 +7,9 @@ from pydantic import Field
 
 from moatless.artifacts.artifact import (
     Artifact,
-    ArtifactHandler,
-    TextPromptModel,
-    ImageURLPromptModel,
-    PromptModel,
+    ArtifactHandler
 )
+from moatless.completion.schema import ChatCompletionImageUrlObject, ChatCompletionTextObject, MessageContentListBlock
 
 
 class FileArtifact(Artifact):
@@ -20,18 +18,18 @@ class FileArtifact(Artifact):
     mime_type: Optional[str] = Field(default=None, description="MIME type of the file content")
     content: bytes = Field(exclude=True)
 
-    def to_prompt_format(self) -> PromptModel:
+    def to_prompt_message_content(self) -> MessageContentListBlock:
         if self.mime_type is None:
             self.mime_type = "text/plain"
 
         if self.mime_type.startswith("text/"):
             # Return TextPromptModel for text content
             text_str = self.content.decode("utf-8", errors="replace")
-            return TextPromptModel(type="text", text=text_str)
+            return ChatCompletionTextObject(type="text", text=text_str)
         else:
             # Return ImageURLPromptModel for binary content
             encoded = base64.b64encode(self.content).decode("utf-8")
-            return ImageURLPromptModel(
+            return ChatCompletionImageUrlObject(
                 type="image_url",
                 image_url={"url": f"data:{self.mime_type};base64,{encoded}"},
             )

@@ -3,7 +3,7 @@ from typing import List
 
 from pydantic import BaseModel, Field, model_serializer
 
-from moatless.completion.schema import ChatCompletionUserMessage, AllMessageValues
+from moatless.completion.schema import ChatCompletionTextObject, ChatCompletionUserMessage, AllMessageValues
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
@@ -43,19 +43,23 @@ class MessageHistoryGenerator(BaseModel):
 
         for i, previous_node in enumerate(previous_nodes):
             # Handle user message
+            message_content = []
             if previous_node.user_message:
-                message_content = [{"type": "text", "text": previous_node.user_message}]
+                message_content.append(ChatCompletionTextObject(type="text", text=previous_node.user_message))
 
-                if previous_node.artifact_changes:
-                    for change in previous_node.artifact_changes:
-                        artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
-                        if artifact:
-                            message = f"{artifact.type} artifact: {artifact.id}"
-                            message_content.append({"type": "text", "text": message})
-                            message_content.append(artifact.to_prompt_format())
+            logger.info(f"Artifact changes: {previous_node.artifact_changes}")
 
+            if previous_node.artifact_changes:
+                
+                for change in previous_node.artifact_changes:
+                    artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
+                    if artifact:
+                        message_content.append(ChatCompletionTextObject(type="text", text=f"The artifact {artifact.id} with type {artifact.type} was {change.change_type} by the user"))
+                        message_content.append(artifact.to_prompt_message_content())
+
+            if message_content:
                 messages.append(ChatCompletionUserMessage(role="user", content=message_content))
-                tokens += count_tokens(previous_node.user_message)
+                tokens += count_tokens(str(message_content))
 
             tool_calls = []
             tool_responses = []

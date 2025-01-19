@@ -13,6 +13,7 @@ from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,10 @@ class AgenticLoop(BaseModel):
     @classmethod
     def create(
         cls,
-        message: str,
+        message: str | None = None,
+        root: Node | None = None,
         file_context: Optional[FileContext] = None,
+        workspace: Optional[Workspace] = None,
         repository: Repository | None = None,
         runtime: Optional[RuntimeEnvironment] = None,
         agent: Optional[ActionAgent] = None,
@@ -48,11 +51,13 @@ class AgenticLoop(BaseModel):
         if not file_context:
             file_context = FileContext(repo=repository, runtime=runtime)
 
-        root = Node(
-            node_id=0,
-            user_message=message,
-            file_context=file_context,
-        )
+        if not root:
+            root = Node(
+                node_id=0,
+                user_message=message,
+                file_context=file_context,
+                workspace=workspace,
+            )
 
         return cls(
             root=root,
@@ -131,6 +136,7 @@ class AgenticLoop(BaseModel):
         child_node = Node(
             node_id=self._generate_unique_id(),
             parent=parent,
+            workspace=parent.workspace.clone() if parent.workspace else None,
             file_context=parent.file_context.clone() if parent.file_context else None,
         )
         parent.add_child(child_node)
@@ -160,10 +166,7 @@ class AgenticLoop(BaseModel):
 
     def total_usage(self) -> Usage:
         """Calculate total token usage across all nodes."""
-        total_usage = Usage()
-        for node in self.root.get_all_nodes():
-            total_usage += node.total_usage()
-        return total_usage
+        return self.root.total_usage()
 
     def maybe_persist(self):
         """Persist the loop state if a persist path is set."""
@@ -186,9 +189,6 @@ class AgenticLoop(BaseModel):
         """Verify that the loop is properly configured to run."""
         if self.root is None:
             raise ValueError("AgenticLoop must have a root node.")
-
-        if self.root.file_context is None:
-            raise ValueError("AgenticLoop root node must have a file context.")
 
         if self.agent is None:
             raise ValueError("AgenticLoop must have an agent.")

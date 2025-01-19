@@ -2,6 +2,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 from typing import Optional, Dict, List
 
 from dotenv import load_dotenv
@@ -86,7 +87,7 @@ def ingest_instance(
     persist_dir = get_persist_dir(instance["instance_id"], index_store_dir)
     code_index.persist(persist_dir=persist_dir)
     logger.info(f"Index persisted to {persist_dir}")
-    
+
     return vectors, indexed_tokens
 
 def write_report(
@@ -136,6 +137,9 @@ def process_instances(
         )
         
         write_report(report_path, instance, vectors, indexed_tokens)
+
+        shutil.rmtree(code_index._file_repo.path)
+
 
 def extract_number(instance_id: str) -> int:
     """Extract the numeric portion of an instance ID for sorting."""

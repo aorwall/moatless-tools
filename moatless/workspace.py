@@ -53,3 +53,7 @@ class Workspace(BaseModel):
         """Load artifact handlers from a serialized format"""
         handlers = [ArtifactHandler.load(data) for data in handlers_data.values()]
         self.artifact_handlers = {handler.type: handler for handler in handlers}
+
+    def clone(self):
+        cloned_workspace = Workspace(artifact_handlers=list(self.artifact_handlers.values()), artifacts=self.artifacts)
+        return cloned_workspace

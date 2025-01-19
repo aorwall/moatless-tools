@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 class CompletionRetryError(Exception):
     """Exception raised when a completion should be retried"""
 
-    def __init__(self, message: str, retry_message: AllMessageValues):
+    def __init__(self, message: str, retry_message: AllMessageValues | None = None, retry_messages: List[AllMessageValues] | None = None):
         super().__init__(message)
-        self.retry_message = retry_message
+        if retry_message:
+            self.retry_messages = [retry_message]
+        elif retry_messages:
+            self.retry_messages = retry_messages
+        else:
+            self.retry_messages = []
 
 
 class LLMResponseFormat(str, Enum):
@@ -226,9 +231,11 @@ class BaseCompletionModel(BaseModel, ABC):
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
             if (
-                not completion_response.choices[0].message.content
-                and not completion_response.choices[0].message.tool_calls
+                not completion_response.choices or
+                (not completion_response.choices[0].message.content
+                and not completion_response.choices[0].message.tool_calls)
             ):
+                logger.error(f"Completion response is empty: {completion_response.model_dump_json(indent=2)}")
                 raise CompletionRuntimeError(
                     "Completion response is empty",
                     messages=messages,
@@ -243,7 +250,8 @@ class BaseCompletionModel(BaseModel, ABC):
                 )
             except CompletionRetryError as e:
                 messages.append(completion_response.choices[0].message.model_dump())
-                messages.append(e.retry_message)
+                if e.retry_messages:
+                    messages.extend(e.retry_messages)
                 raise e
 
             response_dict = completion_response.model_dump()
@@ -323,19 +331,13 @@ class BaseCompletionModel(BaseModel, ABC):
         )
         def _do_completion_with_rate_limit_retry():
             try:
-                betas = []
                 if "claude-3-5" in self.model:
                     self._inject_prompt_caching(messages)
-                    betas.append("prompt-caching-2024-07-31")
 
-                if "claude-3-5-sonnet" in self.model:
-                    betas.append("computer-use-2024-10-22")
-
-                if betas:
-                    extra_headers = {"anthropic-beta": ",".join(betas)}
-                    logger.info(f"Using betas: {extra_headers}")
-                else:
-                    extra_headers = None
+                if self.model_base_url:
+                    params["api_base"] = self.model_base_url
+                if self.model_api_key:
+                    params["api_key"] = self.model_api_key
 
                 return litellm.completion(
                     model=self.model,
@@ -344,20 +346,25 @@ class BaseCompletionModel(BaseModel, ABC):
                     messages=messages,
                     metadata=dict(self.metadata or {}),
                     timeout=self.timeout,
-                    api_base=self.model_base_url,
-                    api_key=self.model_api_key,
-                    extra_headers=extra_headers,
                     **params,
                 )
 
             except BadRequestError as e:
+
+                if e.response:
+                    response_text = e.response.text
+                else:
+                    response_text = None
+
                 logger.exception(
                     f"LiteLLM completion failed. Model: {self.model}, "
                     f"Response Schemas: {', '.join(self._get_schema_names())}, "
                     f"Completion Params:\n{json.dumps(params, indent=2)}\n"
-                    f"Error: {e}"
+                    f"Response: {response_text}"
                 )
-                raise CompletionRuntimeError(str(e), messages=messages) from e
+                
+
+                raise CompletionRuntimeError(message=str(e), messages=messages) from e
             except RateLimitError:
                 raise  # Let tenacity handle the retry
             except Exception as e:
@@ -366,10 +373,11 @@ class BaseCompletionModel(BaseModel, ABC):
                     f"Response Schemas: {', '.join(self._get_schema_names())}, "
                     f"Error: {e}"
                 )
-                raise CompletionRuntimeError(str(e), messages=messages) from e
+
+                raise CompletionRuntimeError(message=str(e), messages=messages) from e
 
         return _do_completion_with_rate_limit_retry()
-
+    
     def _get_schema_names(self):
         return [schema.__name__ for schema in self.response_schema] if self.response_schema else ["None"]
 
@@ -389,16 +397,21 @@ class BaseCompletionModel(BaseModel, ABC):
         if not self.message_cache:
             return
 
-        breakpoints_remaining = 2
+        breakpoints_remaining = 3
         for message in reversed(messages):
             if breakpoints_remaining:
                 if isinstance(message.get("content"), list):
                     if breakpoints_remaining:
-                        breakpoints_remaining -= 1
                         message["content"][-1]["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
                 else:
                     message["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
-                    breakpoints_remaining -= 1
+
+                breakpoints_remaining -= 1
+            else:
+                if isinstance(message.get("content"), list) and "cache_control" in message["content"][-1]:
+                    del message["content"][-1]["cache_control"]
+                elif "cache_control" in message:
+                    del message["cache_control"]
 
     @abstractmethod
     def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:

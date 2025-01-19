@@ -95,18 +95,22 @@ export TESTBED_BASE_URL="<your-base-url>"
 
 ## Verified Models
 
-Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. When specifying just the `--model` argument, the following configurations are used:
+Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. 
+Verified models are models that have been tested and found to work with the [Verified Mini subset](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini) of the SWE-Bench dataset.
 
-| Model | Response Format | Message History | Thoughts in Action |
-|-------|----------------|-----------------|-------------------|
-| claude-3-5-sonnet-20241022 | tool_call | messages | no |
-| claude-3-5-haiku-20241022 | tool_call | messages | no |
-| gpt-4o-2024-11-20 | tool_call | messages | yes |
-| gpt-4o-mini-2024-07-18 | tool_call | messages | yes |
-| deepseek/deepseek-chat | react | react | yes |
-| gemini/gemini-2.0-flash-exp | tool_call | messages | yes |
-| openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no |
-| openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | no |
+When specifying just the `--model` argument, the following configurations are used:
+
+| Model | Response Format | Message History | Thoughts in Action | Verified Mini |
+|-------|----------------|-----------------|-------------------|---------------|
+| claude-3-5-sonnet-20241022 | tool_call | messages | no | [46%](https://experiments.moatless.ai/evaluations/20250119_claude_3_5_sonnet_20241022_0_0_n_20_fmt_tool_call_verified_mini) | 
+| claude-3-5-haiku-20241022 | tool_call | messages | no | [28%](https://experiments.moatless.ai/evaluations/20250118_claude_3_5_haiku_20241022_0_0_n_20_fmt_tool_call_verified_mini) |
+| gpt-4o-2024-11-20 | tool_call | messages | yes | [32%](https://experiments.moatless.ai/evaluations/20250119_azure_gpt_4o_0_0_n_20_fmt_tool_call_thoughts-in-action_1_verified_mini) |
+| gpt-4o-mini-2024-07-18 | tool_call | messages | yes | [16%](https://experiments.moatless.ai/evaluations/20250118_gpt_4o_mini_2024_07_18_0_0_n_20_fmt_tool_call_thoughts-in-action_6_verified_mini) |
+| deepseek/deepseek-chat | react | react | yes | [36%](https://experiments.moatless.ai/evaluations/20250118_deepseek_deepseek_chat_0_0_n_20_fmt_react_verified_mini) |
+| gemini/gemini-2.0-flash-exp | react | react | no | [38%](https://experiments.moatless.ai/evaluations/20250119_gemini_gemini_2.0_flash_exp_0_0_n_20_fmt_react_verified_mini) |
+| openrouter/meta-llama/llama-3.1-70b-instruct | react | react | no | - |
+| openrouter/meta-llama/llama-3.1-405b-instruct | react | react | [28%](https://experiments.moatless.ai/evaluations/20250119_openai_meta_llama_Meta_Llama_3.1_405B_Instruct_FP8_0_0_n_20_fmt_react_verified_mini) | - |
+| openrouter/qwen/qwen-2.5-coder-32b-instruct | react | react | [32%](https://experiments.moatless.ai/evaluations/20250119_openai_Qwen_Qwen2.5_Coder_32B_Instruct_0_0_n_20_fmt_react_verified_mini) | - |
 
 ## Verify Setup
 
@@ -185,15 +189,16 @@ poetry run python -m moatless.benchmark.run_evaluation \
 Basic setup using the `AgenticLoop` to solve a SWE-Bench instance.
 
 ```python
-from moatless.agent import ActionAgent
-from moatless.agent.code_prompts import SIMPLE_CODE_PROMPT
+from moatless.actions.string_replace import StringReplace
+from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
-from moatless.completion import CompletionModel
+from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
+from moatless.completion.tool_call import ToolCallCompletionModel
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.loop import AgenticLoop
-from moatless.actions import FindClass, FindFunction, FindCodeSnippet, SemanticSearch, RequestMoreContext, RequestCodeChange, Finish, Reject
+from moatless.schema import MessageHistoryType
 
 index_store_dir = "/tmp/index_store"
 repo_base_dir = "/tmp/repos"
@@ -201,7 +206,7 @@ persist_path = "trajectory.json"
 
 instance = get_moatless_instance("django__django-16379")
 
-completion_model = CompletionModel(model="gpt-4o", temperature=0.0)
+completion_model = BaseCompletionModel.create(response_format=LLMResponseFormat.TOOLS, model="claude-3-5-sonnet-20240620", temperature=0.0)
 
 repository = create_repository(instance)
 
@@ -209,19 +214,8 @@ code_index = CodeIndex.from_index_name(
     instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
 )
 
-actions = [
-    FindClass(code_index=code_index, repository=repository),
-    FindFunction(code_index=code_index, repository=repository),
-    FindCodeSnippet(code_index=code_index, repository=repository),
-    SemanticSearch(code_index=code_index, repository=repository),
-    RequestMoreContext(repository=repository),
-    RequestCodeChange(repository=repository, completion_model=completion_model),
-    Finish(),
-    Reject()
-]
-
 file_context = FileContext(repo=repository)
-agent = ActionAgent(actions=actions, completion=completion_model, system_prompt=SIMPLE_CODE_PROMPT)
+agent = CodingAgent.create(completion_model=completion_model, code_index=code_index, repository=repository, message_history_type=MessageHistoryType.MESSAGES)
 
 loop = AgenticLoop.create(
     message=instance["problem_statement"],

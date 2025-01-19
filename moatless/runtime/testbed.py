@@ -144,6 +144,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                     with self.testbed_sdk.create_client(
                         instance_id=self.instance["instance_id"],
                         log_dir=self.log_dir,
+                        run_id=self.run_id,
                     ) as testbed:
                         baseline_response = testbed.run_tests(
                             test_files=list(failing_test_files), patch=None, timeout=600
@@ -189,7 +190,7 @@ class TestbedEnvironment(RuntimeEnvironment):
             logger.warning("No instance provided for evaluation")
             return None
 
-        logger.info(f"Running evaluation for instance {self.instance['instance_id']}")
+        logger.info(f"Running evaluation for instance {self.instance['instance_id']}. Run ID: {self.run_id}")
 
         test_patch_files = self.instance.get("test_file_spans", {}).keys()
 
@@ -200,6 +201,7 @@ class TestbedEnvironment(RuntimeEnvironment):
             with self.testbed_sdk.create_client(
                 instance_id=self.instance["instance_id"],
                 log_dir=self.log_dir,
+                run_id=self.run_id,
             ) as testbed:
                 if not patch.endswith("\n"):
                     patch += "\n"

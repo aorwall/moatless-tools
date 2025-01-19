@@ -7,6 +7,7 @@ from moatless.schema import MessageHistoryType
 BASE_MODEL_CONFIG = {
     "temperature": 0.0,
     "thoughts_in_action": False,
+    "max_tokens": 4000,
 }
 
 # Claude 3.5 Sonnet configuration
@@ -34,6 +35,11 @@ GPT4O = {
     "thoughts_in_action": True,
 }
 
+AZURE_GPT4O = {
+    **GPT4O,
+    "model": "azure/gpt-4o"
+}
+
 # GPT-4o Mini configuration
 GPT4O_MINI = {
     **BASE_MODEL_CONFIG,
@@ -49,6 +55,7 @@ O1_PREVIEW = {
     "model": "o1-preview-2024-09-12",
     "response_format": LLMResponseFormat.REACT,
     "message_history_type": MessageHistoryType.REACT,
+    "max_tokens": 8000,
 }
 
 # O1 Mini configuration
@@ -58,6 +65,7 @@ O1_MINI = {
     "response_format": LLMResponseFormat.REACT,
     "message_history_type": MessageHistoryType.REACT,
     "disable_thoughts": True,
+    "max_tokens": 8000,
 }
 
 # DeepSeek Chat configuration
@@ -72,22 +80,30 @@ DEEPSEEK_CHAT = {
 GEMINI_1206 = {
     **BASE_MODEL_CONFIG,
     "model": "gemini/gemini-exp-1206",
-    "response_format": LLMResponseFormat.TOOLS,
-    "message_history_type": MessageHistoryType.MESSAGES,
+    "response_format": LLMResponseFormat.REACT,
+    "message_history_type": MessageHistoryType.REACT,
 }
 
 # Gemini Flash configuration
 GEMINI_FLASH = {
     **BASE_MODEL_CONFIG,
     "model": "gemini/gemini-2.0-flash-exp",
-    "response_format": LLMResponseFormat.TOOLS,
-    "message_history_type": MessageHistoryType.MESSAGES,
+    "response_format": LLMResponseFormat.REACT,
+    "message_history_type": MessageHistoryType.REACT,
 }
 
 # Gemini Flash Think configuration
 GEMINI_FLASH_THINK = {
     **BASE_MODEL_CONFIG,
     "model": "gemini/gemini-2.0-flash-thinking-exp",
+    "response_format": LLMResponseFormat.REACT,
+    "message_history_type": MessageHistoryType.REACT,
+}
+
+# Llama 3.1 405B Instruct configuration
+LLAMA_31_405B = {
+    **BASE_MODEL_CONFIG,
+    "model": "openrouter/meta-llama/llama-3.1-405b-instruct",
     "response_format": LLMResponseFormat.REACT,
     "message_history_type": MessageHistoryType.REACT,
 }
@@ -103,16 +119,19 @@ LLAMA_31_70B = {
 # Qwen 2.5 Coder configuration
 QWEN_25_CODER = {
     **BASE_MODEL_CONFIG,
-    "model": "openrouter/qwen/qwen-2.5-coder-32b-instruct",
+    "model": "qwen/qwen-2.5-coder-32b-instruct",
     "response_format": LLMResponseFormat.REACT,
     "message_history_type": MessageHistoryType.REACT,
 }
 
 SUPPORTED_MODELS = [
+    AZURE_GPT4O,
     CLAUDE_35_SONNET,
     CLAUDE_35_HAIKU,
+    O1_MINI,
     GPT4O,
     GPT4O_MINI,
+    GEMINI_1206,
     GEMINI_FLASH,
     DEEPSEEK_CHAT,
     LLAMA_31_70B,

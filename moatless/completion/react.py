@@ -119,7 +119,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             retry_message = ChatCompletionUserMessage(role="user", content=str(e))
             raise CompletionRetryError(
                 message=str(e),
-                retry_message=retry_message,
+                retry_messages=[retry_message],
             ) from e
 
     def _validate_react_format(self, response_text: str) -> None:

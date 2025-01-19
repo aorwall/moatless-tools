@@ -84,5 +84,5 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             )
             raise CompletionRetryError(
                 message=str(e),
-                retry_message=retry_message,
+                retry_messages=[retry_message],
             ) from e

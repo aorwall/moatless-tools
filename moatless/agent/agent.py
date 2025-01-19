@@ -13,7 +13,7 @@ from moatless.actions.schema import (
 from moatless.agent.settings import AgentSettings
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.model import Completion
-from moatless.exceptions import CompletionError, RuntimeError, CompletionRejectError
+from moatless.exceptions import CompletionError, RejectError, RuntimeError, CompletionRejectError
 from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
@@ -98,10 +98,13 @@ class ActionAgent(BaseModel):
             )
             node.completions["build_action"] = completion_response.completion
 
+            node.assistant_message = completion_response.text_response
+            if not completion_response.structured_outputs:
+                raise RejectError("No action found")
+
             if completion_response.structured_outputs:
                 node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
 
-            node.assistant_message = completion_response.text_response
         except CompletionError as e:
             node.terminal = True
             node.error = traceback.format_exc()
@@ -151,7 +154,7 @@ class ActionAgent(BaseModel):
             raise RuntimeError(f"Action {type(node.action)} not found in action map.")
 
         try:
-            action_step.observation = action.execute(action_step.action, node.file_context, node.workspace)
+            action_step.observation = action.execute(action_step.action, file_context=node.file_context, workspace=node.workspace)
             if not action_step.observation:
                 logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:
@@ -167,12 +170,13 @@ class ActionAgent(BaseModel):
 
         except CompletionRejectError as e:
             logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
-            action_step.completion = Completion.from_llm_completion(
-                input_messages=e.messages,
-                completion_response=e.last_completion,
-                model=self.completion.model,
-                usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
-            )
+            if e.last_completion:
+                action_step.completion = Completion.from_llm_completion(
+                    input_messages=e.messages,
+                    completion_response=e.last_completion,
+                    model=self.completion.model,
+                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
+                )
             node.error = traceback.format_exc()
             node.terminal = True
             raise e
