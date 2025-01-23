@@ -72,7 +72,7 @@ class CompletionResponse(BaseModel):
 
 class BaseCompletionModel(BaseModel, ABC):
     model: str = Field(..., description="The model to use for completion")
-    temperature: float = Field(0.0, description="The temperature to use for completion")
+    temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(2000, description="The maximum number of tokens to generate")
     timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
     model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
@@ -89,6 +89,10 @@ class BaseCompletionModel(BaseModel, ABC):
     disable_thoughts: bool = Field(
         default=False,
         description="Whether to disable to use thoughts at all.",
+    )
+    merge_same_role_messages: bool = Field(
+        default=False,
+        description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
 
     response_schema: Optional[List[type[ResponseSchema]]] = Field(
@@ -315,13 +319,17 @@ class BaseCompletionModel(BaseModel, ABC):
             CompletionRuntimeError: For provider errors
         """
         import litellm
-        from litellm import BadRequestError, RateLimitError, APIConnectionError, ServiceUnavailableError
+        from litellm import BadRequestError, RateLimitError
         from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
         params = self._completion_params.copy()
 
+        if self.merge_same_role_messages:
+            messages = self._merge_same_role_messages(messages)
+
+
         @retry(
-            retry=retry_if_exception_type((RateLimitError, APIConnectionError, ServiceUnavailableError)),
+            retry=tenacity.retry_if_not_exception_type((BadRequestError)),
             wait=wait_exponential(multiplier=5, min=5, max=60),
             stop=stop_after_attempt(3),
             reraise=True,
@@ -484,3 +492,60 @@ class BaseCompletionModel(BaseModel, ABC):
         if self.model_base_url and not self.model_api_key:
             self.model_api_key = os.getenv("CUSTOM_LLM_API_KEY")
         return self
+
+    def _merge_same_role_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Merge consecutive messages with the 'user' role into a single message.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content' keys
+            
+        Returns:
+            List of merged messages where consecutive user messages are combined
+        """
+        if not messages:
+            return messages
+        
+        merged = []
+        current_content: List[str] = []
+        
+        for message in messages:
+            if message["role"] == "user":
+                # User message - accumulate content
+                if isinstance(message["content"], list):
+                    # Handle list of content blocks
+                    for content_block in message["content"]:
+                        if isinstance(content_block, dict) and content_block["type"] == "text":
+                            current_content.append(content_block["text"])
+                        else:
+                            # For non-text content blocks, flush current content and add message as-is
+                            if current_content:
+                                merged.append({
+                                    "role": "user",
+                                    "content": "\n".join(current_content)
+                                })
+                                current_content = []
+                            merged.append(message)
+                            break
+                else:
+                    # String content
+                    current_content.append(message["content"])
+            else:
+                # Non-user message - flush any accumulated user content first
+                if current_content:
+                    merged.append({
+                        "role": "user",
+                        "content": "\n".join(current_content)
+                    })
+                    current_content = []
+                
+                # Add non-user message as-is
+                merged.append(message)
+        
+        # Add final user message if exists
+        if current_content:
+            merged.append({
+                "role": "user",
+                "content": "\n".join(current_content)
+            })
+        
+        return merged

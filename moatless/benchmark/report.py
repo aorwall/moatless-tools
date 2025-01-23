@@ -221,14 +221,14 @@ def create_trajectory_stats(
     action_dumps = set()
 
     for node in nodes:
-        if node.action:
-            action_name = node.action.name
+        for action_step in node.action_steps:
+            action_name = action_step.action.name
             if action_name == "str_replace_editor":
-                action_name = node.action.command
+                action_name = action_step.action.command
             elif action_name == "Error":
                 result.status = "rejected"
-                if node.observation:
-                    result.message = node.observation.message
+                if action_step.observation:
+                    result.message = action_step.observation.message
 
             if not last_action or last_action != action_name:
                 last_action = action_name
@@ -242,7 +242,7 @@ def create_trajectory_stats(
 
             result.actions[action_name] += 1
 
-            if node.observation and node.observation.expect_correction:
+            if action_step.observation and action_step.observation.expect_correction:
                 result.expect_corrections += 1
 
             if node.file_context and node.file_context.test_files:
@@ -263,14 +263,14 @@ def create_trajectory_stats(
                     if failed_test_count > 0:
                         result.flags.append("failed_tests")
 
-            if node.observation and node.observation.properties:
+            if action_step.observation and action_step.observation.properties:
                 # if "flags" in node.observation.properties:
                 #    for flag in node.observation.properties["flags"]:
                 #        if flag not in result.flags:
                 #            result.flags.append(flag)
 
-                if "fail_reason" in node.observation.properties:
-                    fail_reason = node.observation.properties["fail_reason"]
+                if "fail_reason" in action_step.observation.properties:
+                    fail_reason = action_step.observation.properties["fail_reason"]
 
                     if fail_reason not in ["no_spans_added", "no_search_hits", "search_too_large"]:
                         result.failed_actions += 1
@@ -280,23 +280,20 @@ def create_trajectory_stats(
                         "no_search_hits",
                         "search_too_large",
                         "no_spans_found",
-                        "no_changes",
                         "no_test_files",
                         "file_exists",
                         "file_not_found",
                         "file_not_in_context",
-                        "string_already_exists",
-                        "string_not_found",
                         "invalid_path",
                     ]:
                         if fail_reason not in result.flags:
                             result.flags.append(fail_reason)
 
-            if node.observation and node.observation.properties.get("diff"):
-                if hasattr(node.action, "file_path"):
-                    file_path = node.action.file_path
-                elif hasattr(node.action, "path"):
-                    file_path = node.action.path
+            if action_step.observation and action_step.observation.properties.get("diff"):
+                if hasattr(action_step.action, "file_path"):
+                    file_path = action_step.action.file_path
+                elif hasattr(action_step.action, "path"):
+                    file_path = action_step.action.path
                 else:
                     file_path = ""
 
@@ -305,23 +302,23 @@ def create_trajectory_stats(
                 else:
                     result.edits += 1
 
-            if "build_action" in node.completions:
-                completion = node.completions["build_action"]
-                if completion and completion.usage:
-                    result.max_build_tokens = max(
-                        result.max_build_tokens,
-                        completion.usage.get_total_prompt_tokens(completion.model) + completion.usage.completion_tokens,
-                    )
-
-                if node.completions["build_action"].retries and node.completions["build_action"].retries > 1:
-                    result.retries += node.completions["build_action"].retries
-
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
             dump_str = str(current_action_dump)
             if dump_str in action_dumps:
                 result.duplicated_actions += 1
             else:
                 action_dumps.add(dump_str)
+        if "build_action" in node.completions:
+            completion = node.completions["build_action"]
+            if completion and completion.usage:
+                result.max_build_tokens = max(
+                    result.max_build_tokens,
+                    completion.usage.get_total_prompt_tokens(completion.model) + completion.usage.completion_tokens,
+                )
+
+            if node.completions["build_action"].retries and node.completions["build_action"].retries > 1:
+                result.retries += node.completions["build_action"].retries
+
 
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
@@ -437,6 +434,9 @@ def to_result(
         total_usage = root_node.total_usage()
         
         total_prompt_tokens = total_usage.get_total_prompt_tokens(model)
+
+        if total_usage.completion_cost == 0:
+            total_usage.completion_cost = total_usage.calculate_cost(model, total_prompt_tokens, total_usage.completion_tokens, total_usage.cache_read_tokens)
 
         result = BenchmarkResult(
             instance_id=instance["instance_id"],

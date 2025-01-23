@@ -234,32 +234,6 @@ class ResponseSchema(BaseModel):
             },
         }
 
-    @classmethod
-    def anthropic_schema(cls) -> dict[str, Any]:
-        schema = cls.model_json_schema()
-        del schema["title"]
-
-        if "description" in schema:
-            description = schema["description"]
-            del schema["description"]
-        else:
-            description = None
-
-        response = {
-            "name": cls.name,
-            "input_schema": schema,
-        }
-
-        if description:
-            response["description"] = description
-
-        # Exclude thoughts field from properties and required if it exists
-        if "thoughts" in schema.get("properties", {}):
-            del schema["properties"]["thoughts"]
-            if "required" in schema and "thoughts" in schema["required"]:
-                schema["required"].remove("thoughts")
-
-        return response
 
     @classmethod
     def model_validate_xml(cls, xml_text: str) -> Self:

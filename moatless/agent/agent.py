@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 class ActionAgent(BaseModel):
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
-    use_few_shots: bool = Field(True, description="Whether to use few-shot examples for generating completions")
+    use_few_shots: bool = Field(False, description="Whether to use few-shot examples for generating completions")
     thoughts_in_action: bool = Field(True, description="")
     actions: List[Action] = Field(default_factory=list)
     message_generator: MessageHistoryGenerator = Field(
@@ -140,7 +140,8 @@ class ActionAgent(BaseModel):
             logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution.")
             return
 
-        logger.info(f"Node{node.node_id}: Execute {len(node.action_steps)} actions")
+        action_names = [action_step.action.name for action_step in node.action_steps]
+        logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
         for action_step in node.action_steps:
             self._execute(node, action_step)
 

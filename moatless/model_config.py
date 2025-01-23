@@ -8,6 +8,7 @@ BASE_MODEL_CONFIG = {
     "temperature": 0.0,
     "thoughts_in_action": False,
     "max_tokens": 4000,
+    "few_shot_examples": True,
 }
 
 # Claude 3.5 Sonnet configuration
@@ -76,6 +77,19 @@ DEEPSEEK_CHAT = {
     "message_history_type": MessageHistoryType.REACT,
 }
 
+# DeepSeek Reasoner Chat configuration
+DEEPSEEK_REASONER_CHAT = {
+    **BASE_MODEL_CONFIG,
+    "model": "deepseek/deepseek-reasoner",
+    "temperature": None,
+    "response_format": LLMResponseFormat.REACT,
+    "message_history_type": MessageHistoryType.REACT,
+    "disable_thoughts": True,
+    "few_shot_examples": True,
+    "merge_same_role_messages": True,
+    "max_tokens": 8000,
+}
+
 # Gemini 1206 configuration
 GEMINI_1206 = {
     **BASE_MODEL_CONFIG,
@@ -125,7 +139,7 @@ QWEN_25_CODER = {
 }
 
 SUPPORTED_MODELS = [
-    AZURE_GPT4O,
+    #AZURE_GPT4O,
     CLAUDE_35_SONNET,
     CLAUDE_35_HAIKU,
     O1_MINI,
@@ -134,6 +148,7 @@ SUPPORTED_MODELS = [
     GEMINI_1206,
     GEMINI_FLASH,
     DEEPSEEK_CHAT,
+    DEEPSEEK_REASONER_CHAT,
     LLAMA_31_70B,
     QWEN_25_CODER,
 ]

@@ -54,6 +54,7 @@ class CodingAgent(ActionAgent):
         message_history_type: MessageHistoryType | None = None,
         thoughts_in_action: bool = False,
         disable_thoughts: bool = False,
+        few_shot_examples: bool = False,
         **kwargs,
     ):
         # Clone the completion model to ensure we have our own instance
@@ -85,7 +86,6 @@ class CodingAgent(ActionAgent):
             )
 
             action_type = "Claude actions with computer use capability"
-            use_few_shots = False
         else:
             actions = create_edit_code_actions(
                 repository=repository,
@@ -94,7 +94,6 @@ class CodingAgent(ActionAgent):
                 runtime=runtime,
             )
             action_type = "standard edit code actions"
-            use_few_shots = True
 
         # Generate workflow prompt based on available actions
         workflow_prompt = generate_workflow_prompt(actions, runtime is not None)
@@ -149,7 +148,7 @@ class CodingAgent(ActionAgent):
             actions=actions,
             system_prompt=system_prompt,
             message_generator=message_generator,
-            use_few_shots=use_few_shots,
+            use_few_shots=few_shot_examples,
             thoughts_in_action=thoughts_in_action,
             **kwargs,
         )

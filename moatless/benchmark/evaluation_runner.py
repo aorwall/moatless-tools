@@ -57,7 +57,7 @@ class EvaluationRunner:
         num_workers: int = 1,
         use_testbed: bool = False,
         rerun_errors: bool = True,
-        remove_repo_after_evaluation: bool = False,
+        remove_repo_after_evaluation: bool = True,
     ):
         self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
 
@@ -261,6 +261,7 @@ class EvaluationRunner:
                 message_history_type=self.evaluation.settings.agent_settings.message_history_type,
                 thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
                 disable_thoughts=self.evaluation.settings.agent_settings.disable_thoughts,
+                few_shot_examples=self.evaluation.settings.agent_settings.few_shot_examples,
             )
         else:
             completion_model = BaseCompletionModel.model_validate(
@@ -275,6 +276,7 @@ class EvaluationRunner:
                 runtime=runtime,
                 message_history_type=self.evaluation.settings.agent_settings.message_history_type,
                 thoughts_in_action=self.evaluation.settings.agent_settings.thoughts_in_action,
+                few_shot_examples=self.evaluation.settings.agent_settings.few_shot_examples,
             )
             agentic_loop = AgenticLoop.create(
                 message=problem_statement,

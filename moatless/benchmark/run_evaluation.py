@@ -231,10 +231,9 @@ def print_config(config: dict, console_logger: logging.Logger):
     config_sections = {
         "Model Settings": [
             ("Model", "model"),
-            ("Response Format", "response_format"),
-            ("Thoughts in Action", "thoughts_in_action"),
             ("API Key", "api_key"),
             ("Base URL", "base_url"),
+            ("Merge Same Role Messages", "merge_same_role_messages"),
         ],
         "Dataset Settings": [
             ("Split", "split"),
@@ -245,9 +244,15 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Max Expansions", "max_expansions"),
             ("Max Cost", "max_cost"),
         ],
+        "Agent Settings": [
+            ("Response Format", "response_format"),
+            ("Message History", "message_history"),
+            ("Thoughts in Action", "thoughts_in_action"),
+            ("Few Shot Examples", "few_shot_examples"),
+            ("Disable Thoughts", "disable_thoughts"),
+        ],
         "Runner Settings": [
             ("Number of Workers", "num_workers"),
-            ("Message History", "message_history"),
         ],
         "Evaluation Settings": [
             ("Evaluation Name", "evaluation_name"),
@@ -343,16 +348,16 @@ def run_evaluation(config: dict):
 
     if not instance_ids:
         raise ValueError("No instance IDs provided")
-
     model_settings = CompletionModelSettings(
         model=config["model"],
-        temperature=config.get("temperature", 0.0),
+        temperature=config.get("temperature"),
         max_tokens=config.get("max_tokens", 4000),
         model_api_key=config.get("api_key"),
         model_base_url=config.get("base_url"),
         response_format=config.get("response_format"),
         thoughts_in_action=config.get("thoughts_in_action", False),
         disable_thoughts=config.get("disable_thoughts", False),
+        merge_same_role_messages=config.get("merge_same_role_messages", False)
     )
 
     agent_settings = AgentSettings(
@@ -361,6 +366,7 @@ def run_evaluation(config: dict):
         system_prompt=None,
         thoughts_in_action=config.get("thoughts_in_action", False),
         disable_thoughts=config.get("disable_thoughts", False),
+        few_shot_examples=config.get("few_shot_examples", False),
     )
 
     tree_search_settings = TreeSearchSettings(

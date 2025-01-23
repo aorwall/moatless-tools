@@ -115,7 +115,7 @@ class AgenticLoop(BaseModel):
                 self.log(logger.error, f"Rejection error: {e}")
                 self.emit_event("loop_error", {"error": str(e)})
             except Exception as e:
-                self.log(logger.error, f"Unexpected error: {e}")
+                self.log(logger.exception, f"Unexpected error: {e}")
                 self.emit_event("loop_error", {"error": str(e)})
                 raise e
             finally:

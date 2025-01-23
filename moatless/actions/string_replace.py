@@ -658,6 +658,22 @@ def find_exact_matches(old_str: str, file_content: str) -> list[dict]:
         start_line = file_content.count("\n", 0, start_pos) + 1
         end_line = start_line + old_str.count("\n")
 
+        # For single-line matches, verify the entire line matches
+        if "\n" not in old_str:
+            # Find start and end of the line containing the match
+            line_start = file_content.rfind("\n", 0, start_pos) + 1
+            line_end = file_content.find("\n", start_pos)
+            if line_end == -1:  # Handle last line
+                line_end = len(file_content)
+            
+            # Get the full line from the file
+            full_line = file_content[line_start:line_end]
+            
+            # Skip if old_str is only a part of a larger line
+            if full_line != old_str:
+                start_pos += 1
+                continue
+
         matches.append(
             {
                 "start_line": start_line,

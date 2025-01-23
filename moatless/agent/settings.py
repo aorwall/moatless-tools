@@ -26,6 +26,10 @@ class AgentSettings(BaseModel):
         default=False,
         description="Whether to disable to use thoughts at all.",
     )
+    few_shot_examples: bool = Field(
+        default=False,
+        description="Whether to use few shot examples.",
+    )
 
     def __eq__(self, other):
         if not isinstance(other, AgentSettings):

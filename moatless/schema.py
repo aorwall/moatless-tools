@@ -32,7 +32,7 @@ class MessageHistoryType(Enum):
 
 class CompletionModelSettings(BaseModel):
     model: str = Field(..., description="The model to use for completion")
-    temperature: float = Field(0.0, description="The temperature to use for completion")
+    temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
     max_tokens: int = Field(2000, description="The maximum number of tokens to generate")
     timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
     model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
@@ -45,6 +45,10 @@ class CompletionModelSettings(BaseModel):
     disable_thoughts: bool = Field(
         default=False,
         description="Whether to disable to use thoughts at all.",
+    )
+    merge_same_role_messages: bool = Field(
+        default=False,
+        description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
 
 
