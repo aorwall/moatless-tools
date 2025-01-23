@@ -15,13 +15,13 @@ With version 0.0.4 I get 30.7% solve rate (92 instances) using the open-source D
 ### Version 0.0.3: Claude 3.5 Sonnet v20241022
 With version 0.0.3 I get 38.3% solve rate with Claude 3.5 Sonnet v20241022. Average cost per instance is $0.30.
 
-The three main reasons I’ve been able to go from 27% to 38% solved instances in this version:
+The three main reasons I've been able to go from 27% to 38% solved instances in this version:
 
 - **Claude 3.5 Sonnet and Computer Use**  
   The solution has been adjusted to use the `text_editor_20241022` tool introduced in the new version of Claude 3.5 Sonnet. This provides more stable results when editing existing code.  
 
 - **[moatless-testbeds](https://github.com/aorwall/moatless-testbeds)**  
-  I set up a Kubernetes-based solution to run tests and provide feedback on test results to the agent. It’s worth noting that the agent has to independently identify the tests and can’t rely on the `PASS_TO_PASS` or `FAIL_TO_PASS` data for each instance.  
+  I set up a Kubernetes-based solution to run tests and provide feedback on test results to the agent. It's worth noting that the agent has to independently identify the tests and can't rely on the `PASS_TO_PASS` or `FAIL_TO_PASS` data for each instance.  
 
 - **More flexible model**  
   In the earlier version of Moatless Tools, the agent followed a rigid flow where it first retrieved content and then edited the code. Now, it can dynamically choose between actions for code retrieval or editing, depending on the situation.
@@ -94,6 +94,11 @@ export TESTBED_BASE_URL="<your-base-url>"
 ```
 
 ## Verified Models
+
+> **Note**: The current version of litellm lacks support for computer use tools required by Claude 3.5 Sonnet. You need to use a specific dependency:
+> ```toml
+> litellm = { git = "https://github.com/aorwall/litellm.git", branch = "anthropic-computer-use" }
+> ```
 
 Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. 
 Verified models are models that have been tested and found to work with the [Verified Mini subset](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini) of the SWE-Bench dataset.
