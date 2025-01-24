@@ -106,8 +106,8 @@ class AgenticLoop(BaseModel):
                         "iteration": len(self.root.get_all_nodes()),
                         "total_cost": total_cost,
                         "action": current_node.action.name if current_node.action else None,
+                        "action_steps": [step.model_dump() for step in current_node.action_steps] if current_node.action_steps else None,
                         "current_node_id": current_node.node_id,
-                        "total_nodes": len(self.root.get_all_nodes()),
                     },
                 )
 
