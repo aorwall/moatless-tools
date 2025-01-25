@@ -9,7 +9,7 @@ from testbeds.schema import TestStatus
 
 def create_linear_table(
     nodes: List[Node],
-    max_node_id: int,
+    max_node_id: int | None = None,
     eval_result: Optional[dict] = None,
     instance: Optional[dict] = None,
 ) -> None:
@@ -107,6 +107,8 @@ def create_linear_table(
     st.markdown("### Timeline")
 
     # Calculate number of nodes to show (excluding root node)
+    if max_node_id is None:
+        max_node_id = nodes[-1].node_id
     visible_nodes = [n for n in nodes[1:] if n.node_id <= max_node_id]
     nodes_per_row = 8
     num_rows = (len(visible_nodes) + nodes_per_row - 1) // nodes_per_row  # Ceiling division
@@ -222,8 +224,8 @@ def create_linear_table(
                         tokens.append(f"{usage.prompt_tokens}↑")
                     if usage.completion_tokens:
                         tokens.append(f"{usage.completion_tokens}↓")
-                    if usage.cached_tokens:
-                        tokens.append(f"{usage.cached_tokens}⚡")
+                    if usage.cache_read_tokens:
+                        tokens.append(f"{usage.cache_read_tokens}⚡")
 
                     if usage.completion_cost:
                         has_cost = True

@@ -3,6 +3,8 @@ import json
 import logging
 import os
 
+from moatless.loop import AgenticLoop
+from moatless.streamlit.list_visualization import create_linear_table
 import streamlit as st
 from dotenv import load_dotenv
 from moatless.streamlit.investigate_node import investigate_node
@@ -122,8 +124,8 @@ def main():
                         #    )
                         # except:
                         #    runtime = None
-
-                        st.session_state.search_tree = SearchTree.from_file(
+                        
+                        st.session_state.search_tree = AgenticLoop.from_file(
                             file_path,
                             # repository=repository,
                             # runtime=runtime,
@@ -135,12 +137,21 @@ def main():
                     node_id = int(st.query_params["node_id"])
                     investigate_node(st.session_state.search_tree, node_id)
                 else:
-                    update_visualization(
-                        container,
-                        st.session_state.search_tree,
-                        file_path,
-                        instance,
-                        force_linear=args.linear,
+                    eval_result = None
+                    directory_path = os.path.dirname(file_path)
+                    eval_path = f"{directory_path}/eval_result.json"
+                    if os.path.exists(eval_path):
+                        with open(f"{directory_path}/eval_result.json", "r") as f:
+                            eval_result = json.load(f)
+
+                    if not instance and search_tree.metadata.get("instance_id"):
+                        instance = get_moatless_instance(search_tree.metadata["instance_id"])
+
+                    
+                    create_linear_table(
+                        st.session_state.search_tree.root.get_all_nodes(),
+                        eval_result=eval_result,
+                        instance=instance,
                     )
 
         else:
