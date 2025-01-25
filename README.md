@@ -191,38 +191,47 @@ poetry run python -m moatless.benchmark.run_evaluation \
   --instance-ids "django__django-16527"
 ```
 
-# Code Example
+# Code Examples
 
 Basic setup using the `AgenticLoop` to solve a SWE-Bench instance.
 
+## Example 1: Using Claude 3.5 Sonnet
 ```python
-from moatless.actions.string_replace import StringReplace
-from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.benchmark.utils import get_moatless_instance
-from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
-from moatless.completion.tool_call import ToolCallCompletionModel
-from moatless.file_context import FileContext
+from moatless.agent.code_agent import CodingAgent
 from moatless.index import CodeIndex
 from moatless.loop import AgenticLoop
+from moatless.file_context import FileContext
+from moatless.completion.base import LLMResponseFormat
 from moatless.schema import MessageHistoryType
 
-index_store_dir = "/tmp/index_store"
-repo_base_dir = "/tmp/repos"
+index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
 persist_path = "trajectory.json"
 
 instance = get_moatless_instance("django__django-16379")
-
-completion_model = BaseCompletionModel.create(response_format=LLMResponseFormat.TOOLS, model="claude-3-5-sonnet-20240620", temperature=0.0)
-
 repository = create_repository(instance)
-
 code_index = CodeIndex.from_index_name(
-    instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
+    instance["instance_id"], 
+    index_store_dir=index_store_dir, 
+    file_repo=repository
 )
-
 file_context = FileContext(repo=repository)
-agent = CodingAgent.create(completion_model=completion_model, code_index=code_index, repository=repository, message_history_type=MessageHistoryType.MESSAGES)
+
+# Create agent using Claude 3.5 Sonnet with explicit config
+agent = CodingAgent.create(
+    repository=repository, # Repository instance with codebase
+    code_index=code_index, # Code index for semantic search
+    
+    model="claude-3-5-sonnet-20241022",
+    temperature=0.0, 
+    max_tokens=4000,
+    few_shot_examples=False, # We don't need few-shot examples for this model
+    
+    response_format=LLMResponseFormat.TOOLS,
+    message_history_type=MessageHistoryType.MESSAGES, # We must show the full message history to make us of claude's prompt cache
+)
 
 loop = AgenticLoop.create(
     message=instance["problem_statement"],
@@ -231,10 +240,80 @@ loop = AgenticLoop.create(
     repository=repository,
     persist_path=persist_path,
     max_iterations=50,
-    max_cost=2.0  # Optional: Set maximum cost in dollars
+    max_cost=2.0
 )
 
 final_node = loop.run()
 if final_node:
     print(final_node.observation.message)
 ```
+
+## Example 2: Using Deepseek V3
+```python
+from moatless.benchmark.swebench import create_repository
+from moatless.benchmark.utils import get_moatless_instance
+from moatless.agent.code_agent import CodingAgent
+from moatless.index import CodeIndex
+from moatless.loop import AgenticLoop
+from moatless.file_context import FileContext
+from moatless.completion.base import LLMResponseFormat
+from moatless.schema import MessageHistoryType
+
+index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+repo_base_dir = os.getenv("REPO_DIR", "/tmp/repos")
+persist_path = "trajectory.json"
+
+instance = get_moatless_instance("django__django-16379")
+repository = create_repository(instance)
+code_index = CodeIndex.from_index_name(
+    instance["instance_id"], 
+    index_store_dir=index_store_dir, 
+    file_repo=repository
+)
+file_context = FileContext(repo=repository)
+
+# Create agent using Deepseek Chat with explicit config
+agent = CodingAgent.create(
+    repository=repository,
+    code_index=code_index,
+    
+    model="deepseek/deepseek-chat",
+    temperature=0.0,
+    max_tokens=4000,
+    few_shot_examples=True,
+    
+    response_format=LLMResponseFormat.REACT,
+    message_history_type=MessageHistoryType.REACT
+)
+
+loop = AgenticLoop.create(
+    message=instance["problem_statement"],
+    agent=agent,
+    file_context=file_context,
+    repository=repository,
+    persist_path=persist_path,
+    max_iterations=50,
+    max_cost=2.0
+)
+
+final_node = loop.run()
+if final_node:
+    print(final_node.observation.message)
+```
+
+## CodingAgent Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `model` | str | Required | Model identifier from supported models table (e.g., "claude-3-5-sonnet-20241022") |
+| `repository` | Repository | Required | Repository instance containing the codebase |
+| `code_index` | CodeIndex | None | Code index for semantic search functionality |
+| `runtime` | RuntimeEnvironment | None | Environment for running tests |
+| `message_history_type` | MessageHistoryType | From config | How to format the message history in the prompt ('messages', 'react', etc.) |
+| `thoughts_in_action` | bool | From config | Whether to include thoughts in action responses, used when the LLM can't provide the reasoning in the message content |
+| `disable_thoughts` | bool | From config | Whether to completely disable thought generation, used for reasoning models like o1 and Deepseek R1 |
+| `few_shot_examples` | bool | From config | Whether to use few-shot examples in prompts |
+| `temperature` | float | From config | Temperature for model sampling (0.0 = deterministic) |
+| `max_tokens` | int | From config | Maximum tokens per model completion |
+
+The default values for optional parameters are taken from the model's configuration in `model_config.py`. See the Verified Models table above for model-specific defaults.

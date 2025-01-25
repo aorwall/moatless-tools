@@ -35,6 +35,7 @@ from moatless.completion.base import (
 )
 from moatless.index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
+from moatless.model_config import get_model_config
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import MessageHistoryType
@@ -47,24 +48,57 @@ class CodingAgent(ActionAgent):
     def create(
         cls,
         repository: Repository,
-        completion_model: BaseCompletionModel,
+        completion_model: BaseCompletionModel | None = None,
+        model: str | None = None,
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
-        edit_completion_model: BaseCompletionModel | None = None,
         message_history_type: MessageHistoryType | None = None,
-        thoughts_in_action: bool = False,
-        disable_thoughts: bool = False,
-        few_shot_examples: bool = False,
+        thoughts_in_action: bool | None = None,
+        disable_thoughts: bool | None = None,
+        few_shot_examples: bool | None = None,
         **kwargs,
     ):
-        # Clone the completion model to ensure we have our own instance
-        completion_model = completion_model.clone()
+        if completion_model is None:
+            if model is None:
+                raise ValueError("Either completion_model or model name must be provided")
+            
+            # Get default config for the model from model_config
+            model_config = get_model_config(model)
+            
+            # Set instance variables from model config if not explicitly provided
+            if thoughts_in_action is None:
+                thoughts_in_action = model_config.get('thoughts_in_action', False)
+            if disable_thoughts is None:
+                disable_thoughts = model_config.get('disable_thoughts', False)
+            if few_shot_examples is None:
+                few_shot_examples = model_config.get('few_shot_examples', True)
+            
+            # Override with any provided kwargs
+            model_config.update(kwargs)
+            
+            # Create completion model
+            completion_model = BaseCompletionModel.create(**model_config)
+        else:
+            # Clone the completion model to ensure we have our own instance
+            completion_model = completion_model.clone()
+            
+            # Set instance variables from completion model if not explicitly provided
+            if thoughts_in_action is None:
+                thoughts_in_action = completion_model.thoughts_in_action
+            if disable_thoughts is None:
+                disable_thoughts = completion_model.disable_thoughts
 
         if message_history_type is None:
             if completion_model.response_format == LLMResponseFormat.TOOLS:
                 message_history_type = MessageHistoryType.MESSAGES
+
+                if few_shot_examples is None:
+                    few_shot_examples = False
             else:
                 message_history_type = MessageHistoryType.REACT
+
+                if few_shot_examples is None:
+                    few_shot_examples = True
 
         action_completion_format = completion_model.response_format
         if action_completion_format != LLMResponseFormat.TOOLS:
@@ -133,7 +167,6 @@ class CodingAgent(ActionAgent):
             "completion_model": completion_model.__class__.__name__,
             "code_index_enabled": code_index is not None,
             "runtime_enabled": runtime is not None,
-            "edit_completion_model": edit_completion_model.__class__.__name__ if edit_completion_model else None,
             "action_type": action_type,
             "actions": [a.__class__.__name__ for a in actions],
             "message_history_type": message_history_type.value,
