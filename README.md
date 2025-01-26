@@ -53,7 +53,7 @@ poetry install --with api
 
 # Alternative: Install all optional components at once
 poetry install --all-extras
-
+```
 
 ## Environment Variables
 
