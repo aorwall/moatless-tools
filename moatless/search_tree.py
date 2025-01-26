@@ -468,7 +468,6 @@ class SearchTree(BaseModel):
         """Calculate total token usage across all nodes."""
         return self.root.total_usage()
 
-
     def maybe_persist(self):
         if self.persist_path:
             self.persist(self.persist_path)

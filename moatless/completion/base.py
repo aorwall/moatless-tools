@@ -18,7 +18,12 @@ logger = logging.getLogger(__name__)
 class CompletionRetryError(Exception):
     """Exception raised when a completion should be retried"""
 
-    def __init__(self, message: str, retry_message: AllMessageValues | None = None, retry_messages: List[AllMessageValues] | None = None):
+    def __init__(
+        self,
+        message: str,
+        retry_message: AllMessageValues | None = None,
+        retry_messages: List[AllMessageValues] | None = None,
+    ):
         super().__init__(message)
         if retry_message:
             self.retry_messages = [retry_message]
@@ -234,10 +239,9 @@ class BaseCompletionModel(BaseModel, ABC):
             else:
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
-            if (
-                not completion_response.choices or
-                (not completion_response.choices[0].message.content
-                and not completion_response.choices[0].message.tool_calls)
+            if not completion_response.choices or (
+                not completion_response.choices[0].message.content
+                and not completion_response.choices[0].message.tool_calls
             ):
                 logger.error(f"Completion response is empty: {completion_response.model_dump_json(indent=2)}")
                 raise CompletionRuntimeError(
@@ -327,7 +331,6 @@ class BaseCompletionModel(BaseModel, ABC):
         if self.merge_same_role_messages:
             messages = self._merge_same_role_messages(messages)
 
-
         @retry(
             retry=tenacity.retry_if_not_exception_type((BadRequestError)),
             wait=wait_exponential(multiplier=5, min=5, max=60),
@@ -358,7 +361,6 @@ class BaseCompletionModel(BaseModel, ABC):
                 )
 
             except BadRequestError as e:
-
                 if e.response:
                     response_text = e.response.text
                 else:
@@ -370,7 +372,6 @@ class BaseCompletionModel(BaseModel, ABC):
                     f"Completion Params:\n{json.dumps(params, indent=2)}\n"
                     f"Response: {response_text}"
                 )
-                
 
                 raise CompletionRuntimeError(message=str(e), messages=messages) from e
             except RateLimitError:
@@ -385,7 +386,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 raise CompletionRuntimeError(message=str(e), messages=messages) from e
 
         return _do_completion_with_rate_limit_retry()
-    
+
     def _get_schema_names(self):
         return [schema.__name__ for schema in self.response_schema] if self.response_schema else ["None"]
 
@@ -495,19 +496,19 @@ class BaseCompletionModel(BaseModel, ABC):
 
     def _merge_same_role_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
         """Merge consecutive messages with the 'user' role into a single message.
-        
+
         Args:
             messages: List of message dictionaries with 'role' and 'content' keys
-            
+
         Returns:
             List of merged messages where consecutive user messages are combined
         """
         if not messages:
             return messages
-        
+
         merged = []
         current_content: List[str] = []
-        
+
         for message in messages:
             if message["role"] == "user":
                 # User message - accumulate content
@@ -519,10 +520,7 @@ class BaseCompletionModel(BaseModel, ABC):
                         else:
                             # For non-text content blocks, flush current content and add message as-is
                             if current_content:
-                                merged.append({
-                                    "role": "user",
-                                    "content": "\n".join(current_content)
-                                })
+                                merged.append({"role": "user", "content": "\n".join(current_content)})
                                 current_content = []
                             merged.append(message)
                             break
@@ -532,20 +530,14 @@ class BaseCompletionModel(BaseModel, ABC):
             else:
                 # Non-user message - flush any accumulated user content first
                 if current_content:
-                    merged.append({
-                        "role": "user",
-                        "content": "\n".join(current_content)
-                    })
+                    merged.append({"role": "user", "content": "\n".join(current_content)})
                     current_content = []
-                
+
                 # Add non-user message as-is
                 merged.append(message)
-        
+
         # Add final user message if exists
         if current_content:
-            merged.append({
-                "role": "user",
-                "content": "\n".join(current_content)
-            })
-        
+            merged.append({"role": "user", "content": "\n".join(current_content)})
+
         return merged

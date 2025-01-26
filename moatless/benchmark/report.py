@@ -319,7 +319,6 @@ def create_trajectory_stats(
             if node.completions["build_action"].retries and node.completions["build_action"].retries > 1:
                 result.retries += node.completions["build_action"].retries
 
-
         missing_test_files = get_missing_files(instance["test_file_spans"], test_files)
 
         result.missing_test_files = len(missing_test_files)
@@ -382,13 +381,13 @@ def to_result(
         if not agentic_loop:
             raise ValueError("Either agentic_loop or root_node must be provided")
         root_node = agentic_loop.root
-      
+
     if not instance_id:
         info = agentic_loop.metadata
         instance_id = info["instance_id"]
     else:
         info = None
-    
+
     instance = get_moatless_instance(instance_id)
 
     if not model and agentic_loop:
@@ -406,7 +405,6 @@ def to_result(
         if agentic_loop and not agentic_loop.is_finished():
             status = "running"
         else:
-
             leaf_nodes = root_node.get_leaf_nodes()
 
             if len(leaf_nodes) > 0:
@@ -432,11 +430,13 @@ def to_result(
                 logger.warning(f"No best node found for {instance_id}")
 
         total_usage = root_node.total_usage()
-        
+
         total_prompt_tokens = total_usage.get_total_prompt_tokens(model)
 
         if total_usage.completion_cost == 0:
-            total_usage.completion_cost = total_usage.calculate_cost(model, total_prompt_tokens, total_usage.completion_tokens, total_usage.cache_read_tokens)
+            total_usage.completion_cost = total_usage.calculate_cost(
+                model, total_prompt_tokens, total_usage.completion_tokens, total_usage.cache_read_tokens
+            )
 
         result = BenchmarkResult(
             instance_id=instance["instance_id"],
@@ -489,7 +489,9 @@ def to_result(
                 if eval_report["node_results"].get(str(traj.state_id), {}).get("resolved") is not None:
                     if traj.resolved is True:
                         result.resolved_solutions += 1
-                        if traj.reward and (result.resolved_max_reward is None or traj.reward > result.resolved_max_reward):
+                        if traj.reward and (
+                            result.resolved_max_reward is None or traj.reward > result.resolved_max_reward
+                        ):
                             result.resolved_max_reward = traj.reward
                     elif traj.resolved is False:
                         result.failed_solutions += 1

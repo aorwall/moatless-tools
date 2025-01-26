@@ -50,11 +50,15 @@ class MessageHistoryGenerator(BaseModel):
             logger.info(f"Artifact changes: {previous_node.artifact_changes}")
 
             if previous_node.artifact_changes:
-                
                 for change in previous_node.artifact_changes:
                     artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
                     if artifact:
-                        message_content.append(ChatCompletionTextObject(type="text", text=f"The artifact {artifact.id} with type {artifact.type} was {change.change_type} by the user"))
+                        message_content.append(
+                            ChatCompletionTextObject(
+                                type="text",
+                                text=f"The artifact {artifact.id} with type {artifact.type} was {change.change_type} by the user",
+                            )
+                        )
                         message_content.append(artifact.to_prompt_message_content())
 
             if message_content:

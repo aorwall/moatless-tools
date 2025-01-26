@@ -12,7 +12,6 @@ MODEL_COSTS = {
     "claude-3-5-sonnet-20241022": {"input": 3.0, "output": 15.0, "cache": 0.30, "cached_included": False},
     "deepseek/deepseek-chat": {"input": 0.14, "output": 0.28, "cache": 0.014, "cached_included": True},
     "deepseek/deepseek-reasoner": {"input": 0.55, "output": 2.19, "cache": 0.14, "cached_included": True},
-
     "o1-mini-2024-09-12": {"input": 3.0, "output": 12.0, "cache": 1.5, "cached_included": True},
     "o1-preview-2024-09-12": {"input": 15.0, "output": 60.0, "cache": 7.5, "cached_included": True},
 }

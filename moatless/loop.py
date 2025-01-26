@@ -68,7 +68,7 @@ class AgenticLoop(BaseModel):
             max_cost=max_cost,
         )
 
-    def run(self):
+    def run(self) -> Node:
         """Run the agentic loop until completion or max iterations."""
         self.assert_runnable()
 
@@ -106,7 +106,9 @@ class AgenticLoop(BaseModel):
                         "iteration": len(self.root.get_all_nodes()),
                         "total_cost": total_cost,
                         "action": current_node.action.name if current_node.action else None,
-                        "action_steps": [step.model_dump() for step in current_node.action_steps] if current_node.action_steps else None,
+                        "action_steps": [step.model_dump() for step in current_node.action_steps]
+                        if current_node.action_steps
+                        else None,
                         "current_node_id": current_node.node_id,
                     },
                 )

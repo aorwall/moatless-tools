@@ -2,7 +2,6 @@ import json
 from typing import ClassVar, Any, Self, Union, TypedDict, Literal, Iterable, Required, Optional, List
 
 from docstring_parser import parse
-from instructor.utils import classproperty
 from pydantic import BaseModel, ValidationError, ConfigDict
 
 from moatless.completion.model import logger
@@ -112,9 +111,7 @@ class NameDescriptor:
 class ResponseSchema(BaseModel):
     name: ClassVar[NameDescriptor] = NameDescriptor()
 
-    model_config = ConfigDict(ignored_types=(classproperty,))
-
-    @classproperty
+    @classmethod
     def description(cls):
         return cls.model_json_schema().get("description", "")
 
@@ -233,7 +230,6 @@ class ResponseSchema(BaseModel):
                 "parameters": parameters,
             },
         }
-
 
     @classmethod
     def model_validate_xml(cls, xml_text: str) -> Self:

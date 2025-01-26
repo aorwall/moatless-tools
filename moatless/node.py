@@ -290,7 +290,7 @@ class Node(BaseModel):
         for node in self.get_all_nodes():
             total_usage += node.usage()
         return total_usage
-    
+
     def usage(self) -> Usage:
         """Calculate total token usage for this node."""
         usage = Usage()

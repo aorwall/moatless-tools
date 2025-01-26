@@ -36,10 +36,7 @@ GPT4O = {
     "thoughts_in_action": True,
 }
 
-AZURE_GPT4O = {
-    **GPT4O,
-    "model": "azure/gpt-4o"
-}
+AZURE_GPT4O = {**GPT4O, "model": "azure/gpt-4o"}
 
 # GPT-4o Mini configuration
 GPT4O_MINI = {
@@ -139,7 +136,7 @@ QWEN_25_CODER = {
 }
 
 SUPPORTED_MODELS = [
-    #AZURE_GPT4O,
+    # AZURE_GPT4O,
     CLAUDE_35_SONNET,
     CLAUDE_35_HAIKU,
     O1_MINI,

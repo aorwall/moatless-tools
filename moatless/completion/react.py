@@ -155,7 +155,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
             # Check if sections are in correct order
             if not (thought_line < action_line):
-                raise ValueError("Your response is incorrect. The Thought section must come before the Action section. Please try the same request again with the correct format.")
+                raise ValueError(
+                    "Your response is incorrect. The Thought section must come before the Action section. Please try the same request again with the correct format."
+                )
 
     def _extract_thought_action(self, response_text: str) -> tuple[str, str]:
         """Extract thought and action from response text.

@@ -61,27 +61,27 @@ class CodingAgent(ActionAgent):
         if completion_model is None:
             if model is None:
                 raise ValueError("Either completion_model or model name must be provided")
-            
+
             # Get default config for the model from model_config
             model_config = get_model_config(model)
-            
+
             # Set instance variables from model config if not explicitly provided
             if thoughts_in_action is None:
-                thoughts_in_action = model_config.get('thoughts_in_action', False)
+                thoughts_in_action = model_config.get("thoughts_in_action", False)
             if disable_thoughts is None:
-                disable_thoughts = model_config.get('disable_thoughts', False)
+                disable_thoughts = model_config.get("disable_thoughts", False)
             if few_shot_examples is None:
-                few_shot_examples = model_config.get('few_shot_examples', True)
-            
+                few_shot_examples = model_config.get("few_shot_examples", True)
+
             # Override with any provided kwargs
             model_config.update(kwargs)
-            
+
             # Create completion model
             completion_model = BaseCompletionModel.create(**model_config)
         else:
             # Clone the completion model to ensure we have our own instance
             completion_model = completion_model.clone()
-            
+
             # Set instance variables from completion model if not explicitly provided
             if thoughts_in_action is None:
                 thoughts_in_action = completion_model.thoughts_in_action

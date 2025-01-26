@@ -124,7 +124,7 @@ def main():
                         #    )
                         # except:
                         #    runtime = None
-                        
+
                         st.session_state.search_tree = AgenticLoop.from_file(
                             file_path,
                             # repository=repository,
@@ -147,7 +147,6 @@ def main():
                     if not instance and search_tree.metadata.get("instance_id"):
                         instance = get_moatless_instance(search_tree.metadata["instance_id"])
 
-                    
                     create_linear_table(
                         st.session_state.search_tree.root.get_all_nodes(),
                         eval_result=eval_result,

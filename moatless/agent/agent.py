@@ -155,7 +155,9 @@ class ActionAgent(BaseModel):
             raise RuntimeError(f"Action {type(node.action)} not found in action map.")
 
         try:
-            action_step.observation = action.execute(action_step.action, file_context=node.file_context, workspace=node.workspace)
+            action_step.observation = action.execute(
+                action_step.action, file_context=node.file_context, workspace=node.workspace
+            )
             if not action_step.observation:
                 logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:

@@ -27,7 +27,11 @@ class CompletionError(MoatlessError):
     """Base exception for completion-related errors."""
 
     def __init__(
-        self, message: str, last_completion: Any | None = None, messages: List[dict] | None = None, accumulated_usage: Usage | None = None
+        self,
+        message: str,
+        last_completion: Any | None = None,
+        messages: List[dict] | None = None,
+        accumulated_usage: Usage | None = None,
     ):
         super().__init__(message)
         self.last_completion = last_completion

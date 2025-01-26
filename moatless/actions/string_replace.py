@@ -82,13 +82,14 @@ class StringReplaceArgs(ActionArguments):
         self.new_str = remove_line_numbers(self.new_str.rstrip("\n"))
 
         return self
-    
+
     @field_validator("new_str")
     @classmethod
     def validate_new_str(cls, v):
         if v is None:
-            raise ValueError("Parameter `new_str` cannot be null. Return an empty string if your intention was to remove old_str."
-)
+            raise ValueError(
+                "Parameter `new_str` cannot be null. Return an empty string if your intention was to remove old_str."
+            )
         return v
 
     def format_args_for_llm(self) -> str:
@@ -665,10 +666,10 @@ def find_exact_matches(old_str: str, file_content: str) -> list[dict]:
             line_end = file_content.find("\n", start_pos)
             if line_end == -1:  # Handle last line
                 line_end = len(file_content)
-            
+
             # Get the full line from the file
             full_line = file_content[line_start:line_end]
-            
+
             # Skip if old_str is only a part of a larger line
             if full_line != old_str:
                 start_pos += 1

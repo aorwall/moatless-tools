@@ -53,6 +53,7 @@ CONFIG_MAP = {
 
 litellm.drop_params = True
 
+
 def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
 
@@ -357,7 +358,7 @@ def run_evaluation(config: dict):
         response_format=config.get("response_format"),
         thoughts_in_action=config.get("thoughts_in_action", False),
         disable_thoughts=config.get("disable_thoughts", False),
-        merge_same_role_messages=config.get("merge_same_role_messages", False)
+        merge_same_role_messages=config.get("merge_same_role_messages", False),
     )
 
     agent_settings = AgentSettings(

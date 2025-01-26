@@ -115,7 +115,7 @@ class EditActionArguments(ActionArguments):
                 file_text=self.file_text,
                 thoughts=self.thoughts,
             )
-        
+
         return None
 
     @model_validator(mode="after")

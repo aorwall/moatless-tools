@@ -131,7 +131,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 continue
 
             # Just in case we need to retry
-            retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} could not be executed as other tools failed.")
+            retry_message = self._create_retry_message(
+                tool_call, f"Tool {tool_name} could not be executed as other tools failed."
+            )
             retry_messages.append(retry_message)
 
         if retry:
