@@ -16,12 +16,12 @@
 	let isLoading = false;
 	let activeTab: 'path' | 'upload' = 'path';
 
-
 	function loadTrajectory() {
 		if (!filePath) {
 			return;
 		}
-		goto(`?path=${encodeURIComponent(filePath)}`);
+		// Use the current URL's pathname to maintain SPA routing
+		goto(`/trajectory/?path=${encodeURIComponent(filePath)}`);
 	}
 
 	async function handleFileSelect() {

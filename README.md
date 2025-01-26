@@ -202,37 +202,31 @@ python -m moatless.benchmark.run_evaluation \
 
 # Running the UI and API
 
-The project includes a web UI for visualizing saved trajectory files, built with SvelteKit.
+The project includes a web UI for visualizing saved trajectory files, built with SvelteKit. The UI is packaged with the Python package and will be served by the API server.
 
 First, make sure you have the required components installed:
 ```bash
-# Install from PyPI:
 pip install "moatless[api]"
-
-# Or if installing from source:
-# Using Poetry:
-poetry install --with api
 ```
 
 ### Start the API Server
 ```bash
-# If installed from PyPI or using pip:
-python -m moatless.api
-
-# If using Poetry:
-poetry run moatless-api
+moatless-api
 ```
-This will start the FastAPI server on http://localhost:8000.
 
-### Start the UI Development Server
+This will start the FastAPI server on http://localhost:8000 and serve the UI at the same address.
+
+### Development Mode
+
+If you want to develop the UI, you can run it in development mode:
+
 ```bash
 # From the ui directory
 cd ui
 pnpm install
 pnpm run dev
 ```
-The UI will be available at http://localhost:5173. Currently, it provides a view for exploring saved trajectory files.
-
+The UI development server will be available at http://localhost:5173.
 
 # Code Examples
 

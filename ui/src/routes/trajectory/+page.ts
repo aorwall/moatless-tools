@@ -13,7 +13,9 @@ export const load = (async ({ url, fetch }) => {
 	}
 
 	try {
-		const trajectoryUrl = new URL(`${API_BASE_URL}/trajectory`);
+		// For development, we need a full URL. For production, we can use a relative URL
+		const baseUrl = import.meta.env.DEV ? API_BASE_URL : window.location.origin + API_BASE_URL;
+		const trajectoryUrl = new URL(`${baseUrl}/trajectory`);
 		trajectoryUrl.searchParams.set('file_path', filePath);
 
 		const response = await fetch(trajectoryUrl);
