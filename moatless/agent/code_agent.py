@@ -91,14 +91,11 @@ class CodingAgent(ActionAgent):
         if message_history_type is None:
             if completion_model.response_format == LLMResponseFormat.TOOLS:
                 message_history_type = MessageHistoryType.MESSAGES
-
-                if few_shot_examples is None:
-                    few_shot_examples = False
             else:
                 message_history_type = MessageHistoryType.REACT
 
-                if few_shot_examples is None:
-                    few_shot_examples = True
+        if few_shot_examples is None:
+            few_shot_examples = message_history_type == MessageHistoryType.REACT
 
         action_completion_format = completion_model.response_format
         if action_completion_format != LLMResponseFormat.TOOLS:
