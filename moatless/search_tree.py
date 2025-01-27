@@ -361,23 +361,31 @@ class SearchTree(BaseModel):
                 raise  # Re-raise to abort the entire search
 
     def _backpropagate(self, node: Node):
-        """Backpropagate the reward up the tree."""
+        """Backpropagate both visits and rewards up the tree."""
+        
+        # Always update visit counts, separately from reward propagation
+        current = node
+        while current is not None:
+            current.visits += 1
+            current = current.parent
 
-        if not node.reward:
+        # Only propagate rewards if they exist
+        if node.reward:
+            current = node
+            reward = node.reward.value
+            while current is not None:
+                if not current.value:
+                    current.value = reward
+                else:
+                    current.value += reward
+                current = current.parent
+        
+        else:
             self.log(
                 logger.info,
-                f"Node{node.node_id} has no evaluation. Skipping backpropagation.",
+                f"Node{node.node_id} has no evaluation. Skipping reward backpropagation.",
             )
             return
-
-        reward = node.reward.value
-        while node is not None:
-            node.visits += 1
-            if not node.value:
-                node.value = reward
-            else:
-                node.value += reward
-            node = node.parent
 
     def get_best_trajectory(self) -> Node | None:
         """
