@@ -3,8 +3,8 @@ you cannot communicate with the user but must rely on information you can get fr
 """
 
 
-def generate_react_guidelines(thoughts_in_action: bool = True) -> str:
-    if not thoughts_in_action:
+def generate_react_guidelines(disable_thoughts: bool = False) -> str:
+    if not disable_thoughts:
         return """# Action and ReAct Guidelines
 
 1. **Analysis First**

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class ActionAgent(BaseModel):
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
     use_few_shots: bool = Field(False, description="Whether to use few-shot examples for generating completions")
-    thoughts_in_action: bool = Field(True, description="")
+    disable_thoughts: bool = Field(False, description="Whether to disable thoughts in the action")
     actions: List[Action] = Field(default_factory=list)
     message_generator: MessageHistoryGenerator = Field(
         description="Generator for message history",
@@ -217,8 +217,8 @@ class ActionAgent(BaseModel):
                         "InsertLinesArgs",
                         "FindCodeSnippetArgs",
                     ]:
-                        prompt += f"\nTask: {example.user_input}"
-                        if self.thoughts_in_action:
+                        prompt += f"\nTask: {example.user_input}\n"
+                        if not self.disable_thoughts:
                             prompt += f"\nThought: {thoughts}\n"
                         prompt += f"Action: {str(example.action.name)}\n"
 
@@ -260,13 +260,13 @@ class ActionAgent(BaseModel):
 
                 elif self.completion.response_format == LLMResponseFormat.TOOLS:
                     tools_json = {"tool": example.action.name}
-                    if self.thoughts_in_action:
-                        tools_json.update(example.action.model_dump())
-                    else:
+                    if self.disable_thoughts:
                         tools_json.update(example.action.model_dump(exclude={"thoughts"}))
+                    else:
+                        tools_json.update(example.action.model_dump())
 
                     prompt += f"Task: {example.user_input}\n"
-                    if not self.thoughts_in_action:
+                    if not self.disable_thoughts:
                         prompt += f"<thoughts>{example.action.thoughts}</thoughts>\n"
                     prompt += json.dumps(tools_json)
                     prompt += "\n\n"

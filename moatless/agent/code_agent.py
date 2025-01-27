@@ -140,7 +140,7 @@ class CodingAgent(ActionAgent):
                 system_prompt += REACT_CORE_OPERATION_RULES
 
         elif completion_model.response_format == LLMResponseFormat.TOOLS:
-            system_prompt += generate_react_guidelines(thoughts_in_action)
+            system_prompt += generate_react_guidelines(disable_thoughts)
         else:
             raise ValueError(f"Unsupported response format: {completion_model.response_format}")
 
