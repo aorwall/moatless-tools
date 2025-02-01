@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/lib/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -10,6 +10,8 @@ import { ModelSelector } from '@/lib/components/selectors/ModelSelector';
 import { useValidationStore } from '@/stores/validationStore';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
+import { useWebSocket } from '@/lib/stores/websocketStore';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function ValidatePage() {
   const navigate = useNavigate();
@@ -31,9 +33,12 @@ export function ValidatePage() {
   // Add error state
   const [error, setError] = useState<string | null>(null);
 
+  const queryClient = useQueryClient();
+  const { subscribe, unsubscribe } = useWebSocket();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null); // Clear any previous errors
+    setError(null);
 
     try {
       const response = await startValidation.mutateAsync({
@@ -55,14 +60,6 @@ export function ValidatePage() {
       toast.error(errorMessage);
     }
   };
-
-  if (startValidation.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin" />
-      </div>
-    );
-  }
 
   return (
     <div className="container mx-auto py-6">
@@ -97,9 +94,16 @@ export function ValidatePage() {
         <div className="flex justify-end">
           <Button
             type="submit"
-            disabled={!selectedAgentId || !selectedModelId || !selectedInstanceId}
+            disabled={!selectedAgentId || !selectedModelId || !selectedInstanceId || startValidation.isPending}
           >
-            Run Validation
+            {startValidation.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Starting...
+              </>
+            ) : (
+              'Run Validation'
+            )}
           </Button>
         </div>
       </form>

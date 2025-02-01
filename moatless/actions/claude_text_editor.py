@@ -153,7 +153,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
     _create_file: CreateFile = PrivateAttr()
     _repository: Repository | None = PrivateAttr(None)
 
-    def execute(
+    async def execute(
         self,
         args: EditActionArguments,
         file_context: FileContext | None = None,

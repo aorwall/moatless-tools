@@ -55,7 +55,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
 
     args_schema = InsertLinesArgs
 
-    def execute(
+    async def execute(
         self,
         args: InsertLinesArgs,
         file_context: FileContext | None = None,

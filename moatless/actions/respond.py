@@ -27,7 +27,7 @@ class MessageAction(Action):
 
     args_schema = MessageArgs
 
-    def execute(
+    async def execute(
         self,
         args: MessageArgs,
         file_context: FileContext | None = None,

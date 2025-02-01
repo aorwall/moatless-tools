@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class AgenticLoop(AgenticSystem):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _run(self) -> Node:
+    async def _run(self) -> Node:
         """Run the agentic loop until completion or max iterations."""
 
         current_node = self.root.get_all_nodes()[-1]
@@ -49,7 +49,7 @@ class AgenticLoop(AgenticSystem):
 
             try:
                 current_node = self._create_next_node(current_node)
-                self.agent.run(current_node)
+                await self.agent.run(current_node)
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, current_node))
             except RejectError as e:

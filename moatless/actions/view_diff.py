@@ -30,7 +30,7 @@ class ViewDiff(Action):
 
     args_schema = ViewDiffArgs
 
-    def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None) -> Observation:
+    async def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None) -> Observation:
         diff = file_context.generate_git_patch()
 
         if not diff:

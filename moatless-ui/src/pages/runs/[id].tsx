@@ -7,29 +7,27 @@ import { Alert, AlertDescription } from '@/lib/components/ui/alert';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/lib/components/ui/resizable';
 import { RunStatus } from './components/RunStatus';
 import { RunEvents } from './components/RunEvents';
-import { useWebSocketStore } from '@/lib/stores/websocketStore';
-import { useMemo } from 'react';
+import { useEffect } from 'react';
 import { ScrollArea } from '@/lib/components/ui/scroll-area';
 import { TimelineItemDetails } from './components/TimelineItemDetails';
+import { useQueryClient } from '@tanstack/react-query';
+import { useWebSocketStore } from '@/lib/stores/websocketStore';
 
 export function RunPage() {
   const { id } = useParams<{ id: string }>();
   const { data: runData, isError, error } = useRun(id!);
+  const queryClient = useQueryClient();
+  const { subscribe } = useWebSocketStore();
   
-  // Use useMemo to cache the selector functions
-  //const selectMessages = useMemo(
-  //  () => (state: any) => state.messages,
-  //  [id]
-  //);
-  
-  const selectConnectionStatus = useMemo(
-    () => (state: any) => state.connectionStatus,
-    []
-  );
+  useEffect(() => {
+    if (!id) return;
+    
+    const unsubscribe = subscribe(`run.${id}`, () => {
+      queryClient.invalidateQueries({ queryKey: ['run', id] });
+    });
 
-  // Use the memoized selectors
-  //const messages = useWebSocketStore(selectMessages);
-  const wsStatus = useWebSocketStore(selectConnectionStatus);
+    return () => unsubscribe();
+  }, [id, subscribe, queryClient]);
 
   if (isError) {
     return (
@@ -58,16 +56,6 @@ export function RunPage() {
       </div>
     );
   }
-
-  // Combine WebSocket messages with initial events
-  //const allEvents = useMemo(() => {
-  //  const wsEvents = messages.map(msg => ({
-  //    event_type: msg.type,
-  //    timestamp: new Date().toISOString(),
-  //    data: { message: msg.message || msg.error }
-  //    }));
-  //  return [...(runData.events || []), ...wsEvents];
-  //}, [runData.events, messages]);
 
   return (
     <div className="h-[calc(100vh-56px)]">

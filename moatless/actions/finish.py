@@ -46,7 +46,7 @@ class Finish(Action):
         description="Whether to enforce that the file context has a test patch",
     )
 
-    def execute(
+    async def execute(
         self,
         args: FinishArgs,
         file_context: FileContext | None = None,

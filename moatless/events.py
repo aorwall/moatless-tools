@@ -71,32 +71,19 @@ class EventBus:
         return cls._instance
 
     def subscribe(self, callback: Callable):
+        logger.info(f"Subscribing to event: {callback.__name__}")
         self._subscribers.append(callback)
+        logger.info(f"Subscribed to {len(self._subscribers)} events")
 
-    def publish(self, run_id: str, event: BaseEvent):
+    async def publish(self, run_id: str, event: BaseEvent):
         """Publish event, handling both sync and async subscribers"""
-        # Handle sync subscribers immediately
-        logger.info(f"Publishing event: {event.event_type}")
-        
-        for callback in self._subscribers:
-            if not asyncio.iscoroutinefunction(callback):
-                try:
-                    callback(run_id, event)
-                except Exception as e:
-                    logger.error(f"Error in event subscriber: {e}")
-        
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self.publish_async(run_id, event))
-        except RuntimeError:
-            # No event loop running - skip async subscribers
-            pass
+        logger.info(f"Publishing event: {event.event_type} to {len(self._subscribers)} subscribers")
+        await asyncio.gather(*[self._run_async_callback(callback, run_id, event) for callback in self._subscribers])
 
-    async def publish_async(self, run_id: str, event: BaseEvent):
-        """Asynchronous publish for async subscribers"""
-        for callback in self._subscribers:
-            if asyncio.iscoroutinefunction(callback):
-                await callback(run_id, event)
+    async def _run_async_callback(self, callback: Callable, run_id: str, event: BaseEvent):
+        """Helper method to run a single async callback"""
+        logger.info(f"Running async callback: {callback.__name__}")
+        await callback(run_id, event)
 
 
 event_bus = EventBus.get_instance()

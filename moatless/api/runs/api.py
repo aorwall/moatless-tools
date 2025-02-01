@@ -3,11 +3,13 @@
 import os
 import json
 import logging
+import time
 from fastapi import APIRouter, HTTPException
+from moatless.agentic_system import SystemStatus
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.runner import agentic_runner
 from moatless.api.trajectory.trajectory_utils import convert_nodes, create_trajectory_dto, load_trajectory_from_file
-from .schema import RunResponseDTO, RunStatusDTO, RunEventDTO
+from .schema import RunResponseDTO, RunEventDTO
 from pathlib import Path
 from datetime import datetime
 
@@ -43,7 +45,7 @@ def load_run_events(run_dir: Path) -> list[RunEventDTO]:
             
     return events
 
-def load_run_status(run_dir: Path) -> RunStatusDTO:
+def load_run_status(run_dir: Path) -> SystemStatus:
     """Load status from status.json file."""
     status_path = run_dir / 'status.json'
     
@@ -55,26 +57,24 @@ def load_run_status(run_dir: Path) -> RunStatusDTO:
                 for dt_field in ['started_at', 'finished_at', 'last_restart']:
                     if status_data.get(dt_field):
                         status_data[dt_field] = datetime.fromisoformat(status_data[dt_field])
-                return RunStatusDTO(**status_data)
+                return SystemStatus(**status_data)
         except Exception as e:
             logger.error(f"Error reading status file: {e}")
     
     # Return default status if file doesn't exist or has errors
-    return RunStatusDTO(
+    return SystemStatus(
         status="unknown",
         started_at=datetime.utcnow()
     )
 
 @router.get("/{run_id}", response_model=RunResponseDTO)
 async def get_run(run_id: str):
-    logger.info(f"Getting run {run_id}")
     """Get the status, trajectory data, and events for a specific run."""
     try:
-        run_dir = get_run_dir(run_id)
         
         # First try to get active run from runner
-        system = agentic_runner.get_run(run_id)
-        
+        system = await agentic_runner.get_run(run_id)
+        run_dir = get_run_dir(run_id)
         if system:
             # Active run found - get status and trajectory from system
             status = "running"
@@ -92,8 +92,6 @@ async def get_run(run_id: str):
             system_status = system.get_status()
 
         else:
-            logger.info(f"Run {run_id} not found in runner, trying to load from file")
-            # Try to load completed run from trajectory file
             trajectory_path = get_trajectory_path(run_id)
             try:
                 trajectory = load_trajectory_from_file(trajectory_path)
@@ -101,7 +99,7 @@ async def get_run(run_id: str):
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="Run not found")
 
-            # Load status from file
+        
             system_status = load_run_status(run_dir)
             if system_status.status == "running":
                 system_status.status = "stopped"

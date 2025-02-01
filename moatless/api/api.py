@@ -39,31 +39,42 @@ class ConnectionManager:
         self.active_connections: Set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
-        logger.info("Connecting to WebSocket")
-        await websocket.accept()
-        self.active_connections.add(websocket)
-        logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        try:
+            logger.info("Accepting WebSocket connection")
+            await websocket.accept()
+            self.active_connections.add(websocket)
+            logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        except Exception as e:
+            logger.error(f"Failed to accept WebSocket connection: {e}")
+            raise
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.discard(websocket)
-        logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+        try:
+            self.active_connections.discard(websocket)
+            logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
+        except Exception as e:
+            logger.error(f"Error during WebSocket disconnect: {e}")
 
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected clients"""
+        if not self.active_connections:
+            return
+            
         logger.info(f"Broadcasting message to {len(self.active_connections)} clients")
+        
+        connections = self.active_connections.copy()
         disconnected = set()
-        for connection in self.active_connections:
+        
+        for connection in connections:
             try:
                 await connection.send_text(json.dumps(message))
-            except WebSocketDisconnect:
+            except Exception as e:
+                logger.error(f"Failed to send message to client: {e}")
                 disconnected.add(connection)
     
-        # Clean up disconnected clients
         for connection in disconnected:
             self.disconnect(connection)
 
-
-# Create a global connection manager instance
 manager = ConnectionManager()
 
 
@@ -71,65 +82,48 @@ async def handle_system_event(run_id: str, event: dict):
     """Handle system events and broadcast them via WebSocket"""
     message = {
         'run_id': run_id,
-        'type': event.get('event_type'),
-        **event
+        **event.model_dump(exclude_none=True)
     }
     await manager.broadcast_message(message)
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
-    # Load environment variables
+
     load_dotenv()
 
-    # Create main FastAPI application
     api = FastAPI(title="Moatless API")
-
-    # Update CORS middleware with WebSocket origins
-    origins = [
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://[::1]:5173",
-        "http://localhost:4173",
-        "http://127.0.0.1:4173",
-        "http://[::1]:4173",
-        # Add WebSocket origins
-        "ws://localhost:5173",
-        "ws://127.0.0.1:5173",
-        "ws://[::1]:5173",
-        # Add development API server origins
-        "ws://localhost:8000",
-        "ws://127.0.0.1:8000",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000"
-    ]
-
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Allow all origins in development
+        allow_origins=["*"],
         allow_credentials=True,
-        allow_methods=["*"],  # Allow all methods
+        allow_methods=["*"],
         allow_headers=["*"],
         max_age=3600,
     )
 
-    # Create API router with /api prefix
     router = FastAPI(title="Moatless API")
 
     @router.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         try:
             await manager.connect(websocket)
-            # Keep connection alive with ping/pong
+            
             while True:
                 try:
-                    data = await websocket.receive_text()
-                    # Handle incoming messages if needed
+                    # Wait for messages but don't do anything with them
+                    # This keeps the connection alive
+                    await websocket.receive_text()
                 except WebSocketDisconnect:
                     break
+                except Exception as e:
+                    logger.error(f"Error in WebSocket connection: {e}")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to establish WebSocket connection: {e}")
+            raise
         finally:
             manager.disconnect(websocket)
-            logger.info("WebSocket connection closed")
 
     if workspace is not None:
 
@@ -226,6 +220,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     except ImportError:
         logger.info("API extras not installed, UI will not be served")
 
+    logger.info("Subscribing to system events")
     # Subscribe to system events
     event_bus.subscribe(handle_system_event)
 

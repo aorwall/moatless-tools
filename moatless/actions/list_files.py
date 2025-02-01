@@ -33,7 +33,7 @@ class ListFilesArgs(ActionArguments):
 class ListFiles(Action):
     args_schema = ListFilesArgs
 
-    def execute(
+    async def execute(
         self,
         args: ListFilesArgs,
         file_context: FileContext | None = None,

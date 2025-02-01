@@ -7,9 +7,11 @@ from moatless.events import BaseEvent
 
 class AgentEvent(BaseEvent):
     """Base class for pure agent events"""
-
+    
     agent_id: str
     node_id: int
+    action_name: Optional[str] = None
+    action_params: Optional[Dict] = None
 
 
 class AgentStarted(AgentEvent):
@@ -22,13 +24,9 @@ class AgentActionCreated(AgentEvent):
     """Emitted when an agent creates an action"""
 
     event_type: str = "agent_action_created"
-    action_name: str
-    action_params: Dict
 
 
 class AgentActionExecuted(AgentEvent):
     """Emitted when an agent executes an action"""
 
     event_type: str = "agent_action_executed"
-    action_name: str
-    observation: Optional[str]

@@ -164,7 +164,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def initialized(self) -> bool:
         return self._initialized
 
-    def create_completion(
+    async def create_completion(
         self,
         messages: List[dict],
     ) -> CompletionResponse:
@@ -174,7 +174,8 @@ class BaseCompletionModel(BaseModel, ABC):
             )
 
         prepared_messages = self._prepare_messages(messages, self._system_prompt)
-        return self._create_completion_with_retries(messages=prepared_messages)
+        return await self._create_completion_with_retries(messages=prepared_messages)
+
 
     def _prepare_system_prompt(
         self,
@@ -221,7 +222,7 @@ class BaseCompletionModel(BaseModel, ABC):
         """
         return {}
 
-    def _create_completion_with_retries(
+    async def _create_completion_with_retries(
         self,
         messages: List[dict],
     ) -> CompletionResponse:
@@ -239,12 +240,12 @@ class BaseCompletionModel(BaseModel, ABC):
                 f"Retrying litellm completion after error: {retry_state.outcome.exception()}"
             ),
         )
-        def _do_completion_with_validation():
+        async def _do_completion_with_validation():
             nonlocal retry_count, accumulated_usage, completion_response
             retry_count += 1
 
             # Execute completion and get raw response
-            completion_response = self._execute_completion(messages)
+            completion_response = await self._execute_completion(messages)
 
             # Track usage from this attempt regardless of validation outcome
             usage = Usage.from_completion_response(completion_response, self.model)
@@ -295,7 +296,7 @@ class BaseCompletionModel(BaseModel, ABC):
             )
 
         try:
-            return _do_completion_with_validation()
+            return await _do_completion_with_validation()
         except CompletionRetryError as e:
             logger.warning(
                 f"Completion failed after {retry_count} retries. Exception: {e}. Completion response: {completion_response}"
@@ -317,7 +318,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 accumulated_usage=accumulated_usage,
             ) from e
 
-    def _execute_completion(
+    async def _execute_completion(
         self,
         messages: List[Dict[str, str]],
     ):
@@ -354,7 +355,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 f"Rate limited by provider, retrying in {retry_state.next_action.sleep} seconds"
             ),
         )
-        def _do_completion_with_rate_limit_retry():
+        async def _do_completion_with_rate_limit_retry():
             try:
                 if "claude-3-5" in self.model:
                     self._inject_prompt_caching(messages)
@@ -364,7 +365,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 if self.model_api_key:
                     params["api_key"] = self.model_api_key
 
-                return litellm.completion(
+                return await litellm.acompletion(
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
@@ -399,7 +400,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
                 raise CompletionRuntimeError(message=str(e), messages=messages) from e
 
-        return _do_completion_with_rate_limit_retry()
+        return await _do_completion_with_rate_limit_retry()
 
     def _get_schema_names(self):
         return [schema.__name__ for schema in self._response_schema] if self._response_schema else ["None"]

@@ -43,7 +43,7 @@ class VerifiedFinishArgs(ActionArguments):
 class VerifiedFinish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = VerifiedFinishArgs
 
-    def execute(
+    async def execute(
         self,
         args: VerifiedFinishArgs,
         file_context: FileContext | None = None,

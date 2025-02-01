@@ -49,7 +49,7 @@ class CodeFlowValidation:
         
         return dirs
 
-    def start_code_loop(self, 
+    async def start_code_loop(self, 
                        run_id: str,
                        agent_id: str,
                        model_id: str,
@@ -103,5 +103,5 @@ class CodeFlowValidation:
             }
         )
 
-        agentic_runner.start(loop)
+        await agentic_runner.start(loop)
         return run_id

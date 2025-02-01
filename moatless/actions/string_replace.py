@@ -132,7 +132,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         description="When True, automatically corrects indentation if all lines have the same indentation difference",
     )
 
-    def execute(self, args: StringReplaceArgs, file_context: FileContext | None = None) -> Observation:
+    async def execute(self, args: StringReplaceArgs, file_context: FileContext | None = None) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:

@@ -151,12 +151,12 @@ class AgenticSystem(BaseModel, ABC):
             **kwargs,
         )
 
-    def run(self) -> Node:
+    async def run(self) -> Node:
         """Run the system with optional root node."""
         try:
             self._initialize_run_state()
             self.agent.set_event_handler(self._handle_agent_event)
-            result = self._run()
+            result = await self._run()
             
             # Complete attempt successfully
             self._status.complete_current_attempt("completed")
@@ -180,18 +180,18 @@ class AgenticSystem(BaseModel, ABC):
             self.agent.remove_event_handler()
 
     @abstractmethod
-    def _run(self) -> Node:
+    async def _run(self) -> Node:
         raise NotImplementedError("Subclass must implement _run method")
 
-    def emit_event(self, event: BaseEvent):
+    async def emit_event(self, event: BaseEvent):
         """Emit an event."""
         logger.info(f"Emit event {event.event_type}")
         self._save_event(self.run_id, event)
-        event_bus.publish(self.run_id, event)
+        await event_bus.publish(self.run_id, event)
         
-    def _handle_agent_event(self, event: BaseEvent):
+    async def _handle_agent_event(self, event: BaseEvent):
         """Handle agent events and propagate them to system event handlers"""
-        self.emit_event(event)
+        await self.emit_event(event)
 
     def _initialize_run_state(self):
         """Initialize or restore system run state and logging"""
@@ -272,17 +272,10 @@ class AgenticSystem(BaseModel, ABC):
 
         event_data = None
         try:
-            current_attempt = self._status.get_current_attempt()
-            attempt_id = current_attempt.attempt_id if current_attempt else None
-
             event_data = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'run_id': run_id,
-                'event_type': event.event_type,
-                'node_id': event.model_dump().get('node_id'),
-                'data': event.model_dump(exclude={'event_type', 'node_id'}),
-                'restart_count': self._status.restart_count,
-                'attempt_id': attempt_id
+                **event.model_dump(),
             }
             self._events_file.write(json.dumps(event_data) + '\n')
             self._events_file.flush()

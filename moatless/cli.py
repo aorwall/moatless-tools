@@ -99,9 +99,8 @@ class ValidationCLI:
         )
         self.events_file = None
         event_bus.subscribe(self.handle_event_sync)
-        # event_bus.subscribe(self.handle_event)  # Keep async handler
         
-    def handle_event_sync(self, run_id: str, event: BaseEvent):
+    async def handle_event_sync(self, run_id: str, event: BaseEvent):
         """Synchronous event handler for immediate console output"""
         # Get event data
         event_data = event.model_dump()
@@ -143,8 +142,6 @@ class ValidationCLI:
             if event_data:
                 self.console.print(event_data, style="bright_black")
 
-    async def handle_event(self, run_id: str, event: BaseEvent):
-        """Async event handler for file writing and state updates"""
         if run_id not in self.active_runs:
             self.active_runs[run_id] = {
                 'status': 'initializing',
@@ -204,7 +201,7 @@ class ValidationCLI:
         
         try:
             # Start the code loop with our run_id
-            self.validator.start_code_loop(
+            await self.validator.start_code_loop(
                 run_id=run_id,
                 agent_id=agent_id,
                 model_id=model_id,

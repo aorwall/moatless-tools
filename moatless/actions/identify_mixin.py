@@ -73,7 +73,7 @@ class IdentifyMixin(CompletionModelMixin):
         description="The maximum number of tokens allowed in the identify prompt.",
     )
 
-    def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
+    async def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:
@@ -106,7 +106,7 @@ class IdentifyMixin(CompletionModelMixin):
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self._completion_model.create_completion(messages=messages)
+            completion_response = await self._completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )

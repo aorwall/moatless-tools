@@ -62,7 +62,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
     args_schema = AppendStringArgs
 
-    def execute(
+    async def execute(
         self,
         args: AppendStringArgs,
         file_context: FileContext | None = None,

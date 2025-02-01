@@ -47,7 +47,7 @@ class RunTests(Action):
     _repository: Repository = PrivateAttr()
     _runtime: RuntimeEnvironment = PrivateAttr()
 
-    def execute(
+    async def execute(
         self,
         args: RunTestsArgs,
         file_context: FileContext | None = None,

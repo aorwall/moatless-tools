@@ -106,7 +106,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
         if self._completion_model:
             self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
 
-    def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> Observation:
+    async def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
             raise ValueError("File context must be provided to execute the search action.")
 
@@ -141,7 +141,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
             logger.info(
                 f"{self.name}: Search too large. {properties['search_tokens']} tokens and {search_result_context.span_count()} hits, will ask for clarification."
             )
-            view_context, completion = self._identify_code(args, search_result_context)
+            view_context, completion = await self._identify_code(args, search_result_context)
         else:
             view_context = search_result_context
 
@@ -239,7 +239,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
     def _search_for_alternative_suggestion(self, args: SearchBaseArgs) -> SearchCodeResponse:
         return SearchCodeResponse()
 
-    def _identify_code(
+    async def _identify_code(
         self, args: SearchBaseArgs, search_result_ctx: FileContext
     ) -> Tuple[IdentifiedSpans, Completion]:
         search_result_str = search_result_ctx.create_prompt(
@@ -263,7 +263,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self.completion_model.create_completion(messages=messages)
+            completion_response = await self.completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )

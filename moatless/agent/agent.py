@@ -134,18 +134,15 @@ class ActionAgent(BaseModel):
         """Set the event handler for agent events"""
         self._event_handler = handler
 
-    def _emit_event(self, event: AgentEvent):
+    async def _emit_event(self, event: AgentEvent):
         """Emit a pure agent event"""
         if self._event_handler:
-            self._event_handler(event)
+            await self._event_handler(event)
 
-    def run(self, node: Node):
+    async def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
         if not self._completion_model:
             raise RuntimeError("Completion model not set")
-
-        # Emit agent started event
-        self._emit_event(AgentStarted(agent_id=self.agent_id, node_id=node.node_id))
 
         if node.action:
             logger.info(f"Node{node.node_id}: Resetting node")
@@ -158,7 +155,7 @@ class ActionAgent(BaseModel):
                 messages = self._message_generator.generate_messages(node)
                 logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
-            completion_response = self._completion_model.create_completion(
+            completion_response = await self._completion_model.create_completion(
                 messages=messages,
             )
             node.completions["build_action"] = completion_response.completion
@@ -171,12 +168,11 @@ class ActionAgent(BaseModel):
                 node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
                 # Emit action created events
                 for step in node.action_steps:
-                    self._emit_event(
+                    await self._emit_event(
                         AgentActionCreated(
                             agent_id=self.agent_id,
                             node_id=node.node_id,
                             action_name=step.action.name,
-                            action_params=step.action.model_dump(exclude={"name"}),
                         )
                     )
 
@@ -218,9 +214,9 @@ class ActionAgent(BaseModel):
         action_names = [action_step.action.name for action_step in node.action_steps]
         logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
         for action_step in node.action_steps:
-            self._execute(node, action_step)
+            await self._execute(node, action_step)
 
-    def _execute(self, node: Node, action_step: ActionStep):
+    async def _execute(self, node: Node, action_step: ActionStep):
         action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
@@ -232,15 +228,14 @@ class ActionAgent(BaseModel):
             )
 
         try:
-            action_step.observation = action.execute(action_step.action, file_context=node.file_context)
+            action_step.observation = await action.execute(action_step.action, file_context=node.file_context)
 
             # Emit action executed event
-            self._emit_event(
+            await self._emit_event(
                 AgentActionExecuted(
                     agent_id=self.agent_id,
                     node_id=node.node_id,
                     action_name=action_step.action.name,
-                    observation=action_step.observation.message if action_step.observation else None,
                 )
             )
 
@@ -253,8 +248,10 @@ class ActionAgent(BaseModel):
 
             logger.info(
                 f"Executed action: {action_step.action.name}. "
-                f"Terminal: {action_step.observation.terminal if node.observation else False}. "
-                f"Output: {action_step.observation.message if node.observation else None}"
+                f"Terminal: {action_step.observation.terminal if node.observation else False}. ")
+            
+            logger.debug(
+                f"Observation: {action_step.observation.message if node.observation else None}"
             )
 
         except CompletionRejectError as e:

@@ -88,7 +88,7 @@ class ViewCode(Action, IdentifyMixin):
         description="The maximum number of tokens in the requested code.",
     )
 
-    def execute(
+    async def execute(
         self,
         args: ViewCodeArgs,
         file_context: FileContext | None = None,
@@ -179,7 +179,7 @@ class ViewCode(Action, IdentifyMixin):
                     view_file.set_patch(file.patch)
 
             if view_context.context_size() > self.max_tokens:
-                view_context, completion = self._identify_code(args, view_context, self.max_tokens)
+                view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
 
             new_span_ids = file_context.add_file_context(view_context)
             properties["files"][file_path] = {

@@ -56,7 +56,7 @@ class Action(BaseModel, ABC):
 
     _workspace: Workspace = PrivateAttr(default=None)
 
-    def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
+    async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """
         Execute the action.
         """
@@ -67,7 +67,7 @@ class Action(BaseModel, ABC):
         message = self._execute(args, file_context=file_context)
         return Observation.create(message)
 
-    def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
+    async def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
         """
         Execute the action and return the updated FileContext.
         """

@@ -51,7 +51,7 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
 
     args_schema = CreateFileArgs
 
-    def execute(
+    async def execute(
         self,
         args: CreateFileArgs,
         file_context: FileContext | None = None,

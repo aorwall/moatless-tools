@@ -131,7 +131,7 @@ class SearchTree(AgenticSystem):
         instance = super().model_validate(obj)
         return instance
 
-    def _run(self) -> Node:
+    async def _run(self) -> Node:
         """Run the search tree algorithm with the given node."""
         if not self.root:
             raise ValueError("No node provided to run")

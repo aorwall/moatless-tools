@@ -70,22 +70,17 @@ async def validate_instance(request: SWEBenchValidationRequestDTO):
         # Initialize the validator
         validator = CodeFlowValidation()
         
-        # Start the validation in background
-        async def run_validation():
-            try:
-                validator.start_code_loop(
-                    run_id=run_id,
-                    agent_id=request.agent_id,
-                    model_id=request.model_id,
-                    instance_id=request.instance_id,
-                    max_iterations=request.max_iterations
-                )
-            except Exception as e:
-                logger.exception(f"Validation failed: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-
-        # Start validation in background task
-        asyncio.create_task(run_validation())
+        try:
+            await validator.start_code_loop(
+                run_id=run_id,
+                agent_id=request.agent_id,
+                model_id=request.model_id,
+                instance_id=request.instance_id,
+                max_iterations=request.max_iterations
+            )
+        except Exception as e:
+            logger.exception(f"Validation failed: {str(e)}")
+            raise HTTPException(status_code=500, detail=str(e))
 
         return SWEBenchValidationResponseDTO(
             run_id=run_id
