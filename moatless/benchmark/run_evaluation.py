@@ -24,9 +24,9 @@ from moatless.benchmark.schema import (
     InstanceStatus,
     TreeSearchSettings,
 )
+from moatless.config.model_config import get_all_configs
 from moatless.completion.base import LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
-from moatless.model_config import MODEL_CONFIGS
 from moatless.schema import CompletionModelSettings
 from moatless.schema import MessageHistoryType
 
@@ -48,11 +48,10 @@ DEFAULT_CONFIG = {
 
 # Automatically get all model configs from model_config.py
 CONFIG_MAP = {
-    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config} for model_name, config in MODEL_CONFIGS.items()
+    model_name.lower().replace("-", "_"): {**DEFAULT_CONFIG, **config} for model_name, config in get_all_configs().items()
 }
 
 litellm.drop_params = True
-
 
 def setup_loggers(logs_dir: str):
     """Setup console and file loggers"""
@@ -139,18 +138,18 @@ class SimpleEvaluationMonitor:
             "\nEvaluation Settings:",
             f"Directory: {eval_dir}",
             "\nModel Settings:",
-            f"  Model: {settings.model.model}",
-            f"  Temperature: {settings.model.temperature}",
+            f"  Model: {settings.model_id}",
+            #f"  Temperature: {settings.temperature}",
             "\nTree Search Settings:",
             f"  Max Iterations: {settings.max_iterations}",
             f"  Max Expansions: {settings.max_expansions}",
             f"  Max Cost: ${settings.max_cost}",
             "\nAgent Settings:",
-            f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
-            f"  Response Format: {settings.model.response_format if settings.model.response_format else 'default'}",
-            f"  Message History: {settings.agent_settings.message_history_type.value}",
-            f"  Thoughts in Action: {settings.model.thoughts_in_action}",
-            f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
+            #f"  System Prompt: {'custom' if settings.agent_settings.system_prompt else 'default'}",
+            #f"  Response Format: {settings.model.response_format if settings.model.response_format else 'default'}",
+            #f"  Message History: {settings.agent_settings.message_history_type.value}",
+            #f"  Thoughts in Action: {settings.model.thoughts_in_action}",
+            #f"  Thoughts in Action: {settings.agent_settings.thoughts_in_action}",
         ]
 
         for line in info_lines:
@@ -234,7 +233,6 @@ def print_config(config: dict, console_logger: logging.Logger):
             ("Model", "model"),
             ("API Key", "api_key"),
             ("Base URL", "base_url"),
-            ("Merge Same Role Messages", "merge_same_role_messages"),
         ],
         "Dataset Settings": [
             ("Split", "split"),
@@ -349,33 +347,14 @@ def run_evaluation(config: dict):
 
     if not instance_ids:
         raise ValueError("No instance IDs provided")
-    model_settings = CompletionModelSettings(
-        model=config["model"],
-        temperature=config.get("temperature"),
-        max_tokens=config.get("max_tokens", 4000),
-        model_api_key=config.get("api_key"),
-        model_base_url=config.get("base_url"),
-        response_format=config.get("response_format"),
-        thoughts_in_action=config.get("thoughts_in_action", False),
-        disable_thoughts=config.get("disable_thoughts", False),
-        merge_same_role_messages=config.get("merge_same_role_messages", False),
-    )
-
-    agent_settings = AgentSettings(
-        completion_model=model_settings,
-        message_history_type=config.get("message_history_type", MessageHistoryType.MESSAGES),
-        system_prompt=None,
-        thoughts_in_action=config.get("thoughts_in_action", False),
-        disable_thoughts=config.get("disable_thoughts", False),
-        few_shot_examples=config.get("few_shot_examples", False),
-    )
-
+    print(config)
+    
     tree_search_settings = TreeSearchSettings(
         max_iterations=config["max_iterations"],
         max_expansions=config["max_expansions"],
         max_cost=config["max_cost"],
-        model=model_settings,
-        agent_settings=agent_settings,
+        model_id=config["model"],
+        agent_id=config.get("agent_id"),
     )
 
     evaluation = create_evaluation(
@@ -388,6 +367,7 @@ def run_evaluation(config: dict):
     # Create runner with event handler
     runner = EvaluationRunner(
         evaluation=evaluation,
+        tree_search_settings=tree_search_settings,
         num_workers=config["num_workers"],
         repo_base_dir=os.getenv("MOATLESS_REPO_DIR", "./repos"),
         use_testbed=True,
@@ -419,7 +399,7 @@ def parse_args():
         "--model",
         help="Model to evaluate (e.g., 'claude-3-5-sonnet-20241022')",
     )
-
+    parser.add_argument("--agent-id", help="Agent configuration ID to use for evaluation")
     # Model settings
     parser.add_argument("--api-key", help="API key for the model")
     parser.add_argument("--base-url", help="Base URL for the model API")
@@ -456,21 +436,11 @@ def get_config_from_args(args):
     # Start with default config
     config = DEFAULT_CONFIG.copy()
 
-    # If model specified, update with model config
-    if args.model:
-        if args.model in MODEL_CONFIGS:
-            config.update(MODEL_CONFIGS[args.model])
-        else:
-            config["model"] = args.model
-    else:
-        print("\nNo model specified. Available models and their configurations:")
-        for model, cfg in MODEL_CONFIGS.items():
-            print(f"\n{model}:")
-            for key, value in cfg.items():
-                print(f"  {key}: {value}")
-        sys.exit(1)
-
     # Override with command line arguments if provided
+    if args.model:
+        config["model"] = args.model
+    if args.agent_id:
+        config["agent_id"] = args.agent_id
     if args.split:
         config["split"] = args.split
     if args.instance_ids:

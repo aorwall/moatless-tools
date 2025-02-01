@@ -122,7 +122,11 @@ def investigate_node(search_tree: SearchTree, node_id: int):
 
                 with view_tabs[0]:
                     st.code(
-                        file.to_prompt(show_span_ids=False, show_line_numbers=True, show_outcommented_code=True),
+                        file.to_prompt(
+                            show_span_ids=False,
+                            show_line_numbers=True,
+                            show_outcommented_code=True,
+                        ),
                         language="python",
                     )
 

@@ -5,45 +5,34 @@ from typing import Optional, Dict, Any, List, Callable
 
 from pydantic import BaseModel, Field, model_validator, ConfigDict
 
-from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
-from moatless.agent.settings import AgentSettings
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
+from moatless.events import BaseEvent, SystemEvent
 from moatless.exceptions import RuntimeError, RejectError
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
-from moatless.file_context import FileContext
-from moatless.index.code_index import CodeIndex
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
+from moatless.agentic_system import AgenticSystem
+from moatless.workspace import Workspace
+from moatless.agent.events import AgentStarted, AgentActionCreated, AgentActionExecuted
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class SearchTree(BaseModel):
-    root: Node = Field(..., description="The root node of the search tree.")
+class SearchTree(AgenticSystem):
     selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
-    agent: ActionAgent = Field(..., description="Agent for generating actions.")
-    agent_settings: Optional[AgentSettings] = Field(None, description="Agent settings for the search tree.")
-    actions: List[Action] = Field(
-        default_factory=list,
-        description="Actions that can be used by the agent in the search tree.",
-    )
-    repository: Optional[Repository] = Field(None, description="Repository for the search tree.")
     expander: Optional[Expander] = Field(None, description="Expander for expanding nodes.")
     value_function: Optional[BaseValueFunction] = Field(None, description="Value function for reward calculation.")
     feedback_generator: Optional[BaseFeedbackGenerator] = Field(None, description="Feedback generator.")
     discriminator: Optional[BaseDiscriminator] = Field(
         None, description="Discriminator for selecting the best trajectory."
     )
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the search tree.")
-    persist_path: Optional[str] = Field(None, description="Path to persist the search tree.")
-    unique_id: int = Field(default=0, description="Unique ID counter for nodes.")
 
     max_expansions: int = Field(1, description="The maximum number of expansions of one state.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run the tree search.")
@@ -70,11 +59,8 @@ class SearchTree(BaseModel):
     @classmethod
     def create(
         cls,
-        message: Optional[str] = None,
-        root: Optional[Node] = None,
-        file_context: Optional[FileContext] = None,
-        repository: Repository | None = None,
         selector: Optional[BaseSelector] = None,
+        expander: Optional[Expander] = None,
         agent: Optional[ActionAgent] = None,
         value_function: Optional[BaseValueFunction] = None,
         feedback_generator: Optional[BaseFeedbackGenerator] = None,
@@ -87,25 +73,14 @@ class SearchTree(BaseModel):
         min_finished_nodes: Optional[int] = None,
         max_finished_nodes: Optional[int] = None,
         reward_threshold: Optional[float] = None,
-        max_depth: int = 10,
+        max_depth: Optional[int] = None,
+        **kwargs,
     ) -> "SearchTree":
-        if not root and not message:
-            raise ValueError("Either a root node or a message must be provided.")
-
-        if not file_context:
-            file_context = FileContext(repo=repository)
-
-        if not root:
-            root = Node(
-                node_id=0,
-                max_expansions=max_expansions,
-                message=message,
-                file_context=file_context,
-            )
+        expander = expander or Expander(max_expansions=max_expansions)
 
         return cls(
-            root=root,
             selector=selector,
+            expander=expander,
             agent=agent,
             value_function=value_function,
             feedback_generator=feedback_generator,
@@ -119,10 +94,16 @@ class SearchTree(BaseModel):
             max_finished_nodes=max_finished_nodes,
             reward_threshold=reward_threshold,
             max_depth=max_depth,
+            **kwargs,
         )
 
     @classmethod
-    def model_validate(cls, obj: Any, repository: Repository | None = None, runtime: RuntimeEnvironment | None = None):
+    def model_validate(
+        cls,
+        obj: Any,
+        repository: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
+    ):
         if isinstance(obj, dict):
             obj = obj.copy()
 
@@ -145,120 +126,62 @@ class SearchTree(BaseModel):
                 obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
 
             if "root" in obj and isinstance(obj["root"], dict):
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository)
+                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
 
         instance = super().model_validate(obj)
-        instance.repository = repository
         return instance
 
-    @classmethod
-    def from_dict(
-        cls,
-        data: Dict[str, Any],
-        persist_path: str | None = None,
-        repository: Repository | None = None,
-        code_index: CodeIndex | None = None,
-        runtime: RuntimeEnvironment | None = None,
-    ) -> "SearchTree":
-        data = data.copy()
-        if persist_path:
-            data["persist_path"] = persist_path
+    def _run(self) -> Node:
+        """Run the search tree algorithm with the given node."""
+        if not self.root:
+            raise ValueError("No node provided to run")
 
-        logger.info(f"Repository: {repository}")
-        logger.info(f"Code index: {code_index}")
-        logger.info(f"Runtime: {runtime}")
-        if "agent" in data and isinstance(data["agent"], dict):
-            agent_data = data["agent"]
-            data["agent"] = ActionAgent.model_validate(
-                agent_data,
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-            )
+        try:
+            self.log(logger.info, generate_ascii_tree(self.root))
 
-        return cls.model_validate(data, repository)
+            if len(self.root.get_all_nodes()) > 1:
+                self.log(
+                    logger.info,
+                    f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
+                )
 
-    @classmethod
-    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "SearchTree":
-        with open(file_path, "r") as f:
-            tree_data = json.load(f)
+            while not self.is_finished():
+                total_cost = self.total_usage().completion_cost
+                self.log(
+                    logger.info,
+                    f"Run iteration {len(self.root.get_all_nodes())}",
+                    cost=total_cost,
+                )
 
-        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
+                node = self._select(self.root)
 
-    def run_search(self) -> Node | None:
-        """Run the MCTS algorithm for a specified number of iterations."""
+                if node:
+                    new_node = self._expand(node)
+                    self._simulate(new_node)
+                    self._backpropagate(new_node)
+                    self.maybe_persist()
+                    self.log(logger.info, generate_ascii_tree(self.root, new_node))
 
-        self.assert_runnable()
+                else:
+                    self.log(logger.info, "Search complete: no more nodes to expand.")
+                    break
 
-        self.log(logger.info, generate_ascii_tree(self.root))
-
-        if len(self.root.get_all_nodes()) > 1:
-            self.log(
-                logger.info,
-                f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
-            )
-
-        # Emit tree started event
-        self.emit_event("tree_started", {})
-
-        while not self.is_finished():
-            total_cost = self.total_usage().completion_cost
-            self.log(
-                logger.info,
-                f"Run iteration {len(self.root.get_all_nodes())}",
-                cost=total_cost,
-            )
-
-            node = self._select(self.root)
-
-            if node:
-                new_node = self._expand(node)
-                self._simulate(new_node)
-                self._backpropagate(new_node)
-                self.maybe_persist()
-                self.log(logger.info, generate_ascii_tree(self.root, new_node))
-
-                # Emit tree iteration event
-                self.emit_event(
-                    "tree_iteration",
-                    {
-                        "iteration": len(self.root.get_all_nodes()),
-                        "total_cost": total_cost,
-                        "best_reward": max((n.reward.value if n.reward else 0) for n in self.root.get_all_nodes()),
-                        "finished_nodes": len(self.get_finished_nodes()),
-                        "total_nodes": len(self.root.get_all_nodes()),
-                        "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None,
-                        "action": new_node.action.name if new_node.action else None,
-                        "current_node_id": new_node.node_id,
-                    },
+            if not len(self.get_finished_nodes()):
+                self.log(
+                    logger.warning,
+                    f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.",
                 )
             else:
-                self.log(logger.info, "Search complete: no more nodes to expand.")
-                break
+                self.log(
+                    logger.info,
+                    f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
+                )
 
-        if not len(self.get_finished_nodes()):
-            self.log(
-                logger.warning,
-                f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.",
-            )
-        else:
-            self.log(
-                logger.info,
-                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
-            )
-
-        # Emit tree completed event
-        self.emit_event(
-            "tree_completed",
-            {
-                "total_iterations": len(self.root.get_all_nodes()),
-                "total_cost": self.total_usage().completion_cost,
-                "finished_nodes": len(self.get_finished_nodes()),
-                "best_node_id": self.get_best_trajectory().node_id if self.get_best_trajectory() else None,
-            },
-        )
-
-        return self.get_best_trajectory()
+            return self.get_best_trajectory()
+        finally:
+            # Clean up event handler
+            if hasattr(self.agent, "event_handlers"):
+                self.agent.event_handlers.remove(self._handle_agent_event)
 
     def _select(self, node: Node) -> Optional[Node]:
         """Select a node for expansion using the UCT algorithm."""
@@ -271,7 +194,7 @@ class SearchTree(BaseModel):
         # If we have a finished node or exceeded depth, use normal selection
         return self.selector.select(expandable_nodes)
 
-    def _expand(self, node: Node, force_expansion: bool = False) -> Node:
+    def _expand(self, node: Node) -> Node:
         """Expand the node and return a child node."""
 
         # Check if any action step was not executed, if so return the node
@@ -279,7 +202,7 @@ class SearchTree(BaseModel):
             self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
             return node
 
-        child_node = self.expander.expand(node, self, force_expansion)
+        child_node = self.expander.expand(node)
 
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:
@@ -293,14 +216,16 @@ class SearchTree(BaseModel):
                 child_node.user_message = feedback_data.feedback
 
                 self.emit_event(
-                    "feedback_generated",
-                    {
-                        "node_id": child_node.node_id,
-                        "parent_id": node.node_id,
-                        "feedback": child_node.feedback_data.model_dump(),
-                        "action": child_node.action.name if child_node.action else None,
-                        "depth": child_node.get_depth(),
-                    },
+                    SystemEvent(
+                        event_type="feedback_generated",
+                        event={
+                            "node_id": child_node.node_id,
+                            "parent_id": node.node_id,
+                            "feedback": child_node.feedback_data.model_dump(),
+                            "action": child_node.action.name if child_node.action else None,
+                            "depth": child_node.get_depth(),
+                        }
+                    )
                 )
 
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
@@ -332,15 +257,17 @@ class SearchTree(BaseModel):
                         logger.info,
                         f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
                     )
-                    # Emit reward generated event
+                    
                     self.emit_event(
-                        "reward_generated",
-                        {
-                            "node_id": node.node_id,
-                            "reward": node.reward.value,
-                            "action": node.action.name if node.action else None,
-                            "depth": node.get_depth(),
-                        },
+                        SystemEvent(
+                            event_type="reward_generated",
+                            event={
+                                "node_id": node.node_id,
+                                "reward": node.reward.value,
+                                "action": node.action.name if node.action else None,
+                                "depth": node.get_depth(),
+                            },
+                        )
                     )
                 else:
                     self.log(
@@ -361,31 +288,23 @@ class SearchTree(BaseModel):
                 raise  # Re-raise to abort the entire search
 
     def _backpropagate(self, node: Node):
-        """Backpropagate both visits and rewards up the tree."""
-        
-        # Always update visit counts, separately from reward propagation
-        current = node
-        while current is not None:
-            current.visits += 1
-            current = current.parent
+        """Backpropagate the reward up the tree."""
 
-        # Only propagate rewards if they exist
-        if node.reward:
-            current = node
-            reward = node.reward.value
-            while current is not None:
-                if not current.value:
-                    current.value = reward
-                else:
-                    current.value += reward
-                current = current.parent
-        
-        else:
+        if not node.reward:
             self.log(
                 logger.info,
-                f"Node{node.node_id} has no evaluation. Skipping reward backpropagation.",
+                f"Node{node.node_id} has no evaluation. Skipping backpropagation.",
             )
             return
+
+        reward = node.reward.value
+        while node is not None:
+            node.visits += 1
+            if not node.value:
+                node.value = reward
+            else:
+                node.value += reward
+            node = node.parent
 
     def get_best_trajectory(self) -> Node | None:
         """
@@ -476,29 +395,8 @@ class SearchTree(BaseModel):
         """Calculate total token usage across all nodes."""
         return self.root.total_usage()
 
-    def maybe_persist(self):
-        if self.persist_path:
-            self.persist(self.persist_path)
-
-    def persist(self, file_path: str, **kwargs):
-        """
-        Persist the entire SearchTree to a file.
-
-        Args:
-            file_path (str): The path to the file where the tree will be saved.
-        """
-        tree_data = self.model_dump(**kwargs)
-
-        with open(file_path, "w") as f:
-            try:
-                json.dump(tree_data, f, indent=2)
-            except Exception as e:
-                logger.exception(f"Error saving search tree to {file_path}: {tree_data}")
-                raise e
-
     def _generate_unique_id(self) -> int:
-        self.unique_id += 1
-        return self.unique_id
+        return len(self.root.get_all_nodes()) + 1
 
     def assert_runnable(self):
         if self.root is None:
@@ -516,96 +414,15 @@ class SearchTree(BaseModel):
         return True
 
     @classmethod
-    def create(
-        cls,
-        message: Optional[str] = None,
-        root: Optional[Node] = None,
-        file_context: Optional[FileContext] = None,
-        repository: Repository | None = None,
-        runtime: RuntimeEnvironment | None = None,
-        selector: Optional[BaseSelector] = None,
-        expander: Optional[Expander] = None,
-        agent: Optional[ActionAgent] = None,
-        value_function: Optional[BaseValueFunction] = None,
-        feedback_generator: Optional[BaseFeedbackGenerator] = None,
-        discriminator: Optional[BaseDiscriminator] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        persist_path: Optional[str] = None,
-        max_expansions: int = 1,
-        max_iterations: int = 10,
-        max_cost: Optional[float] = None,
-        min_finished_nodes: Optional[int] = None,
-        max_finished_nodes: Optional[int] = None,
-        reward_threshold: Optional[float] = None,
-        simulation_depth: int = 1,
-        max_depth: Optional[int] = None,
-    ) -> "SearchTree":
-        if not root and not message:
-            raise ValueError("Either a root node or a message must be provided.")
-
-        if not file_context:
-            file_context = FileContext(repo=repository, runtime=runtime)
-
-        if not root:
-            root = Node(
-                node_id=0,
-                max_expansions=max_expansions,
-                user_message=message,
-                file_context=file_context,
-            )
-
-        expander = expander or Expander(max_expansions=max_expansions)
-
-        return cls(
-            root=root,
-            selector=selector,
-            expander=expander,
-            agent=agent,
-            repository=repository,
-            value_function=value_function,
-            feedback_generator=feedback_generator,
-            discriminator=discriminator,
-            metadata=metadata or {},
-            persist_path=persist_path,
-            max_expansions=max_expansions,
-            max_iterations=max_iterations,
-            max_cost=max_cost,
-            min_finished_nodes=min_finished_nodes,
-            max_finished_nodes=max_finished_nodes,
-            reward_threshold=reward_threshold,
-            max_depth=max_depth,
-        )
-
-    @classmethod
-    def from_dict(
-        cls,
-        data: Dict[str, Any],
-        persist_path: str | None = None,
-        repository: Repository | None = None,
-        code_index: CodeIndex | None = None,
-        runtime: RuntimeEnvironment | None = None,
-    ) -> "SearchTree":
-        data = data.copy()
-        if persist_path:
-            data["persist_path"] = persist_path
-
-        if "agent" in data and isinstance(data["agent"], dict):
-            agent_data = data["agent"]
-            data["agent"] = ActionAgent.model_validate(
-                agent_data,
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-            )
-
-        return cls.model_validate(data, repository, runtime)
-
-    @classmethod
     def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "SearchTree":
         with open(file_path, "r") as f:
-            tree_data = json.load(f)
+            data = json.load(f)
 
-        return cls.from_dict(tree_data, persist_path=persist_path or file_path, **kwargs)
+        # Remove root/nodes from loaded data since we'll provide it at runtime
+        data.pop("root", None)
+        data.pop("nodes", None)
+
+        return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
 
     @model_validator(mode="after")
     def set_depth(self):
@@ -643,8 +460,6 @@ class SearchTree(BaseModel):
         data["selector"] = self.selector.model_dump(**kwargs)
         data["expander"] = self.expander.model_dump(**kwargs)
         data["agent"] = self.agent.model_dump(**kwargs)
-        data["agent_settings"] = self.agent_settings.model_dump(**kwargs) if self.agent_settings else None
-        data["repository"] = self.repository.model_dump(**kwargs) if self.repository else None
 
         if self.value_function:
             data["value_function"] = self.value_function.model_dump(**kwargs)
@@ -671,19 +486,3 @@ class SearchTree(BaseModel):
         log_message = f"[{metadata_str}] {message}" if metadata else message
 
         logger_fn(log_message)
-
-    def add_event_handler(self, handler: Callable):
-        """Add an event handler for tree events."""
-        self.event_handlers.append(handler)
-
-    def emit_event(self, event_type: str, data: dict):
-        """Emit an event to all registered handlers."""
-        logger.info(f"Emit event {event_type}")
-        for handler in self.event_handlers:
-            handler(
-                {
-                    "event_type": event_type,
-                    "data": data,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )

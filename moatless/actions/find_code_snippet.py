@@ -1,11 +1,11 @@
 import logging
-from fnmatch import fnmatch
 from typing import List, Optional, Tuple, Type, ClassVar
+import os
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import Field, model_validator
 
-from moatless.actions.action import FewShotExample
-from moatless.actions.schema import ActionArguments
+from fnmatch import fnmatch
+from moatless.actions.schema import ActionArguments, FewShotExample, Observation
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 
@@ -32,22 +32,14 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    model_config = ConfigDict(title="FindCodeSnippet")
+    class Config:
+        title = "FindCodeSnippet"
 
     @model_validator(mode="after")
     def validate_snippet(self) -> "FindCodeSnippetArgs":
         if not self.code_snippet.strip():
             raise ValueError("code_snippet cannot be empty")
         return self
-
-    @classmethod
-    def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema(
-            {
-                "code_snippet": "The exact code snippet to find",
-                "file_pattern": "A glob pattern to filter search results to specific file types or directories.",
-            }
-        )
 
     def to_prompt(self):
         prompt = f"Searching for code snippet: {self.code_snippet}"
@@ -60,12 +52,6 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         if self.file_pattern:
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
-
-    def format_args_for_llm(self) -> str:
-        return f"""<code_snippet>
-{self.code_snippet}
-</code_snippet>
-<file_pattern>{self.file_pattern if self.file_pattern else ''}</file_pattern>"""
 
 
 class FindCodeSnippet(SearchBaseAction):
@@ -81,9 +67,13 @@ class FindCodeSnippet(SearchBaseAction):
 
         matches = self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
 
-        if args.file_pattern and len(matches) > 1:
+        if args.file_pattern:
+            # Normalize the pattern to handle both **/*.py and *.py cases
+            pattern = args.file_pattern.replace("**/", "*")
             matches = [
-                (file_path, line_num) for file_path, line_num in matches if fnmatch(file_path, args.file_pattern)
+                (file_path, line_num)
+                for file_path, line_num in matches
+                if fnmatch(os.path.basename(file_path), pattern) or fnmatch(file_path, args.file_pattern)
             ]
 
         search_result_context = FileContext(repo=self._repository)

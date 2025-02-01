@@ -10,6 +10,7 @@ from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.utils.file import is_test
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -19,10 +20,6 @@ class CodeModificationMixin:
     A mixin that provides common functionality for actions that modify code files.
     This includes path normalization, file validation, test running, and observation handling.
     """
-
-    _runtime: RuntimeEnvironment | None = PrivateAttr(default=None)
-    _code_index: CodeIndex | None = PrivateAttr(default=None)
-    _repository: Repository | None = PrivateAttr(default=None)
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path by removing /repo and leading /"""
@@ -70,9 +67,9 @@ class CodeModificationMixin:
 
         if file_context.file_exists(file_path) and is_test(file_path):
             file_context.add_test_file(file_path)
-        elif self._code_index:
+        elif self._workspace.code_index:
             # If the file is not a test file, find test files that might be related to the file
-            search_results = self._code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
+            search_results = self._workspace.code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
 
             for search_result in search_results:
                 file_context.add_test_file(search_result.file_path)

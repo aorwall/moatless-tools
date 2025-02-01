@@ -74,7 +74,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
         seen_arguments = set()
         flags = []
         structured_outputs = []
-        valid_names = [s.name for s in self.response_schema]
+        valid_names = [s.name for s in self._response_schema]
         invalid_function_names = []
 
         retry_messages = []
@@ -110,7 +110,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
             # Find matching schema for tool
             schema = None
-            for s in self.response_schema:
+            for s in self._response_schema:
                 if s.name == tool_name:
                     schema = s
                     break
@@ -153,6 +153,6 @@ class ToolCallCompletionModel(BaseCompletionModel):
         Returns:
             Matching ResponseSchema class or None if not found
         """
-        for r in self.response_schema:
+        for r in self._response_schema:
             if r.name == tool_name:
                 return r

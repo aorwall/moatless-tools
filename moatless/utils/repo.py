@@ -1,13 +1,12 @@
-import hashlib
 import logging
 import os
 import random
 import subprocess
 import time
-from contextlib import contextmanager
-from pathlib import Path
-
 import filelock
+from pathlib import Path
+import hashlib
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,15 @@ def clone_and_checkout(repo_url, repo_dir, commit):
         try:
             logger.info(f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}")
             subprocess.run(
-                ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir],
+                [
+                    "git",
+                    "clone",
+                    "--depth",
+                    "1",
+                    "--no-single-branch",
+                    repo_url,
+                    repo_dir,
+                ],
                 check=True,
                 text=True,
                 capture_output=True,

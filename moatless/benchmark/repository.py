@@ -1,3 +1,5 @@
+from datetime import datetime
+from enum import Enum
 import json
 import logging
 import os
@@ -5,9 +7,21 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Optional, List
 
-from moatless.benchmark.schema import Evaluation, EvaluationInstance, DateTimeEncoder
+from moatless.benchmark.schema import Evaluation, EvaluationInstance
+from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, MessageHistoryType):
+            return obj.value
+        if isinstance(obj, Enum):
+            return obj.value
+        return super().default(obj)
 
 
 class EvaluationRepository(ABC):

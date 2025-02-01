@@ -1,5 +1,16 @@
 import json
-from typing import ClassVar, Any, Self, Union, TypedDict, Literal, Iterable, Required, Optional, List
+from typing import (
+    ClassVar,
+    Any,
+    Self,
+    Union,
+    TypedDict,
+    Literal,
+    Iterable,
+    Required,
+    Optional,
+    List,
+)
 
 from docstring_parser import parse
 from pydantic import BaseModel, ValidationError, ConfigDict

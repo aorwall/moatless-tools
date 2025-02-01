@@ -1,12 +1,11 @@
+from datetime import datetime
+import os
 import json
 import logging
-import os
 import random
-from datetime import datetime
 from typing import Optional, List
-
-from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.benchmark.schema import Evaluation, EvaluationInstance, TreeSearchSettings
+from moatless.benchmark.repository import EvaluationFileRepository
 from moatless.completion.base import LLMResponseFormat
 from moatless.schema import MessageHistoryType
 

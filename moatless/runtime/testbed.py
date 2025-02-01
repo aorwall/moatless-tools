@@ -26,6 +26,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         repository: Repository,
         testbed_sdk: TestbedSDK | None = None,
         instance: dict | None = None,
+        instance_id: str | None = None,
         log_dir: str | None = None,
         enable_cache: bool = False,
         run_id: str | None = None,
@@ -33,6 +34,14 @@ class TestbedEnvironment(RuntimeEnvironment):
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
         self.instance = instance
+        if instance_id:
+            self.instance_id = instance_id
+        else:
+            self.instance_id = instance["instance_id"]
+
+        if not self.instance_id:
+            raise RuntimeError("No instance ID provided")
+    
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
@@ -115,7 +124,7 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         try:
             with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"],
+                instance_id=self.instance_id,
                 log_dir=self.log_dir,
                 run_id=self.run_id,
             ) as testbed:
@@ -142,7 +151,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                     }
 
                     with self.testbed_sdk.create_client(
-                        instance_id=self.instance["instance_id"],
+                        instance_id=self.instance_id,
                         log_dir=self.log_dir,
                         run_id=self.run_id,
                     ) as testbed:
@@ -172,12 +181,12 @@ class TestbedEnvironment(RuntimeEnvironment):
 
             if isinstance(e, TimeoutError):
                 logger.warning(
-                    f"Timeout running tests for instance {self.instance['instance_id']} and files {test_files}"
+                    f"Timeout running tests for instance {self.instance_id} and files {test_files}"
                 )
                 return []
 
             raise RuntimeError(
-                f"Error running tests for instance {self.instance['instance_id']} and files {test_files}"
+                f"Error running tests for instance {self.instance_id} and files {test_files}"
             ) from e
         finally:
             if self.log_dir:
@@ -186,11 +195,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                     f.write(log_content)
 
     def evaluate(self, patch: str) -> EvaluationResult | None:
-        if not self.instance:
-            logger.warning("No instance provided for evaluation")
-            return None
-
-        logger.info(f"Running evaluation for instance {self.instance['instance_id']}. Run ID: {self.run_id}")
+        logger.info(f"Running evaluation for instance {self.instance_id}. Run ID: {self.run_id}")
 
         test_patch_files = self.instance.get("test_file_spans", {}).keys()
 
@@ -199,7 +204,7 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         try:
             with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"],
+                instance_id=self.instance_id,
                 log_dir=self.log_dir,
                 run_id=self.run_id,
             ) as testbed:

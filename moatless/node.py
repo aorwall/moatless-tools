@@ -73,7 +73,6 @@ class Node(BaseModel):
     parent: Optional["Node"] = Field(None, description="The parent node")
     children: List["Node"] = Field(default_factory=list, description="The child nodes")
 
-    workspace: Optional[Workspace] = Field(None, description="The workspace associated with the node")
     artifact_changes: List[ArtifactChange] = Field(
         default_factory=list,
         description="The artifact changes associated with the node",
@@ -251,6 +250,12 @@ class Node(BaseModel):
             node = self
 
         return node._get_all_nodes()
+    
+    def get_node_by_id(self, node_id: int) -> Optional["Node"]:
+        for node in self.get_all_nodes():
+            if node.node_id == node_id:
+                return node
+        return None
 
     def get_leaf_nodes(self) -> List["Node"]:
         """Get all leaf nodes ."""
@@ -461,7 +466,19 @@ class Node(BaseModel):
 
             return node
         else:
-            return super().model_validate(node_data)
+            return cls.model_validate(node_data)
+
+    @classmethod
+    def from_file(cls, file_path: str, repo: Repository | None = None, **kwargs) -> "Node":
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        if "root" in data:
+            return Node.reconstruct(data["root"], repo=repo)
+        elif "nodes" in data:
+            return Node.reconstruct(data["nodes"], repo=repo)
+        else:
+            raise ValueError("No root or nodes found in data")
 
     @classmethod
     def reconstruct(

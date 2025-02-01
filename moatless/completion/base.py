@@ -6,11 +6,16 @@ from enum import Enum
 from typing import Optional, List, Union, Any, Dict
 
 import tenacity
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from moatless.completion.model import Completion, Usage
-from moatless.completion.schema import ResponseSchema, AllMessageValues, ChatCompletionCachedContent
+from moatless.completion.schema import (
+    ResponseSchema,
+    AllMessageValues,
+    ChatCompletionCachedContent,
+)
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
+from moatless.schema import MessageHistoryType
 
 logger = logging.getLogger(__name__)
 
@@ -78,14 +83,15 @@ class CompletionResponse(BaseModel):
 class BaseCompletionModel(BaseModel, ABC):
     model: str = Field(..., description="The model to use for completion")
     temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
-    max_tokens: int = Field(2000, description="The maximum number of tokens to generate")
+    max_tokens: Optional[int] = Field(2000, description="The maximum number of tokens to generate")
     timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
     model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
     model_api_key: Optional[str] = Field(default=None, description="The API key for the model", exclude=True)
     response_format: LLMResponseFormat = Field(..., description="The response format expected from the LLM")
     metadata: Optional[dict] = Field(default=None, description="Additional metadata for the completion model")
     message_cache: bool = Field(
-        default=True, description="Cache the message history in the prompt cache if the LLM supports it"
+        default=True,
+        description="Cache the message history in the prompt cache if the LLM supports it",
     )
     thoughts_in_action: bool = Field(
         default=False,
@@ -95,17 +101,19 @@ class BaseCompletionModel(BaseModel, ABC):
         default=False,
         description="Whether to disable to use thoughts at all.",
     )
+    use_few_shots: bool = Field(False, description="Whether to use few-shot examples for generating completions")
+    message_history_type: MessageHistoryType = Field(
+        default=MessageHistoryType.MESSAGES,
+        description="The type of message history to use",
+    )
+
     merge_same_role_messages: bool = Field(
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
 
-    response_schema: Optional[List[type[ResponseSchema]]] = Field(
-        default=None, description="The schema(s) used to validate responses", exclude=True
-    )
-    system_prompt: Optional[str] = Field(
-        default=None, description="The system prompt to use for completion", exclude=True
-    )
+    _response_schema: Optional[List[type[ResponseSchema]]] = PrivateAttr(default=None)
+    _system_prompt: Optional[str] = PrivateAttr(default=None)
 
     _completion_params: Optional[Dict[str, Union[str, Dict, List]]] = None
     _initialized: bool = False
@@ -141,16 +149,20 @@ class BaseCompletionModel(BaseModel, ABC):
             if not issubclass(schema, ResponseSchema):
                 raise CompletionRuntimeError(f"Schema {schema.__name__} must be a subclass of ResponseSchema")
 
-        if self.response_schema and self.response_schema != schemas:
+        if self._response_schema and self._response_schema != schemas:
             raise ValueError("Response schema cannot be changed after initialization")
 
-        if self.system_prompt and self.system_prompt != system_prompt:
+        if self._system_prompt and self._system_prompt != system_prompt:
             raise ValueError("System prompt cannot be changed after initialization")
 
-        self.response_schema = schemas
-        self._completion_params = self._get_completion_params(self.response_schema)
-        self.system_prompt = self._prepare_system_prompt(system_prompt, self.response_schema)
+        self._response_schema = schemas
+        self._completion_params = self._get_completion_params(self._response_schema)
+        self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
         self._initialized = True
+
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
 
     def create_completion(
         self,
@@ -161,11 +173,13 @@ class BaseCompletionModel(BaseModel, ABC):
                 "Model must be initialized with response schema and system prompt before creating completion"
             )
 
-        prepared_messages = self._prepare_messages(messages, self.system_prompt)
+        prepared_messages = self._prepare_messages(messages, self._system_prompt)
         return self._create_completion_with_retries(messages=prepared_messages)
 
     def _prepare_system_prompt(
-        self, system_prompt: str, response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]]
+        self,
+        system_prompt: str,
+        response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]],
     ) -> str:
         """Prepare the system prompt by adding format-specific instructions.
 
@@ -388,7 +402,7 @@ class BaseCompletionModel(BaseModel, ABC):
         return _do_completion_with_rate_limit_retry()
 
     def _get_schema_names(self):
-        return [schema.__name__ for schema in self.response_schema] if self.response_schema else ["None"]
+        return [schema.__name__ for schema in self._response_schema] if self._response_schema else ["None"]
 
     def _inject_prompt_caching(self, messages: List[Dict[str, str]]) -> None:
         """Set cache breakpoints for Claude 3.5 message history.
@@ -459,6 +473,8 @@ class BaseCompletionModel(BaseModel, ABC):
             dump["model_api_key"] = None
         if "response_format" in dump:
             dump["response_format"] = dump["response_format"].value
+        if "message_history_type" in dump:
+            dump["message_history_type"] = dump["message_history_type"].value
         return dump
 
     @classmethod
@@ -483,6 +499,8 @@ class BaseCompletionModel(BaseModel, ABC):
         if isinstance(obj, dict) and "response_format" in obj:
             if isinstance(obj["response_format"], str):
                 obj["response_format"] = LLMResponseFormat(obj["response_format"])
+            if isinstance(obj["message_history_type"], str):
+                obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
             return cls.create(**obj)
 
         return obj
@@ -520,7 +538,12 @@ class BaseCompletionModel(BaseModel, ABC):
                         else:
                             # For non-text content blocks, flush current content and add message as-is
                             if current_content:
-                                merged.append({"role": "user", "content": "\n".join(current_content)})
+                                merged.append(
+                                    {
+                                        "role": "user",
+                                        "content": "\n".join(current_content),
+                                    }
+                                )
                                 current_content = []
                             merged.append(message)
                             break

@@ -4,7 +4,7 @@ from typing import List, Optional, Type, Any, ClassVar, Tuple
 
 from pydantic import Field, PrivateAttr, BaseModel, field_validator, model_validator
 
-from moatless.actions.action import Action
+from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion import BaseCompletionModel
 from moatless.completion.model import Completion
@@ -81,7 +81,7 @@ class Identify(ResponseSchema):
     )
 
 
-class SearchBaseAction(Action):
+class SearchBaseAction(Action, CompletionModelMixin):
     args_schema: ClassVar[Type[ActionArguments]] = SearchBaseArgs
 
     max_search_tokens: int = Field(
@@ -100,38 +100,18 @@ class SearchBaseAction(Action):
         10,
         description="The maximum number of search hits to display.",
     )
-    completion_model: BaseCompletionModel = Field(
-        ...,
-        description="The completion model used to identify relevant code sections in search results.",
-    )
 
-    _repository: Repository = PrivateAttr()
-    _code_index: CodeIndex = PrivateAttr()
+    def _initialize_completion_model(self):
+        """Override mixin method to customize initialization"""
+        if self._completion_model:
+            self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
 
-    def __init__(
-        self,
-        repository: Repository = None,
-        code_index: CodeIndex | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        self._repository = repository
-        self._code_index = code_index
-
-    @model_validator(mode="after")
-    def initalize_model(self):
-        if self.completion_model:
-            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
-        return self
-
-    def execute(
-        self,
-        args: SearchBaseArgs,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> Observation:
+    def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
             raise ValueError("File context must be provided to execute the search action.")
+
+        if not self.completion_model.initialized:
+            self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
 
         properties = {"search_hits": [], "search_tokens": 0}
 
@@ -405,14 +385,3 @@ class SearchBaseAction(Action):
                     ),
                 ]
             )
-
-    @classmethod
-    def model_validate(cls, obj: Any) -> "SearchBaseAction":
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            repository = obj.pop("repository")
-            code_index = obj.pop("code_index")
-            completion_model = BaseCompletionModel.model_validate(obj.pop("completion_model"))
-
-            return cls(code_index=code_index, repository=repository, completion_model=completion_model, **obj)
-        return super().model_validate(obj)

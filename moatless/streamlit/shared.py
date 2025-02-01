@@ -147,10 +147,8 @@ def trajectory_table(report_path: str):
     with col1:
         status_filter = st.multiselect("Status", df["status"].unique(), key="status_filter")
     with col2:
-        solution_status_filter = st.multiselect(
-            "Solution Status",
-            ["Has Resolved Solutions", "Has Unresolved Solutions", "No Solutions"],
-            key="solution_status_filter",
+        has_resolved_solutions = st.multiselect(
+            "Has Resolved Solutions", ["Yes", "No"], key="resolved_solutions_filter"
         )
     with col3:
         flag_filter = st.multiselect("Flags", sorted(list(all_flags)), key="flag_filter")
@@ -170,13 +168,11 @@ def trajectory_table(report_path: str):
     mask = pd.Series(True, index=df.index)
     if status_filter:
         mask &= df["status"].isin(status_filter)
-    if solution_status_filter:
-        if "Has Resolved Solutions" in solution_status_filter:
+    if has_resolved_solutions:
+        if "Yes" in has_resolved_solutions:
             mask &= df["resolved_solutions"] > 0
-        if "Has Unresolved Solutions" in solution_status_filter:
-            mask &= df["failed_solutions"] > 0
-        if "No Solutions" in solution_status_filter:
-            mask &= (df["resolved_solutions"] == 0) & (df["failed_solutions"] == 0)
+        if "No" in has_resolved_solutions:
+            mask &= df["resolved_solutions"] == 0
     if flag_filter:
         mask &= df.apply(
             lambda row: any(flag in row.get("flags", []) for flag in flag_filter),
@@ -332,34 +328,28 @@ def show_completion(completion):
         if completion.input:
             st.subheader("Input prompts")
             for input_idx, input_msg in enumerate(completion.input):
-                try:
-                    if "content" in input_msg:
-                        if isinstance(input_msg["content"], str):
-                            content = input_msg["content"]
-                        elif isinstance(input_msg["content"], list) and input_msg["role"] == "user":
-                            content_list = [c.get("content") or c.get("text") for c in input_msg["content"]]
+                if "content" in input_msg:
+                    if isinstance(input_msg["content"], str):
+                        content = input_msg["content"]
+                    elif isinstance(input_msg["content"], list) and input_msg["role"] == "user":
+                        content_list = [c.get("content") for c in input_msg["content"]]
 
-                            content = "\n\n".join(content_list)
-                        else:
-                            content = json.dumps(input_msg["content"], indent=2)
-
-                        tokens = count_tokens(content)
-                        with st.expander(
-                            f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
-                            expanded=(input_idx == len(completion.input) - 1),
-                        ):
-                            st.code(content, language="")
-
-                            if "tool_calls" in input_msg:
-                                st.json(input_msg["tool_calls"])
+                        content = "\n\n".join(content_list)
                     else:
-                        with st.expander(
-                            f"Message {input_idx + 1} by {input_msg['role']}",
-                            expanded=(input_idx == len(completion.input) - 1),
-                        ):
-                            st.json(input_msg)
-                except Exception as e:
-                    logger.exception(f"Failed to parse {json.dumps(input_msg, indent=2)}")
+                        content = json.dumps(input_msg["content"], indent=2)
+
+                    tokens = count_tokens(content)
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']} ({tokens} tokens)",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.code(content, language="")
+                else:
+                    with st.expander(
+                        f"Message {input_idx + 1} by {input_msg['role']}",
+                        expanded=(input_idx == len(completion.input) - 1),
+                    ):
+                        st.json(input_msg)
 
         if completion.response:
             st.subheader("Completion response")

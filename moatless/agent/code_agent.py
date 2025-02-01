@@ -35,7 +35,6 @@ from moatless.completion.base import (
 )
 from moatless.index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
-from moatless.model_config import get_model_config
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import MessageHistoryType
@@ -58,61 +57,15 @@ class CodingAgent(ActionAgent):
         few_shot_examples: bool | None = None,
         **kwargs,
     ):
-        if completion_model is None:
-            if model is None:
-                raise ValueError("Either completion_model or model name must be provided")
-
-            # Get default config for the model from model_config
-            model_config = get_model_config(model)
-
-            # Set instance variables from model config if not explicitly provided
-            if thoughts_in_action is None:
-                thoughts_in_action = model_config.get("thoughts_in_action", False)
-            if disable_thoughts is None:
-                disable_thoughts = model_config.get("disable_thoughts", False)
-            if few_shot_examples is None:
-                few_shot_examples = model_config.get("few_shot_examples", True)
-
-            # Override with any provided kwargs
-            model_config.update(kwargs)
-
-            # Create completion model
-            completion_model = BaseCompletionModel.create(**model_config)
-        else:
-            # Clone the completion model to ensure we have our own instance
-            completion_model = completion_model.clone()
-
-            # Set instance variables from completion model if not explicitly provided
-            if thoughts_in_action is None:
-                thoughts_in_action = completion_model.thoughts_in_action
-            if disable_thoughts is None:
-                disable_thoughts = completion_model.disable_thoughts
-
-        if message_history_type is None:
-            if completion_model.response_format == LLMResponseFormat.TOOLS:
-                message_history_type = MessageHistoryType.MESSAGES
-            else:
-                message_history_type = MessageHistoryType.REACT
-
         if few_shot_examples is None:
             few_shot_examples = message_history_type == MessageHistoryType.REACT
 
-        action_completion_format = completion_model.response_format
-        if action_completion_format != LLMResponseFormat.TOOLS:
-            logger.info("Default to JSON as Response format for action completion model")
-            action_completion_format = LLMResponseFormat.JSON
-
-        # Create action completion model by cloning the input model with JSON response format
-        action_completion_model = completion_model.clone(response_format=action_completion_format)
-        action_completion_model.message_cache = False
-
-        supports_anthropic_computer_use = completion_model.model.startswith("claude-3-5-sonnet")
+        supports_anthropic_computer_use = model.startswith("claude-3-5-sonnet") if model else False
 
         if supports_anthropic_computer_use:
             actions = create_claude_coding_actions(
                 repository=repository,
                 code_index=code_index,
-                completion_model=action_completion_model,
                 runtime=runtime,
             )
 
@@ -121,17 +74,17 @@ class CodingAgent(ActionAgent):
             actions = create_edit_code_actions(
                 repository=repository,
                 code_index=code_index,
-                completion_model=action_completion_model,
                 runtime=runtime,
             )
             action_type = "standard edit code actions"
 
         # Generate workflow prompt based on available actions
-        workflow_prompt = generate_workflow_prompt(actions, runtime is not None)
+        action_names = [a.name for a in actions]
+        workflow_prompt = generate_workflow_prompt(action_names, runtime is not None)
 
         # Compose system prompt based on model type and format
         system_prompt = AGENT_ROLE
-        if completion_model.response_format == LLMResponseFormat.REACT:
+        if message_history_type == MessageHistoryType.REACT:
             system_prompt += "\n"
 
             if disable_thoughts:
@@ -139,7 +92,7 @@ class CodingAgent(ActionAgent):
             else:
                 system_prompt += REACT_CORE_OPERATION_RULES
 
-        elif completion_model.response_format == LLMResponseFormat.TOOLS:
+        elif message_history_type == MessageHistoryType.MESSAGES:
             system_prompt += generate_react_guidelines(disable_thoughts)
         else:
             raise ValueError(f"Unsupported response format: {completion_model.response_format}")
@@ -173,8 +126,8 @@ class CodingAgent(ActionAgent):
 
         logger.info(f"Created CodingAgent with configuration: {json.dumps(config, indent=2)}")
 
-        return cls(
-            completion=completion_model,
+        return ActionAgent(
+            completion_model=completion_model,
             actions=actions,
             system_prompt=system_prompt,
             message_generator=message_generator,
@@ -194,24 +147,20 @@ def create_base_actions(
         SemanticSearch(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model.clone(),
         ),
         FindClass(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model.clone(),
         ),
         FindFunction(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model.clone(),
         ),
         FindCodeSnippet(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model.clone(),
         ),
-        ViewCode(repository=repository, completion_model=completion_model.clone()),
+        ViewCode(repository=repository),
     ]
 
 
@@ -222,7 +171,7 @@ def create_edit_code_actions(
     runtime: RuntimeEnvironment | None = None,
 ) -> List[Action]:
     """Create a list of simple code modification actions."""
-    actions = create_base_actions(repository, code_index, completion_model.clone())
+    actions = create_base_actions(repository, code_index)
 
     edit_actions = [
         StringReplace(repository=repository, code_index=code_index),
@@ -245,12 +194,11 @@ def create_claude_coding_actions(
     completion_model: BaseCompletionModel | None = None,
     runtime: RuntimeEnvironment | None = None,
 ) -> List[Action]:
-    actions = create_base_actions(repository, code_index, completion_model.clone())
+    actions = create_base_actions(repository, code_index)
     actions.append(
         ClaudeEditTool(
             code_index=code_index,
             repository=repository,
-            completion_model=completion_model.clone(),
         ),
     )
     actions.append(ListFiles())
@@ -265,9 +213,7 @@ def create_all_actions(
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
 ) -> List[Action]:
-    actions = create_base_actions(repository, code_index, completion_model.clone())
-    actions.extend(create_edit_code_actions(repository, code_index, completion_model.clone()))
-    actions.append(
-        ClaudeEditTool(code_index=code_index, repository=repository, completion_model=completion_model.clone())
-    )
+    actions = create_base_actions(repository, code_index)
+    actions.extend(create_edit_code_actions(repository, code_index))
+    actions.append(ClaudeEditTool(code_index=code_index, repository=repository))
     return actions

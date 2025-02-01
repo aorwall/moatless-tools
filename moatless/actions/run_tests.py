@@ -47,21 +47,10 @@ class RunTests(Action):
     _repository: Repository = PrivateAttr()
     _runtime: RuntimeEnvironment = PrivateAttr()
 
-    def __init__(
-        self,
-        repository: Repository | None = None,
-        runtime: RuntimeEnvironment | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        self._repository = repository
-        self._runtime = runtime
-
     def execute(
         self,
         args: RunTestsArgs,
         file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
     ) -> Observation:
         """
         Run all tests found in file context or provided in args.
@@ -69,15 +58,20 @@ class RunTests(Action):
         if file_context is None:
             raise ValueError("File context must be provided to execute the run tests action.")
 
+        if self._runtime is None:
+            raise ValueError("Runtime must be provided to execute the run tests action.")
+
         # Separate non-existent files and directories from valid test files
         non_existent_files = []
         directories = []
         test_files = []
 
         for test_file in args.test_files:
-            if not file_context.file_exists(test_file):
+            if not self._repository.file_exists(test_file):
+                logger.warning(f"File {test_file} does not exist in repository")
                 non_existent_files.append(test_file)
-            elif file_context.is_directory(test_file):
+            elif self._repository.is_directory(test_file):
+                logger.warning(f"Directory {test_file} provided instead of file")
                 directories.append(test_file)
             else:
                 test_files.append(test_file)
@@ -171,16 +165,8 @@ class RunTests(Action):
         if isinstance(obj, dict):
             obj = obj.copy()
             repository = obj.pop("repository")
-            if "code_index" in obj:
-                code_index = obj.pop("code_index")
-            else:
-                code_index = None
-
-            if "runtime" in obj:
-                runtime = obj.pop("runtime")
-            else:
-                runtime = None
-
+            code_index = obj.pop("code_index")
+            runtime = obj.pop("runtime")
             return cls(code_index=code_index, repository=repository, runtime=runtime, **obj)
         return super().model_validate(obj)
 

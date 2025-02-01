@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+import threading
 
 from moatless.codeblocks.module import Module
 from moatless.loop import AgenticLoop

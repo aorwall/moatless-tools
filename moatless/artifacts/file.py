@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from pydantic import Field
 
 from moatless.artifacts.artifact import Artifact, ArtifactHandler, ArtifactListItem
-from moatless.completion.schema import ChatCompletionImageUrlObject, ChatCompletionTextObject, MessageContentListBlock
+from moatless.completion.schema import (
+    ChatCompletionImageUrlObject,
+    ChatCompletionTextObject,
+    MessageContentListBlock,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -43,7 +47,11 @@ class FileArtifact(Artifact):
 
         base_repr = super().to_ui_representation()
         base_repr["data"].update(
-            {"mime_type": self.mime_type, "content": content_b64, "parsed_content": self.parsed_content}
+            {
+                "mime_type": self.mime_type,
+                "content": content_b64,
+                "parsed_content": self.parsed_content,
+            }
         )
         return base_repr
 
@@ -58,7 +66,10 @@ class TextFileArtifact(FileArtifact):
         """Convert text file to UI representation"""
         base_repr = super().to_ui_representation()
         base_repr["data"].update(
-            {"mime_type": self.mime_type, "content": base64.b64encode(self.content.encode("utf-8")).decode("utf-8")}
+            {
+                "mime_type": self.mime_type,
+                "content": base64.b64encode(self.content.encode("utf-8")).decode("utf-8"),
+            }
         )
         return base_repr
 
@@ -68,7 +79,8 @@ class ImageFileArtifact(FileArtifact):
 
     def to_prompt_message_content(self) -> MessageContentListBlock:
         return ChatCompletionImageUrlObject(
-            type="image_url", image_url={"url": f"data:{self.mime_type};base64,{self.base64_image}"}
+            type="image_url",
+            image_url={"url": f"data:{self.mime_type};base64,{self.base64_image}"},
         )
 
     def to_ui_representation(self) -> Dict[str, Any]:

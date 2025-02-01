@@ -83,15 +83,6 @@ class ViewCode(Action, IdentifyMixin):
 
     _repository: Repository = PrivateAttr()
 
-    def __init__(
-        self,
-        repository: Repository = None,
-        completion_model: BaseCompletionModel | None = None,
-        **data,
-    ):
-        super().__init__(completion_model=completion_model, **data)
-        self._repository = repository
-
     max_tokens: int = Field(
         3000,
         description="The maximum number of tokens in the requested code.",

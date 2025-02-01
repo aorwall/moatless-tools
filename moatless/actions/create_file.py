@@ -51,19 +51,6 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
 
     args_schema = CreateFileArgs
 
-    def __init__(
-        self,
-        runtime: RuntimeEnvironment | None = None,
-        code_index: CodeIndex | None = None,
-        repository: Repository | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        # Initialize mixin attributes directly
-        object.__setattr__(self, "_runtime", runtime)
-        object.__setattr__(self, "_code_index", code_index)
-        object.__setattr__(self, "_repository", repository)
-
     def execute(
         self,
         args: CreateFileArgs,

@@ -1,14 +1,15 @@
 import logging
 from typing import Optional, Tuple
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from moatless.actions.search_base import IDENTIFY_SYSTEM_PROMPT, Identify
+from moatless.actions.action import CompletionModelMixin
 from moatless.completion import BaseCompletionModel
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
+    ResponseSchema,
 )
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
@@ -16,13 +17,53 @@ from moatless.file_context import FileContext
 logger = logging.getLogger(__name__)
 
 
-class IdentifyMixin:
+IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with identifying relevant code in a codebase. Your goal is to select key code sections from the search results that are most relevant to the search request.
+
+The previous messages will contain:
+1. A search request from an AI assistant
+2. Search results containing various code sections with their line numbers
+
+# Your Task:
+
+1. Understand the Search Request:
+   * Analyze the previous search request to understand what code elements are being looked for
+   * Identify key elements such as functions, variables, classes, or patterns that are relevant
+
+2. Evaluate Search Results:
+   * Examine each code section in the search results for alignment with the search request
+   * Assess the relevance and importance of each code section
+   * Consider the complete context of code sections
+
+3. Respond with the Identify Action:
+   * Select and respond with the code sections that best match the search request
+   * Provide your analysis in the thoughts field
+   * List the relevant file paths with start and end line numbers in the identified_spans field
+"""
+
+
+class IdentifiedSpans(BaseModel):
+    file_path: str = Field(description="The file path where the relevant code is found.")
+    start_line: int = Field(description="Starting line number of the relevant code section.")
+    end_line: int = Field(description="Ending line number of the relevant code section.")
+
+
+class Identify(ResponseSchema):
+    """Identify if the provided search result is relevant to the reported issue."""
+
+    thoughts: Optional[str] = Field(
+        None,
+        description="Your thoughts and analysis on the search results and how they relate to the reported issue.",
+    )
+
+    identified_spans: Optional[list[IdentifiedSpans]] = Field(
+        default=None,
+        description="Files and code sections in the search results identified as relevant to the reported issue.",
+    )
+
+
+class IdentifyMixin(CompletionModelMixin):
     """Mixin that provides identify flow functionality for large code sections."""
 
-    completion_model: Optional[BaseCompletionModel] = Field(
-        None,
-        description="The completion model used to identify relevant code sections.",
-    )
     max_identify_tokens: int = Field(
         8000,
         description="The maximum number of tokens allowed in the identified code sections.",
@@ -31,12 +72,6 @@ class IdentifyMixin:
         16000,
         description="The maximum number of tokens allowed in the identify prompt.",
     )
-
-    @model_validator(mode="after")
-    def initalize_model(self):
-        if self.completion_model:
-            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
-        return self
 
     def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
@@ -71,7 +106,7 @@ class IdentifyMixin:
 
         MAX_RETRIES = 3
         for retry_attempt in range(MAX_RETRIES):
-            completion_response = self.completion_model.create_completion(messages=messages)
+            completion_response = self._completion_model.create_completion(messages=messages)
             logger.info(
                 f"Identifying relevant code sections. Attempt {retry_attempt + 1} of {MAX_RETRIES}.{len(completion_response.structured_outputs)} identify requests."
             )
@@ -117,3 +152,6 @@ class IdentifyMixin:
             last_completion=completion,
             messages=messages,
         )
+
+    def _initialize_completion_model(self):
+        self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)

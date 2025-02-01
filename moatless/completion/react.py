@@ -219,10 +219,10 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         Raises:
             ValueError: If action name is invalid
         """
-        if not isinstance(self.response_schema, list):
-            schemas = [self.response_schema]
+        if not isinstance(self._response_schema, list):
+            schemas = [self._response_schema]
         else:
-            schemas = self.response_schema
+            schemas = self._response_schema
 
         action_class = next((a for a in schemas if a.name == action_name), None)
         if not action_class:

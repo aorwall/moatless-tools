@@ -68,13 +68,13 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             CompletionRejectError: For invalid JSON that should be retried
         """
 
-        if len(self.response_schema) > 1:
+        if len(self._response_schema) > 1:
             raise ValueError("JSON Completion Model only handles one response schema")
 
         try:
             assistant_message = completion_response.choices[0].message.content
 
-            response = self.response_schema[0].model_validate_json(assistant_message)
+            response = self._response_schema[0].model_validate_json(assistant_message)
             return [response], None, []
 
         except (ValidationError, json.JSONDecodeError) as e:

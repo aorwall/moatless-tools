@@ -1,3 +1,6 @@
+from typing import List
+
+
 AGENT_ROLE = """You are an autonomous AI assistant with superior programming skills. As you're working autonomously, 
 you cannot communicate with the user but must rely on information you can get from the available functions.
 """
@@ -126,7 +129,7 @@ After your function call, you will receive an Observation to inform your next st
 """
 
 
-def generate_workflow_prompt(actions, has_runtime: bool = False) -> str:
+def generate_workflow_prompt(actions: List[str], has_runtime: bool = False) -> str:
     """Generate the workflow prompt based on available actions."""
     search_actions = []
     modify_actions = []
@@ -149,8 +152,7 @@ def generate_workflow_prompt(actions, has_runtime: bool = False) -> str:
         "ClaudeEditTool": "Use the str_replace_editor tool to update the code.",
     }
 
-    for action in actions:
-        action_name = action.__class__.__name__
+    for action_name in actions:
         if action_name in search_descriptions:
             search_actions.append((action_name, search_descriptions[action_name]))
         elif action_name in modify_descriptions:

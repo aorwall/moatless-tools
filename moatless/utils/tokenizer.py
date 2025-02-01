@@ -19,9 +19,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
             try:
                 import voyageai
             except ImportError as e:
-                raise ImportError(
-                    "`voyageai` package not found, please run `pip install voyageai`"
-                ) from e
+                raise ImportError("`voyageai` package not found, please run `pip install voyageai`") from e
 
             _voyage_clients[model] = voyageai.Client()
 
@@ -42,7 +40,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
                 os.environ["TIKTOKEN_CACHE_DIR"] = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
                     "_static",
-                    "tiktoken_cache"
+                    "tiktoken_cache",
                 )
 
             _tiktoken_encoders[model] = tiktoken.encoding_for_model(model)
@@ -57,9 +55,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
 
     except ImportError as e:
         # tiktoken isn't installed at all
-        raise ImportError(
-            "`tiktoken` package not found, please run `pip install tiktoken`"
-        ) from e
+        raise ImportError("`tiktoken` package not found, please run `pip install tiktoken`") from e
 
     except KeyError:
         """
@@ -72,8 +68,7 @@ def count_tokens(content: str, model: str = "gpt-3.5-turbo") -> int:
                 from transformers import AutoTokenizer
             except ImportError as e:
                 raise ImportError(
-                    "Hugging Face `transformers` not found. "
-                    "Please install via `pip install transformers`."
+                    "Hugging Face `transformers` not found. " "Please install via `pip install transformers`."
                 ) from e
 
             _hf_tokenizers[model] = AutoTokenizer.from_pretrained(model)

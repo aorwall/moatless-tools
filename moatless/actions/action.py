@@ -1,16 +1,24 @@
 import importlib
 import logging
 import pkgutil
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
+import inspect
 
-from pydantic import BaseModel, ConfigDict
+from docstring_parser import parse
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry, FewShotExample
+from moatless.actions.schema import (
+    ActionArguments,
+    Observation,
+    RewardScaleEntry,
+    FewShotExample,
+)
 from moatless.completion.base import BaseCompletionModel
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -18,34 +26,74 @@ logger = logging.getLogger(__name__)
 _actions: Dict[str, Type["Action"]] = {}
 
 
+class CompletionModelMixin:
+    """Mixin to provide completion model functionality to actions that need it"""
+
+    _completion_model: Optional[BaseCompletionModel] = None
+
+    @property
+    def completion_model(self):
+        return self._completion_model
+
+    @completion_model.setter
+    def completion_model(self, value: Optional[BaseCompletionModel]):
+        if value is None:
+            self._completion_model = None
+        else:
+            self._completion_model = value.clone()
+            self._initialize_completion_model()
+
+    @abstractmethod
+    def _initialize_completion_model(self):
+        """Override this method to customize completion model initialization"""
+        pass
+
+
 class Action(BaseModel, ABC):
     args_schema: ClassVar[Type[ActionArguments]]
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def execute(
-        self,
-        args: ActionArguments,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> Observation:
+    _workspace: Workspace = PrivateAttr(default=None)
+
+    def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """
         Execute the action.
         """
 
-        message = self._execute(args, file_context=file_context, workspace=workspace)
+        if not self._workspace:
+            raise RuntimeError("No workspace set")
+
+        message = self._execute(args, file_context=file_context)
         return Observation.create(message)
 
-    def _execute(
-        self,
-        args: ActionArguments,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> str | None:
+    def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
         """
         Execute the action and return the updated FileContext.
         """
         raise NotImplementedError("Subclasses must implement this method.")
+
+    @property
+    def workspace(self) -> Workspace:
+        if not self._workspace:
+            raise ValueError("Workspace is not set")
+        return self._workspace
+
+    @workspace.setter
+    def workspace(self, value: Workspace):
+        self._workspace = value
+
+    @property
+    def _repository(self) -> Repository:
+        return self.workspace.repository
+
+    @property
+    def _code_index(self) -> CodeIndex:
+        return self.workspace.code_index
+
+    @property
+    def _runtime(self) -> RuntimeEnvironment:
+        return self.workspace.runtime
 
     @property
     def name(self) -> str:
@@ -171,35 +219,19 @@ class Action(BaseModel, ABC):
                     _actions[name] = obj
 
     @classmethod
-    def model_validate(
-        cls,
-        obj: Any,
-        repository: Repository = None,
-        runtime: Any = None,
-        code_index: CodeIndex = None,
-    ) -> "Action":
+    def model_validate(cls, obj: Any) -> "Action":
         if isinstance(obj, dict):
             obj = obj.copy()
 
             if obj.get("action_class"):
                 action_class_path = obj["action_class"]
-
+                # TODO: Keep backwards compatibility for old claude text editor package
                 if action_class_path == "moatless.actions.edit":
                     action_class_path = "moatless.actions.claude_text_editor"
 
                 module_name, class_name = action_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 action_class = getattr(module, class_name)
-
-                if repository and hasattr(action_class, "_repository"):
-                    obj["repository"] = repository
-                if code_index and hasattr(action_class, "_code_index"):
-                    obj["code_index"] = code_index
-                if runtime and hasattr(action_class, "_runtime"):
-                    obj["runtime"] = runtime
-
-                if "completion_model" in obj:
-                    obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
 
                 return action_class(**obj)
             else:
@@ -211,3 +243,18 @@ class Action(BaseModel, ABC):
         dump = super().model_dump(**kwargs)
         dump["action_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return dump
+
+    @classmethod
+    def get_available_actions(cls) -> List[Dict[str, Any]]:
+        """Get all available actions with their documentation and schema."""
+        if not _actions:
+            cls._load_actions()
+
+        actions = []
+        for name, action_class in _actions.items():
+            docstring = parse(inspect.getdoc(action_class) or "").description
+            args_schema = action_class.args_schema.model_json_schema() if hasattr(action_class, "args_schema") else {}
+
+            actions.append({"name": name, "description": docstring, "args_schema": args_schema})
+
+        return actions

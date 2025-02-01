@@ -2,7 +2,8 @@ import importlib
 import json
 import logging
 import traceback
-from typing import List, Type, Dict, Any
+import uuid
+from typing import List, Type, Dict, Any, Optional, Callable
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
@@ -11,47 +12,72 @@ from moatless.actions.schema import (
     ActionArguments,
 )
 from moatless.agent.settings import AgentSettings
+from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.model import Completion
-from moatless.exceptions import CompletionError, RejectError, RuntimeError, CompletionRejectError
+from moatless.exceptions import (
+    CompletionError,
+    RejectError,
+    RuntimeError,
+    CompletionRejectError,
+)
 from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
 from moatless.repository.repository import Repository
+from moatless.actions.action import CompletionModelMixin
+from moatless.workspace import Workspace
+from moatless.agent.events import (
+    AgentEvent,
+    AgentStarted,
+    AgentActionCreated,
+    AgentActionExecuted,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class ActionAgent(BaseModel):
+    agent_id: str = Field(..., description="Agent ID")
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
-    use_few_shots: bool = Field(False, description="Whether to use few-shot examples for generating completions")
-    disable_thoughts: bool = Field(False, description="Whether to disable thoughts in the action")
     actions: List[Action] = Field(default_factory=list)
-    message_generator: MessageHistoryGenerator = Field(
-        description="Generator for message history",
-    )
 
-    _completion: BaseCompletionModel = PrivateAttr()
+    _completion_model: BaseCompletionModel | None = PrivateAttr()
+    _message_generator: MessageHistoryGenerator | None = PrivateAttr(default_factory=MessageHistoryGenerator)
     _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
+
+    _event_handler: Optional[Callable] = PrivateAttr(default=None)
 
     def __init__(
         self,
-        completion: BaseCompletionModel,
-        system_prompt: str | None = None,
-        actions: List[Action] | None = None,
-        message_generator: MessageHistoryGenerator | None = None,
+        agent_id: str,
+        actions: List[Action],
+        system_prompt: str,
+        completion_model: BaseCompletionModel | None = None,
+        repository: Repository | None = None,
+        code_index: CodeIndex | None = None,
+        runtime: Any | None = None,
+        workspace: Workspace | None = None,
+        artifact_handlers: List[ArtifactHandler] | None = None,
         **data,
     ):
-        actions = actions or []
-        message_generator = message_generator or MessageHistoryGenerator()
         super().__init__(
-            actions=actions,
             system_prompt=system_prompt,
-            message_generator=message_generator,
+            actions=actions,
+            agent_id=agent_id,
             **data,
         )
-        self._completion = completion
-        self.set_actions(actions)
+        self.completion_model = completion_model
+
+        if workspace:
+            self.workspace = workspace
+        else:
+            self.workspace = Workspace(
+                repository=repository,
+                runtime=runtime,
+                code_index=code_index,
+                artifact_handlers=artifact_handlers,
+            )
 
     @classmethod
     def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
@@ -64,24 +90,62 @@ class ActionAgent(BaseModel):
             actions=actions,
         )
 
-    def set_actions(self, actions: List[Action]):
-        self.actions = actions
-        self._action_map = {action.args_schema: action for action in actions}
-        action_args = [action.args_schema for action in self.actions]
-        system_prompt = self.generate_system_prompt()
-        self._completion.initialize(action_args, system_prompt)
+    @property
+    def completion_model(self):
+        return self._completion_model
 
-    @model_validator(mode="after")
-    def verify_actions(self) -> "ActionAgent":
+    @property
+    def action_map(self):
+        if not self._action_map:
+            self._action_map = {action.args_schema: action for action in self.actions}
+        return self._action_map
+
+    @completion_model.setter
+    def completion_model(self, completion_model: BaseCompletionModel | None):
+        """Set completion model on agent and all actions that support it"""
+        if completion_model is None:
+            self._completion_model = None
+            for action in self.actions:
+                if isinstance(action, CompletionModelMixin):
+                    action.completion_model = None
+        else:
+            self._completion_model = completion_model.clone()
+            self._message_generator = MessageHistoryGenerator.create(completion_model.message_history_type)
+
+            action_args = [action.args_schema for action in self.actions]
+            system_prompt = self.generate_system_prompt()
+            self._completion_model.initialize(action_args, system_prompt)
+
+            for action in self.actions:
+                if hasattr(action, "completion_model"):
+                    action.completion_model = self._completion_model
+
+    @property
+    def workspace(self):
+        return self._workspace
+
+    @workspace.setter
+    def workspace(self, workspace: Workspace):
+        self._workspace = workspace
         for action in self.actions:
-            if not isinstance(action, Action):
-                raise ValueError(f"Invalid action type: {type(action)}. Expected Action subclass.")
-            if not hasattr(action, "args_schema"):
-                raise ValueError(f"Action {action.__class__.__name__} is missing args_schema attribute")
-        return self
+            action.workspace = workspace
+
+    def set_event_handler(self, handler: Callable):
+        """Set the event handler for agent events"""
+        self._event_handler = handler
+
+    def _emit_event(self, event: AgentEvent):
+        """Emit a pure agent event"""
+        if self._event_handler:
+            self._event_handler(event)
 
     def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
+        if not self._completion_model:
+            raise RuntimeError("Completion model not set")
+
+        # Emit agent started event
+        self._emit_event(AgentStarted(agent_id=self.agent_id, node_id=node.node_id))
 
         if node.action:
             logger.info(f"Node{node.node_id}: Resetting node")
@@ -90,10 +154,11 @@ class ActionAgent(BaseModel):
         node.possible_actions = [action.name for action in self.actions]
 
         try:
-            messages = self.message_generator.generate_messages(node)
-            logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
+            if self._message_generator:
+                messages = self._message_generator.generate_messages(node)
+                logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
-            completion_response = self._completion.create_completion(
+            completion_response = self._completion_model.create_completion(
                 messages=messages,
             )
             node.completions["build_action"] = completion_response.completion
@@ -104,6 +169,16 @@ class ActionAgent(BaseModel):
 
             if completion_response.structured_outputs:
                 node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
+                # Emit action created events
+                for step in node.action_steps:
+                    self._emit_event(
+                        AgentActionCreated(
+                            agent_id=self.agent_id,
+                            node_id=node.node_id,
+                            action_name=step.action.name,
+                            action_params=step.action.model_dump(exclude={"name"}),
+                        )
+                    )
 
         except CompletionError as e:
             node.terminal = True
@@ -114,7 +189,7 @@ class ActionAgent(BaseModel):
                 node.completions["build_action"] = Completion.from_llm_completion(
                     input_messages=e.messages if hasattr(e, "messages") else [],
                     completion_response=e.last_completion,
-                    model=self.completion.model,
+                    model=self.completion_model.model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             else:
@@ -146,18 +221,29 @@ class ActionAgent(BaseModel):
             self._execute(node, action_step)
 
     def _execute(self, node: Node, action_step: ActionStep):
-        action = self._action_map.get(type(action_step.action))
+        action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
                 f"Node{node.node_id}: Action {node.action.name} not found in action map. "
-                f"Available actions: {self._action_map.keys()}"
+                f"Available actions: {self.action_map.keys()}"
             )
-            raise RuntimeError(f"Action {type(node.action)} not found in action map.")
+            raise RuntimeError(
+                f"Action {type(node.action)} not found in action map with actions: {self.action_map.keys()}"
+            )
 
         try:
-            action_step.observation = action.execute(
-                action_step.action, file_context=node.file_context, workspace=node.workspace
+            action_step.observation = action.execute(action_step.action, file_context=node.file_context)
+
+            # Emit action executed event
+            self._emit_event(
+                AgentActionExecuted(
+                    agent_id=self.agent_id,
+                    node_id=node.node_id,
+                    action_name=action_step.action.name,
+                    observation=action_step.observation.message if action_step.observation else None,
+                )
             )
+
             if not action_step.observation:
                 logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:
@@ -177,7 +263,7 @@ class ActionAgent(BaseModel):
                 action_step.completion = Completion.from_llm_completion(
                     input_messages=e.messages,
                     completion_response=e.last_completion,
-                    model=self.completion.model,
+                    model=self.completion_model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             node.error = traceback.format_exc()
@@ -188,7 +274,7 @@ class ActionAgent(BaseModel):
         """Generate a system prompt for the agent."""
 
         system_prompt = self.system_prompt
-        if self.use_few_shots:
+        if self._completion_model and self._completion_model.use_few_shots:
             system_prompt += "\n\n" + self.generate_few_shots()
 
         return system_prompt
@@ -204,7 +290,7 @@ class ActionAgent(BaseModel):
         if few_shot_examples:
             prompt += "\n\n# Examples\nHere are some examples of how to use the available actions:\n\n"
             for i, example in enumerate(few_shot_examples):
-                if self.completion.response_format == LLMResponseFormat.REACT:
+                if self.completion_model.response_format == LLMResponseFormat.REACT:
                     prompt += f"\n**Example {i + 1}**"
                     action_data = example.action.model_dump()
                     thoughts = action_data.pop("thoughts", "")
@@ -249,7 +335,7 @@ class ActionAgent(BaseModel):
                             f"{json.dumps(action_data)}\n\n"
                         )
 
-                elif self.completion.response_format == LLMResponseFormat.JSON:
+                elif self.completion_model.response_format == LLMResponseFormat.JSON:
                     action_json = {
                         "action": example.action.model_dump(),
                         "action_type": example.action.name,
@@ -258,7 +344,7 @@ class ActionAgent(BaseModel):
                         f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
                     )
 
-                elif self.completion.response_format == LLMResponseFormat.TOOLS:
+                elif self.completion_model.response_format == LLMResponseFormat.TOOLS:
                     tools_json = {"tool": example.action.name}
                     if self.disable_thoughts:
                         tools_json.update(example.action.model_dump(exclude={"thoughts"}))
@@ -273,9 +359,16 @@ class ActionAgent(BaseModel):
 
         return prompt
 
+    def set_event_handler(self, handler: Callable):
+        """Set an event handler for the agent."""
+        self._event_handler = handler
+
+    def remove_event_handler(self):
+        """Remove an event handler from the agent."""
+        self._event_handler = None
+
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["completion"] = self._completion.model_dump(**kwargs)
         dump["actions"] = []
         dump["agent_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         for action in self.actions:
@@ -283,41 +376,12 @@ class ActionAgent(BaseModel):
         return dump
 
     @classmethod
-    def model_validate(
-        cls,
-        obj: Any,
-        repository: Repository = None,
-        runtime: Any = None,
-        code_index: CodeIndex = None,
-    ) -> "ActionAgent":
+    def model_validate(cls, obj: Any) -> "ActionAgent":
         if isinstance(obj, dict):
             obj = obj.copy()
-            completion_data = obj.pop("completion", None)
             agent_class_path = obj.pop("agent_class", None)
 
-            message_generator_data = obj.get("message_generator", {})
-            if message_generator_data:
-                obj["message_generator"] = MessageHistoryGenerator.model_validate(message_generator_data)
-
-            if completion_data:
-                obj["completion"] = BaseCompletionModel.model_validate(completion_data)
-            else:
-                obj["completion"] = None
-
-            if repository:
-                obj["actions"] = [
-                    Action.model_validate(
-                        action_data,
-                        repository=repository,
-                        runtime=runtime,
-                        code_index=code_index,
-                    )
-                    for action_data in obj.get("actions", [])
-                ]
-            else:
-                logger.info(f"No repository provided, skip initiating actions")
-                obj["actions"] = []
-
+            obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
             if agent_class_path:
                 module_name, class_name = agent_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
@@ -330,50 +394,41 @@ class ActionAgent(BaseModel):
 
         return super().model_validate(obj)
 
-    @classmethod
-    def from_dict(
-        cls,
-        data: Dict[str, Any],
-        repository: Repository | None = None,
-        code_index: CodeIndex | None = None,
-        runtime: Any | None = None,
-    ) -> "ActionAgent":
-        """Create an ActionAgent from a dictionary, properly handling dependencies."""
-        data = data.copy()
+    @model_validator(mode="after")
+    def verify_actions(self) -> "ActionAgent":
+        for action in self.actions:
+            if not isinstance(action, Action):
+                raise ValueError(f"Invalid action type: {type(action)}. Expected Action subclass.")
+            if not hasattr(action, "args_schema"):
+                raise ValueError(f"Action {action.__class__.__name__} is missing args_schema attribute")
+        return self
 
-        # Handle completion model
-        if "completion" in data and isinstance(data["completion"], dict):
-            data["completion"] = BaseCompletionModel.model_validate(data["completion"])
+    def create_action(self, name: str, **params) -> Action:
+        """Create an action with the given name and parameters."""
+        action = super().create_action(name, **params)
 
-        # Handle actions with dependencies
-        if repository and "actions" in data and isinstance(data["actions"], list):
-            data["actions"] = [
-                Action.model_validate(
-                    action_data,
-                    repository=repository,
-                    runtime=runtime,
-                    code_index=code_index,
-                )
-                for action_data in data["actions"]
-            ]
+        self._emit_event(
+            AgentActionCreated(
+                agent_id=self.agent_id,
+                node_id=self.current_node.node_id,
+                action_name=name,
+                action_params=params,
+            )
+        )
 
-        # Handle message generator
-        if "message_generator" in data and isinstance(data["message_generator"], dict):
-            data["message_generator"] = MessageHistoryGenerator.model_validate(data["message_generator"])
+        return action
 
-        # Handle agent class if specified
-        if "agent_class" in data:
-            module_name, class_name = data["agent_class"].rsplit(".", 1)
-            module = importlib.import_module(module_name)
-            agent_class = getattr(module, class_name)
-            return agent_class(**data)
+    def execute_action(self, action: Action) -> Dict:
+        """Execute an action and return the observation."""
+        observation = super().execute_action(action)
 
-        return cls.model_validate(data)
+        self._emit_event(
+            AgentActionExecuted(
+                agent_id=self.agent_id,
+                node_id=self.current_node.node_id,
+                action_name=action.name,
+                observation=observation,
+            )
+        )
 
-    @property
-    def completion(self) -> BaseCompletionModel:
-        return self._completion
-
-    @completion.setter
-    def completion(self, value: BaseCompletionModel):
-        self._completion = value
+        return observation

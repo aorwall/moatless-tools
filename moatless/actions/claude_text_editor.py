@@ -13,7 +13,10 @@ from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.completion import BaseCompletionModel
-from moatless.completion.schema import ChatCompletionToolParam, ChatCompletionToolParamFunctionChunk
+from moatless.completion.schema import (
+    ChatCompletionToolParam,
+    ChatCompletionToolParamFunctionChunk,
+)
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
@@ -51,7 +54,8 @@ class EditActionArguments(ActionArguments):
     @classmethod
     def tool_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
         return ChatCompletionToolParam(
-            type="text_editor_20241022", function=ChatCompletionToolParamFunctionChunk(name="str_replace_editor")
+            type="text_editor_20241022",
+            function=ChatCompletionToolParamFunctionChunk(name="str_replace_editor"),
         )
 
     @field_validator("file_text")
@@ -148,30 +152,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
     _str_replace: StringReplace = PrivateAttr()
     _create_file: CreateFile = PrivateAttr()
     _repository: Repository | None = PrivateAttr(None)
-
-    def __init__(
-        self,
-        code_index: CodeIndex | None = None,
-        repository: Repository | None = None,
-        completion_model: BaseCompletionModel | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        object.__setattr__(self, "_code_index", code_index)
-        object.__setattr__(self, "_repository", repository)
-        object.__setattr__(self, "_completion_model", completion_model)
-
-        self._str_replace = StringReplace(
-            runtime=self._runtime,
-            code_index=self._code_index,
-            repository=self._repository,
-        )
-        self._create_file = CreateFile(
-            runtime=self._runtime,
-            code_index=self._code_index,
-            repository=self._repository,
-        )
-        self._view_code = ViewCode(repository=self._repository, completion_model=completion_model)
 
     def execute(
         self,

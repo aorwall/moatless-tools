@@ -39,7 +39,7 @@ class BaseValueFunction(BaseModel, ABC):
 
             return instance
 
-        return super().model_validate(obj)
+        return obj
 
     def model_dump(self, *args, **kwargs):
         data = super().model_dump(*args, **kwargs)

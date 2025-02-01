@@ -1,3 +1,4 @@
+from typing import List
 import logging
 import random
 from typing import List
@@ -19,26 +20,25 @@ class Expander(BaseModel):
         description="The settings for the agent model",
     )
 
-    def expand(self, node: Node, search_tree, force_expansion: bool = False) -> None | Node:
-        """Handle all node expansion logic in one place"""
-        if not force_expansion and node.is_fully_expanded():
+    def expand(self, node: Node) -> None | Node:
+        if node.is_fully_expanded():
             return None
 
-        # Return the first unexecuted child if one exists
+        # Find first unexecuted child if it exists
         for child in node.children:
             if not child.observation:
                 logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
                 return child
 
         num_expansions = node.max_expansions or self.max_expansions
-        if not force_expansion and len(node.children) >= num_expansions:
+        if len(node.children) >= num_expansions:
             logger.info(f"Max expansions reached for node {node.node_id}")
             return None
 
         settings_to_use = self._get_agent_settings(node)
 
         child_node = Node(
-            node_id=search_tree._generate_unique_id(),
+            node_id=self._generate_unique_id(node),
             parent=node,
             file_context=node.file_context.clone() if node.file_context else None,
             max_expansions=self.max_expansions,

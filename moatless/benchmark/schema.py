@@ -63,12 +63,8 @@ class TreeSearchSettings(BaseModel):
         description="The maximum depth for one trajectory in simulations.",
     )
 
-    model: Optional[CompletionModelSettings] = Field(
-        default=None,
-        description="The default model.",
-    )
-
-    agent_settings: AgentSettings = Field(..., description="Settings for creating the agent")
+    model_id: str = Field(..., description="The ID of the model to use for the evaluation.")
+    agent_id: str = Field(..., description="The ID of the agent to use for the evaluation.")
 
     selector: Optional[BaseSelector] = Field(default=None, description="Custom selector for tree search")
 

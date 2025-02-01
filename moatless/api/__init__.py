@@ -1,22 +1,37 @@
+"""Moatless API initialization."""
+
 import logging
-from dotenv import load_dotenv
-import moatless.api.api
 import uvicorn
+from dotenv import load_dotenv
+from .api import create_api
 
 
-def run_api():
-    """Run the Moatless API server"""
+def run_api(dev_mode: bool = False, host: str = "0.0.0.0", port: int = 8000):
+    """Run the Moatless API server.
+
+    Args:
+        dev_mode: If True, enables auto-reload and debug features
+        host: Host to bind to
+        port: Port to listen on
+    """
     # Load environment variables from .env file
     load_dotenv()
 
-    # Configure logging
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    logger = logging.getLogger(__name__)
-
-    # Create and run API without workspace
-    api = moatless.api.api.create_api()
-    logger.info("Starting API server")
-    uvicorn.run(api, host="0.0.0.0", port=8000)
+    if dev_mode:
+        logging.info("Starting API server in development mode with auto-reload")
+        uvicorn.run(
+            "moatless.api.api:create_api",
+            host=host,
+            port=port,
+            reload=True,
+            reload_dirs=["moatless"],
+            factory=True,
+            log_level="debug",
+        )
+    else:
+        logging.info("Starting API server")
+        api = create_api()
+        uvicorn.run(api, host=host, port=port)
 
 
 if __name__ == "__main__":

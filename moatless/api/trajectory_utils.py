@@ -336,12 +336,13 @@ def convert_nodes(trajectory_data: Dict[str, Any]) -> List[NodeDTO]:
     nodes = []
     action_history = {}  # Track action dumps to detect duplicates
 
-    if "root_node" in trajectory_data:
-        root_node = Node.reconstruct(trajectory_data["root_node"])
+    if "root" in trajectory_data:
+        root_node = Node.reconstruct(trajectory_data["root"])
     elif "nodes" in trajectory_data:
         root_node = Node.reconstruct(trajectory_data["nodes"])
     else:
-        raise HTTPException(status_code=400, detail="No root node found in trajectory data")
+        logger.error(f"No root node found in trajectory data {trajectory_data.keys()}")
+        raise HTTPException(400, "No root node found in trajectory data")
     for node in root_node.get_all_nodes():
         node_dto = convert_moatless_node_to_api_node(node, action_history)
         nodes.append(node_dto)

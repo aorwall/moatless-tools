@@ -24,8 +24,7 @@ class MessageHistoryGenerator(BaseModel):
         description="Whether to include thoughts in the action or in the message",
     )
 
-    @model_serializer
-    def serialize_model(self) -> dict:
+    def model_dump(self, **kwargs):
         return {
             "message_history_type": self.message_history_type.value,
             "max_tokens": self.max_tokens,
@@ -46,8 +45,6 @@ class MessageHistoryGenerator(BaseModel):
             message_content = []
             if previous_node.user_message:
                 message_content.append(ChatCompletionTextObject(type="text", text=previous_node.user_message))
-
-            logger.info(f"Artifact changes: {previous_node.artifact_changes}")
 
             if previous_node.artifact_changes:
                 for change in previous_node.artifact_changes:
