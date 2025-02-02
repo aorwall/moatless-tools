@@ -1,103 +1,100 @@
 """API endpoints for agent configuration management."""
 
 import logging
+from typing import List
 from fastapi import APIRouter, HTTPException
 from moatless.actions.action import Action
+from moatless.actions.schema import ActionSchema
 from moatless.agent.agent import ActionAgent
 from moatless.config.agent_config import (
-    get_config,
-    get_all_configs,
-    create_config,
-    update_config,
-    delete_config,
+    get_agent,
+    get_all_agents,
+    create_agent,
+    update_agent,
+    delete_agent,
 )
 from .schema import (
+    ActionConfigDTO,
     AgentConfigDTO,
     AgentConfigUpdateDTO,
     AgentConfigsResponseDTO,
-    ActionInfoDTO,
     ActionsResponseDTO,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _convert_to_dto(config_id: str, config: ActionAgent) -> AgentConfigDTO:
+def _convert_to_dto(agent_id: str, agent: ActionAgent) -> AgentConfigDTO:
     """Convert a config dict to a DTO."""
-    actions = [action.name for action in config.actions]
-    return AgentConfigDTO(id=config_id, system_prompt=config.system_prompt, actions=actions)
+    actions = [ActionConfigDTO(action_class=action.get_class_name(), properties=action.model_dump(exclude={"action_class"})) for action in agent.actions]
+    return AgentConfigDTO(id=agent_id, system_prompt=agent.system_prompt, actions=actions)
 
 
 router = APIRouter()
 
-
 @router.get("/available-actions", response_model=ActionsResponseDTO)
-async def list_available_actions() -> ActionsResponseDTO:
-    """Get all available actions"""
-    try:
-        actions = []
-        for action in Action.get_available_actions():
-            actions.append(
-                ActionInfoDTO(
-                    name=action["name"],
-                    description=action["description"],
-                    args_schema=action["args_schema"],
-                )
-            )
-        return ActionsResponseDTO(actions=actions)
-    except Exception as e:
-        logger.exception(f"Failed to list actions")
-        raise HTTPException(status_code=500, detail=str(e))
+async def list_available_actions():
+    """Get all available actions with their schema."""
+    actions = Action.get_available_actions()
+    return ActionsResponseDTO(actions=actions)
+
 
 
 @router.get("", response_model=AgentConfigsResponseDTO)
 async def list_agent_configs() -> AgentConfigsResponseDTO:
     """Get all agent configurations"""
     configs = []
-    all_configs = get_all_configs()
-    for config_id, config in all_configs.items():
-        configs.append(_convert_to_dto(config_id, config))
+    all_agents = get_all_agents()
+    for agent in all_agents:
+        configs.append(_convert_to_dto(agent.agent_id, agent))
     return AgentConfigsResponseDTO(configs=configs)
 
 
-@router.get("/{config_id}", response_model=AgentConfigDTO)
-async def read_agent_config(config_id: str) -> AgentConfigDTO:
+@router.get("/{agent_id}", response_model=AgentConfigDTO)
+async def read_agent_config(agent_id: str) -> AgentConfigDTO:
     """Get configuration for a specific agent"""
     try:
-        config = get_config(config_id)
-        return _convert_to_dto(config_id, config)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.post("/{config_id}", response_model=AgentConfigDTO)
-async def create_agent_config_api(config_id: str, config: AgentConfigUpdateDTO) -> AgentConfigDTO:
-    """Create a new agent configuration"""
-    try:
-        logger.info(f"Creating agent config {config_id} with {config.model_dump(exclude_none=True)}")
-        config_dict = config.model_dump(exclude_none=True)
-        created = create_config(config_id, config_dict)
-        return _convert_to_dto(config_id, created)
+        agent = get_agent(agent_id)
+        return _convert_to_dto(agent_id, agent)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/{config_id}", response_model=AgentConfigDTO)
-async def update_agent_config_api(config_id: str, update: AgentConfigUpdateDTO) -> AgentConfigDTO:
+@router.post("/{agent_id}", response_model=AgentConfigDTO)
+async def create_agent_config_api(agent_id: str, config: AgentConfigDTO) -> AgentConfigDTO:
+    """Create a new agent configuration"""
+    try:
+        logger.info(f"Creating agent config {agent_id} with {config.model_dump(exclude_none=True)}")
+
+        agent = _create_agent(agent_id, config.actions, config.system_prompt)
+        created = create_agent(agent_id, agent)
+        return _convert_to_dto(agent_id, created)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/{agent_id}")
+async def update_agent_config_api(agent_id: str, update: AgentConfigUpdateDTO):
     """Update configuration for a specific agent"""
     try:
-        logger.info(f"Updating agent config {config_id} with {update.model_dump(exclude_none=True)}")
-        updates = update.model_dump(exclude_none=True)
-        updated = update_config(config_id, updates)
-        return _convert_to_dto(config_id, updated)
+        logger.info(f"Updating agent config {agent_id} with {update.model_dump(exclude_none=True)}")
+        agent = _create_agent(agent_id, update.actions, update.system_prompt)
+        update_agent(agent)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.delete("/{config_id}")
-async def delete_agent_config_api(config_id: str):
+@router.delete("/{agent_id}")
+async def delete_agent_config_api(agent_id: str):
     """Delete an agent configuration"""
     try:
-        delete_config(config_id)
+        delete_agent(agent_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _create_agent(agent_id: str, actions: List[ActionConfigDTO], system_prompt: str) -> ActionAgent:
+    actions = []
+    for action in actions:
+        actions.append(Action(action_class=action.action_class, **action.properties))
+    return ActionAgent(agent_id=agent_id, actions=actions, system_prompt=system_prompt)

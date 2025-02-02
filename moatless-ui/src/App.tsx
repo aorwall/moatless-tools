@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import ErrorBoundary from '@/lib/components/ErrorBoundary';
 import { WebSocketProvider } from '@/lib/providers/WebSocketProvider';
+import { Toaster } from "@/lib/components/ui/sonner"
 
 // Import page components
 import { Home } from '@/pages/home/index';
@@ -56,6 +57,7 @@ function App() {
             </Routes>
           </BrowserRouter>
           <ReactQueryDevtools initialIsOpen={false} />
+          <Toaster />
         </WebSocketProvider>
       </QueryClientProvider>
     </ErrorBoundary>

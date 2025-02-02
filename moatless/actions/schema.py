@@ -147,3 +147,19 @@ class FewShotExample(BaseModel):
     @classmethod
     def create(cls, user_input: str, action: ActionArguments) -> "FewShotExample":
         return cls(user_input=user_input, action=action)
+
+
+class ActionProperty(BaseModel):
+    type: str
+    title: str
+    description: str
+    default: Optional[Any] = None
+
+
+class ActionSchema(BaseModel):
+    title: str
+    description: str
+    type: str = "object"
+    action_class: str
+    properties: Dict[str, ActionProperty]
+

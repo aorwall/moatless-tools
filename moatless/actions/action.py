@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from moatless.actions.schema import (
     ActionArguments,
+    ActionProperty,
+    ActionSchema,
     Observation,
     RewardScaleEntry,
     FewShotExample,
@@ -241,20 +243,41 @@ class Action(BaseModel, ABC):
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["action_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
+        dump["action_class"] = self.get_class_name()
         return dump
 
     @classmethod
-    def get_available_actions(cls) -> List[Dict[str, Any]]:
-        """Get all available actions with their documentation and schema."""
+    def get_action_schema(cls) -> ActionSchema:
+        """Generate an ActionSchema for this action."""
+        schema = cls.model_json_schema()
+        properties = {}
+        for prop_name, prop_data in schema.get('properties', {}).items():
+            properties[prop_name] = ActionProperty(
+                type=prop_data.get('type', 'string'),
+                title=prop_data.get('title', prop_name),
+                description=prop_data.get('description', ''),
+                default=prop_data.get('default')
+            )
+
+        return ActionSchema(
+            title=cls.__name__,
+            description=schema.get('description', ''),
+            properties=properties,
+            action_class=cls.get_class_name()
+        )
+
+    @classmethod
+    def get_available_actions(cls) -> List[ActionSchema]:
+        """Get all available actions with their schema."""
         if not _actions:
             cls._load_actions()
 
-        actions = []
-        for name, action_class in _actions.items():
-            docstring = parse(inspect.getdoc(action_class) or "").description
-            args_schema = action_class.args_schema.model_json_schema() if hasattr(action_class, "args_schema") else {}
+        return [
+            action_class.get_action_schema() 
+            for name, action_class in _actions.items()
+        ]
 
-            actions.append({"name": name, "description": docstring, "args_schema": args_schema})
-
-        return actions
+    @classmethod
+    def get_class_name(cls) -> str:
+        return f"{cls.__module__}.{cls.__name__}"
+    

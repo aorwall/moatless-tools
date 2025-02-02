@@ -28,6 +28,8 @@ from moatless.api.agents.api import router as agent_router
 from moatless.api.swebench.api import router as swebench_router
 from moatless.api.runs.api import router as run_router
 from moatless.events import event_bus
+from moatless.actions.schema import ActionSchema
+from moatless.actions.action import Action
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

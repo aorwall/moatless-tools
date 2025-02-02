@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.config.agent_config import get_config as get_agent_config
+from moatless.config.agent_config import get_agent as get_agent_config
 
 logger = logging.getLogger(__name__)
 
