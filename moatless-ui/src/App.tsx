@@ -18,6 +18,7 @@ import { AgentsPage } from '@/pages/settings/agents';
 import { AgentDetailPage } from '@/pages/settings/agents/[id]';
 import { ValidatePage } from '@/pages/validate';
 import { RunPage } from '@/pages/runs/[id]';
+import { NewAgentPage } from '@/pages/settings/agents/new';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +45,7 @@ function App() {
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route path="agents" element={<AgentsLayout />}>
                     <Route index element={<AgentsPage />} />
+                    <Route path="new" element={<NewAgentPage />} />
                     <Route path=":id" element={<AgentDetailPage />} />
                   </Route>
                   <Route path="models" element={<ModelsLayout />}>

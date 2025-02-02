@@ -52,14 +52,7 @@ export function AgentsLayout() {
 
   if (!agents?.length) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
-        <Alert className="max-w-md">
-          <AlertTitle>No Agents Available</AlertTitle>
-          <AlertDescription>
-            No agents have been configured yet.
-          </AlertDescription>
-        </Alert>
-      </div>
+      <Outlet />
     );
   }
 
@@ -76,7 +69,11 @@ export function AgentsLayout() {
   return (
     <SplitLayout 
       left={agentList}
-      right={<Outlet />}
+      right={
+        <div className="h-full min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+      }
     />
   );
 } 

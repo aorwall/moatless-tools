@@ -2,6 +2,8 @@ import { useNavigate } from 'react-router-dom';
 import { DataExplorer } from '@/lib/components/DataExplorer';
 import { useAgents } from '@/lib/hooks/useAgents';
 import type { AgentConfig } from '@/lib/types/agent';
+import { Button } from '@/lib/components/ui/button';
+import { Plus } from 'lucide-react';
 
 export function AgentsPage() {
   const navigate = useNavigate();
@@ -34,12 +36,38 @@ export function AgentsPage() {
   }
 
   if (!agents?.length) {
-    return <div className="text-muted-foreground">No agents available</div>;
+    return (
+      <div className="flex h-full flex-col items-center justify-center space-y-4 p-4">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold">No Agents Available</h2>
+          <p className="text-muted-foreground">
+            Looks like you haven't created any agents yet.
+            Click the button below to create your first agent.
+          </p>
+        </div>
+        <Button
+          onClick={() => navigate('/settings/agents/new')}
+          className="flex items-center gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          Create First Agent
+        </Button>
+      </div>
+    );
   }
 
   return (
     <div className="p-4">
-      <h2 className="text-xl font-bold mb-4">Agent Configurations</h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-xl font-bold">Agent Configurations</h2>
+        <Button 
+          onClick={() => navigate('/settings/agents/new')} 
+          className="flex items-center gap-2"
+        >
+          <Plus className="h-4 w-4" />
+          New Agent
+        </Button>
+      </div>
       <DataExplorer
         items={agents}
         filterFields={filterFields}

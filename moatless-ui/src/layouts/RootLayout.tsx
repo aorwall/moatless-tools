@@ -8,7 +8,7 @@ export function RootLayout() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <header className="flex-none border-b bg-background">
         <div className="px-4">
           <nav className="flex h-14 items-center space-x-8">
@@ -53,7 +53,7 @@ export function RootLayout() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 min-h-0">
         <Outlet />
       </main>
     </div>

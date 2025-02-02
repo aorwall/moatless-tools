@@ -15,13 +15,15 @@ from moatless.search_tree import SearchTree
 from moatless.streamlit.shared import trajectory_table
 from moatless.streamlit.tree_visualization import update_visualization
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
 
 def main():
+    load_dotenv()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
     # Add argument parsing at the start of main()
     parser = argparse.ArgumentParser()
     parser.add_argument("path", nargs="?", help="Path to the file")

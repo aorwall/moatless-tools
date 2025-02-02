@@ -26,7 +26,7 @@ def run_api(dev_mode: bool = False, host: str = "0.0.0.0", port: int = 8000):
             reload=True,
             reload_dirs=["moatless"],
             factory=True,
-            log_level="debug",
+            log_level="info",
         )
     else:
         logging.info("Starting API server")

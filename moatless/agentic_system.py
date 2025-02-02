@@ -19,7 +19,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.index.code_index import CodeIndex
 from moatless.workspace import Workspace
-from moatless.config.agent_config import create_agent
+from moatless.config.agent_config import get_agent
 from moatless.events import event_bus
 
 logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ class AgenticSystem(BaseModel, ABC):
             run_id = str(uuid.uuid4())
 
         if not agent:
-            agent = create_agent(agent_id, completion_model, repository, code_index, runtime)
+            agent = get_agent(agent_id, completion_model, repository, code_index, runtime)
 
         if not agent.workspace:
             if not workspace:

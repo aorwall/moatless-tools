@@ -13,7 +13,8 @@ from moatless.benchmark.swebench import create_repository
 from moatless.index import CodeIndex
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.config.model_config import create_completion_model
-from moatless.config.agent_config import create_agent
+from moatless.config.agent_config import get_agent
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,6 @@ class ValidationManager:
             return
 
         try:
-            # Get instance data
             instances = get_moatless_instances()
             instance = instances.get(validation.instance_id)
             if not instance:
@@ -92,7 +92,6 @@ class ValidationManager:
             completion_model = create_completion_model(validation.model_id)
             repository = create_repository(instance)
 
-            # Create code index
             index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
             code_index = CodeIndex.from_index_name(
                 instance["instance_id"],
@@ -100,21 +99,18 @@ class ValidationManager:
                 file_repo=repository,
             )
 
-            # Create runtime environment
             if os.getenv("TESTBED_API_KEY") and os.getenv("TESTBED_BASE_URL"):
                 runtime = TestbedEnvironment(repository=repository, instance=instance)
             else:
                 logger.warning("TESTBED_API_KEY and TESTBED_BASE_URL not set, wont use testbed runtime")
                 runtime = None
 
-            # Create agent
-            agent = create_agent(
-                validation.agent_id,
-                completion_model=completion_model,
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-            )
+            agent = get_agent(validation.agent_id)
+
+            workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
+            agent.workspace = workspace
+            agent.completion_model = completion_model
+
 
             # Create and run loop with progress callback
             loop = AgenticLoop.create(

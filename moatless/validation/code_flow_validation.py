@@ -19,9 +19,10 @@ from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.index import CodeIndex
 from moatless.config.model_config import create_completion_model
-from moatless.config.agent_config import create_agent
+from moatless.config.agent_config import get_agent
 from moatless.completion.log_handler import LogHandler
 from moatless.events import BaseEvent, event_bus
+from moatless.workspace import Workspace
 
 class CodeFlowValidation:
     def __init__(self):
@@ -81,13 +82,10 @@ class CodeFlowValidation:
         completion_model = create_completion_model(model_id)
         completion_model.metadata = {"instance_id": instance_id}
         
-        agent = create_agent(
-            config_id=agent_id,
-            completion_model=completion_model,
-            repository=repository,
-            code_index=code_index,
-            runtime=runtime,
-        )
+        agent = get_agent(agent_id=agent_id)
+        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
+        agent.workspace = workspace
+        agent.completion_model = completion_model
 
         loop = AgenticLoop.create(
             message=f"<task>\n{instance['problem_statement']}\n</task>",

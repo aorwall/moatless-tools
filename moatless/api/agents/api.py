@@ -60,15 +60,15 @@ async def read_agent_config(agent_id: str) -> AgentConfigDTO:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.post("/{agent_id}", response_model=AgentConfigDTO)
-async def create_agent_config_api(agent_id: str, config: AgentConfigDTO) -> AgentConfigDTO:
+@router.post("", response_model=AgentConfigDTO)
+async def create_agent_config_api(config: AgentConfigDTO) -> AgentConfigDTO:
     """Create a new agent configuration"""
     try:
-        logger.info(f"Creating agent config {agent_id} with {config.model_dump(exclude_none=True)}")
+        logger.info(f"Creating agent config with {config.model_dump(exclude_none=True)}")
 
-        agent = _create_agent(agent_id, config.actions, config.system_prompt)
-        created = create_agent(agent_id, agent)
-        return _convert_to_dto(agent_id, created)
+        agent = _create_agent(config.id, config.actions, config.system_prompt)
+        created = create_agent(agent)
+        return _convert_to_dto(config.id, created)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -10,7 +10,6 @@ from fastapi import (
 )
 from typing import List, Dict, Any, Set
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 import json
 import logging
 from moatless.workspace import Workspace
@@ -28,11 +27,8 @@ from moatless.api.agents.api import router as agent_router
 from moatless.api.swebench.api import router as swebench_router
 from moatless.api.runs.api import router as run_router
 from moatless.events import event_bus
-from moatless.actions.schema import ActionSchema
-from moatless.actions.action import Action
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
 logger = logging.getLogger(__name__)
 
 
@@ -91,8 +87,7 @@ async def handle_system_event(run_id: str, event: dict):
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
-
-    load_dotenv()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     api = FastAPI(title="Moatless API")
     api.add_middleware(

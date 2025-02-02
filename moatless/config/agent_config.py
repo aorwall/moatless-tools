@@ -26,7 +26,6 @@ class AgentConfigManager:
 
     def __init__(self):
         """Initialize the agent config manager."""
-        self._global_config = {}
         self._configs = {}
         logger.info("Loading agent configs")
         self._load_configs()
@@ -42,12 +41,13 @@ class AgentConfigManager:
     def _load_configs(self):
         """Load configurations from JSON file."""
 
-        with open(self._get_global_config_path()) as f:
-            global_config = json.load(f)
-            for agent_id, agent_config in global_config.items():
-                self._global_config[agent_id] = agent_config
-
-        if os.path.exists(self._get_config_path()):
+        if not os.path.exists(self._get_config_path()):
+            with open(self._get_global_config_path()) as f:
+                global_config = json.load(f)
+                for agent_id, agent_config in global_config.items():
+                    agent_config["agent_id"] = agent_id
+                    self._configs[agent_id] = agent_config
+        else:
             try:
                 with open(self._get_config_path()) as f:
                     configs = json.load(f)
@@ -67,7 +67,8 @@ class AgentConfigManager:
         """Save configurations to JSON file."""
         path = self._get_config_path()
         try:
-            configs = [c.model_dump() for c in self._configs.values()]
+            configs = list(self._configs.values())
+            logger.info(f"Saving agent configs to {path}")
             with open(path, "w") as f:
                 json.dump(configs, f, indent=2)
         except Exception as e:
@@ -78,23 +79,16 @@ class AgentConfigManager:
         logger.info(f"Getting agent config {agent_id}")
         if agent_id in self._configs:
             return ActionAgent.model_validate(self._configs[agent_id])
-        elif agent_id in self._global_config:
-            return ActionAgent.model_validate(self._global_config[agent_id])
         else:
             raise ValueError(f"Agent config {agent_id} not found. Available configs: {self._configs.keys()}")
 
     def get_all_agents(self) -> List[ActionAgent]:
         agents = []
         for config in self._configs.values():
-            agents.append(ActionAgent.model_validate(config))
-
-        for agent_id, config in self._global_config.items():
-            if agent_id not in self._configs:
-                try:
-                    config["agent_id"] = agent_id
-                    agents.append(ActionAgent.model_validate(config))
-                except Exception as e:
-                    logger.exception(f"Failed to load global agent config {config}")
+            try:
+                agents.append(ActionAgent.model_validate(config))
+            except Exception as e:
+                logger.exception(f"Failed to load agent config {config['agent_id']}: {e}")
 
         agents.sort(key=lambda x: x.agent_id)
         return agents
@@ -120,40 +114,6 @@ class AgentConfigManager:
 
         del self._configs[agent_id]
         self._save_configs()
-
-    def create_agent(
-        self,
-        agent_id: str,
-        completion_model: BaseCompletionModel,
-        repository: Repository,
-        code_index: CodeIndex,
-        runtime: Optional[str] = None,
-    ) -> ActionAgent:
-        """Create an ActionAgent instance from a configuration.
-
-        Args:
-            agent_id: ID of the agent configuration to use
-            completion_model: The completion model to use
-
-        Returns:
-            Configured ActionAgent instance
-
-        Raises:
-            ValueError: If the agent config is not found
-        """
-        agent = self.get_agent(agent_id)
-        if not agent:
-            raise RuntimeError(f"Agent config {agent_id} not found. Available configs: {self._configs.keys()}")
-
-        logger.info(
-            f"Creating agent with config id {agent.agent_id}, completion model {completion_model}, repository {repository}, code index {code_index}, runtime {runtime}"
-        )
-
-        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
-        agent.workspace = workspace
-        agent.completion_model = completion_model
-
-        return agent
 
 
 # Create singleton instance

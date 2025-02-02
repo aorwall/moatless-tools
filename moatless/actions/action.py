@@ -4,6 +4,8 @@ import pkgutil
 from abc import ABC, abstractmethod
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 import inspect
+import os
+import sys
 
 from docstring_parser import parse
 from pydantic import BaseModel, ConfigDict, PrivateAttr
@@ -211,14 +213,70 @@ class Action(BaseModel, ABC):
 
     @classmethod
     def _load_actions(cls):
+        # Track original actions for conflict detection
+        original_actions = {}
+        
+        # Load built-in actions first using pkgutil.walk_packages (recursive)
         actions_package = importlib.import_module("moatless.actions")
+        cls._scan_for_actions(actions_package.__path__, "moatless.actions")
+        original_actions.update(_actions)
+        
+        # Optionally, support a custom actions path via an environment variable
+        custom_actions_path = os.getenv('MOATLESS_ACTIONS_PATH', None)
+        if custom_actions_path:
+            if os.path.isdir(custom_actions_path):
+                try:
+                    # Add custom path to Python path
+                    sys.path.insert(0, custom_actions_path)
+                    
+                    # Scan every subdirectory that looks like a Python package
+                    for item in os.listdir(custom_actions_path):
+                        full_path = os.path.join(custom_actions_path, item)
+                        if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, "__init__.py")):
+                            package_name = item
+                            cls._scan_package_recursively(full_path, package_name)
+                    
+                    # Check for conflicts with built-in actions
+                    for name, action in _actions.items():
+                        if name in original_actions and action != original_actions[name]:
+                            logger.info(
+                                f"Action '{name}' from custom directory overrides built-in action"
+                            )
+                finally:
+                    sys.path.pop(0)
+            else:
+                logger.warning(f"Custom actions path {custom_actions_path} is not a directory")
 
-        for _, module_name, _ in pkgutil.iter_modules(actions_package.__path__):
-            full_module_name = f"moatless.actions.{module_name}"
-            module = importlib.import_module(full_module_name)
-            for name, obj in module.__dict__.items():
-                if isinstance(obj, type) and issubclass(obj, Action) and obj != Action:
-                    _actions[name] = obj
+    @classmethod
+    def _scan_for_actions(cls, paths, base_package: str):
+        cls._scan_actions_in_paths(paths, base_package)
+
+    @classmethod
+    def _scan_package_recursively(cls, directory: str, package_name: str):
+        logger.debug(f"Scanning package: {package_name} in {directory}")
+        cls._scan_actions_in_paths([directory], package_name)
+
+    @classmethod
+    def _scan_actions_in_paths(cls, paths: list[str], package_prefix: str):
+        """
+        Helper function to scan for Action subclasses in given paths with a package prefix.
+ 
+        Args:
+            paths: List of paths to scan.
+            package_prefix: The package prefix for proper module imports.
+        """
+        for finder, modname, ispkg in pkgutil.walk_packages(paths, prefix=package_prefix + '.'):
+            try:
+                module = importlib.import_module(modname)
+                for name, obj in module.__dict__.items():
+                    if (isinstance(obj, type) and
+                        issubclass(obj, Action) and
+                        obj != Action and
+                        not inspect.isabstract(obj)):
+                        _actions[name] = obj
+                        logger.debug(f"Loaded action: {name} from {modname}")
+            except Exception as e:
+                logger.debug(f"Failed to load actions from module {modname}: {e}")
 
     @classmethod
     def model_validate(cls, obj: Any) -> "Action":
