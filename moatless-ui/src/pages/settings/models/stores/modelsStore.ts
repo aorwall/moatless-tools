@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import type { ModelConfig } from '../../../../lib/types/model';
+import { create } from "zustand";
+import type { ModelConfig } from "../../../../lib/types/model";
 
 interface ModelsState {
   models: ModelConfig[];
@@ -30,15 +30,16 @@ export const useModelsStore = create<ModelsState & ModelsActions>()((set) => ({
     try {
       set({ loading: true, error: null });
       const response = await fetch(`http://localhost:8000/api/models`);
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const data = await response.json();
       set({ models: data.models, loading: false });
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to load models';
+      const errorMessage =
+        error instanceof Error ? error.message : "Failed to load models";
       set({ error: errorMessage, loading: false });
     }
   },
@@ -47,4 +48,4 @@ export const useModelsStore = create<ModelsState & ModelsActions>()((set) => ({
 // Optional: Create hooks for specific use cases
 export const useModels = () => useModelsStore((state) => state.models);
 export const useModelsLoading = () => useModelsStore((state) => state.loading);
-export const useModelsError = () => useModelsStore((state) => state.error); 
+export const useModelsError = () => useModelsStore((state) => state.error);

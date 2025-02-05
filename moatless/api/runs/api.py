@@ -9,6 +9,7 @@ from moatless.agentic_system import SystemStatus
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.runner import agentic_runner
 from moatless.api.trajectory.trajectory_utils import convert_nodes, create_trajectory_dto, load_trajectory_from_file
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from .schema import RunResponseDTO, RunEventDTO
 from pathlib import Path
 from datetime import datetime
@@ -19,7 +20,7 @@ router = APIRouter()
 
 def get_run_dir(run_id: str) -> Path:
     """Get the directory path for a run."""
-    moatless_dir = os.getenv('MOATLESS_DIR', '.moatless')
+    moatless_dir = get_moatless_trajectory_dir()
     return Path(moatless_dir) / run_id
 
 def get_trajectory_path(run_id: str) -> str:

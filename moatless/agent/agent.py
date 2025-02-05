@@ -111,8 +111,13 @@ class ActionAgent(BaseModel):
         else:
             self._completion_model = completion_model.clone()
             self._message_generator = MessageHistoryGenerator.create(completion_model.message_history_type)
+            if self._workspace:
+                self._message_generator.workspace = self._workspace
 
             action_args = [action.args_schema for action in self.actions]
+            if not action_args:
+                raise RuntimeError("No actions found")
+        
             system_prompt = self.generate_system_prompt()
             self._completion_model.initialize(action_args, system_prompt)
 
@@ -127,6 +132,8 @@ class ActionAgent(BaseModel):
     @workspace.setter
     def workspace(self, workspace: Workspace):
         self._workspace = workspace
+        if self._message_generator:
+            self._message_generator.workspace = workspace
         for action in self.actions:
             action.workspace = workspace
 
@@ -189,7 +196,7 @@ class ActionAgent(BaseModel):
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             else:
-                logger.exception(f"Node{node.node_id}: Build action failed with error")
+                logger.exception(f"Node{node.node_id}: Build action failed with error ")
 
             if isinstance(e, CompletionRejectError):
                 return

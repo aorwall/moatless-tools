@@ -1,12 +1,12 @@
-import { useParams } from 'react-router-dom';
-import { useAgent } from '@/lib/hooks/useAgents';
-import { Loader2 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
-import { AgentForm } from '../components/AgentForm';
+import { useParams } from "react-router-dom";
+import { useAgent } from "@/lib/hooks/useAgents";
+import { Loader2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
+import { AgentForm } from "../components/AgentForm";
 
 export function AgentDetailPage() {
   const { id } = useParams();
-  const { data: agent, isLoading, error } = useAgent(id ?? '');
+  const { data: agent, isLoading, error } = useAgent(id ?? "");
 
   if (isLoading) {
     return (
@@ -22,7 +22,7 @@ export function AgentDetailPage() {
         <Alert variant="destructive" className="max-w-md">
           <AlertTitle>Error Loading Agent</AlertTitle>
           <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to load agent'}
+            {error instanceof Error ? error.message : "Failed to load agent"}
           </AlertDescription>
         </Alert>
       </div>
@@ -47,4 +47,4 @@ export function AgentDetailPage() {
       <AgentForm agent={agent} />
     </div>
   );
-} 
+}

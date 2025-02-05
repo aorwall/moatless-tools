@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet } from "react-router-dom";
 
 export function SettingsLayout() {
   return (
@@ -8,4 +8,4 @@ export function SettingsLayout() {
       </div>
     </div>
   );
-} 
+}

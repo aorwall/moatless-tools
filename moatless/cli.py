@@ -20,7 +20,7 @@ from moatless.runner import agentic_runner
 from moatless.events import BaseEvent, event_bus, SystemEvent
 from moatless.validation.code_flow_validation import CodeFlowValidation
 from moatless.config.model_config import get_model_config, get_all_configs
-from moatless.config.agent_config import get_config as get_agent_config, get_all_configs as get_all_agent_configs
+from moatless.config.agent_config import get_agent as get_agent_config, get_all_agents as get_all_agent_configs
 
 logger = logging.getLogger(__name__)
 console = Console()

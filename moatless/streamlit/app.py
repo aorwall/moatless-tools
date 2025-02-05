@@ -18,7 +18,6 @@ from moatless.streamlit.tree_visualization import update_visualization
 logger = logging.getLogger(__name__)
 
 
-
 def main():
     load_dotenv()
 

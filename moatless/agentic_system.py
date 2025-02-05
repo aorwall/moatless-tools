@@ -183,6 +183,26 @@ class AgenticSystem(BaseModel, ABC):
     async def _run(self) -> Node:
         raise NotImplementedError("Subclass must implement _run method")
 
+    async def retry(self, node_id: int) -> Node:
+        """Retry execution from a specific node.
+        
+        Args:
+            node_id (int): ID of the node to retry from
+            
+        Returns:
+            Node: The retried node with new execution results
+            
+        Raises:
+            ValueError: If node_id is not found
+        """
+        node = self.get_node_by_id(node_id)
+        if not node:
+            raise ValueError(f"Node with ID {node_id} not found")
+
+        node.reset()
+
+        return await self.run()
+
     async def emit_event(self, event: BaseEvent):
         """Emit an event."""
         logger.info(f"Emit event {event.event_type}")
@@ -300,6 +320,8 @@ class AgenticSystem(BaseModel, ABC):
         """Persist the system state if a persist path is set."""
         if self.persist_path:
             self.persist(self.persist_path)
+        elif self.persist_dir:
+            self.persist(Path(self.persist_dir) / "trajectory.json")
 
     def persist(self, file_path: str):
         """Persist the system state to a file."""

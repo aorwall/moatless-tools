@@ -1,11 +1,11 @@
-import { useSearchParams } from 'react-router-dom';
-import { TrajectoryHeader } from '@/pages/trajectory/components/TrajectoryHeader';
-import { TrajectoryUpload } from '@/pages/trajectory/components/TrajectoryUpload';
-import { TrajectoryViewer } from '@/lib/components/trajectory/TrajectoryViewer';
+import { useSearchParams } from "react-router-dom";
+import { TrajectoryHeader } from "@/pages/trajectory/components/TrajectoryHeader";
+import { TrajectoryUpload } from "@/pages/trajectory/components/TrajectoryUpload";
+import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
 
 export function Trajectory() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const path = searchParams.get('path');
+  const path = searchParams.get("path");
 
   const handleLoadTrajectory = (path: string) => {
     setSearchParams({ path });
@@ -15,7 +15,7 @@ export function Trajectory() {
     <div className="flex h-screen flex-col">
       <div className="flex-none p-6 bg-white border-b">
         <TrajectoryHeader />
-        <TrajectoryUpload 
+        <TrajectoryUpload
           onLoadTrajectory={handleLoadTrajectory}
           searchParams={searchParams}
           setSearchParams={setSearchParams}
@@ -30,4 +30,4 @@ export function Trajectory() {
       )}
     </div>
   );
-} 
+}

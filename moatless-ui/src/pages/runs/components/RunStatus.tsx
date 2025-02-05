@@ -1,6 +1,14 @@
-import { Badge } from '@/lib/components/ui/badge';
-import { AlertCircle, CheckCircle2, Loader2, History, Zap, Coins, FileText } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
+import { Badge } from "@/lib/components/ui/badge";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Loader2,
+  History,
+  Zap,
+  Coins,
+  FileText,
+} from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 
 interface RunStatusProps {
   status: {
@@ -26,11 +34,11 @@ interface RunStatusProps {
 export function RunStatusDisplay({ status, trajectory }: RunStatusProps) {
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
-      case 'error':
+      case "error":
         return <AlertCircle className="h-5 w-5 text-destructive" />;
-      case 'finished':
+      case "finished":
         return <CheckCircle2 className="h-5 w-5 text-success" />;
-      case 'running':
+      case "running":
         return <Loader2 className="h-5 w-5 animate-spin" />;
       default:
         return null;
@@ -41,8 +49,8 @@ export function RunStatusDisplay({ status, trajectory }: RunStatusProps) {
     <div className="space-y-4 p-4">
       <div className="flex items-center justify-between">
         <span className="text-sm font-medium">Current Status</span>
-        <Badge 
-          variant={status.status === 'error' ? 'destructive' : 'default'}
+        <Badge
+          variant={status.status === "error" ? "destructive" : "default"}
           className="flex items-center gap-1"
         >
           {getStatusIcon(status.status)}
@@ -107,7 +115,8 @@ export function RunStatusDisplay({ status, trajectory }: RunStatusProps) {
             </div>
           </div>
 
-          {(trajectory.failedActions > 0 || trajectory.duplicatedActions > 0) && (
+          {(trajectory.failedActions > 0 ||
+            trajectory.duplicatedActions > 0) && (
             <div className="border-t pt-4">
               <h3 className="text-sm font-medium mb-3">Issues</h3>
               <div className="space-y-2">
@@ -151,4 +160,4 @@ export function RunStatusDisplay({ status, trajectory }: RunStatusProps) {
   );
 }
 
-export { RunStatusDisplay as RunStatus }; 
+export { RunStatusDisplay as RunStatus };

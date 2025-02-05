@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.schema import ResponseSchema, ChatCompletionToolMessage
+from moatless.exceptions import CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
             - tools: List of available tools/functions
             - tool_choice: How tools should be selected
         """
+        if not schema:
+            raise CompletionRuntimeError("At least one response schema must be provided when using tool calls")
+
         return {
             "tools": [s.tool_schema(thoughts_in_action=self.thoughts_in_action) for s in schema],
             "tool_choice": "required" if self.thoughts_in_action else "auto",

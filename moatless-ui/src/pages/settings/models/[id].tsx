@@ -1,10 +1,10 @@
-import { useParams } from 'react-router-dom';
-import { ModelDetail } from '@/pages/settings/models/components/ModelDetail';
-import type { ModelConfig } from '@/lib/types/model';
-import { toast } from 'sonner';
-import { useModel, useUpdateModel } from '@/lib/hooks/useModels';
-import { Loader2 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
+import { useParams } from "react-router-dom";
+import { ModelDetail } from "@/pages/settings/models/components/ModelDetail";
+import type { ModelConfig } from "@/lib/types/model";
+import { toast } from "sonner";
+import { useModel, useUpdateModel } from "@/lib/hooks/useModels";
+import { Loader2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 
 export function ModelDetailPage() {
   const { id } = useParams();
@@ -14,9 +14,9 @@ export function ModelDetailPage() {
   const handleSubmit = async (formData: ModelConfig) => {
     try {
       await updateModelMutation.mutateAsync(formData);
-      toast.success('Changes saved successfully');
+      toast.success("Changes saved successfully");
     } catch (error) {
-      toast.error('Failed to save changes');
+      toast.error("Failed to save changes");
       throw error;
     }
   };
@@ -35,7 +35,7 @@ export function ModelDetailPage() {
         <Alert variant="destructive" className="max-w-md">
           <AlertTitle>Error Loading Model</AlertTitle>
           <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to load model'}
+            {error instanceof Error ? error.message : "Failed to load model"}
           </AlertDescription>
         </Alert>
       </div>
@@ -61,7 +61,9 @@ export function ModelDetailPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">{model.model}</h1>
-            <div className="mt-1 text-sm text-gray-500">Model Configuration</div>
+            <div className="mt-1 text-sm text-gray-500">
+              Model Configuration
+            </div>
           </div>
         </div>
       </div>
@@ -71,4 +73,4 @@ export function ModelDetailPage() {
       </div>
     </div>
   );
-} 
+}

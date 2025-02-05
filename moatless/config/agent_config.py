@@ -54,10 +54,10 @@ class AgentConfigManager:
                 logger.info(f"Loaded {len(configs)} agent configs")
                 for config in configs:
                     try: 
-                        self._configs[config["id"]] = config
-                        logger.info(f"Loaded agent config {config['id']}")
+                        self._configs[config["agent_id"]] = config
+                        logger.info(f"Loaded agent config {config['agent_id']}")
                     except Exception as e:
-                        logger.error(f"Failed to load agent config {config['id']}: {e}")
+                        logger.error(f"Failed to load agent config {config['agent_id']}: {e}")
 
             except Exception as e:
                 logger.error(f"Failed to load agent configs: {e}")
@@ -76,7 +76,7 @@ class AgentConfigManager:
 
     def get_agent(self, agent_id: str) -> ActionAgent:
         """Get an agent configuration by ID."""
-        logger.info(f"Getting agent config {agent_id}")
+        logger.debug(f"Getting agent config {agent_id}")
         if agent_id in self._configs:
             return ActionAgent.model_validate(self._configs[agent_id])
         else:
@@ -95,6 +95,7 @@ class AgentConfigManager:
 
     def create_agent(self, agent: ActionAgent) -> ActionAgent:
         """Create a new agent configuration."""
+        logger.debug(f"Creating agent config {agent.agent_id}")
         if agent.agent_id in self._configs:
             raise ValueError(f"Agent config {agent.agent_id} already exists")
 
@@ -104,11 +105,13 @@ class AgentConfigManager:
 
     def update_agent(self, agent: ActionAgent):
         """Update an existing agent configuration."""
+        logger.debug(f"Updating agent config {agent.agent_id}")
         self._configs[agent.agent_id] = agent.model_dump()
         self._save_configs()
 
     def delete_agent(self, agent_id: str):
         """Delete an agent configuration."""
+        logger.debug(f"Deleting agent config {agent_id}")
         if agent_id not in self._configs:
             raise ValueError(f"Agent config {agent_id} not found")
 

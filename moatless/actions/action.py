@@ -24,11 +24,11 @@ from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
+from moatless.utils.class_loading import DynamicClassLoadingMixin
 
 logger = logging.getLogger(__name__)
 
 _actions: Dict[str, Type["Action"]] = {}
-
 
 class CompletionModelMixin:
     """Mixin to provide completion model functionality to actions that need it"""
@@ -53,7 +53,7 @@ class CompletionModelMixin:
         pass
 
 
-class Action(BaseModel, ABC):
+class Action(BaseModel, ABC, DynamicClassLoadingMixin):
     args_schema: ClassVar[Type[ActionArguments]]
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -202,81 +202,14 @@ class Action(BaseModel, ABC):
         """
         Dynamically import and return the appropriate Action class for the given action name.
         """
+        cls._initialize_actions_map()
+        return _actions.get(action_name)
+    
+    @classmethod
+    def _initialize_actions_map(cls):
+        global _actions
         if not _actions:
-            cls._load_actions()
-
-        action = _actions.get(action_name)
-        if action:
-            return action
-
-        raise ValueError(f"Unknown action: {action_name}")
-
-    @classmethod
-    def _load_actions(cls):
-        # Track original actions for conflict detection
-        original_actions = {}
-        
-        # Load built-in actions first using pkgutil.walk_packages (recursive)
-        actions_package = importlib.import_module("moatless.actions")
-        cls._scan_for_actions(actions_package.__path__, "moatless.actions")
-        original_actions.update(_actions)
-        
-        # Optionally, support a custom actions path via an environment variable
-        custom_actions_path = os.getenv('MOATLESS_ACTIONS_PATH', None)
-        if custom_actions_path:
-            if os.path.isdir(custom_actions_path):
-                try:
-                    # Add custom path to Python path
-                    sys.path.insert(0, custom_actions_path)
-                    
-                    # Scan every subdirectory that looks like a Python package
-                    for item in os.listdir(custom_actions_path):
-                        full_path = os.path.join(custom_actions_path, item)
-                        if os.path.isdir(full_path) and os.path.exists(os.path.join(full_path, "__init__.py")):
-                            package_name = item
-                            cls._scan_package_recursively(full_path, package_name)
-                    
-                    # Check for conflicts with built-in actions
-                    for name, action in _actions.items():
-                        if name in original_actions and action != original_actions[name]:
-                            logger.info(
-                                f"Action '{name}' from custom directory overrides built-in action"
-                            )
-                finally:
-                    sys.path.pop(0)
-            else:
-                logger.warning(f"Custom actions path {custom_actions_path} is not a directory")
-
-    @classmethod
-    def _scan_for_actions(cls, paths, base_package: str):
-        cls._scan_actions_in_paths(paths, base_package)
-
-    @classmethod
-    def _scan_package_recursively(cls, directory: str, package_name: str):
-        logger.debug(f"Scanning package: {package_name} in {directory}")
-        cls._scan_actions_in_paths([directory], package_name)
-
-    @classmethod
-    def _scan_actions_in_paths(cls, paths: list[str], package_prefix: str):
-        """
-        Helper function to scan for Action subclasses in given paths with a package prefix.
- 
-        Args:
-            paths: List of paths to scan.
-            package_prefix: The package prefix for proper module imports.
-        """
-        for finder, modname, ispkg in pkgutil.walk_packages(paths, prefix=package_prefix + '.'):
-            try:
-                module = importlib.import_module(modname)
-                for name, obj in module.__dict__.items():
-                    if (isinstance(obj, type) and
-                        issubclass(obj, Action) and
-                        obj != Action and
-                        not inspect.isabstract(obj)):
-                        _actions[name] = obj
-                        logger.debug(f"Loaded action: {name} from {modname}")
-            except Exception as e:
-                logger.debug(f"Failed to load actions from module {modname}: {e}")
+            _actions = cls._load_classes("moatless.actions", Action)
 
     @classmethod
     def model_validate(cls, obj: Any) -> "Action":
@@ -289,15 +222,35 @@ class Action(BaseModel, ABC):
                 if action_class_path == "moatless.actions.edit":
                     action_class_path = "moatless.actions.claude_text_editor"
 
-                module_name, class_name = action_class_path.rsplit(".", 1)
-                module = importlib.import_module(module_name)
-                action_class = getattr(module, class_name)
-
-                return action_class(**obj)
+                try:
+                    # Ensure actions are loaded
+                    cls._initialize_actions_map()
+                    
+                    # Try to find action by full class path first
+                    module_name, class_name = action_class_path.rsplit(".", 1)
+                    action_class = cls.get_action_by_name(class_name)
+                    
+                    if not action_class:
+                        logger.warning(f"Invalid action class: {class_name}. Available actions: {_actions.keys()}")
+                        raise ValueError(f"Invalid action class: {class_name}")
+                    
+                    return action_class(**obj)
+                except Exception as e:
+                    logger.warning(f"Failed to load action class {action_class_path}: {e}")
+                    raise ValueError(f"Failed to load action class {action_class_path}") from e
             else:
                 raise ValueError(f"action_class is required in {obj}")
 
         return super().model_validate(obj)
+    
+    @classmethod
+    def create_by_name(cls, name: str, **kwargs) -> "Action":
+        cls._initialize_actions_map()
+
+        action_class = cls.get_action_by_name(name)
+        if not action_class:
+            raise ValueError(f"Unknown action: {name}")
+        return action_class(**kwargs)
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
@@ -317,9 +270,13 @@ class Action(BaseModel, ABC):
                 default=prop_data.get('default')
             )
 
+        description = schema.get('description', '')
+        if not description:
+            description = cls.args_schema.model_json_schema().get('description', '')
+
         return ActionSchema(
             title=cls.__name__,
-            description=schema.get('description', ''),
+            description=description,
             properties=properties,
             action_class=cls.get_class_name()
         )
@@ -327,12 +284,12 @@ class Action(BaseModel, ABC):
     @classmethod
     def get_available_actions(cls) -> List[ActionSchema]:
         """Get all available actions with their schema."""
-        if not _actions:
-            cls._load_actions()
+        if not cls._registered_classes:
+            cls._load_classes("moatless.actions", Action)
 
         return [
             action_class.get_action_schema() 
-            for name, action_class in _actions.items()
+            for name, action_class in cls._registered_classes.items()
         ]
 
     @classmethod

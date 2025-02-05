@@ -1,12 +1,13 @@
 import logging
 from typing import List
 
-from pydantic import BaseModel, Field, model_serializer
+from pydantic import BaseModel, Field, PrivateAttr, model_serializer
 
 from moatless.completion.schema import ChatCompletionTextObject, ChatCompletionUserMessage, AllMessageValues
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,7 @@ class MessageHistoryGenerator(BaseModel):
         description="Whether to include thoughts in the action or in the message",
     )
 
-    def model_dump(self, **kwargs):
-        return {
-            "message_history_type": self.message_history_type.value,
-            "max_tokens": self.max_tokens,
-            "include_file_context": self.include_file_context,
-            "include_git_patch": self.include_git_patch,
-            "thoughts_in_action": self.thoughts_in_action,
-        }
+    _workspace: Workspace | None = PrivateAttr(default=None)
 
     def generate_messages(self, node: Node) -> List[AllMessageValues]:  # type: ignore
         previous_nodes = node.get_trajectory()
@@ -48,12 +42,12 @@ class MessageHistoryGenerator(BaseModel):
 
             if previous_node.artifact_changes:
                 for change in previous_node.artifact_changes:
-                    artifact = previous_node.workspace.get_artifact_by_id(change.artifact_id)
+                    artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
                     if artifact:
                         message_content.append(
                             ChatCompletionTextObject(
                                 type="text",
-                                text=f"The artifact {artifact.id} with type {artifact.type} was {change.change_type} by the user",
+                                text=f"The {artifact.type} {artifact.id} was {change.change_type}",
                             )
                         )
                         message_content.append(artifact.to_prompt_message_content())
@@ -89,11 +83,27 @@ class MessageHistoryGenerator(BaseModel):
 
                 tokens += count_tokens(action_step.action.model_dump_json(exclude=exclude))
 
+                message_content = []
+
+                message_content.append(ChatCompletionTextObject(type="text", text=action_step.observation.message))
+
+                if action_step.observation.artifact_changes:
+                    for change in action_step.observation.artifact_changes:
+                        artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
+                        if artifact:
+                            message_content.append(
+                            ChatCompletionTextObject(
+                                    type="text",
+                                    text=f"The {artifact.type} {artifact.id} was {change.change_type}",
+                                )
+                            )
+                            message_content.append(artifact.to_prompt_message_content())
+
                 tool_responses.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call_id,
-                        "content": action_step.observation.message,
+                        "content": message_content,
                     }
                 )
 
@@ -116,6 +126,23 @@ class MessageHistoryGenerator(BaseModel):
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 
         return messages
+
+    @property
+    def workspace(self):
+        return self._workspace
+
+    @workspace.setter
+    def workspace(self, workspace: Workspace):
+        self._workspace = workspace
+
+    def model_dump(self, **kwargs):
+        return {
+            "message_history_type": self.message_history_type.value,
+            "max_tokens": self.max_tokens,
+            "include_file_context": self.include_file_context,
+            "include_git_patch": self.include_git_patch,
+            "thoughts_in_action": self.thoughts_in_action,
+        }
 
     @classmethod
     def create(cls, message_history_type: MessageHistoryType, **obj):

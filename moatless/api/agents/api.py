@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def _convert_to_dto(agent_id: str, agent: ActionAgent) -> AgentConfigDTO:
     """Convert a config dict to a DTO."""
-    actions = [ActionConfigDTO(action_class=action.get_class_name(), properties=action.model_dump(exclude={"action_class"})) for action in agent.actions]
+    actions = [ActionConfigDTO(title=action.name, properties=action.model_dump(exclude={"action_class"})) for action in agent.actions]
     return AgentConfigDTO(id=agent_id, system_prompt=agent.system_prompt, actions=actions)
 
 
@@ -53,48 +53,38 @@ async def list_agent_configs() -> AgentConfigsResponseDTO:
 @router.get("/{agent_id}", response_model=AgentConfigDTO)
 async def read_agent_config(agent_id: str) -> AgentConfigDTO:
     """Get configuration for a specific agent"""
-    try:
-        agent = get_agent(agent_id)
-        return _convert_to_dto(agent_id, agent)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    agent = get_agent(agent_id)
+    return _convert_to_dto(agent_id, agent)
 
 
 @router.post("", response_model=AgentConfigDTO)
 async def create_agent_config_api(config: AgentConfigDTO) -> AgentConfigDTO:
     """Create a new agent configuration"""
-    try:
-        logger.info(f"Creating agent config with {config.model_dump(exclude_none=True)}")
+    logger.info(f"Creating agent config with {len(config.actions)} actions")
 
-        agent = _create_agent(config.id, config.actions, config.system_prompt)
-        created = create_agent(agent)
-        return _convert_to_dto(config.id, created)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    agent = _create_agent(agent_id=config.id, action_configs=config.actions, system_prompt=config.system_prompt)
+    created = create_agent(agent)
+    return _convert_to_dto(config.id, created)
 
 
 @router.put("/{agent_id}")
 async def update_agent_config_api(agent_id: str, update: AgentConfigUpdateDTO):
     """Update configuration for a specific agent"""
-    try:
-        logger.info(f"Updating agent config {agent_id} with {update.model_dump(exclude_none=True)}")
-        agent = _create_agent(agent_id, update.actions, update.system_prompt)
-        update_agent(agent)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Updating agent config {agent_id} with {len(update.actions)} actions")
+    agent = _create_agent(agent_id=agent_id, action_configs=update.actions, system_prompt=update.system_prompt)
+    update_agent(agent)
+   
 
 
 @router.delete("/{agent_id}")
 async def delete_agent_config_api(agent_id: str):
     """Delete an agent configuration"""
-    try:
-        delete_agent(agent_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    delete_agent(agent_id)
 
 
-def _create_agent(agent_id: str, actions: List[ActionConfigDTO], system_prompt: str) -> ActionAgent:
+def _create_agent(agent_id: str, action_configs: List[ActionConfigDTO], system_prompt: str) -> ActionAgent:
     actions = []
-    for action in actions:
-        actions.append(Action(action_class=action.action_class, **action.properties))
+    for action_config in action_configs:
+        actions.append(Action.create_by_name(action_config.title, **action_config.properties))
+    logger.info(f"Created actions: {actions}")
     return ActionAgent(agent_id=agent_id, actions=actions, system_prompt=system_prompt)

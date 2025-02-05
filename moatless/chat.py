@@ -74,6 +74,7 @@ class Chat(BaseModel):
                 artifact_changes.append(
                     ArtifactChange(
                         artifact_id=artifact.id,
+                        artifact_type=artifact.type,
                         change_type="added",
                         actor="user",
                     )

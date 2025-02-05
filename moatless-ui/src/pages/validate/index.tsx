@@ -7,11 +7,9 @@ import { useStartValidation } from '@/lib/hooks/useSWEBench';
 import { InstanceSelector } from '@/lib/components/selectors/InstanceSelector';
 import { AgentSelector } from '@/lib/components/selectors/AgentSelector';
 import { ModelSelector } from '@/lib/components/selectors/ModelSelector';
-import { useValidationStore } from '@/stores/validationStore';
+import { useValidationStore } from '@/pages/validate/stores/validationStore';
 import { AlertCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
-import { useWebSocket } from '@/lib/stores/websocketStore';
-import { useQueryClient } from '@tanstack/react-query';
 
 export function ValidatePage() {
   const navigate = useNavigate();
@@ -32,9 +30,6 @@ export function ValidatePage() {
 
   // Add error state
   const [error, setError] = useState<string | null>(null);
-
-  const queryClient = useQueryClient();
-  const { subscribe, unsubscribe } = useWebSocket();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

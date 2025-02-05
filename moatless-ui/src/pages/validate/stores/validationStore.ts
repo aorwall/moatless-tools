@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
 interface ValidationStore {
   lastUsedAgent: string;
@@ -15,17 +15,17 @@ interface ValidationStore {
 export const useValidationStore = create<ValidationStore>()(
   persist(
     (set) => ({
-      lastUsedAgent: '',
-      lastUsedModel: '',
-      lastUsedInstance: '',
-      lastSearchQuery: '',
+      lastUsedAgent: "",
+      lastUsedModel: "",
+      lastUsedInstance: "",
+      lastSearchQuery: "",
       setLastUsedAgent: (id) => set({ lastUsedAgent: id }),
       setLastUsedModel: (id) => set({ lastUsedModel: id }),
       setLastUsedInstance: (id) => set({ lastUsedInstance: id }),
       setLastSearchQuery: (query) => set({ lastSearchQuery: query }),
     }),
     {
-      name: 'validation-store',
-    }
-  )
-); 
+      name: "validation-store",
+    },
+  ),
+);

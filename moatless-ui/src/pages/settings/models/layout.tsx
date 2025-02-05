@@ -1,10 +1,10 @@
-import { Outlet, useNavigate, useParams } from 'react-router-dom';
-import { DataExplorer } from '@/lib/components/DataExplorer';
-import { useModels } from '@/lib/hooks/useModels';
-import type { ModelConfig } from '@/lib/types/model';
-import { Loader2 } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
-import { SplitLayout } from '@/lib/components/layouts/SplitLayout';
+import { Outlet, useNavigate, useParams } from "react-router-dom";
+import { DataExplorer } from "@/lib/components/DataExplorer";
+import { useModels } from "@/lib/hooks/useModels";
+import type { ModelConfig } from "@/lib/types/model";
+import { Loader2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
+import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 
 export function ModelsLayout() {
   const navigate = useNavigate();
@@ -12,13 +12,17 @@ export function ModelsLayout() {
   const { data: models, isLoading, error } = useModels();
 
   const filterFields = [
-    { name: 'model', type: 'text' as const },
-    { name: 'response_format', type: 'select' as const, options: ['TOOL_CALL', 'REACT'] }
+    { name: "model", type: "text" as const },
+    {
+      name: "response_format",
+      type: "select" as const,
+      options: ["TOOL_CALL", "REACT"],
+    },
   ];
 
   const getModelDisplay = (model: ModelConfig) => ({
     title: model.model,
-    subtitle: `${model.response_format}`
+    subtitle: `${model.response_format}`,
   });
 
   const handleModelSelect = (model: ModelConfig) => {
@@ -39,7 +43,7 @@ export function ModelsLayout() {
         <Alert variant="destructive" className="max-w-md">
           <AlertTitle>Error Loading Models</AlertTitle>
           <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to load models'}
+            {error instanceof Error ? error.message : "Failed to load models"}
           </AlertDescription>
         </Alert>
       </div>
@@ -65,14 +69,9 @@ export function ModelsLayout() {
       filterFields={filterFields}
       itemDisplay={getModelDisplay}
       onSelect={handleModelSelect}
-      selectedItem={models.find(m => m.id === id)}
+      selectedItem={models.find((m) => m.id === id)}
     />
   );
 
-  return (
-    <SplitLayout 
-      left={modelList}
-      right={<Outlet />}
-    />
-  );
-} 
+  return <SplitLayout left={modelList} right={<Outlet />} />;
+}

@@ -27,6 +27,8 @@ from moatless.api.agents.api import router as agent_router
 from moatless.api.swebench.api import router as swebench_router
 from moatless.api.runs.api import router as run_router
 from moatless.events import event_bus
+from moatless.api.loop.api import router as loop_router
+from moatless.api.artifacts.api import router as artifact_router
 
 
 logger = logging.getLogger(__name__)
@@ -171,6 +173,8 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
     router.include_router(swebench_router, prefix="/swebench", tags=["swebench"])
     router.include_router(run_router, prefix="/runs", tags=["runs"])
+    router.include_router(loop_router, prefix="/loop", tags=["loop"])
+    router.include_router(artifact_router, prefix="/artifacts", tags=["artifacts"])
 
     # Mount the API router with /api prefix
     api.mount("/api", router)

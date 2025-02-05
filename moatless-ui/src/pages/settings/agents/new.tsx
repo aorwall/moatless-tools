@@ -1,4 +1,4 @@
-import { AgentForm } from './components/AgentForm';
+import { AgentForm } from "./components/AgentForm";
 
 export function NewAgentPage() {
   return (
@@ -6,4 +6,4 @@ export function NewAgentPage() {
       <AgentForm isNew />
     </div>
   );
-} 
+}

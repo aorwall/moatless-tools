@@ -15,6 +15,7 @@ from moatless.api.trajectory.schema import (
     FileContextFileDTO,
     FileContextSpanDTO,
 )
+from moatless.api.trajectory.timeline_utils import generate_timeline_items
 from moatless.node import Node
 from moatless.file_context import FileContext
 from moatless.runtime.runtime import TestStatus
@@ -177,6 +178,8 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
         if error_tests > 0:
             all_warnings.append(f"{error_tests} test errors")
 
+    timeline_items = generate_timeline_items(node)
+
     return NodeDTO(
         nodeId=node.node_id,
         actionSteps=action_steps,
@@ -193,6 +196,7 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
         allNodeErrors=all_errors,
         allNodeWarnings=all_warnings,
         testResultsSummary=test_results_summary,
+        items=timeline_items,
     )
 
 
@@ -371,7 +375,7 @@ def load_trajectory_from_file(file_path: str) -> TrajectoryDTO:
         logger.error(f"Invalid JSON in trajectory file: {file_path}")
         raise HTTPException(status_code=400, detail=f"Invalid JSON in trajectory file: {file_path}")
     except Exception as e:
-        logger.error(f"Error processing trajectory file {file_path}: {str(e)}")
+        logger.exception(f"Error processing trajectory file {file_path}")
         raise HTTPException(status_code=500, detail=f"Error processing trajectory file: {str(e)}")
 
 

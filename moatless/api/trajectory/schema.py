@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
+from enum import Enum
 
 
 class UsageDTO(BaseModel):
@@ -109,6 +110,25 @@ class TestResultsSummaryDTO(BaseModel):
     skipped: int = 0
 
 
+class TimelineItemType(str, Enum):
+    USER_MESSAGE = "user_message"
+    ASSISTANT_MESSAGE = "assistant_message"
+    ARTIFACT = "artifact"
+    COMPLETION = "completion"
+    THOUGHT = "thought"
+    ACTION = "action"
+    OBSERVATION = "observation"
+    ERROR = "error"
+    WORKSPACE = "workspace"
+
+
+class TimelineItemDTO(BaseModel):
+    """Represents a timeline item in the node."""
+    label: str
+    type: TimelineItemType
+    content: Dict[str, Any]
+
+
 class NodeDTO(BaseModel):
     """Node information in the tree."""
 
@@ -131,6 +151,10 @@ class NodeDTO(BaseModel):
         description="All warnings from this node, including action steps and file context",
     )
     testResultsSummary: Optional[TestResultsSummaryDTO] = None
+    items: List[TimelineItemDTO] = Field(
+        default_factory=list,
+        description="Timeline items for this node"
+    )
 
 
 class TrajectoryDTO(BaseModel):

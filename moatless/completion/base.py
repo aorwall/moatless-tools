@@ -140,6 +140,9 @@ class BaseCompletionModel(BaseModel, ABC):
         else:
             schemas = [response_schema]
 
+        if not schemas:
+            raise CompletionRuntimeError("At least one response schema must be provided")
+
         if self.response_format == LLMResponseFormat.REACT and self.message_cache:
             logger.info("Disabling message cache for ReAct model")
             self.message_cache = False

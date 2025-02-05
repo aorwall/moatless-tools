@@ -1,26 +1,26 @@
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { 
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import {
   Form,
   FormControl,
   FormField,
   FormItem,
   FormLabel,
   FormDescription,
-  FormMessage 
-} from '@/lib/components/ui/form';
-import { Input } from '@/lib/components/ui/input';
-import { Button } from '@/lib/components/ui/button';
-import { Checkbox } from '@/lib/components/ui/checkbox';
-import { 
+  FormMessage,
+} from "@/lib/components/ui/form";
+import { Input } from "@/lib/components/ui/input";
+import { Button } from "@/lib/components/ui/button";
+import { Checkbox } from "@/lib/components/ui/checkbox";
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue 
-} from '@/lib/components/ui/select';
-import { ModelConfigSchema, type ModelConfig } from '@/lib/types/model';
-import { useState } from 'react';
+  SelectValue,
+} from "@/lib/components/ui/select";
+import { ModelConfigSchema, type ModelConfig } from "@/lib/types/model";
+import { useState } from "react";
 
 interface ModelDetailProps {
   model: ModelConfig;
@@ -30,7 +30,7 @@ interface ModelDetailProps {
 export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
   const form = useForm<ModelConfig>({
     resolver: zodResolver(ModelConfigSchema),
-    defaultValues: model
+    defaultValues: model,
   });
 
   const [isSaving, setIsSaving] = useState(false);
@@ -42,7 +42,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
       setError(null);
       await onSubmit(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'An error occurred');
+      setError(e instanceof Error ? e.message : "An error occurred");
       throw e;
     } finally {
       setIsSaving(false);
@@ -60,13 +60,21 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Model Name</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    placeholder="e.g. anthropic/claude-3-sonnet-20240229" 
+                  <Input
+                    {...field}
+                    placeholder="e.g. anthropic/claude-3-sonnet-20240229"
                   />
                 </FormControl>
                 <FormDescription>
-                  The LiteLLM model identifier to use. See <a href="https://docs.litellm.ai/docs/providers" target="_blank" className="text-primary hover:underline">LiteLLM providers</a> for available models.
+                  The LiteLLM model identifier to use. See{" "}
+                  <a
+                    href="https://docs.litellm.ai/docs/providers"
+                    target="_blank"
+                    className="text-primary hover:underline"
+                  >
+                    LiteLLM providers
+                  </a>{" "}
+                  for available models.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -80,13 +88,14 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Model Base URL</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    placeholder="e.g. http://localhost:8000/v1" 
+                  <Input
+                    {...field}
+                    placeholder="e.g. http://localhost:8000/v1"
                   />
                 </FormControl>
                 <FormDescription>
-                  Optional base URL for the model API. Leave empty to use the default provider URL.
+                  Optional base URL for the model API. Leave empty to use the
+                  default provider URL.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -100,14 +109,15 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Model API Key</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
+                  <Input
+                    {...field}
                     type="password"
-                    placeholder="Optional, will use CUSTOM_LLM_API_KEY env var if not set" 
+                    placeholder="Optional, will use CUSTOM_LLM_API_KEY env var if not set"
                   />
                 </FormControl>
                 <FormDescription>
-                  Optional API key for the model. If not set, will use CUSTOM_LLM_API_KEY environment variable.
+                  Optional API key for the model. If not set, will use
+                  CUSTOM_LLM_API_KEY environment variable.
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -120,8 +130,8 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Response Format</FormLabel>
-                <Select 
-                  onValueChange={field.onChange} 
+                <Select
+                  onValueChange={field.onChange}
                   defaultValue={field.value}
                 >
                   <FormControl>
@@ -135,7 +145,9 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   </SelectContent>
                 </Select>
                 <FormDescription>
-                  Format for model responses - 'react' uses structured ReACT format with thought/action/params in XML/JSON, 'tool_call' uses function calling
+                  Format for model responses - 'react' uses structured ReACT
+                  format with thought/action/params in XML/JSON, 'tool_call'
+                  uses function calling
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -148,8 +160,8 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Message History Type</FormLabel>
-                <Select 
-                  onValueChange={field.onChange} 
+                <Select
+                  onValueChange={field.onChange}
                   defaultValue={field.value}
                 >
                   <FormControl>
@@ -163,7 +175,9 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   </SelectContent>
                 </Select>
                 <FormDescription>
-                  How message history is formatted in completions - 'messages' keeps full message list unchanged, 'react' uses ReACT format with optimized history to reduce tokens
+                  How message history is formatted in completions - 'messages'
+                  keeps full message list unchanged, 'react' uses ReACT format
+                  with optimized history to reduce tokens
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -177,16 +191,11 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Temperature</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                  />
+                  <Input {...field} type="number" min="0" max="1" step="0.1" />
                 </FormControl>
                 <FormDescription>
-                  Temperature for model sampling - higher values make output more random, lower values more deterministic
+                  Temperature for model sampling - higher values make output
+                  more random, lower values more deterministic
                 </FormDescription>
                 <FormMessage />
               </FormItem>
@@ -200,10 +209,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Max Tokens</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    type="number"
-                  />
+                  <Input {...field} type="number" />
                 </FormControl>
                 <FormDescription>
                   Maximum number of tokens to generate in the response
@@ -220,12 +226,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <FormItem>
                 <FormLabel>Timeout (seconds)</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    type="number"
-                    min="1"
-                    step="1"
-                  />
+                  <Input {...field} type="number" min="1" step="1" />
                 </FormControl>
                 <FormDescription>
                   Timeout in seconds for model requests
@@ -253,7 +254,8 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   <div className="space-y-1">
                     <FormLabel>Disable Thoughts</FormLabel>
                     <FormDescription>
-                      Disable thought generation completely. Works better with reasoning models like Claude-1 and Deepseek R1
+                      Disable thought generation completely. Works better with
+                      reasoning models like Claude-1 and Deepseek R1
                     </FormDescription>
                   </div>
                 </FormItem>
@@ -265,14 +267,12 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
         </div>
 
         <div className="mt-8 flex items-center justify-end gap-4">
-          {error && (
-            <p className="text-sm text-red-500">{error}</p>
-          )}
+          {error && <p className="text-sm text-red-500">{error}</p>}
           <Button type="submit" disabled={isSaving}>
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            {isSaving ? "Saving..." : "Save Changes"}
           </Button>
         </div>
       </form>
     </Form>
   );
-} 
+}

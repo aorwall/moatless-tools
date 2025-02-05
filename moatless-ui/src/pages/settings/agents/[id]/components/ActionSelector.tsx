@@ -1,20 +1,24 @@
-import { useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
-import { Input } from '@/lib/components/ui/input';
-import { ScrollArea } from '@/lib/components/ui/scroll-area';
-import { Button } from '@/lib/components/ui/button';
-import { useActionStore } from '@/lib/stores/actionStore';
-import type { ActionSchema } from '@/lib/types/agent';
+import { useState, useEffect } from "react";
+import { Search } from "lucide-react";
+import { Input } from "@/lib/components/ui/input";
+import { ScrollArea } from "@/lib/components/ui/scroll-area";
+import { Button } from "@/lib/components/ui/button";
+import { useActionStore } from "@/lib/stores/actionStore";
+import type { ActionSchema } from "@/lib/types/agent";
 
 interface ActionSelectorProps {
   selectedActions: string[];
   onSelect: (actionClassName: string) => void;
 }
 
-export function ActionSelector({ selectedActions, onSelect }: ActionSelectorProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const { actions, isLoading, error, fetchActions, searchActions } = useActionStore();
-  
+export function ActionSelector({
+  selectedActions,
+  onSelect,
+}: ActionSelectorProps) {
+  const [searchQuery, setSearchQuery] = useState("");
+  const { actions, isLoading, error, fetchActions, searchActions } =
+    useActionStore();
+
   useEffect(() => {
     fetchActions();
   }, [fetchActions]);
@@ -22,25 +26,31 @@ export function ActionSelector({ selectedActions, onSelect }: ActionSelectorProp
   const filteredActions = Object.entries(actions).filter(([_, action]) => {
     const query = searchQuery.toLowerCase();
     const isSelected = Object.values(selectedActions).some(
-      selected => selected === action.action_class
+      (selected) => selected === action.title,
     );
-    return !isSelected && (
-      action.title.toLowerCase().includes(query) || 
-      action.description.toLowerCase().includes(query)
+    return (
+      !isSelected &&
+      (action.title.toLowerCase().includes(query) ||
+        action.description.toLowerCase().includes(query))
     );
   });
 
-  const categories = groupActionsByCategory(Object.fromEntries(filteredActions));
+  const categories = groupActionsByCategory(
+    Object.fromEntries(filteredActions),
+  );
 
   function groupActionsByCategory(actions: Record<string, ActionSchema>) {
-    return Object.entries(actions).reduce((acc, [key, action]) => {
-      const category = action.title.split('_')[0] || 'Other';
-      if (!acc[category]) {
-        acc[category] = {};
-      }
-      acc[category][key] = action;
-      return acc;
-    }, {} as Record<string, Record<string, ActionSchema>>);
+    return Object.entries(actions).reduce(
+      (acc, [key, action]) => {
+        const category = action.title.split("_")[0] || "Other";
+        if (!acc[category]) {
+          acc[category] = {};
+        }
+        acc[category][key] = action;
+        return acc;
+      },
+      {} as Record<string, Record<string, ActionSchema>>,
+    );
   }
 
   if (error) {
@@ -48,7 +58,11 @@ export function ActionSelector({ selectedActions, onSelect }: ActionSelectorProp
   }
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-32">Loading actions...</div>;
+    return (
+      <div className="flex items-center justify-center h-32">
+        Loading actions...
+      </div>
+    );
   }
 
   return (
@@ -71,22 +85,26 @@ export function ActionSelector({ selectedActions, onSelect }: ActionSelectorProp
         <div className="p-4">
           {Object.entries(categories).map(([category, categoryActions]) => (
             <div key={category} className="mb-6 last:mb-0">
-              <h3 className="font-semibold mb-3 text-sm text-muted-foreground">{category}</h3>
+              <h3 className="font-semibold mb-3 text-sm text-muted-foreground">
+                {category}
+              </h3>
               <div className="space-y-2">
                 {Object.entries(categoryActions).map(([key, action]) => (
-                  <div 
-                    key={action.title} 
+                  <div
+                    key={action.title}
                     className="flex flex-col space-y-2 p-3 rounded-lg hover:bg-muted/50 transition-colors"
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="font-medium">{action.title}</div>
-                        <p className="text-sm text-muted-foreground">{action.description}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {action.description}
+                        </p>
                       </div>
-                      <Button 
-                        variant="ghost" 
+                      <Button
+                        variant="ghost"
                         size="sm"
-                        onClick={() => onSelect(action.action_class)}
+                        onClick={() => onSelect(action.title)}
                       >
                         Add
                       </Button>
@@ -100,4 +118,4 @@ export function ActionSelector({ selectedActions, onSelect }: ActionSelectorProp
       </ScrollArea>
     </div>
   );
-} 
+}

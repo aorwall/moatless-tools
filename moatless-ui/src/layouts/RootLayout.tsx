@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from "react-router-dom";
 
 export function RootLayout() {
   const location = useLocation();
@@ -19,15 +19,29 @@ export function RootLayout() {
               <Link
                 to="/trajectory"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath('/trajectory') ? 'text-primary' : 'text-muted-foreground'
+                  isActivePath("/trajectory")
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 }`}
               >
                 Trajectory
               </Link>
               <Link
+                to="/loop"
+                className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                  isActivePath("/loop")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Loop
+              </Link>
+              <Link
                 to="/validate"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath('/validate') ? 'text-primary' : 'text-muted-foreground'
+                  isActivePath("/validate")
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 }`}
               >
                 Validate
@@ -35,7 +49,9 @@ export function RootLayout() {
               <Link
                 to="/settings/agents"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath('/settings/agents') ? 'text-primary' : 'text-muted-foreground'
+                  isActivePath("/settings/agents")
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 }`}
               >
                 Agents
@@ -43,7 +59,9 @@ export function RootLayout() {
               <Link
                 to="/settings/models"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath('/settings/models') ? 'text-primary' : 'text-muted-foreground'
+                  isActivePath("/settings/models")
+                    ? "text-primary"
+                    : "text-muted-foreground"
                 }`}
               >
                 Models
@@ -58,4 +76,4 @@ export function RootLayout() {
       </main>
     </div>
   );
-} 
+}

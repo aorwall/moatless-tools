@@ -66,10 +66,6 @@ class Workspace(BaseModel):
         handler = self.artifact_handlers[artifact_type]
         return handler.read(artifact_id)
 
-    def get_artifact_by_id(self, artifact_id: str) -> Artifact | None:
-        handler = self._get_handler(artifact.type)
-        artifact = handler.read(artifact_id)
-        return artifact
 
     def get_artifacts_by_type(self, artifact_type: str) -> List[Artifact]:
         handler = self._get_handler(artifact_type)

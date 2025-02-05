@@ -1,4 +1,4 @@
-import { Card, CardTitle } from '@/lib/components/ui/card';
+import { Card, CardTitle } from "@/lib/components/ui/card";
 
 export function TrajectoryHeader() {
   return (
@@ -6,4 +6,4 @@ export function TrajectoryHeader() {
       <CardTitle>Trajectory Viewer</CardTitle>
     </Card>
   );
-} 
+}

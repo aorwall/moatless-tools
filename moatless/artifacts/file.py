@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 
 from PIL import Image, ImageEnhance
+from moatless.utils.moatless import get_moatless_dir
 import pymupdf as fitz
 
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ class FileArtifact(Artifact):
     parsed_content: Optional[str] = Field(default=None, description="Parsed content for PDFs and other parseable files")
 
     def to_prompt_message_content(self) -> MessageContentListBlock:
-        return ChatCompletionTextObject(type="text", text=str(self.content))
+        return ChatCompletionTextObject(type="text", text=str(self.parsed_content))
 
     def to_ui_representation(self) -> Dict[str, Any]:
         """Convert file artifact to UI representation with binary content"""
@@ -96,6 +97,17 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
 
     max_image_size: Tuple[int, int] = Field(default=(1024, 1024), description="Maximum size of the image to save")
     quality: int = Field(default=85, description="Quality of the image to save")
+
+
+    def __init__(self, directory_path: Path | None = None):
+        if not directory_path:
+            directory_path = get_moatless_dir() / "files"
+
+        super().__init__(directory_path=directory_path)
+
+    @classmethod
+    def get_type(cls) -> str:
+        return "file"
 
     def _detect_mime_type(self, file_path: str) -> str:
         mime_type, _ = mimetypes.guess_type(file_path)
@@ -202,5 +214,7 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
         with fitz.open(stream=file_content, filetype="pdf") as doc:
             for page in doc:
                 pdf_content += page.get_text()
+
+        logger.info(f"PDF content: {pdf_content}")
 
         return file_content, pdf_content

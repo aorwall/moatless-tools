@@ -6,7 +6,7 @@ from moatless.message_history import MessageHistoryGenerator
 
 
 class ActionConfigDTO(BaseModel):
-    action_class: str = Field(..., description="The class name of the action")
+    title: str = Field(..., description="The name of the action")
     properties: Dict = Field(..., description="The properties of the action")
 
 class AgentConfigDTO(BaseModel):

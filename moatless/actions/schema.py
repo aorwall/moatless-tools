@@ -2,10 +2,11 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Dict, Type, Any, Optional
+from typing import Dict, List, Type, Any, Optional
 
 from pydantic import Field, BaseModel, model_validator
 
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import Completion
 from moatless.completion.schema import ResponseSchema
 
@@ -128,6 +129,7 @@ class Observation(BaseModel):
     )
     properties: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
+    artifact_changes: Optional[List[ArtifactChange]] = Field(default_factory=list, description="Artifact changes created when executing the action")
 
     @classmethod
     def create(cls, message: str, terminal: bool = False):

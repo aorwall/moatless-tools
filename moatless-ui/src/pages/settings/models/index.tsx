@@ -1,9 +1,9 @@
-import { useParams } from 'react-router-dom';
-import { useModel } from '@/lib/hooks/useModels';
+import { useParams } from "react-router-dom";
+import { useModel } from "@/lib/hooks/useModels";
 
 export function ModelsPage() {
   const { id } = useParams();
-  const { data: selectedModel } = useModel(id ?? '');
+  const { data: selectedModel } = useModel(id ?? "");
 
   if (!selectedModel) {
     return (
@@ -21,7 +21,9 @@ export function ModelsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">{selectedModel.model}</h1>
-            <div className="mt-1 text-sm text-gray-500">Model Configuration</div>
+            <div className="mt-1 text-sm text-gray-500">
+              Model Configuration
+            </div>
           </div>
         </div>
       </div>
@@ -33,11 +35,15 @@ export function ModelsPage() {
               <dl className="space-y-2">
                 <div>
                   <dt className="font-medium">Response Format</dt>
-                  <dd className="text-gray-600">{selectedModel.response_format}</dd>
+                  <dd className="text-gray-600">
+                    {selectedModel.response_format}
+                  </dd>
                 </div>
                 <div>
                   <dt className="font-medium">Model ID</dt>
-                  <dd className="font-mono text-sm text-gray-600">{selectedModel.id}</dd>
+                  <dd className="font-mono text-sm text-gray-600">
+                    {selectedModel.id}
+                  </dd>
                 </div>
               </dl>
             </div>
@@ -54,4 +60,4 @@ export function ModelsPage() {
       </div>
     </div>
   );
-} 
+}

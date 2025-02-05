@@ -1,29 +1,33 @@
-import { useParams } from 'react-router-dom';
-import { useRun } from '@/lib/hooks/useRun';
-import { Card, CardContent } from '@/lib/components/ui/card';
-import { Loader2, AlertCircle } from 'lucide-react';
-import { Timeline } from '@/lib/components/trajectory';
-import { Alert, AlertDescription } from '@/lib/components/ui/alert';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/lib/components/ui/resizable';
-import { RunStatus } from './components/RunStatus';
-import { RunEvents } from './components/RunEvents';
-import { useEffect } from 'react';
-import { ScrollArea } from '@/lib/components/ui/scroll-area';
-import { TimelineItemDetails } from './components/TimelineItemDetails';
-import { useQueryClient } from '@tanstack/react-query';
-import { useWebSocketStore } from '@/lib/stores/websocketStore';
+import { useParams } from "react-router-dom";
+import { useRun } from "@/lib/hooks/useRun";
+import { Card, CardContent } from "@/lib/components/ui/card";
+import { Loader2, AlertCircle } from "lucide-react";
+import { Timeline } from "@/lib/components/trajectory";
+import { Alert, AlertDescription } from "@/lib/components/ui/alert";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/lib/components/ui/resizable";
+import { RunStatus } from "./components/RunStatus";
+import { RunEvents } from "./components/RunEvents";
+import { useEffect } from "react";
+import { ScrollArea } from "@/lib/components/ui/scroll-area";
+import { TimelineItemDetails } from "./components/TimelineItemDetails";
+import { useQueryClient } from "@tanstack/react-query";
+import { useWebSocketStore } from "@/lib/stores/websocketStore";
 
 export function RunPage() {
   const { id } = useParams<{ id: string }>();
   const { data: runData, isError, error } = useRun(id!);
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
-  
+
   useEffect(() => {
     if (!id) return;
-    
+
     const unsubscribe = subscribe(`run.${id}`, () => {
-      queryClient.invalidateQueries({ queryKey: ['run', id] });
+      queryClient.invalidateQueries({ queryKey: ["run", id] });
     });
 
     return () => unsubscribe();
@@ -35,7 +39,7 @@ export function RunPage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {error instanceof Error ? error.message : 'Failed to load run data'}
+            {error instanceof Error ? error.message : "Failed to load run data"}
           </AlertDescription>
         </Alert>
       </div>
@@ -59,8 +63,8 @@ export function RunPage() {
 
   return (
     <div className="h-[calc(100vh-56px)]">
-      <ResizablePanelGroup 
-        direction="horizontal" 
+      <ResizablePanelGroup
+        direction="horizontal"
         className="h-full border rounded-lg"
       >
         <ResizablePanel defaultSize={25} minSize={20} className="border-r">
@@ -72,16 +76,16 @@ export function RunPage() {
                   <h2 className="font-semibold">Status</h2>
                 </div>
                 <ScrollArea className="flex-1">
-                  <RunStatus 
-                    status={runData.system_status} 
-                    trajectory={runData.trajectory} 
+                  <RunStatus
+                    status={runData.system_status}
+                    trajectory={runData.trajectory}
                   />
                 </ScrollArea>
               </div>
             </ResizablePanel>
 
             <ResizableHandle className="bg-border hover:bg-ring" />
-            
+
             {/* Events Panel */}
             <ResizablePanel defaultSize={60}>
               <div className="flex h-full flex-col">
@@ -97,7 +101,7 @@ export function RunPage() {
         </ResizablePanel>
 
         <ResizableHandle className="bg-border hover:bg-ring" />
-        
+
         {/* Timeline Panel */}
         <ResizablePanel defaultSize={50} className="border-x">
           <div className="flex h-full flex-col">
@@ -107,10 +111,7 @@ export function RunPage() {
             <ScrollArea className="flex-1">
               <div className="p-4">
                 {runData.trajectory && (
-                  <Timeline 
-                    nodes={runData.trajectory.nodes} 
-                    instanceId={id!}
-                  />
+                  <Timeline nodes={runData.trajectory.nodes} instanceId={id!} />
                 )}
               </div>
             </ScrollArea>
@@ -118,11 +119,11 @@ export function RunPage() {
         </ResizablePanel>
 
         <ResizableHandle className="bg-border hover:bg-ring" />
-        
+
         <ResizablePanel defaultSize={25}>
           <TimelineItemDetails />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
   );
-} 
+}
