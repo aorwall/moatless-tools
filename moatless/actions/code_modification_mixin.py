@@ -57,12 +57,13 @@ class CodeModificationMixin:
 
         return path, None
 
-    def run_tests(
+    async def run_tests(
         self,
         file_path: str,
         file_context: FileContext,
     ) -> str:
         if not file_context.has_runtime:
+            logger.warning(f"No runtime, cannot run tests for {file_path}")
             return ""
 
         if file_context.file_exists(file_path) and is_test(file_path):
@@ -74,10 +75,11 @@ class CodeModificationMixin:
             for search_result in search_results:
                 file_context.add_test_file(search_result.file_path)
         else:
-            logger.warning(f"No code index cannot find test files for {file_path}")
+            logger.warning(f"No code index, cannot find test files for {file_path}")
             return ""
 
-        file_context.run_tests()
+        logger.info(f"Running tests for {file_path}")
+        await file_context.run_tests()
 
         response_msg = ""
         if not file_context.test_files:

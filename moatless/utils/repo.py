@@ -7,6 +7,7 @@ import filelock
 from pathlib import Path
 import hashlib
 from contextlib import contextmanager
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -64,11 +65,8 @@ def verify_commit_exists(repo_dir: str, commit: str) -> bool:
 
 def clone_and_checkout(repo_url, repo_dir, commit):
     with repo_operation_lock(repo_url):
-        # Always check current state after acquiring lock
-        # as another process might have created/modified the repo
         if os.path.exists(f"{repo_dir}/.git"):
             if verify_commit_exists(repo_dir, commit):
-                # Commit exists, just checkout
                 subprocess.run(
                     ["git", "checkout", commit],
                     cwd=repo_dir,
@@ -91,13 +89,8 @@ def clone_and_checkout(repo_url, repo_dir, commit):
             logger.info(f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}")
             subprocess.run(
                 [
-                    "git",
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--no-single-branch",
-                    repo_url,
-                    repo_dir,
+                    "git", "clone", "--depth", "1", "--no-single-branch",
+                    repo_url, repo_dir
                 ],
                 check=True,
                 text=True,
@@ -120,7 +113,6 @@ def clone_and_checkout(repo_url, repo_dir, commit):
             logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
         except subprocess.CalledProcessError as e:
             logger.warning(f"Shallow clone failed, attempting full clone: {e.stderr}")
-            # Check one more time before full clone as another process might have succeeded
             if os.path.exists(f"{repo_dir}/.git") and verify_commit_exists(repo_dir, commit):
                 subprocess.run(
                     ["git", "checkout", commit],
@@ -148,9 +140,109 @@ def clone_and_checkout(repo_url, repo_dir, commit):
             logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
 
 
+async def async_clone_and_checkout(repo_url, repo_dir, commit):
+    """Clone and checkout a specific commit asynchronously."""
+    with repo_operation_lock(repo_url):
+        if os.path.exists(f"{repo_dir}/.git"):
+            if verify_commit_exists(repo_dir, commit):
+                await run_git_command(["git", "checkout", commit], repo_dir)
+                logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
+                return
+            else:
+                logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
+                await run_git_command(["rm", "-rf", repo_dir])
+
+        try:
+            # For local file:// URLs, do a shallow clone
+            if repo_url.startswith("file://"):
+                logger.info(f"Starting shallow clone from local repo {repo_url} to {repo_dir}")
+                await run_git_command([
+                    "git", "clone", "--depth", "1", "--no-single-branch",
+                    repo_url, repo_dir
+                ])
+                logger.info(f"Local shallow clone completed, fetching commit {commit}")
+                await run_git_command(["git", "fetch", "origin", commit], repo_dir)
+            else:
+                # For remote URLs, do a full clone
+                logger.info(f"Starting full clone of {repo_url} to {repo_dir}")
+                await run_git_command(["git", "clone", repo_url, repo_dir])
+                try:
+                    await run_git_command(["git", "fetch", "origin", commit], repo_dir)
+                except subprocess.CalledProcessError as e:
+                    logger.warning(f"Failed to fetch specific commit, trying full fetch: {e}")
+                    await run_git_command(["git", "fetch", "--unshallow"], repo_dir)
+
+            logger.info(f"Fetch completed, checking out commit {commit}")
+            await run_git_command(["git", "checkout", commit], repo_dir)
+            logger.info(f"Successfully completed all git operations for {repo_url} at {commit}")
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Git operation failed: {e.stderr}")
+            if os.path.exists(repo_dir):
+                await run_git_command(["rm", "-rf", repo_dir])
+            raise
+
+
+async def async_retry_clone(repo_url, repo_dir, max_attempts=3):
+    for attempt in range(max_attempts):
+        try:
+            logger.info(f"Cloning {repo_url} to {repo_dir} (attempt {attempt + 1})")
+            result = await run_git_command(["git", "clone", repo_url, repo_dir])
+            logger.info(f"Cloned {repo_url} to {repo_dir}. Output: {result}")
+            return
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Clone attempt {attempt + 1} failed: {e.stderr}")
+            if attempt < max_attempts - 1:
+                if "Connection reset by peer" in e.stderr or "early EOF" in e.stderr:
+                    wait_time = (2**attempt) + (random.randint(0, 1000) / 1000)
+                    logger.info(f"Retrying in {wait_time:.2f} seconds...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+            else:
+                raise
+
+
+async def run_git_command(command, cwd=None):
+    """Run a git command asynchronously"""
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(
+            process.returncode,
+            command,
+            stdout.decode(),
+            stderr.decode()
+        )
+    return stdout.decode()
+
+
+async def maybe_clone_async(repo_url, repo_dir):
+    """Clone a repo if it doesn't exist."""
+    with repo_operation_lock(repo_url):
+        if not os.path.exists(f"{repo_dir}/.git"):
+            logger.info(f"Cloning repo '{repo_url}' to '{repo_dir}'")
+            try:
+                # For GitHub URLs, convert to HTTPS if needed
+                if repo_url.startswith("file://") and not os.path.exists(repo_url[7:]):
+                    repo_url = f"https://github.com/{repo_url.split('/')[-1]}.git"
+                    logger.info(f"Converting to GitHub URL: {repo_url}")
+                
+                await run_git_command(["git", "clone", repo_url, repo_dir])
+                logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
+            except Exception as e:
+                logger.error(f"Clone failed: {e}")
+                raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
+
+
 def maybe_clone(repo_url, repo_dir):
     with repo_operation_lock(repo_url):
-        # Recheck existence after acquiring lock
         if not os.path.exists(f"{repo_dir}/.git"):
             logger.info(f"Cloning repo '{repo_url}'")
             try:
@@ -159,32 +251,6 @@ def maybe_clone(repo_url, repo_dir):
                 logger.error(f"Clone failed after multiple attempts: {e}")
                 raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
             logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
-
-
-def retry_clone(repo_url, repo_dir, max_attempts=3):
-    # No need for lock here as it's called from within maybe_clone which is already locked
-    for attempt in range(max_attempts):
-        try:
-            logger.info(f"Cloning {repo_url} to {repo_dir} (attempt {attempt + 1})")
-            result = subprocess.run(
-                ["git", "clone", repo_url, repo_dir],
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-            logger.info(f"Cloned {repo_url} to {repo_dir}. Output: {result.stdout}")
-            return
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Clone attempt {attempt + 1} failed: {e.stderr}")
-            if attempt < max_attempts - 1:
-                if "Connection reset by peer" in e.stderr or "early EOF" in e.stderr:
-                    wait_time = (2**attempt) + (random.randint(0, 1000) / 1000)
-                    logger.info(f"Retrying in {wait_time:.2f} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    raise  # Don't retry for other types of errors
-            else:
-                raise  # Raise the error on the last attempt
 
 
 def pull_latest(repo_dir):
@@ -356,3 +422,43 @@ def clean_and_reset_repo(repo_dir, branch_name="master", repo_url=None):
         clean_and_reset_state(repo_dir)
         checkout_branch(repo_dir, branch_name)
         pull_latest(repo_dir)
+
+
+async def setup_github_repo_async(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
+    repo_name = get_repo_dir_name(repo)
+    repo_url = f"https://github.com/{repo}.git"
+    path = f"{base_dir}/{repo_name}"
+    logger.info(f"Clone Github repo {repo_url} to {path} and checkout commit {base_commit}")
+    if not os.path.exists(path):
+        os.makedirs(path)
+        logger.info(f"Directory '{path}' was created.")
+
+    with repo_operation_lock(repo_url):
+        await maybe_clone_async(repo_url, path)
+        await run_git_command(["git", "checkout", base_commit], path)
+    return path
+
+
+def retry_clone(repo_url, repo_dir, max_attempts=3):
+    for attempt in range(max_attempts):
+        try:
+            logger.info(f"Cloning {repo_url} to {repo_dir} (attempt {attempt + 1})")
+            result = subprocess.run(
+                ["git", "clone", repo_url, repo_dir],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+            logger.info(f"Cloned {repo_url} to {repo_dir}. Output: {result.stdout}")
+            return
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Clone attempt {attempt + 1} failed: {e.stderr}")
+            if attempt < max_attempts - 1:
+                if "Connection reset by peer" in e.stderr or "early EOF" in e.stderr:
+                    wait_time = (2**attempt) + (random.randint(0, 1000) / 1000)
+                    logger.info(f"Retrying in {wait_time:.2f} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    raise  # Don't retry for other types of errors
+            else:
+                raise  # Raise the error on the last attempt

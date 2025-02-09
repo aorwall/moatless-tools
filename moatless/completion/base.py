@@ -14,11 +14,23 @@ from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionCachedContent,
 )
+from moatless.events import BaseEvent, EventBus
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
 
+from moatless.events import event_bus
+
 logger = logging.getLogger(__name__)
 
+
+class CompletionEvent(BaseEvent):
+    event_type: str
+    model: str
+
+class CompletionRetryEvent(CompletionEvent):
+    event_type: str = "completion_retry"
+    retry_count: int
+    message: str
 
 class CompletionRetryError(Exception):
     """Exception raised when a completion should be retried"""
@@ -238,11 +250,9 @@ class BaseCompletionModel(BaseModel, ABC):
             retry=tenacity.retry_if_exception_type((CompletionRetryError)),
             stop=tenacity.stop_after_attempt(3),
             wait=tenacity.wait_fixed(0),
-            reraise=True,
-            before_sleep=lambda retry_state: logger.warning(
-                f"Retrying litellm completion after error: {retry_state.outcome.exception()}"
-            ),
+            reraise=True
         )
+        
         async def _do_completion_with_validation():
             nonlocal retry_count, accumulated_usage, completion_response
             retry_count += 1
@@ -275,6 +285,7 @@ class BaseCompletionModel(BaseModel, ABC):
                     completion_response=completion_response,
                 )
             except CompletionRetryError as e:
+                await self._send_retry_event(retry_count, str(e))
                 messages.append(completion_response.choices[0].message.model_dump())
                 if e.retry_messages:
                     messages.extend(e.retry_messages)
@@ -350,7 +361,7 @@ class BaseCompletionModel(BaseModel, ABC):
             messages = self._merge_same_role_messages(messages)
 
         @retry(
-            retry=tenacity.retry_if_not_exception_type((BadRequestError)),
+            retry=tenacity.retry_if_not_exception_type((BadRequestError, CompletionRuntimeError)),
             wait=wait_exponential(multiplier=5, min=5, max=60),
             stop=stop_after_attempt(3),
             reraise=True,
@@ -367,13 +378,13 @@ class BaseCompletionModel(BaseModel, ABC):
                     params["api_base"] = self.model_base_url
                 if self.model_api_key:
                     params["api_key"] = self.model_api_key
-
+                
                 return await litellm.acompletion(
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     messages=messages,
-                    metadata=dict(self.metadata or {}),
+                    metadata=self.metadata,
                     timeout=self.timeout,
                     **params,
                 )
@@ -464,6 +475,16 @@ class BaseCompletionModel(BaseModel, ABC):
             CompletionRuntimeError: If the response indicates a fundamental problem
         """
         raise NotImplementedError
+
+    async def _send_retry_event(self, retry_count: int, message: str):
+        logger.info(f"Retrying completion for model: {self.model}, retry count: {retry_count}, message: {message}")
+        event = CompletionRetryEvent(
+            event_type="completion_retry",
+            model=self.model,
+            retry_count=retry_count,
+            message=message,
+        )
+        await event_bus.publish(event)
 
     def clone(self, **kwargs) -> "BaseCompletionModel":
         """Create a copy of the completion model with optional parameter overrides."""

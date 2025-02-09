@@ -88,7 +88,7 @@ class RunTests(Action):
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_files = file_context.run_tests(test_files)
+        test_files = await file_context.run_tests(test_files)
 
         response_msg = f"Running tests for the following files:\n"
         for test_file in test_files:

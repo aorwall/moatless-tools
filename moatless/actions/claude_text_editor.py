@@ -220,7 +220,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             runtime=self._runtime,
             code_index=self._code_index,
         )
-        test_observation = run_tests.execute(
+        test_observation = await run_tests.execute(
             RunTestsArgs(
                 thoughts=args.thoughts,
                 test_files=[args.path],

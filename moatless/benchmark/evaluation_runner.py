@@ -9,8 +9,9 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Union, Callable, List
 
+from moatless.events import BaseEvent, event_bus
 from moatless.config.model_config import create_completion_model
-from moatless.config.agent_config import create_agent
+from moatless.config.agent_config import get_agent
 from moatless.agent.code_agent import CodingAgent
 from moatless.agentic_system import AgenticSystem
 from moatless.benchmark.schema import (
@@ -25,7 +26,7 @@ from moatless.benchmark.swebench import (
     create_repository,
     create_index,
 )
-from moatless.benchmark.swebench.utils import instance_repo_path
+from moatless.benchmark.swebench.utils import create_repository_async, instance_repo_path
 from moatless.benchmark.utils import get_moatless_instance, load_moatless_datasets
 from moatless.completion import BaseCompletionModel
 from moatless.events import SystemEvent
@@ -35,6 +36,14 @@ from moatless.node import Node
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.search_tree import SearchTree
 
+import asyncio
+from asyncio import Task
+from moatless.context_data import current_evaluation_name
+
+from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
+from moatless.runner import agentic_runner
+from moatless.workspace import Workspace
+from testbeds.sdk.sdk import TestbedSDK
 
 # Custom JSON encoder for datetime objects
 class DateTimeEncoder(json.JSONEncoder):
@@ -59,17 +68,14 @@ class EvaluationRunner:
     def __init__(
         self,
         evaluation: Evaluation,
-        tree_search_settings: TreeSearchSettings,
         repo_base_dir: Union[str, None] = None,
         evaluations_dir: Union[str, None] = None,
         num_workers: int = 1,
-        use_testbed: bool = False,
+        use_testbed: bool = True,
         rerun_errors: bool = True,
         remove_repo_after_evaluation: bool = True,
     ):
-        self._event_handlers: List[Callable[[EvaluationEvent], None]] = []
-        self.tree_search_settings = tree_search_settings
-
+        self.tree_search_settings = evaluation.settings
         self.evaluation = evaluation
 
         if evaluations_dir:
@@ -77,267 +83,194 @@ class EvaluationRunner:
         else:
             self.evaluations_dir = os.getenv("MOATLESS_DIR", "./evals")
 
+        self.evaluation_dir = os.path.join(self.evaluations_dir, self.evaluation.evaluation_name)
+
         self.repo_base_dir = repo_base_dir or os.getenv("MOATLESS_REPO_DIR", "./repos")
         self.num_workers = num_workers
         self.use_testbed = use_testbed
         self.rerun_errors = rerun_errors
         self.remove_repo_after_evaluation = remove_repo_after_evaluation
+        self.agentic_runner = agentic_runner
+        self._pending_evaluations = {}  # track {run_id: (instance_id, moatless_instance)}
+        event_bus.subscribe(self._handle_flow_event)
 
-    def add_event_handler(self, handler: Callable[[EvaluationEvent], None]):
-        """Add an event handler to receive evaluation events"""
-        self._event_handlers.append(handler)
+    async def run_evaluation(self):
+        """Start the evaluation process."""
+        logger.info(f"Running evaluation: {self.evaluation.evaluation_name}")
+        await self.emit_event("evaluation_started")
+        
+        instance_ids = [instance.instance_id for instance in self.evaluation.instances]
+        logger.info(f"Processing {len(instance_ids)} instances with {self.num_workers} concurrent tasks")
+        
+        # Start initial batch of instances up to num_workers
+        initial_instances = instance_ids[:self.num_workers]
+        async with asyncio.TaskGroup() as tg:
+            for instance_id in initial_instances:
+                logger.info(f"Starting initial instance {instance_id}")
+                tg.create_task(self.create_and_run_instance(instance_id))
 
-    def emit_event(self, event_type: str, data: Any = None):
-        """Emit an event to all registered handlers"""
-        logger.info(f"Emitting event {event_type}")
-        event = EvaluationEvent(
-            evaluation_name=self.evaluation.evaluation_name,
-            event_type=event_type,
-            data=data,
-        )
-        for handler in self._event_handlers:
-            handler(event)
+        # Start background task to manage remaining instances
+        asyncio.create_task(self._manage_instances(instance_ids[self.num_workers:]))
 
-    def run_evaluation(self, instance_ids: List[str] | None = None):
-        """Run the evaluation process."""
+    async def _manage_instances(self, remaining_instances: List[str]):
+        """Background task to manage starting new instances as slots become available."""
+        for instance_id in remaining_instances:
+            while True:
+                # Wait for a slot to become available
+                if len(self._pending_evaluations) < self.num_workers:
+                    logger.info(f"Starting next instance {instance_id}")
+                    await self.create_and_run_instance(instance_id)
+                    break
+                await asyncio.sleep(1)
 
-        os.makedirs(self.get_evaluation_dir(), exist_ok=True)
+    async def _handle_flow_event(self, trajectory_id: str, event: BaseEvent):
+        """Handle flow events for evaluation."""
+        if event.event_type == "flow_completed":
+            if trajectory_id in self._pending_evaluations:
+                instance_id, moatless_instance = self._pending_evaluations[trajectory_id]
+                logger.info(f"Flow completed for instance {instance_id}, starting evaluation")
 
-        if not self.evaluation.start_time:
-            self.evaluation.start_time = datetime.now(timezone.utc)
-
-        self.evaluation.status = EvaluationStatus.RUNNING
-
-        self.emit_event("evaluation_started")
-        error = 0
-
-        # TODO: Filter out instances from evaluation + instance_ids
-
-        logger.info(
-            f"Processing {len(instance_ids)} instances with {self.num_workers} workers. Rerun error {self.rerun_errors}"
-        )
-
-        load_moatless_datasets()
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
-            futures = [executor.submit(self.evaluate_instance, instance_id) for instance_id in instance_ids]
-
-            for future in futures:
+                instance = self.evaluation.get_instance(instance_id)
+                instance.status = InstanceStatus.COMPLETED
+                instance.completed_at = datetime.now(timezone.utc)
+                
                 try:
-                    future.result()
+                    # Get the completed system
+                    system = await self.agentic_runner.get_run(trajectory_id)
+                    if not system:
+                        raise ValueError(f"Could not find completed system for {trajectory_id}")
 
-                except Exception:
-                    error += 1
-                    logger.exception("Error in processing instance")
-                    self.emit_event("instance_error", {"error": traceback.format_exc()})
+                    if self.use_testbed:
+                        await self.evaluate_nodes(
+                            instance_id=instance_id,
+                            instance=moatless_instance,
+                            root_node=system.root
+                        )
 
-        logger.info(f"Completed processing with {error} errors")
-        self.evaluation.status = EvaluationStatus.COMPLETED if error == 0 else EvaluationStatus.ERROR
-        self.evaluation.finish_time = datetime.now(timezone.utc)
+                    instance = self.evaluation.get_instance(instance_id)
+                    instance.status = InstanceStatus.EVALUATED
+                    instance.evaluated_at = datetime.now(timezone.utc)
+                    await self.emit_event(
+                        "instance_completed",
+                        {"instance_id": instance_id},
+                    )
+                except Exception as e:
+                    logger.exception(f"Error evaluating completed flow: {str(e)}")
+                    instance = self.evaluation.get_instance(instance_id)
+                    instance.fail(error=str(e))
+                    await self.emit_event("instance_error", {"instance_id": instance_id, "error": str(e)})
+                finally:
+                    # Clean up tracking
+                    del self._pending_evaluations[trajectory_id]
 
-        self.emit_event(
-            "evaluation_completed",
-            {"total_instances": len(instance_ids), "errors": error},
-        )
+        elif event.event_type == "flow_error":
+            if trajectory_id in self._pending_evaluations:
+                instance_id, _ = self._pending_evaluations[trajectory_id]
+                logger.error(f"Flow failed for instance {instance_id}: {event.error}")
+                instance = self.evaluation.get_instance(instance_id)
+                instance.fail(error=event.error)
+                await self.emit_event("instance_error", {"instance_id": instance_id, "error": event.error})
+                del self._pending_evaluations[trajectory_id]
 
-    def evaluate_instance(self, instance_id: str):
-        """Evaluate a single instance."""
+    async def create_and_run_instance(self, instance_id: str):
+        """Create and run a single instance."""
         logger.info(f"Starting evaluation of instance {instance_id}")
-        runtime = None
-        repository = None
-        agentic_loop = None
-        eval_result = None
-
-        instance_dir = os.path.join(self.get_evaluation_dir(), instance_id)
-        trajectory_path = os.path.join(instance_dir, "trajectory.json")
-        os.makedirs(instance_dir, exist_ok=True)
         instance = self.evaluation.get_instance(instance_id)
         if not instance:
-            instance = EvaluationInstance(instance_id=instance_id)
-            self.evaluation.instances.append(instance)
+            logger.error(f"Instance {instance_id} not found")
+            raise ValueError(f"Instance {instance_id} not found")
 
         try:
-            logger.info(f"Loading moatless instance {instance_id}")
+            instance.status = InstanceStatus.STARTED
+            instance.started_at = datetime.now(timezone.utc)
+
             moatless_instance = get_moatless_instance(instance_id=instance_id)
             problem_statement = f"<task>\nSolve the following reported issue in the {moatless_instance['repo']} repository:\n\n{moatless_instance['problem_statement']}\n</task>"
 
-            root_node = self.create_and_run(
+            agentic_system = await self.create_agentic_flow(
                 problem_statement=problem_statement,
                 instance=instance,
                 moatless_instance=moatless_instance,
-                trajectory_path=trajectory_path,
             )
-            logger.info(f"Completed agentic loop for instance {instance_id}")
 
-            eval_result_path = os.path.join(instance_dir, "eval_result.json")
-            if self.use_testbed:
-                logger.info(f"Starting testbed evaluation for instance {instance_id}")
-                eval_result = self.evaluate_nodes(
-                    instance_id=instance_id,
-                    instance=moatless_instance,
-                    root_node=root_node,
-                    eval_result_path=eval_result_path,
-                )
-                logger.info(f"Completed testbed evaluation for instance {instance_id}")
+            run_id = await self.agentic_runner.start(agentic_system)
+            logger.info(f"Started agentic system with run ID {run_id}")
 
-            instance.complete()
-            self.emit_event(
-                "instance_completed",
-                {"instance_id": instance_id, "eval_result": eval_result},
-            )
-            return
-
+            # Track this run for evaluation when it completes
+            self._pending_evaluations[run_id] = (instance_id, moatless_instance)
+            
         except Exception as e:
-            stacktrace = traceback.format_exc()
-            instance.fail(error=stacktrace)
-            self.emit_event("instance_error", {"instance_id": instance_id, "error": str(e)})
+            logger.exception(f"Error running instance {instance_id}")
+            instance.status = InstanceStatus.ERROR
+            instance.error = str(e)
             raise
-        finally:
-            if self.remove_repo_after_evaluation:
-                repo_path = instance_repo_path(instance_id, self.repo_base_dir)
-                if os.path.exists(repo_path):
-                    shutil.rmtree(repo_path)
 
-            # Clean up
-            del runtime
-            del repository
-            del agentic_loop
-            del eval_result
-            gc.collect()
-
-    def create_and_run(
+    async def create_agentic_flow(
         self,
         problem_statement: str,
         instance: EvaluationInstance,
         moatless_instance: dict,
-        trajectory_path: str,
-    ) -> Node:
-        """Create and run an agentic loop for the given problem instance."""
-        metadata: dict[str, Any] = {
-            "evaluation_name": self.evaluation.evaluation_name,
-            "instance_id": instance.instance_id,
-        }
-
-        start_time = time.time()
-
-        root_node = None
-        rerun_tree = False
-        if os.path.exists(trajectory_path):
-            try:
-                root_node = Node.from_file(
-                    trajectory_path,
-                )
-
-                if self.rerun_errors:
-                    for node in root_node.get_all_nodes():
-                        if node.error or (node.action and node.action.name == "Error"):
-                            rerun_tree = True
-                            break
-
-                # TODO: Calculate if is ifinished
-                # if persisted_node.is_finished() and not rerun_tree:
-                #    logger.info(f"Found completed search tree for {instance.instance_id}")
-                #    return persisted_node
-            except json.JSONDecodeError as e:
-                logger.error(
-                    f"Failed to parse search tree from {trajectory_path}. Will remove file to start over. Error: {e}"
-                )
-                os.remove(trajectory_path)
-
-        repository = create_repository(moatless_instance, repo_base_dir=self.repo_base_dir)
+    ) -> AgenticSystem:
+        """Create an agentic system for the instance."""
+        repository = await create_repository_async(moatless_instance, repo_base_dir=self.repo_base_dir)
         code_index = create_index(moatless_instance, repository=repository)
+        
+        completion_model = create_completion_model(self.tree_search_settings.model_id)
+        completion_model.metadata = {"instance_id": instance.instance_id}
 
         runtime = None
         if self.use_testbed:
             from moatless.runtime.testbed import TestbedEnvironment
+            testbed_log_dir = os.path.join(self.evaluation_dir, instance.instance_id, "testbed_logs")
+            if not os.path.exists(testbed_log_dir):
+                os.makedirs(testbed_log_dir)
 
             runtime = TestbedEnvironment(
                 repository=repository,
-                instance=moatless_instance,
+                instance_id=instance.instance_id,
+                log_dir=testbed_log_dir,
+                enable_cache=True,
             )
 
-        if not root_node:
-            file_context = FileContext(repo=repository, runtime=runtime)
-            root_node = Node(node_id=0, user_message=problem_statement, file_context=file_context)
+        agent = get_agent(agent_id=self.tree_search_settings.agent_id)
+        agent.completion_model = completion_model
+        agent.workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
 
-        completion_model = create_completion_model(self.tree_search_settings.model_id)
-        completion_model.metadata = {"instance_id": instance.instance_id}
-
-        agent = create_agent(
-            self.tree_search_settings.agent_id,
-            completion_model=completion_model,
-            repository=repository,
-            code_index=code_index,
-            runtime=runtime,
-        )
+        persist_dir = get_moatless_trajectory_dir(instance.instance_id)
 
         if self.tree_search_settings.max_expansions > 1:
-            agentic_system = SearchTree.create(
+            return SearchTree.create(
                 message=problem_statement,
-                repository=repository,
-                runtime=runtime,
-                selector=self.tree_search_settings.selector,
                 agent=agent,
-                value_function=self.tree_search_settings.value_function,
-                feedback_generator=self.tree_search_settings.feedback_generator,
+                repository=repository,
+                metadata={"instance_id": instance.instance_id},
                 max_iterations=self.tree_search_settings.max_iterations,
                 max_expansions=self.tree_search_settings.max_expansions,
-                max_cost=self.tree_search_settings.max_cost,
-                max_depth=self.tree_search_settings.max_depth,
-                min_finished_nodes=self.tree_search_settings.min_finished_nodes,
-                max_finished_nodes=self.tree_search_settings.max_finished_nodes,
-                reward_threshold=self.tree_search_settings.reward_threshold,
-                persist_path=trajectory_path,
-                metadata=metadata,
+                persist_dir=persist_dir,
             )
         else:
-            agentic_system = AgenticLoop.create(
+            return AgenticLoop.create(
                 message=problem_statement,
-                repository=repository,
-                runtime=runtime,
+                run_id=instance.instance_id,
                 agent=agent,
                 max_iterations=self.tree_search_settings.max_iterations,
-                max_cost=self.tree_search_settings.max_cost,
-                persist_path=trajectory_path,
-                metadata=metadata,
+                metadata={"instance_id": instance.instance_id},
+                persist_dir=persist_dir,
             )
 
-        self._clean_error_nodes(root_node, instance.instance_id)
-
-        def event_handler(event: SystemEvent):
-            logger.info(f"Got event {event.event_type}")
-
-            self.emit_event(
-                event.event_type,
-                {"instance_id": instance.instance_id, **event.model_dump()},
-            )
-
-        instance.start()
-        self.emit_event("loop_started", {"instance_id": instance.instance_id})
-
-        agentic_system.add_event_handler(event_handler)
-        agentic_system.run(root_node)
-
-        duration = time.time() - start_time
-        self.emit_event(
-            "loop_completed",
-            {"instance_id": instance.instance_id, "duration": duration},
-        )
-
-        return root_node
-
-    def evaluate_nodes(
+    async def evaluate_nodes(
         self,
         instance_id: str,
         instance: dict,
         root_node: Node,
-        eval_result_path: str,
-    ) -> dict:
+        ) -> dict:
         """Evaluate all leaf nodes using the testbed."""
         leaf_nodes = root_node.get_leaf_nodes()
 
         # Load existing eval results if any
         eval_result = None
+
+        eval_result_path = os.path.join(self.get_evaluation_dir(), instance_id, "eval_result.json")
         if os.path.exists(eval_result_path):
             try:
                 with open(eval_result_path) as f:
@@ -381,44 +314,40 @@ class EvaluationRunner:
         )
 
         repository = create_repository(instance, repo_base_dir=self.repo_base_dir)
-        runtime = TestbedEnvironment(
-            repository=repository,
-            instance=instance,
-        )
+        async with TestbedEnvironment(repository=repository, instance_id=instance_id) as runtime:
+            for i, leaf_node in enumerate(unevaluated_nodes):
+                logger.info(f"Evaluate Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id}")
 
-        for i, leaf_node in enumerate(unevaluated_nodes):
-            logger.info(f"Evaluate Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id}")
-
-            if str(leaf_node.node_id) in eval_result["node_results"]:
-                logger.info(
-                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated"
-                )
-                continue
-
-            patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
-            if patch and patch.strip():
-                start_time = time.time()
-                try:
-                    result = runtime.evaluate(patch=patch)
-                    if not result:
-                        logger.error(f"Error in evaluating patch for {instance_id}")
-                        continue
-
-                    eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
+                if str(leaf_node.node_id) in eval_result["node_results"]:
                     logger.info(
-                        f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                        f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} that has already been evaluated"
                     )
-                except Exception as e:
-                    logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
-                    eval_result["error"] = traceback.format_exc()
-                finally:
-                    eval_result["duration"] = time.time() - start_time
-                    with open(eval_result_path, "w") as f:
-                        json.dump(eval_result, f, indent=2)
-            else:
-                logger.info(
-                    f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
-                )
+                    continue
+
+                patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
+                if patch and patch.strip():
+                    start_time = time.time()
+                    try:
+                        result = await runtime.evaluate(patch=patch)
+                        if not result:
+                            logger.error(f"Error in evaluating patch for {instance_id}")
+                            continue
+
+                        eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
+                        logger.info(
+                            f"Evaluated patch for node {leaf_node.node_id} in {time.time() - start_time} seconds (resolved: {result.resolved})"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error in testbed evaluation for instance {instance_id}: {str(e)}")
+                        eval_result["error"] = traceback.format_exc()
+                    finally:
+                        eval_result["duration"] = time.time() - start_time
+                        with open(eval_result_path, "w") as f:
+                            json.dump(eval_result, f, indent=2)
+                else:
+                    logger.info(
+                        f"Skip Node{leaf_node.node_id} {i + 1}/{len(unevaluated_nodes)} for instance {instance_id} with no patch."
+                    )
 
         return eval_result
 
@@ -443,4 +372,19 @@ class EvaluationRunner:
 
     def get_evaluation_dir(self) -> str:
         """Get the directory path for an evaluation."""
-        return os.path.join(self.evaluations_dir, self.evaluation.evaluation_name)
+        return self.evaluation_dir
+
+    async def emit_event(self, event_type: str, data: Any = None):
+        """Emit an event to all registered handlers"""
+        logger.info(f"Emitting event {event_type}")
+        event = EvaluationEvent(
+            evaluation_name=self.evaluation.evaluation_name,
+            event_type=event_type,
+            data=data,
+        )
+        await event_bus.publish(event)
+
+    async def _run_instance(self, instance: EvaluationInstance):
+        """Run a single instance evaluation."""
+        # Your instance evaluation logic here
+        pass

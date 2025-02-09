@@ -44,15 +44,14 @@ class LoopRequest(BaseModel):
 async def start_loop(request: LoopRequest):
     try:
         run_id = f"loop_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        files_dir = os.path.join(get_moatless_dir(), "files")
-        file_handler = FileArtifactHandler(directory_path=Path(files_dir))
+        trajectory_dir = get_moatless_trajectory_dir(run_id)
         
+        workspace = Workspace(trajectory_dir=trajectory_dir)
+        file_handler = FileArtifactHandler(trajectory_dir=trajectory_dir)
         
         # TODO: Move out custom handlers!
-        receipt_path = os.path.join(get_moatless_dir(), "receipts.json")
-        receipt_handler = ReceiptArtifactFileHandler(file_path=Path(receipt_path))
-        verification_path = os.path.join(get_moatless_dir(), "verifications.json")
-        verification_handler = VerificationArtifactFileHandler(file_path=Path(verification_path))
+        receipt_handler = ReceiptArtifactFileHandler(trajectory_dir=trajectory_dir)
+        verification_handler = VerificationArtifactFileHandler(trajectory_dir=trajectory_dir)
         artifact_changes = []
 
         if request.attachments:
@@ -60,9 +59,7 @@ async def start_loop(request: LoopRequest):
                 file_data = attachment.data.split(',')[1]  # Remove the data URI prefix
                 file_bytes = base64.b64decode(file_data)
                 mime_type = mimetypes.guess_type(attachment.name)[0]
-                logger.info(f"Mime type: {mime_type}")
-                logger.info(f"File name: {attachment.name}")
-
+                
                 artifact = FileArtifact(
                     id=attachment.name,
                     name=attachment.name,
@@ -85,17 +82,19 @@ async def start_loop(request: LoopRequest):
         # Get the agent instance and completion model.
         agent = get_agent(agent_id=request.agent_id)
         completion_model = create_completion_model(request.model_id)
+        completion_model.metadata = {"trajectory_id": run_id}
+
         agent.workspace = workspace
         agent.completion_model = completion_model
 
         # Create an AgenticLoop instance (persist paths can be adjusted as needed).
-        persist_dir = f"{get_moatless_trajectory_dir()}/{run_id}"
+        persist_dir = get_moatless_trajectory_dir(run_id)
         loop = AgenticLoop.create(
             message=request.message,
             run_id=run_id,
             agent=agent,
             max_iterations=15,
-            persist_dir=persist_dir,
+            persist_dir=str(persist_dir), # TODO: Change to Path
             metadata={
                 "agent_id": request.agent_id,
                 "model_id": request.model_id,

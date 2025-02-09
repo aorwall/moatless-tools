@@ -16,7 +16,8 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
 from moatless.completion.base import BaseCompletionModel
-from moatless.agentic_system import AgenticSystem
+from moatless.agentic_system import AgenticSystem, FlowErrorEvent, NodeExpandedEvent
+from moatless.context_data import current_node_id
 
 logger = logging.getLogger(__name__)
 
@@ -24,13 +25,16 @@ logger = logging.getLogger(__name__)
 class AgenticLoop(AgenticSystem):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    async def _run(self) -> Node:
+    async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
         """Run the agentic loop until completion or max iterations."""
 
         current_node = self.root.get_all_nodes()[-1]
-        self.log(logger.info, generate_ascii_tree(self.root))
+        if message: # Assume to continue with a new node if a message is provided
+            current_node = self._create_next_node(current_node)
+            current_node.user_message = message
 
-        while not self.is_finished():
+        finish_reason = None
+        while not (finish_reason := self.is_finished()):
             total_cost = self.total_usage().completion_cost
             iteration = len(self.root.get_all_nodes())
 
@@ -40,15 +44,16 @@ class AgenticLoop(AgenticSystem):
                 cost=total_cost,
             )
 
-            if self.max_cost and total_cost and total_cost >= self.max_cost:
-                self.log(
-                    logger.warning,
-                    f"Search cost ${total_cost} exceeded max cost of ${self.max_cost}. Finishing search.",
-                )
-                break
-
             try:
-                current_node = self._create_next_node(current_node)
+                if current_node.is_expandable() and current_node.is_executed():
+                    child_node = self._create_next_node(current_node)
+                    await self.emit_event(NodeExpandedEvent(parent_node_id=current_node.node_id, child_node_id=child_node.node_id))
+                    current_node = child_node
+
+                if current_node.is_executed():
+                    raise RuntimeError(f"Node {current_node.node_id} has already been executed")
+
+                current_node_id.set(current_node.node_id)
                 await self.agent.run(current_node)
                 self.maybe_persist()
                 self.log(logger.info, generate_ascii_tree(self.root, current_node))
@@ -60,13 +65,10 @@ class AgenticLoop(AgenticSystem):
             finally:
                 self.maybe_persist()
 
-        completion_data = {
-            "total_iterations": len(self.root.get_all_nodes()),
-            "total_cost": self.total_usage().completion_cost,
-        }
+        logger.info(f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost")
 
-        return self.get_last_node()
-
+        return self.get_last_node(), finish_reason
+    
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
         child_node = Node(
@@ -77,17 +79,20 @@ class AgenticLoop(AgenticSystem):
         parent.add_child(child_node)
         return child_node
 
-    def is_finished(self) -> bool:
+    def is_finished(self) -> str | None:
         """Check if the loop should finish."""
         total_cost = self.total_usage().completion_cost
         if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
-            return True
+            return "max_cost"
 
         nodes = self.root.get_all_nodes()
         if len(nodes) >= self.max_iterations:
-            return True
+            return "max_iterations"
 
-        return nodes[-1].is_terminal()
+        if nodes[-1].is_terminal():
+            return "terminal"
+
+        return None
 
     def get_last_node(self) -> Node:
         """Get the last node in the action sequence."""

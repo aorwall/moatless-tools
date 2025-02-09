@@ -4,6 +4,7 @@ import uuid
 from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
 from fastapi import APIRouter, HTTPException
 from moatless.artifacts.artifact import ArtifactHandler, ArtifactListItem, ArtifactResponse
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 
 router = APIRouter()
@@ -44,24 +45,30 @@ async def fortnox_callback(
         raise HTTPException(status_code=400, detail="Failed to connect Fortnox account")
 
 
-@router.get("/{type}", response_model=List[ArtifactListItem])
-async def list_artifacts(type: str):
-    artifact_handler = ArtifactHandler.get_handler_by_type(type)
-    return artifact_handler.get_all_artifacts()
+@router.get("/{trajectory_id}", response_model=List[ArtifactListItem])
+async def list_artifacts(trajectory_id: str):
+    workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
+    return workspace.get_all_artifacts()
+
+@router.get("/{trajectory_id}/{type}", response_model=List[ArtifactListItem])
+async def list_artifacts(trajectory_id: str, type: str):
+    workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
+    return workspace.get_artifacts_by_type(type)
     
-@router.get("/{type}/{id}", response_model=ArtifactResponse)
-async def get_artifact(type: str, id: str):
-    logger.info(f"Getting artifact {id} of type {type}")
-    artifact_handler = ArtifactHandler.get_handler_by_type(type)
-    artifact = artifact_handler.read(artifact_id=id)
+@router.get("/{trajectory_id}/{type}/{id}", response_model=ArtifactResponse)
+async def get_artifact(trajectory_id: str, type: str, id: str):
+    logger.info(f"Getting artifact {id} of type {type} for trajectory {trajectory_id}")
+    workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
+    artifact = workspace.get_artifact(artifact_type=type, artifact_id=id)
     return artifact.to_ui_representation()
 
-@router.post("/{type}/{id}/persist", response_model=ArtifactResponse)
-async def persist_artifact(type: str, id: str):
+@router.post("/{trajectory_id}/{type}/{id}/persist", response_model=ArtifactResponse)
+async def persist_artifact(trajectory_id: str, type: str, id: str):
+    logger.info(f"Persisting artifact {id} of type {type} for trajectory {trajectory_id}")
     try:
-        artifact_handler = ArtifactHandler.get_handler_by_type(type)
-        artifact = artifact_handler.read(artifact_id=id)
-        await artifact_handler.persist(artifact)
+        workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
+        await workspace.persist_artifact(artifact_type=type, artifact_id=id)
+        artifact = workspace.get_artifact(artifact_type=type, artifact_id=id)
         return artifact.to_ui_representation()
     except Exception as e:
         logger.exception(f"Failed to persist artifact {id} of type {type}")

@@ -54,7 +54,7 @@ export function LoopPage() {
         attachments: attachmentsData,
       });
       toast.success("Loop started successfully");
-      navigate(`/runs/${data.run_id}`);
+      navigate(`/trajectories/${data.run_id}`);
     } catch (error: any) {
       toast.error(error.message || "Error starting loop");
     }
@@ -69,52 +69,54 @@ export function LoopPage() {
   });
 
   return (
-    <div className="container mx-auto py-6">
-      <h1 className="mb-6 text-2xl font-bold">Start Loop</h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div className="grid gap-6 md:grid-cols-2">
+    <div className="container mx-auto py-6 h-full overflow-y-auto">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="mb-6 text-2xl font-bold">Start Loop</h1>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid gap-6 md:grid-cols-2">
+            <div>
+              <label className="block mb-2 font-medium">Agent</label>
+              <AgentSelector
+                selectedAgentId={selectedAgentId}
+                onAgentSelect={setSelectedAgentId}
+              />
+            </div>
+            <div>
+              <label className="block mb-2 font-medium">Model</label>
+              <ModelSelector
+                selectedModelId={selectedModelId}
+                onModelSelect={setSelectedModelId}
+              />
+            </div>
+          </div>
           <div>
-            <label className="block mb-2 font-medium">Agent</label>
-            <AgentSelector
-              selectedAgentId={selectedAgentId}
-              onAgentSelect={setSelectedAgentId}
+            <label className="block mb-2 font-medium">Message</label>
+            <Textarea
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Enter your message..."
+              className="w-full"
+              rows={4}
             />
           </div>
           <div>
-            <label className="block mb-2 font-medium">Model</label>
-            <ModelSelector
-              selectedModelId={selectedModelId}
-              onModelSelect={setSelectedModelId}
-            />
+            <label className="block mb-2 font-medium">Attachments</label>
+            <Input type="file" multiple onChange={handleFileChange} />
           </div>
-        </div>
-        <div>
-          <label className="block mb-2 font-medium">Message</label>
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Enter your message..."
-            className="w-full"
-            rows={4}
-          />
-        </div>
-        <div>
-          <label className="block mb-2 font-medium">Attachments</label>
-          <Input type="file" multiple onChange={handleFileChange} />
-        </div>
-        <div className="flex justify-end">
-          <Button type="submit" disabled={startLoop.isPending}>
-            {startLoop.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Running...
-              </>
-            ) : (
-              "Run Loop"
-            )}
-          </Button>
-        </div>
-      </form>
+          <div className="flex justify-end">
+            <Button type="submit" disabled={startLoop.isPending}>
+              {startLoop.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Running...
+                </>
+              ) : (
+                "Run Loop"
+              )}
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

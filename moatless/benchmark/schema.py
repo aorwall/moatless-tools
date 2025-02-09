@@ -10,6 +10,7 @@ from moatless.agent.settings import AgentSettings
 from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
+from moatless.events import BaseEvent
 from moatless.feedback import BaseFeedbackGenerator
 from moatless.schema import MessageHistoryType, CompletionModelSettings
 from moatless.selector import BaseSelector
@@ -88,22 +89,22 @@ class InstanceStatus(str, Enum):
     PENDING = "pending"
     STARTED = "started"
     COMPLETED = "completed"
+    EVALUATED = "evaluated"
     ERROR = "error"
 
 
 class EvaluationStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     ERROR = "error"
 
 
-@dataclass
-class EvaluationEvent:
+class EvaluationEvent(BaseEvent):
     """Event emitted by the evaluation process"""
 
     evaluation_name: str
-    event_type: str
     data: Any
 
 
@@ -121,10 +122,11 @@ class EvaluationInstance(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the instance was created",
     )
-    started_at: Optional[datetime] = Field(default=None, description="When evaluation started")
-    completed_at: Optional[datetime] = Field(default=None, description="When evaluation completed")
+    started_at: Optional[datetime] = Field(default=None, description="When instance started")
+    completed_at: Optional[datetime] = Field(default=None, description="When instance completed")
+    evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
     submission: Optional[str] = Field(default=None, description="The submitted patch")
-    error: Optional[str] = Field(default=None, description="Error message if evaluation failed")
+    error: Optional[str] = Field(default=None, description="Error message if instance failed")
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
@@ -167,14 +169,18 @@ class Evaluation(BaseModel):
         }
     )
 
-    evaluations_dir: str = Field(description="Directory where evaluations are stored")
-    evaluation_name: str = Field(description="Name of the evaluation")
-    start_time: Optional[datetime] = Field(default=None, description="When the evaluation started")
-    finish_time: Optional[datetime] = Field(default=None, description="When the evaluation finished")
+    evaluation_name: str = Field(..., description="Name of the evaluation")
+    dataset_name: str = Field(..., description="Name of the dataset")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When the evaluation was created",
+    )
+    started_at: Optional[datetime] = Field(default=None, description="When the evaluation started")
+    completed_at: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
-    instances: List[EvaluationInstance] = Field(default_factory=list)
-    settings: Optional[TreeSearchSettings] = Field(default=None, description="Settings for the evaluation")
-
+    instances: List[EvaluationInstance] = Field(default_factory=list, description="Instances of the evaluation")
+    settings: TreeSearchSettings = Field(..., description="Settings for the evaluation")
+    num_workers: int = Field(default=1, description="Number of workers for the evaluation")
     def get_instance(self, instance_id: str) -> EvaluationInstance | None:
         for instance in self.instances:
             if instance.instance_id == instance_id:

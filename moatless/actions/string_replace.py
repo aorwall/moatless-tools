@@ -136,6 +136,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:
+            logger.warning(f"Error validating file access: {error}")
             return error
 
         context_file = file_context.get_context_file(str(path))
@@ -144,6 +145,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         new_str = args.new_str.expandtabs()
 
         if old_str == new_str:
+            logger.warning(f"The old_str and new_str are the same. No changes were made.")
             return Observation(
                 message=f"The old_str and new_str are the same. No changes were made.",
                 properties={"fail_reason": "no_changes"},
@@ -245,6 +247,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         message += f"Differences found:\n{differences_msg}\n\n"
                         message += "Please update old_str to match the exact line breaks and other special characters as shown above."
 
+                    logger.info(f"Returning observation with message: {message}")
                     return Observation(
                         message=message,
                         properties={"flags": [match["diff_reason"]]},
@@ -255,6 +258,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         f"- Lines {m['start_line']}-{m['end_line']} ({m['diff_reason']}):\n```\n{m['content']}\n```"
                         for m in potential_matches
                     )
+                    logger.info(f"Multiple potential matches found with different formatting:\n{matches_info}")
                     return Observation(
                         message=f"Multiple potential matches found with different formatting:\n{matches_info}\nTry including more surrounding context to create a unique match.",
                         properties={"flags": ["multiple_potential_occurrences"]},
@@ -265,11 +269,12 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 if new_str:
                     new_str_occurrences = file_content.count(new_str)
                     if new_str_occurrences > 0:
+                        logger.info(f"Returning observation with message: {message}")
                         return Observation(
                             message=f"New string '{new_str}' already exists in {path}. No changes were made.",
                             properties={"fail_reason": "string_already_exists"},
                         )
-
+                logger.info(f"string not found in {path}")
                 return Observation(
                     message=f"String '{old_str}' not found in {path}.\n\nRemember to write out the exact string you want to replace with the same indentation and no placeholders.",
                     properties={"fail_reason": "string_not_found"},
@@ -279,6 +284,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             matches_info = "\n".join(
                 f"- Lines {m['start_line']}-{m['end_line']}:\n```\n{m['content']}\n```" for m in exact_matches
             )
+            logger.info(f"Multiple occurrences of string found: {matches_info}")
             return Observation(
                 message=f"Multiple occurrences of string found:\n{matches_info}\nTry including more surrounding lines to create a unique match.",
                 properties={"flags": ["multiple_occurrences"]},
@@ -336,7 +342,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             properties=properties,
         )
 
-        test_summary = self.run_tests(
+        test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )

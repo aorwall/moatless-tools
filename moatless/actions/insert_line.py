@@ -131,7 +131,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             message=success_msg,
             properties={"diff": diff, "success": True},
         )
-        test_summary = self.run_tests(
+        test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )

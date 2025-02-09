@@ -18,8 +18,6 @@ from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 from moatless.agentic_system import AgenticSystem
-from moatless.workspace import Workspace
-from moatless.agent.events import AgentStarted, AgentActionCreated, AgentActionExecuted
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,10 +47,6 @@ class SearchTree(AgenticSystem):
         None, description="The min reward threshold to consider before finishing."
     )
     max_depth: Optional[int] = Field(20, description="The maximum depth for one trajectory in simulations.")
-
-    event_handlers: List[Callable] = Field(
-        default_factory=list, description="Event handlers for tree events", exclude=True
-    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -131,57 +125,53 @@ class SearchTree(AgenticSystem):
         instance = super().model_validate(obj)
         return instance
 
-    async def _run(self) -> Node:
+    async def _run(self) -> tuple[Node, str]:
         """Run the search tree algorithm with the given node."""
         if not self.root:
             raise ValueError("No node provided to run")
 
-        try:
-            self.log(logger.info, generate_ascii_tree(self.root))
+        self.log(logger.info, generate_ascii_tree(self.root))
 
-            if len(self.root.get_all_nodes()) > 1:
-                self.log(
-                    logger.info,
-                    f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
-                )
+        if len(self.root.get_all_nodes()) > 1:
+            self.log(
+                logger.info,
+                f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
+            )
 
-            while not self.is_finished():
-                total_cost = self.total_usage().completion_cost
-                self.log(
-                    logger.info,
-                    f"Run iteration {len(self.root.get_all_nodes())}",
-                    cost=total_cost,
-                )
+        finish_reason = None
+        while not (finish_reason := self.is_finished()):
+            total_cost = self.total_usage().completion_cost
+            self.log(
+                logger.info,
+                f"Run iteration {len(self.root.get_all_nodes())}",
+                cost=total_cost,
+            )
 
-                node = self._select(self.root)
+            node = self._select(self.root)
 
-                if node:
-                    new_node = self._expand(node)
-                    self._simulate(new_node)
-                    self._backpropagate(new_node)
-                    self.maybe_persist()
-                    self.log(logger.info, generate_ascii_tree(self.root, new_node))
+            if node:
+                new_node = self._expand(node)
+                self._simulate(new_node)
+                self._backpropagate(new_node)
+                self.maybe_persist()
+                self.log(logger.info, generate_ascii_tree(self.root, new_node))
 
-                else:
-                    self.log(logger.info, "Search complete: no more nodes to expand.")
-                    break
-
-            if not len(self.get_finished_nodes()):
-                self.log(
-                    logger.warning,
-                    f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.",
-                )
             else:
-                self.log(
-                    logger.info,
-                    f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
-                )
+                self.log(logger.info, "Search complete: no more nodes to expand.")
+                break
 
-            return self.get_best_trajectory()
-        finally:
-            # Clean up event handler
-            if hasattr(self.agent, "event_handlers"):
-                self.agent.event_handlers.remove(self._handle_agent_event)
+        if not len(self.get_finished_nodes()):
+            self.log(
+                logger.warning,
+                f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.",
+            )
+        else:
+            self.log(
+                logger.info,
+                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
+            )
+
+        return self.get_best_trajectory(), finish_reason
 
     def _select(self, node: Node) -> Optional[Node]:
         """Select a node for expansion using the UCT algorithm."""
@@ -331,17 +321,17 @@ class SearchTree(AgenticSystem):
 
         return self.discriminator.select(nodes)
 
-    def is_finished(self):
+    def is_finished(self) -> str | None:
         # Check max cost
         total_cost = self.total_usage().completion_cost
         if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
             logger.info(f"Search finished: Reached max cost {self.max_cost}")
-            return True
+            return "max_cost"
 
         # Check max iterations
         if len(self.root.get_all_nodes()) >= self.max_iterations:
             logger.info(f"Search finished: Reached max iterations {self.max_iterations}")
-            return True
+            return "max_iterations"
 
         finished_nodes = self.get_finished_nodes()
         unique_finished_parents = set()
@@ -351,7 +341,7 @@ class SearchTree(AgenticSystem):
         # Check max finished nodes
         if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
             logger.info(f"Search finished: Reached max finished nodes {self.max_finished_nodes}")
-            return True
+            return "max_finished_nodes"
 
         # Check reward threshold
         if self.reward_threshold and any(
@@ -359,15 +349,15 @@ class SearchTree(AgenticSystem):
         ):
             if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
                 logger.info(f"Search finished: Found solution meeting reward threshold {self.reward_threshold}")
-                return True
+                return "reward_threshold"
 
         # Check if there are no more expandable nodes
         expandable_nodes = self.root.get_expandable_descendants()
         if not expandable_nodes:
             logger.info("Search finished: No more expandable nodes")
-            return True
+            return "no_expandable_nodes"
 
-        return False
+        return None
 
     def get_finished_nodes(self) -> List[Node]:
         """Get all finished nodes in the search tree by uniqe parent node."""
@@ -450,8 +440,7 @@ class SearchTree(AgenticSystem):
                 "value_function",
                 "feedback_generator",
                 "discriminator",
-                "persist_path",
-                "event_handlers",
+                "persist_path"
             ]
         }
 

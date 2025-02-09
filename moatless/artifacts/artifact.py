@@ -1,12 +1,15 @@
+import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Literal, Optional, Union, TypeVar, Generic, List, Any, Callable, Type
 
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.completion.schema import MessageContentListBlock
 from moatless.utils.class_loading import DynamicClassLoadingMixin
+from moatless.artifacts.content import ContentStructure
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ class ArtifactListItem(BaseModel):
     type: str
     name: str | None
     created_at: datetime
+    references: List[ArtifactReference]
 
 
 class ArtifactResponse(BaseModel):
@@ -32,7 +36,10 @@ class ArtifactResponse(BaseModel):
     name: Optional[str]
     created_at: datetime
     references: List[ArtifactReference]
+    status: Literal["updated", "persisted", "new", "unchanged"]
+    can_persist: bool = Field(default=False, description="Whether the artifact can be persisted")
     data: Dict[str, Any]
+    content: Optional[ContentStructure] = None
 
 
 class Artifact(BaseModel, ABC):
@@ -41,25 +48,34 @@ class Artifact(BaseModel, ABC):
     name: Optional[str] = Field(default=None, description="Name of the artifact")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="When the artifact was created")
     references: List[ArtifactReference] = Field(default_factory=list, description="Reference to the artifacts")
+    status: Literal["new", "updated", "persisted", "unchanged"] = Field(default="new", description="Status of the artifact")
 
     @abstractmethod
     def to_prompt_message_content(self) -> MessageContentListBlock:
         pass
 
+    @property
+    def can_persist(self) -> bool:
+        """Check if the artifact can be persisted based on its status and handler implementation"""
+        return self.status in ["updated", "new"]
+
     def to_list_item(self) -> ArtifactListItem:
         """Convert artifact to a list item representation"""
-        return ArtifactListItem(id=self.id, type=self.type, name=self.name, created_at=self.created_at)
+        return ArtifactListItem(id=self.id, type=self.type, name=self.name, created_at=self.created_at, references=self.references)
 
     def to_ui_representation(self) -> ArtifactResponse:
         """Convert artifact to a UI-friendly representation with all necessary data for display.
         By default, returns the complete model data except for default fields in the data field."""
         model_data = self.model_dump(exclude={"id", "type", "name", "created_at", "references"})
+
         return ArtifactResponse(
             id=self.id,
             type=self.type,
             name=self.name,
             created_at=self.created_at,
             references=[ref.model_dump() for ref in self.references],
+            status=self.status,
+            can_persist=self.can_persist and self.status in ["updated", "new"],
             data=model_data,
         )
     
@@ -99,8 +115,6 @@ class SearchCriteria(BaseModel):
     operator: Literal["eq", "contains", "gt", "lt", "gte", "lte"] = "eq"
     case_sensitive: bool = False
 
-_handlers_by_type: Dict[str, "ArtifactHandler"] = {}
-
 class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
     """
     Defines how to load, save, update, and delete artifacts of a certain type.
@@ -108,7 +122,8 @@ class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
     """
 
     type: str = Field(description="Type of artifact this handler manages")
-
+    trajectory_dir: Path = Field(description="Path to the trajectory directory")
+    _artifacts: Dict[str, T] = PrivateAttr(default={})
 
     @classmethod
     def get_type(cls) -> str:
@@ -140,17 +155,19 @@ class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
         """
         raise NotImplementedError("Delete is not supported for this artifact type")
     
-    def persist(self, artifact: T) -> T:
+    def persist(self, artifact_id: str) -> None:
         """
         Finalize and save the artifact to its permanent storage (e.g., disk, remote server).
         Returns the updated artifact instance.
         """
         raise NotImplementedError("Persist is not supported for this artifact type")
 
-    @abstractmethod
     def get_all_artifacts(self) -> List[ArtifactListItem]:
         """Get all artifacts managed by this handler as list items"""
-        pass
+        list_items = []
+        for artifact in self._artifacts.values():
+            list_items.append(artifact.to_list_item())
+        return list_items
 
     def search(self, criteria: List[SearchCriteria]) -> List[T]:
         """
@@ -159,39 +176,33 @@ class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
         """
         raise NotImplementedError("Search is not supported for this artifact type")
 
-    @classmethod
-    def get_handler_by_type(cls, type: str) -> Type["ArtifactHandler"]:
-        """
-        Get an ArtifactHandler class by name.
-        
-        Args:
-            type: The name of the handler class
-            
-        Returns:
-            The ArtifactHandler class
-            
-        Raises:
-            ValueError: If the handler is not found
-        """
-        logger.info(f"Getting handler for type {type}")
-        cls._initiate_handlers()
-        
-        if type not in _handlers_by_type:
-            raise ValueError(f"Handler for type {type} not found, available handler types: {_handlers_by_type.keys()}")
-        return _handlers_by_type[type]
+    def _save_artifacts(self) -> None:
+        artifact_dumps = []
+        for artifact in self._artifacts.values():
+            try:
+                artifact_dict = artifact.model_dump()
+                artifact_dumps.append(artifact_dict)
+            except Exception as e:
+                logger.error(f"Error dumping artifact {artifact}: {e}")
+
+        try:        
+            with open(self.get_storage_path(), "w") as file:
+                json.dump(artifact_dumps, file, indent=4)
+        except Exception as e:
+            logger.exception(f"Error saving artifacts {artifact_dumps} to {self.get_storage_path()}: {e}")
+
+    def get_storage_path(self) -> Path:
+        return self.trajectory_dir / f"{self.type}.json"
 
     @classmethod
-    def _initiate_handlers(cls):
-        global _handlers_by_type
-        if _handlers_by_type:
-            return
-
+    def initiate_handlers(cls, trajectory_dir: Path) -> List["ArtifactHandler"]:
         registered_classes = cls._load_classes("moatless.artifacts", ArtifactHandler)
 
         logger.info(f"Registered classes: {registered_classes.keys()}")
-        _handlers_by_type = {}
+        handlers = []
         for name, handler in registered_classes.items():
-            handler = handler()
-            _handlers_by_type[handler.type] = handler
+            handler = handler(trajectory_dir=trajectory_dir)
+            handlers.append(handler)
 
-        logger.info(f"Initialized handlers: {_handlers_by_type.keys()}")
+        logger.debug(f"Initialized handlers: {handlers}")
+        return handlers

@@ -15,7 +15,7 @@ class DynamicClassLoadingMixin:
     @classmethod
     def _load_classes(cls, base_package: str, base_class: Type) -> Dict[str, Type[Any]]:
         """Load all subclasses from the specified package"""
-        logger.info(f"Loading classes for {base_class.__name__} from {base_package}")
+        logger.debug(f"Loading classes for {base_class.__name__} from {base_package}")
 
         registered_classes = {}
 
@@ -37,7 +37,7 @@ class DynamicClassLoadingMixin:
                 parent_dir = os.path.dirname(root_dir)
                 sys.path.insert(0, parent_dir)
                 
-                logger.info(f"Scanning package '{package_name}' in {root_dir}")
+                logger.debug(f"Scanning package '{package_name}' in {root_dir}")
                 registered_classes.update(cls._scan_classes_in_paths([root_dir], package_name, base_class))
                 
             finally:
@@ -45,7 +45,7 @@ class DynamicClassLoadingMixin:
         elif custom_path:
             logger.warning(f"Custom path {custom_path} is not a directory")
 
-        logger.info(f"Registered classes: {registered_classes.keys()}")
+        logger.debug(f"Registered classes: {registered_classes.keys()}")
         return registered_classes
 
     @classmethod
@@ -59,16 +59,16 @@ class DynamicClassLoadingMixin:
             try:
                 module = importlib.import_module(modname)
                 for name, obj in module.__dict__.items():
-                    if isinstance(obj, type):
-                        logger.info(f"{type(obj)} Is subclass: {issubclass(obj, base_class)} abstract: {getattr(obj, '__abstractmethods__', False)}")
                     if (isinstance(obj, type) and 
                         issubclass(obj, base_class) and 
                         obj != base_class and 
                         not getattr(obj, '__abstractmethods__', False)):
                         if name in registered_classes:
-                            logger.warning(f"Duplicate class: {name} from {modname}")
-                        logger.info(f"Loaded {base_class.__name__}: {name} from {modname}")
-                        registered_classes[name] = obj
+                            logger.debug(f"Duplicate class: {name} from {modname}")
+                        else:
+                            logger.debug(f"Loaded {base_class.__name__}: {name} from {modname}")
+                            registered_classes[name] = obj
+                    
             except Exception as e:
                 logger.exception(f"Failed to load from module {modname}")
         return registered_classes

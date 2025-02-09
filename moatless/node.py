@@ -177,6 +177,14 @@ class Node(BaseModel):
 
         return False
 
+    def is_executed(self) -> bool:
+        """Determine if the node is executed"""
+        if not self.parent:
+            # Consider root node as executed
+            return True
+
+        return bool(self.action_steps and self.action_steps[-1].is_executed())
+
     def add_child(self, child_node: "Node"):
         """Add a child node to this node."""
         child_node.parent = self
@@ -326,11 +334,12 @@ class Node(BaseModel):
     def reset(self):
         """Reset the node state to be able to execute it again."""
         self.action_steps = []
-        self.user_message = None
         self.assistant_message = None
         self.visits = 0
         self.value = 0.0
+        self.terminal = False
         self.is_duplicate = False
+        self.error = None
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
         self.children = []

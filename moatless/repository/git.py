@@ -7,7 +7,13 @@ from pydantic import Field
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
-from moatless.utils.repo import maybe_clone, checkout_commit, clone_and_checkout
+from moatless.utils.repo import (
+    maybe_clone, 
+    checkout_commit, 
+    clone_and_checkout,
+    async_clone_and_checkout,
+    maybe_clone_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +49,17 @@ class GitRepository(FileRepository):
             clone_and_checkout(git_repo_url, repo_path, commit)
         else:
             maybe_clone(git_repo_url, repo_path)
+
+        return cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
+
+    @classmethod
+    async def from_repo_async(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
+        logger.info(f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} ")
+
+        if commit:
+            await async_clone_and_checkout(git_repo_url, repo_path, commit)
+        else:
+            await maybe_clone_async(git_repo_url, repo_path)
 
         return cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
 

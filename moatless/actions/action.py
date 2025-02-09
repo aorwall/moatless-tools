@@ -284,12 +284,11 @@ class Action(BaseModel, ABC, DynamicClassLoadingMixin):
     @classmethod
     def get_available_actions(cls) -> List[ActionSchema]:
         """Get all available actions with their schema."""
-        if not cls._registered_classes:
-            cls._load_classes("moatless.actions", Action)
+        cls._initialize_actions_map()
 
         return [
             action_class.get_action_schema() 
-            for name, action_class in cls._registered_classes.items()
+            for action_class in _actions.values()
         ]
 
     @classmethod

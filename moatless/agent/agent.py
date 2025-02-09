@@ -33,6 +33,7 @@ from moatless.agent.events import (
     AgentActionCreated,
     AgentActionExecuted,
 )
+from moatless.events import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +46,7 @@ class ActionAgent(BaseModel):
     _completion_model: BaseCompletionModel | None = PrivateAttr()
     _message_generator: MessageHistoryGenerator | None = PrivateAttr(default_factory=MessageHistoryGenerator)
     _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
-
-    _event_handler: Optional[Callable] = PrivateAttr(default=None)
+    _workspace: Workspace | None = PrivateAttr()
 
     def __init__(
         self,
@@ -67,17 +67,20 @@ class ActionAgent(BaseModel):
             agent_id=agent_id,
             **data,
         )
+        
         self.completion_model = completion_model
 
         if workspace:
             self.workspace = workspace
-        else:
+        elif repository and runtime and code_index and artifact_handlers:
             self.workspace = Workspace(
                 repository=repository,
                 runtime=runtime,
                 code_index=code_index,
                 artifact_handlers=artifact_handlers,
             )
+        else:
+            self.workspace = None
 
     @classmethod
     def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
@@ -137,27 +140,22 @@ class ActionAgent(BaseModel):
         for action in self.actions:
             action.workspace = workspace
 
-    def set_event_handler(self, handler: Callable):
-        """Set the event handler for agent events"""
-        self._event_handler = handler
-
     async def _emit_event(self, event: AgentEvent):
         """Emit a pure agent event"""
-        if self._event_handler:
-            await self._event_handler(event)
+        await event_bus.publish(event)
 
     async def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
         if not self._completion_model:
             raise RuntimeError("Completion model not set")
 
-        if node.action:
-            logger.info(f"Node{node.node_id}: Resetting node")
-            node.reset()
+        if node.is_executed():
+            raise RuntimeError("Node already executed")
 
         node.possible_actions = [action.name for action in self.actions]
 
         try:
+            await self._emit_event(AgentStarted(agent_id=self.agent_id, node_id=node.node_id))
             if self._message_generator:
                 messages = self._message_generator.generate_messages(node)
                 logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
@@ -237,7 +235,6 @@ class ActionAgent(BaseModel):
         try:
             action_step.observation = await action.execute(action_step.action, file_context=node.file_context)
 
-            # Emit action executed event
             await self._emit_event(
                 AgentActionExecuted(
                     agent_id=self.agent_id,
@@ -270,6 +267,12 @@ class ActionAgent(BaseModel):
                     model=self.completion_model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
+            node.error = traceback.format_exc()
+            node.terminal = True
+            raise e
+        
+        except Exception as e:
+            logger.exception(f"Node{node.node_id}: Execution of action {action_step.action.name} failed.")
             node.error = traceback.format_exc()
             node.terminal = True
             raise e
@@ -363,13 +366,6 @@ class ActionAgent(BaseModel):
 
         return prompt
 
-    def set_event_handler(self, handler: Callable):
-        """Set an event handler for the agent."""
-        self._event_handler = handler
-
-    def remove_event_handler(self):
-        """Remove an event handler from the agent."""
-        self._event_handler = None
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
@@ -406,21 +402,6 @@ class ActionAgent(BaseModel):
             if not hasattr(action, "args_schema"):
                 raise ValueError(f"Action {action.__class__.__name__} is missing args_schema attribute")
         return self
-
-    def create_action(self, name: str, **params) -> Action:
-        """Create an action with the given name and parameters."""
-        action = super().create_action(name, **params)
-
-        self._emit_event(
-            AgentActionCreated(
-                agent_id=self.agent_id,
-                node_id=self.current_node.node_id,
-                action_name=name,
-                action_params=params,
-            )
-        )
-
-        return action
 
     def execute_action(self, action: Action) -> Dict:
         """Execute an action and return the observation."""

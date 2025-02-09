@@ -1,10 +1,11 @@
+import { TrajectoryEvent } from "@/lib/types/trajectory";
 import { create } from "zustand";
-import type { Node } from "../types";
 
 interface TrajectoryState {
-  // Only track expansion states by instanceId
+  trajectoryId: string | null;
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
+  events: TrajectoryEvent[];
   selectedItem: {
     instanceId: string;
     nodeId: number;
@@ -18,6 +19,9 @@ interface TrajectoryState {
   toggleItem: (instanceId: string, nodeId: number, itemId: string) => void;
   resetInstance: (instanceId: string) => void;
   setSelectedItem: (item: TrajectoryState["selectedItem"]) => void;
+  setTrajectoryId: (trajectoryId: string) => void;
+  setEvents: (events: TrajectoryEvent[]) => void;
+  addEvent: (event: TrajectoryEvent) => void;
 
   // State getters
   isNodeExpanded: (instanceId: string, nodeId: number) => boolean;
@@ -26,15 +30,16 @@ interface TrajectoryState {
     nodeId: number,
     itemId: string,
   ) => boolean;
+
 }
 
 export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
-  // State
+  trajectoryId: null,
   expandedNodes: {},
   expandedItems: {},
   selectedItem: null,
+  events: [],
 
-  // Actions
   toggleNode: (instanceId, nodeId) =>
     set((state) => {
       const currentSet = state.expandedNodes[instanceId] || new Set();
@@ -90,7 +95,20 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
 
   setSelectedItem: (item) => set({ selectedItem: item }),
 
-  // Getters
+  setTrajectoryId: (trajectoryId: string) => 
+    set((state) => {
+      // If instance is different, reset the state for the new instance
+      if (state.trajectoryId !== trajectoryId) {
+        return {
+          trajectoryId: trajectoryId,
+          expandedNodes: {},
+          expandedItems: {},
+          selectedItem: null,
+        };
+      }
+      return { trajectoryId: trajectoryId };
+    }),
+
   isNodeExpanded: (instanceId, nodeId) => {
     const state = get();
     return state.expandedNodes[instanceId]?.has(nodeId) || false;
@@ -100,4 +118,8 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
     const state = get();
     return state.expandedItems[instanceId]?.[nodeId]?.has(itemId) || false;
   },
+
+  setEvents: (events: TrajectoryEvent[]) => set({ events }),
+
+  addEvent: (event: TrajectoryEvent) => set((state) => ({ events: [...state.events, event] })),
 }));

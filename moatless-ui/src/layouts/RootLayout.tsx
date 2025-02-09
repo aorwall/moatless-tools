@@ -17,14 +17,14 @@ export function RootLayout() {
             </Link>
             <div className="flex items-center space-x-4">
               <Link
-                to="/trajectory"
+                to="/trajectories"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath("/trajectory")
+                  isActivePath("/trajectories")
                     ? "text-primary"
                     : "text-muted-foreground"
                 }`}
               >
-                Trajectory
+                Trajectories
               </Link>
               <Link
                 to="/loop"
@@ -37,14 +37,14 @@ export function RootLayout() {
                 Loop
               </Link>
               <Link
-                to="/validate"
+                to="/swebench/evaluation"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath("/validate")
+                  isActivePath("/swebench/evaluation")
                     ? "text-primary"
                     : "text-muted-foreground"
                 }`}
               >
-                Validate
+                Evaluation
               </Link>
               <Link
                 to="/settings/agents"

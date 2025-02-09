@@ -1,4 +1,5 @@
 from collections import defaultdict
+from pathlib import Path
 from typing import List, Dict, Any
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -24,17 +25,24 @@ class Workspace(BaseModel):
 
     def __init__(
         self,
+        trajectory_dir: Path | None = None,
         artifact_handlers: List[ArtifactHandler] | None = None,
         repository: Repository | None = None,
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
+        legacy_workspace: bool = False,
         **data,
     ):
         super().__init__(**data)
-        if artifact_handlers:
+
+        if not legacy_workspace:
+            if not artifact_handlers and not trajectory_dir:
+                raise ValueError("Either artifact_handlers or trajectory_dir must be provided")
+
+            if not artifact_handlers:
+                artifact_handlers = ArtifactHandler.initiate_handlers(trajectory_dir=trajectory_dir)
+
             self.artifact_handlers = {handler.type: handler for handler in artifact_handlers}
-        else:
-            self.artifact_handlers = {}
 
         self._repository = repository
         self._code_index = code_index
@@ -94,8 +102,14 @@ class Workspace(BaseModel):
         return all_artifacts
 
     def update_artifact(self, artifact: Artifact) -> None:
+        if not artifact.id:
+            raise ValueError("Artifact ID is required to update an artifact")
         handler = self.artifact_handlers[artifact.type]
         handler.update(artifact)
+
+    async def persist_artifact(self, artifact_type: str, artifact_id: str) -> None:
+        handler = self.artifact_handlers[artifact_type]
+        await handler.persist(artifact_id)
 
     def _get_handler(self, artifact_type: str) -> ArtifactHandler:
         return self.artifact_handlers[artifact_type]

@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set, Tuple
+from typing import Optional, List, Dict, Set, Tuple, Awaitable
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -1349,7 +1349,7 @@ class FileContext(BaseModel):
 
         return (passed_count, failure_count, error_count)
 
-    def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
+    async def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
         """
         Runs tests using the runtime environment and groups results by file.
         Preserves all test files in context, even those without results.
@@ -1382,9 +1382,9 @@ class FileContext(BaseModel):
 
         # If specific test files provided, only run those
         if test_files:
-            test_results = self._runtime.run_tests(patch=patch, test_files=test_files)
+            test_results = await self._runtime.run_tests(patch=patch, test_files=test_files)
         else:
-            test_results = self._runtime.run_tests(patch=patch)
+            test_results = await self._runtime.run_tests(patch=patch)
 
         # Group results by file
         results_by_file = {}

@@ -7,7 +7,6 @@ import ErrorBoundary from "@/lib/components/ErrorBoundary";
 import { WebSocketProvider } from "@/lib/providers/WebSocketProvider";
 import { Toaster } from "@/lib/components/ui/sonner";
 
-// Import page components
 import { Home } from "@/pages/home/index";
 import { Trajectory } from "@/pages/trajectory";
 import { ModelsLayout } from "@/pages/settings/models/layout";
@@ -17,9 +16,14 @@ import { AgentsLayout } from "@/pages/settings/agents/layout";
 import { AgentsPage } from "@/pages/settings/agents";
 import { AgentDetailPage } from "@/pages/settings/agents/[id]";
 import { ValidatePage } from "@/pages/validate";
-import { RunPage } from "@/pages/runs/[id]";
+import { TrajectoryPage } from "@/pages/trajectories/[id]/index";
 import { NewAgentPage } from "@/pages/settings/agents/new";
 import { LoopPage } from "@/pages/loop";
+import { TrajectoriesPage } from "@/pages/trajectories";
+import EvaluationPage from "@/pages/swebench/evaluation";
+import { EvaluationsPage } from "@/pages/swebench/evaluation";
+import { CreateEvaluationPage } from "@/pages/swebench/evaluation/create";
+import { EvaluationDetailsPage } from "@/pages/swebench/evaluation/[id]";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,7 +60,15 @@ function App() {
                   </Route>
                 </Route>
 
-                <Route path="/runs/:id" element={<RunPage />} />
+                <Route path="/trajectories" element={<TrajectoriesPage />} />
+                <Route path="/trajectories/:trajectoryId" element={<TrajectoryPage />} />
+                <Route path="/swebench">
+                  <Route path="evaluation">
+                    <Route index element={<EvaluationsPage />} />
+                    <Route path="create" element={<CreateEvaluationPage />} />
+                    <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
+                  </Route>
+                </Route>
               </Route>
             </Routes>
           </BrowserRouter>

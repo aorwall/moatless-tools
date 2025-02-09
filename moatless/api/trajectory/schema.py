@@ -133,6 +133,7 @@ class NodeDTO(BaseModel):
     """Node information in the tree."""
 
     nodeId: int
+    executed: bool = Field(default=False, description="Whether this node has been executed")
     userMessage: Optional[str] = None
     assistantMessage: Optional[str] = None
     actionCompletion: Optional[CompletionDTO] = None

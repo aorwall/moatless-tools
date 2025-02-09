@@ -1,7 +1,7 @@
 from typing import List, Dict, Any, Literal
 
 from moatless.actions.schema import Observation
-from .schema import TimelineItemDTO, TimelineItemType
+from moatless.api.trajectory.schema import TimelineItemDTO, TimelineItemType
 from moatless.node import Node, ActionStep
 
 def create_user_message_item(node: Node) -> TimelineItemDTO | None:
@@ -29,7 +29,7 @@ def create_user_artifact_items(node: Node) -> List[TimelineItemDTO]:
 
 def create_assistant_artifact_items(observation: Observation) -> List[TimelineItemDTO]:
     items: List[TimelineItemDTO] = []
-    if observation.artifact_changes:
+    if observation and observation.artifact_changes:
         for artifact in observation.artifact_changes:
             if artifact.actor == "assistant":
                 items.append(TimelineItemDTO(
@@ -80,7 +80,7 @@ def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
             label=step.action.name,
             type=TimelineItemType.ACTION,
             content={
-                **step.action.model_dump(),
+                **step.action.model_dump(exclude={"thoughts"}, exclude_unset=True, exclude_none=True),
                 "errors": step.observation.properties.get("errors", []) if step.observation else [],
                 "warnings": step.observation.properties.get("warnings", []) if step.observation else []
             }
@@ -109,7 +109,7 @@ def create_error_item(node: Node) -> TimelineItemDTO | None:
 
 def create_workspace_item(node: Node) -> TimelineItemDTO | None:
     """Create timeline item for workspace."""
-    if node.file_context:
+    if node.file_context and node.file_context.files:
         return TimelineItemDTO(
             label="Workspace",
             type=TimelineItemType.WORKSPACE,
@@ -137,34 +137,27 @@ def generate_timeline_items(node: Node) -> List[TimelineItemDTO]:
         if completion_item := create_completion_item(node.completions["build_action"]):
             items.append(completion_item)
     
-    # Process each action step
     for step in node.action_steps:
-        # Add thoughts if present
         if thoughts := getattr(step.action, "thoughts", None):
             if thought_item := create_thought_item(thoughts):
                 items.append(thought_item)
         
-        # Add action
         if action_item := create_action_item(step):
             items.append(action_item)
         
-        # Add step completion if present
         if completion_item := create_completion_item(step.completion, "Action Completion"):
             items.append(completion_item)
-        
-        # Add observation if present
-        if observation_item := create_observation_item(step):
-            items.append(observation_item)
 
         if assistant_artifact_items := create_assistant_artifact_items(step.observation):
             items.extend(assistant_artifact_items)
-    
-    # Add error or workspace item
-    if node.error:
-        if error_item := create_error_item(node):
-            items.append(error_item)
-    elif node.file_context:
-        if workspace_item := create_workspace_item(node):
-            items.append(workspace_item)
-    
+            
+        if observation_item := create_observation_item(step):
+            items.append(observation_item)
+
+    if error_item := create_error_item(node):
+        items.append(error_item)
+
+    if workspace_item := create_workspace_item(node):
+        items.append(workspace_item)
+
     return items

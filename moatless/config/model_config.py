@@ -189,7 +189,7 @@ class ModelConfigManager:
         if isinstance(config.get("message_history_type"), str):
             config["message_history_type"] = MessageHistoryType(config["message_history_type"])
 
-        logger.info(f"Creating completion model for {model_id} with config: {config}")
+        logger.debug(f"Creating completion model for {model_id} with config: {config}")
 
         return BaseCompletionModel.create(**config)
 

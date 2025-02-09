@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, Union
 import uuid
 import traceback
 from pathlib import Path
@@ -18,11 +18,31 @@ from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.index.code_index import CodeIndex
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 from moatless.config.agent_config import get_agent
+from moatless.config.model_config import create_completion_model
 from moatless.events import event_bus
+from moatless.context_data import current_trajectory_id
 
 logger = logging.getLogger(__name__)
+
+
+class FlowStartedEvent(BaseEvent):
+    event_type: str = "flow_started"
+
+class FlowCompletedEvent(BaseEvent):
+    event_type: str = "flow_completed"
+    finish_reason: str | None = None
+
+class FlowErrorEvent(BaseEvent):
+    event_type: str = "flow_error"
+    error: str
+
+class NodeExpandedEvent(BaseEvent):
+    event_type: str = "node_expanded"
+    parent_node_id: int
+    child_node_id: int
 
 
 class RunAttempt(BaseModel):
@@ -73,6 +93,13 @@ class SystemStatus(BaseModel):
             attempt.error = error
             attempt.error_trace = error_trace
 
+    @classmethod
+    def from_trajectory_id(cls, trajectory_id: str) -> "SystemStatus":
+        status_path = get_moatless_trajectory_dir(trajectory_id) / 'status.json'
+        if not status_path.exists():
+            raise FileNotFoundError(f"Status file not found for trajectory {trajectory_id}")
+        return SystemStatus.model_validate_json(status_path.read_text())
+
 
 class AgenticSystem(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -86,7 +113,7 @@ class AgenticSystem(BaseModel, ABC):
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
 
-    persist_dir: Optional[str] = Field(None, description="Directory to persist system state")
+    persist_dir: Optional[Path] = Field(None, description="Directory to persist system state")
     
     _status: SystemStatus = PrivateAttr(default_factory=SystemStatus)
     _events_file: Optional[Any] = PrivateAttr(default=None)
@@ -107,7 +134,7 @@ class AgenticSystem(BaseModel, ABC):
         workspace: Workspace | None = None,
         metadata: Optional[Dict[str, Any]] = None,
         persist_path: Optional[str] = None,
-        persist_dir: Optional[str] = None,
+        persist_dir: Union[str, Path] | None = None,
         max_iterations: int = 10,
         max_cost: Optional[float] = None,
         **kwargs,
@@ -139,6 +166,12 @@ class AgenticSystem(BaseModel, ABC):
                 file_context=file_context,
             )
 
+        if isinstance(persist_dir, str):
+            persist_dir = Path(persist_dir)
+
+        if not persist_dir:
+            persist_dir = get_moatless_trajectory_dir(run_id)
+
         return cls(
             run_id=run_id,
             root=root,
@@ -151,40 +184,43 @@ class AgenticSystem(BaseModel, ABC):
             **kwargs,
         )
 
-    async def run(self) -> Node:
+    async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
         try:
+            current_trajectory_id.set(self.run_id)
             self._initialize_run_state()
-            self.agent.set_event_handler(self._handle_agent_event)
-            result = await self._run()
+            await event_bus.publish(FlowStartedEvent())
+            result, finish_reason = await self._run(message)
             
             # Complete attempt successfully
             self._status.complete_current_attempt("completed")
             self._status.status = "completed"
             self._status.finished_at = datetime.now(timezone.utc)
+            await event_bus.publish(FlowCompletedEvent(finish_reason=finish_reason))
             return result
         except Exception as e:
             # Complete attempt with error
+            logger.exception(f"Error running flow {self.run_id}")
             error_trace = traceback.format_exc()
             self._status.complete_current_attempt("error", str(e), error_trace)
             self._status.status = "error"
             self._status.error = str(e)
             self._status.error_trace = error_trace
             self._status.finished_at = datetime.now(timezone.utc)
+            await event_bus.publish(FlowErrorEvent(error=str(e)))
             raise
         finally:
             self._save_status()
             if self._events_file:
                 self._events_file.close()
                 self._events_file = None
-            self.agent.remove_event_handler()
 
     @abstractmethod
-    async def _run(self) -> Node:
+    async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
         raise NotImplementedError("Subclass must implement _run method")
 
-    async def retry(self, node_id: int) -> Node:
-        """Retry execution from a specific node.
+    async def reset_node(self, node_id: int) -> Node:
+        """Reset a specific node.
         
         Args:
             node_id (int): ID of the node to retry from
@@ -198,16 +234,16 @@ class AgenticSystem(BaseModel, ABC):
         node = self.get_node_by_id(node_id)
         if not node:
             raise ValueError(f"Node with ID {node_id} not found")
+        
+        if not node.parent:
+            raise ValueError(f"Node with ID {node_id} is the root node and cannot be reset")
 
         node.reset()
-
-        return await self.run()
 
     async def emit_event(self, event: BaseEvent):
         """Emit an event."""
         logger.info(f"Emit event {event.event_type}")
-        self._save_event(self.run_id, event)
-        await event_bus.publish(self.run_id, event)
+        await event_bus.publish(event)
         
     async def _handle_agent_event(self, event: BaseEvent):
         """Handle agent events and propagate them to system event handlers"""
@@ -218,20 +254,21 @@ class AgenticSystem(BaseModel, ABC):
         if not self.persist_dir:            
             return
 
-        path = Path(self.persist_dir)
-        path.mkdir(parents=True, exist_ok=True)
+        if not self.persist_dir.exists():
+            self.persist_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize or restore status
-        status_path = path.joinpath('status.json')
+        status_path = self.persist_dir / 'status.json'
         if status_path.exists():
             try:
                 existing_status = SystemStatus.model_validate_json(status_path.read_text())
                 
-            
                 # Resume previous run
                 self._status = existing_status
                 self._status.status = "running"
                 self._status.restart_count += 1
+                self._status.error = None
+                self._status.error_trace = None
                 self._status.last_restart = datetime.now(timezone.utc)
                 
                 # Mark any incomplete attempts as error
@@ -254,56 +291,19 @@ class AgenticSystem(BaseModel, ABC):
 
         # Start new attempt
         attempt = self._status.start_new_attempt()
-        
-        # Setup event logging
-        events_path = path.joinpath('events.jsonl')
-        self._events_file = open(events_path, 'a', encoding='utf-8')
-        
-        # Log restart/resume event
-        if self._status.restart_count > 0:
-            restart_event = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'run_id': self.run_id,
-                'event_type': 'system_restarted',
-                'data': {
-                    'restart_count': self._status.restart_count,
-                    'previous_start': self._status.started_at.isoformat(),
-                    'metadata': self.metadata,
-                    'run_history': [attempt.model_dump() for attempt in self._status.run_history],
-                    'resume_type': 'fresh' if self._status.status in ["completed", "error"] else 'resume'
-                }
-            }
-            self._events_file.write(json.dumps(restart_event) + '\n')
-            self._events_file.flush()
+
+        # TODO: Log restart/resume event
+        #if self._status.restart_count > 0:
+        #    event_bus.publish(self.run_id, BaseEvent(event_type="flow_restarted"))
 
         self._save_status()
 
     def _save_status(self):
         """Save current status to status.json"""
         if self.persist_dir:
-            status_path = Path(self.persist_dir) / 'status.json'
+            status_path = self.persist_dir / 'status.json'
             self._status.metadata = self.metadata
             status_path.write_text(self._status.model_dump_json(indent=2))
-
-    def _save_event(self, run_id: str, event: BaseEvent):
-        """Handle and log system events"""
-        if not self.persist_dir:
-            return
-
-        event_data = None
-        try:
-            event_data = {
-                'timestamp': datetime.now(timezone.utc).isoformat(),
-                'run_id': run_id,
-                **event.model_dump(),
-            }
-            self._events_file.write(json.dumps(event_data) + '\n')
-            self._events_file.flush()
-        except Exception as e:
-            if event_data:
-                logger.exception(f"Error handling event: {event_data}")
-            else:
-                logger.exception(f"Error handling event: {event}")
 
     def get_node_by_id(self, node_id: int) -> Node | None:
         """Get a node by its ID."""
@@ -318,19 +318,27 @@ class AgenticSystem(BaseModel, ABC):
 
     def maybe_persist(self):
         """Persist the system state if a persist path is set."""
-        if self.persist_path:
-            self.persist(self.persist_path)
-        elif self.persist_dir:
-            self.persist(Path(self.persist_dir) / "trajectory.json")
+        if self.persist_dir:
+            self.persist()
 
-    def persist(self, file_path: str):
+    def persist(self):
         """Persist the system state to a file."""
-        tree_data = self.model_dump(exclude_none=True)
+
+        trajectory_data = {
+            "nodes": self.root.dump_as_list(),
+        }
+
+        self._save_file(self.persist_dir / "trajectory.json", trajectory_data)
+
+        flow_settings = self.model_dump(exclude_none=True)
+        self._save_file(self.persist_dir / "settings.json", flow_settings)
+    
+    def _save_file(self, file_path: str, data: Dict[str, Any]):
         with open(file_path, "w") as f:
             try:
-                json.dump(tree_data, f, indent=2)
+                json.dump(data, f, indent=2)
             except Exception as e:
-                logger.exception(f"Error saving system to {file_path}: {tree_data}")
+                logger.exception(f"Error saving system to {file_path}: {data}")
                 raise e
 
     def _generate_unique_id(self) -> int:
@@ -405,15 +413,52 @@ class AgenticSystem(BaseModel, ABC):
             data = json.load(f)
 
         return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
+    
+    @classmethod
+    def from_trajectory_id(cls, trajectory_id: str, agent_id: str | None = None, model_id: str | None = None) -> "AgenticSystem":
+        trajectory_dir = get_moatless_trajectory_dir(trajectory_id)
+        workspace = Workspace(trajectory_dir=trajectory_dir)
+        
+        if not agent_id or not model_id:
+            status = SystemStatus.from_trajectory_id(trajectory_id)
+            if not agent_id:
+                agent_id = status.metadata.get("agent_id")
+            if not model_id:
+                model_id = status.metadata.get("model_id")
+        
+        if not model_id:
+            raise ValueError("Model ID is required to resume a trajectory")
+        
+        if not agent_id:
+            raise ValueError("Agent ID is required to resume a trajectory")
+        
+        agent = get_agent(agent_id=agent_id)
+        completion_model = create_completion_model(model_id)
+        agent.completion_model = completion_model
+        agent.workspace = workspace
+
+        root_node = Node.from_file(
+            trajectory_dir / 'trajectory.json',
+        )
+
+        flow = cls(
+            run_id=trajectory_id,
+            agent=agent,
+            root=root_node,
+            metadata={
+                "agent_id": agent_id,
+                "model_id": model_id,
+            },
+            persist_dir=trajectory_dir, 
+        )
+
+        return flow
+    
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the system."""
-        data = super().model_dump(exclude={"event_handlers", "agent", "root"})
-
-        data.pop("persist_path", None)
+        data = super().model_dump(exclude={"agent", "root", "persist_dir", "persist_path"})
         data["agent"] = self.agent.model_dump(**kwargs)
-        data["nodes"] = self.root.dump_as_list(**kwargs)
-
         return data
 
     def get_status(self) -> SystemStatus:

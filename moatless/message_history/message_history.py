@@ -37,8 +37,6 @@ class MessageHistoryGenerator(BaseModel):
         for i, previous_node in enumerate(previous_nodes):
             # Handle user message
             message_content = []
-            if previous_node.user_message:
-                message_content.append(ChatCompletionTextObject(type="text", text=previous_node.user_message))
 
             if previous_node.artifact_changes:
                 for change in previous_node.artifact_changes:
@@ -51,6 +49,9 @@ class MessageHistoryGenerator(BaseModel):
                             )
                         )
                         message_content.append(artifact.to_prompt_message_content())
+
+            if previous_node.user_message:
+                message_content.append(ChatCompletionTextObject(type="text", text=previous_node.user_message))
 
             if message_content:
                 messages.append(ChatCompletionUserMessage(role="user", content=message_content))
@@ -85,29 +86,33 @@ class MessageHistoryGenerator(BaseModel):
 
                 message_content = []
 
-                message_content.append(ChatCompletionTextObject(type="text", text=action_step.observation.message))
+                if action_step.observation:
+                    if action_step.observation.message:
+                        message_content.append(ChatCompletionTextObject(type="text", text=action_step.observation.message))
 
-                if action_step.observation.artifact_changes:
-                    for change in action_step.observation.artifact_changes:
-                        artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
-                        if artifact:
-                            message_content.append(
-                            ChatCompletionTextObject(
-                                    type="text",
-                                    text=f"The {artifact.type} {artifact.id} was {change.change_type}",
+                    if action_step.observation.artifact_changes:
+                        for change in action_step.observation.artifact_changes:
+                            artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
+                            if artifact:
+                                message_content.append(
+                                    ChatCompletionTextObject(
+                                        type="text",
+                                        text=f"The {artifact.type} {artifact.id} was {change.change_type}",
+                                    )
                                 )
-                            )
-                            message_content.append(artifact.to_prompt_message_content())
+                                message_content.append(artifact.to_prompt_message_content())
 
-                tool_responses.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": message_content,
-                    }
-                )
+                    tool_responses.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": message_content,
+                        }
+                    )
 
-                tokens += count_tokens(action_step.observation.message)
+                    # TODO: Count tokens for the artifact changes
+
+                    tokens += count_tokens(action_step.observation.message)
 
             # TODO: Truncate on self.max_tokens!
 

@@ -29,10 +29,10 @@ class TestResult(BaseModel):
 
 class RuntimeEnvironment(ABC):
     @abstractmethod
-    def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
+    async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
         pass
 
 
 class NoEnvironment(RuntimeEnvironment):
-    def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
+    async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
         return []

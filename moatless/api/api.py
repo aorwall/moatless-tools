@@ -25,10 +25,10 @@ from pathlib import Path
 from moatless.api.models.api import router as model_router
 from moatless.api.agents.api import router as agent_router
 from moatless.api.swebench.api import router as swebench_router
-from moatless.api.runs.api import router as run_router
-from moatless.events import event_bus
+from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.loop.api import router as loop_router
 from moatless.api.artifacts.api import router as artifact_router
+from moatless.events import BaseEvent, event_bus
 
 
 logger = logging.getLogger(__name__)
@@ -58,9 +58,10 @@ class ConnectionManager:
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected clients"""
         if not self.active_connections:
+            logger.info("No active connections, skipping broadcast")
             return
             
-        logger.info(f"Broadcasting message to {len(self.active_connections)} clients")
+        logger.debug(f"Broadcasting message to {len(self.active_connections)} clients")
         
         connections = self.active_connections.copy()
         disconnected = set()
@@ -78,27 +79,37 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def handle_system_event(run_id: str, event: dict):
+async def handle_system_event(trajectory_id: str, event: BaseEvent):
     """Handle system events and broadcast them via WebSocket"""
     message = {
-        'run_id': run_id,
-        **event.model_dump(exclude_none=True)
+        'trajectory_id': trajectory_id,
+        'event_type': event.event_type,
+        'data': event.model_dump(exclude_none=True, exclude={'event_type'})
     }
+    logger.debug(f"Broadcasting event: {message}")
     await manager.broadcast_message(message)
-
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     api = FastAPI(title="Moatless API")
+    
+    # Update CORS middleware configuration
+    origins = [
+        "http://localhost:5173",  # Development frontend
+        "http://localhost:8000",  # Development API
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
+    ]
+    
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=origins,  # Replace "*" with specific origins
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        max_age=3600,
+        expose_headers=["*"],  # Add this to expose headers to the client
     )
 
     router = FastAPI(title="Moatless API")
@@ -110,9 +121,16 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             
             while True:
                 try:
-                    # Wait for messages but don't do anything with them
-                    # This keeps the connection alive
-                    await websocket.receive_text()
+                    # Receive and process messages
+                    message = await websocket.receive_text()
+                    data = json.loads(message)
+                    
+                    # Handle ping message
+                    if data.get('type') == 'ping':
+                        await websocket.send_json({'type': 'pong'})
+                    else:
+                        logger.info(f"Received message: {data}")
+                    
                 except WebSocketDisconnect:
                     break
                 except Exception as e:
@@ -172,7 +190,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     router.include_router(model_router, prefix="/models", tags=["models"])
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
     router.include_router(swebench_router, prefix="/swebench", tags=["swebench"])
-    router.include_router(run_router, prefix="/runs", tags=["runs"])
+    router.include_router(trajectory_router, prefix="/trajectories", tags=["trajectories"])
     router.include_router(loop_router, prefix="/loop", tags=["loop"])
     router.include_router(artifact_router, prefix="/artifacts", tags=["artifacts"])
 
@@ -221,8 +239,6 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     except ImportError:
         logger.info("API extras not installed, UI will not be served")
 
-    logger.info("Subscribing to system events")
-    # Subscribe to system events
     event_bus.subscribe(handle_system_event)
 
     return api

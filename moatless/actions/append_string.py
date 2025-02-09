@@ -119,7 +119,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
             properties={"diff": diff, "success": True},
         )
 
-        self.run_tests(
+        await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
