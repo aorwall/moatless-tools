@@ -3,7 +3,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, Optional
 
-from llama_index.core.bridge.pydantic import Field, PrivateAttr
+from llama_index.core.bridge.pydantic import Field
 from llama_index.core.callbacks import CallbackManager
 from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSplitter
 from llama_index.core.node_parser.node_utils import logger

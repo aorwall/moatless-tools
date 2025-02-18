@@ -2,15 +2,9 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
-from pydantic import PrivateAttr
-
 from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
-from moatless.index import CodeIndex
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.utils.file import is_test
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

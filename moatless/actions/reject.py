@@ -5,7 +5,6 @@ from pydantic import Field, ConfigDict
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 
 class RejectArgs(ActionArguments):

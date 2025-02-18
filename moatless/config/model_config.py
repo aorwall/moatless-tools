@@ -2,14 +2,13 @@
 
 import json
 import logging
-import os
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.schema import MessageHistoryType
-
+from moatless.utils.moatless import get_moatless_dir
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class ModelConfigManager:
         Uses MOATLESS_DIR environment variable if set, otherwise uses current working directory.
         The overrides file will be stored in the 'config' subdirectory.
         """
-        base_dir = os.getenv("MOATLESS_DIR")
+        base_dir = get_moatless_dir()
         if base_dir:
             base_path = Path(base_dir)
         else:

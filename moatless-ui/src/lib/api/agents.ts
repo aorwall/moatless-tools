@@ -2,6 +2,7 @@ import type {
   AgentConfig,
   AgentData,
   ActionsResponse,
+  ActionSchema,
 } from "@/lib/types/agent";
 import { apiRequest } from "./config";
 
@@ -14,7 +15,7 @@ export const agentsApi = {
       body: JSON.stringify(agent),
     }),
   getAvailableActions: () =>
-    apiRequest<ActionsResponse>("/agents/available-actions"),
+    apiRequest<ActionSchema[]>("/settings/components/actions"),
   deleteAgent: (id: string) =>
     apiRequest<void>(`/agents/${id}`, {
       method: "DELETE",

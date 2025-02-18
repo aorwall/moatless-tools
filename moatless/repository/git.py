@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Any, Dict, Optional, List
+import asyncio
 
 from pydantic import Field
 
@@ -28,18 +29,23 @@ class GitRepository(FileRepository):
 
     def __init__(self, **data):
         super().__init__(**data)
-        from git import Repo
+        
+        try:
+            from git import Repo
+            self._repo = Repo(path=self.repo_path)
 
-        self._repo = Repo(path=self.repo_path)
+            if not self._repo.heads:
+                raise ValueError(f"Repo at {self.repo_path} has no branches")
 
-        if not self._repo.heads:
-            logger.error(f"Repo at {self.repo_path} has no branches")
+            if data.get("commit"):
+                self._repo.git.checkout(data["commit"])
 
-        if data.get("commit"):
-            checkout_commit(self.repo_path, data["commit"])
-
-        self.current_commit = self._repo.head.commit.hexsha
-        self.initial_commit = self.current_commit
+            self.current_commit = self._repo.head.commit.hexsha
+            self.initial_commit = self.current_commit
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize GitRepository: {e}")
+            raise
 
     @classmethod
     def from_repo(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
@@ -54,14 +60,54 @@ class GitRepository(FileRepository):
 
     @classmethod
     async def from_repo_async(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
-        logger.info(f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} ")
+        """Creates a GitRepository instance asynchronously with better error handling and cleanup."""
+        logger.info(f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path}")
 
-        if commit:
-            await async_clone_and_checkout(git_repo_url, repo_path, commit)
-        else:
-            await maybe_clone_async(git_repo_url, repo_path)
+        # First check if repo already exists and is valid
+        if os.path.exists(repo_path):
+            try:
+                repo = cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
+                if commit:
+                    # Verify the commit exists
+                    repo._repo.git.cat_file('-e', commit)
+                logger.info(f"Using existing repository at {repo_path}")
+                return repo
+            except Exception as e:
+                logger.warning(f"Existing repo at {repo_path} is invalid, removing: {e}")
+                import shutil
+                shutil.rmtree(repo_path)
 
-        return cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
+        try:
+            # Ensure parent directory exists
+            os.makedirs(os.path.dirname(repo_path), exist_ok=True)
+
+            if commit:
+                await async_clone_and_checkout(git_repo_url, repo_path, commit)
+            else:
+                await maybe_clone_async(git_repo_url, repo_path)
+
+            # Create and verify repository instance
+            repo = cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
+            
+            # Double check the commit is available
+            if commit:
+                try:
+                    repo._repo.git.cat_file('-e', commit)
+                except Exception as e:
+                    logger.error(f"Commit {commit} not found after clone: {e}")
+                    if os.path.exists(repo_path):
+                        shutil.rmtree(repo_path)
+                    raise
+                
+            return repo
+
+        except Exception as e:
+            logger.error(f"Failed to create GitRepository: {e}")
+            # Clean up failed repo
+            if os.path.exists(repo_path):
+                import shutil
+                shutil.rmtree(repo_path)
+            raise
 
     @classmethod
     def from_dict(cls, data: dict):

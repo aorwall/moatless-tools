@@ -3,13 +3,14 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Literal, Optional, Union, TypeVar, Generic, List, Any, Callable, Type
+from typing import Dict, Literal, Optional, Type, TypeVar, Generic, List, Any
 
 from pydantic import BaseModel, Field, PrivateAttr
 
-from moatless.completion.schema import MessageContentListBlock
-from moatless.utils.class_loading import DynamicClassLoadingMixin
 from moatless.artifacts.content import ContentStructure
+from moatless.completion.schema import MessageContentListBlock
+from moatless.component import MoatlessComponent
+from moatless.utils.class_loading import DynamicClassLoadingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ class SearchCriteria(BaseModel):
     operator: Literal["eq", "contains", "gt", "lt", "gte", "lte"] = "eq"
     case_sensitive: bool = False
 
-class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
+class ArtifactHandler(MoatlessComponent, Generic[T]):
     """
     Defines how to load, save, update, and delete artifacts of a certain type.
     The type parameter T specifies which Artifact subclass this handler manages.
@@ -195,14 +196,15 @@ class ArtifactHandler(ABC, BaseModel, Generic[T], DynamicClassLoadingMixin):
         return self.trajectory_dir / f"{self.type}.json"
 
     @classmethod
-    def initiate_handlers(cls, trajectory_dir: Path) -> List["ArtifactHandler"]:
-        registered_classes = cls._load_classes("moatless.artifacts", ArtifactHandler)
+    def get_component_type(cls) -> str:
+        return "artifact_handler"
 
-        logger.info(f"Registered classes: {registered_classes.keys()}")
-        handlers = []
-        for name, handler in registered_classes.items():
-            handler = handler(trajectory_dir=trajectory_dir)
-            handlers.append(handler)
+    @classmethod
+    def get_base_class(cls) -> Type:
+        return ArtifactHandler
 
-        logger.debug(f"Initialized handlers: {handlers}")
-        return handlers
+    @classmethod
+    def get_name(cls) -> str:
+        return cls.type
+
+    

@@ -1,10 +1,9 @@
 import logging
 from typing import Optional, Tuple
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from moatless.actions.action import CompletionModelMixin
-from moatless.completion import BaseCompletionModel
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,

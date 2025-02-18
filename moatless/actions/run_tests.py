@@ -13,7 +13,6 @@ from moatless.actions.schema import (
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -159,16 +158,6 @@ class RunTests(Action):
                 description="The action is counterproductive, demonstrating misunderstanding or causing setbacks, test failures are severe and could have been anticipated.",
             ),
         ]
-
-    @classmethod
-    def model_validate(cls, obj: Any) -> "RunTests":
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            repository = obj.pop("repository")
-            code_index = obj.pop("code_index")
-            runtime = obj.pop("runtime")
-            return cls(code_index=code_index, repository=repository, runtime=runtime, **obj)
-        return super().model_validate(obj)
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:

@@ -1,7 +1,9 @@
 """API endpoints for model configuration management."""
 
 import logging
+
 from fastapi import APIRouter, HTTPException
+
 from moatless.config.model_config import (
     get_model_config,
     get_all_configs,

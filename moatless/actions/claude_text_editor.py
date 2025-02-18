@@ -4,7 +4,7 @@ from typing import Literal, Optional, List
 
 from pydantic import Field, PrivateAttr, field_validator, ConfigDict, model_validator
 
-from moatless.actions import RunTests, CreateFile, ViewCode
+from moatless.actions import RunTests, CreateFile
 from moatless.actions.action import Action
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
@@ -12,13 +12,11 @@ from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCodeArgs, CodeSpan
-from moatless.completion import BaseCompletionModel
 from moatless.completion.schema import (
     ChatCompletionToolParam,
     ChatCompletionToolParamFunctionChunk,
 )
 from moatless.file_context import FileContext
-from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace

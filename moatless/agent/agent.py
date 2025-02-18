@@ -2,19 +2,26 @@ import importlib
 import json
 import logging
 import traceback
-import uuid
-from typing import List, Type, Dict, Any, Optional, Callable
+from typing import List, Type, Dict, Any
 
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
+from moatless.actions.action import CompletionModelMixin
 from moatless.actions.schema import (
     ActionArguments,
+)
+from moatless.agent.events import (
+    AgentEvent,
+    AgentStarted,
+    AgentActionCreated,
+    AgentActionExecuted,
 )
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.model import Completion
+from moatless.events import event_bus
 from moatless.exceptions import (
     CompletionError,
     RejectError,
@@ -25,15 +32,7 @@ from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
 from moatless.repository.repository import Repository
-from moatless.actions.action import CompletionModelMixin
 from moatless.workspace import Workspace
-from moatless.agent.events import (
-    AgentEvent,
-    AgentStarted,
-    AgentActionCreated,
-    AgentActionExecuted,
-)
-from moatless.events import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -380,6 +379,8 @@ class ActionAgent(BaseModel):
         if isinstance(obj, dict):
             obj = obj.copy()
             agent_class_path = obj.pop("agent_class", None)
+
+            logger.info(f"Validating agent with actions: {obj.get('actions', [])}")
 
             obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
             if agent_class_path:

@@ -12,7 +12,6 @@ from moatless.actions.schema import (
     RewardScaleEntry,
 )
 from moatless.codeblocks import CodeBlockType
-from moatless.completion import BaseCompletionModel
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace

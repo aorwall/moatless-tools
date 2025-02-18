@@ -1,27 +1,22 @@
-from abc import ABC, abstractmethod
+import base64
 import base64
 import io
 import json
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Optional, Tuple, Dict, Any
 
-from PIL import Image, ImageEnhance
-from moatless.utils.moatless import get_moatless_dir
 import pymupdf as fitz
-
-from dataclasses import dataclass
-
+from PIL import Image, ImageEnhance
 from pydantic import Field, PrivateAttr
 
-from moatless.artifacts.artifact import Artifact, ArtifactHandler, ArtifactListItem, ArtifactResponse
+from moatless.artifacts.artifact import Artifact, ArtifactHandler, ArtifactResponse
 from moatless.completion.schema import (
     ChatCompletionImageUrlObject,
     ChatCompletionTextObject,
     MessageContentListBlock,
 )
-
 
 logger = logging.getLogger(__name__)
 

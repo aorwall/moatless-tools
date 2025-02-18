@@ -13,11 +13,7 @@ from moatless.actions.schema import (
     FewShotExample,
 )
 from moatless.file_context import FileContext
-from moatless.index.code_index import CodeIndex
 from moatless.repository.file import do_diff
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +265,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 if new_str:
                     new_str_occurrences = file_content.count(new_str)
                     if new_str_occurrences > 0:
-                        logger.info(f"Returning observation with message: {message}")
+                        logger.info(f"Found {new_str_occurrences} occurrences of new_str in {path}")
                         return Observation(
                             message=f"New string '{new_str}' already exists in {path}. No changes were made.",
                             properties={"fail_reason": "string_already_exists"},

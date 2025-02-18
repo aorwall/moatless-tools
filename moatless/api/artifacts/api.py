@@ -1,9 +1,10 @@
 import logging
-from typing import Dict, List
 import uuid
-from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
+from typing import List
+
 from fastapi import APIRouter, HTTPException
-from moatless.artifacts.artifact import ArtifactHandler, ArtifactListItem, ArtifactResponse
+
+from moatless.artifacts.artifact import ArtifactListItem, ArtifactResponse
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 
@@ -20,6 +21,8 @@ logger = logging.getLogger(__name__)
 async def connect_artifact(
     type: str
 ):
+    from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
+
     fortnox_auth = FortnoxAuth()
 
     state = str(uuid.uuid4())
@@ -33,6 +36,8 @@ async def fortnox_callback(
     state: str,
     type: str
 ):
+    from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
+
     fortnox_auth = FortnoxAuth()
 
     try:

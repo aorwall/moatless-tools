@@ -1,28 +1,18 @@
 import json
 import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, Callable, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import ConfigDict
 
-from moatless.agent.agent import ActionAgent
-from moatless.agent.code_agent import CodingAgent
-from moatless.completion.model import Usage
-from moatless.exceptions import RejectError, RuntimeError
-from moatless.file_context import FileContext
-from moatless.index.code_index import CodeIndex
-from moatless.node import Node, generate_ascii_tree
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.workspace import Workspace
-from moatless.completion.base import BaseCompletionModel
-from moatless.agentic_system import AgenticSystem, FlowErrorEvent, NodeExpandedEvent
 from moatless.context_data import current_node_id
+from moatless.exceptions import RejectError, RuntimeError
+from moatless.flow import AgenticFlow
+from moatless.flow.events import NodeExpandedEvent
+from moatless.node import Node, generate_ascii_tree
 
 logger = logging.getLogger(__name__)
 
 
-class AgenticLoop(AgenticSystem):
+class AgenticLoop(AgenticFlow):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
@@ -33,7 +23,6 @@ class AgenticLoop(AgenticSystem):
             current_node = self._create_next_node(current_node)
             current_node.user_message = message
 
-        finish_reason = None
         while not (finish_reason := self.is_finished()):
             total_cost = self.total_usage().completion_cost
             iteration = len(self.root.get_all_nodes())

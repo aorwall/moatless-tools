@@ -17,9 +17,8 @@ from moatless.benchmark.utils import (
     read_search_trees,
 )
 from moatless.file_context import FileContext
-from moatless.utils.file import is_test
 from moatless.node import Node
-from moatless.search_tree import SearchTree
+from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
 
@@ -296,7 +295,7 @@ def create_trajectory_stats(
                     result.max_build_tokens,
                     node.completions["build_action"].usage.prompt_tokens
                     + node.completions["build_action"].usage.completion_tokens
-                    + node.completions["build_action"].usage.cached_tokens,
+                    + node.completions["build_action"].usage.cache_read_tokens,
                 )
 
                 if node.completions["build_action"].retries:
@@ -359,15 +358,16 @@ def create_trajectory_stats(
 
 
 def to_result(
-    search_tree: SearchTree,
+    node: Node,
     eval_report: dict | None = None,
+    instance_id: str | None = None,
     external_result: dict | None = None,
 ) -> BenchmarkResult:
-    info = search_tree.metadata
-    instance = get_moatless_instance(info["instance_id"])
+
+    instance = get_moatless_instance(instance_id)
 
     if not eval_report:
-        logger.info(f"No eval report for {info['instance_id']}")
+        logger.info(f"No eval report for {instance_id}")
         eval_report = {}
 
     try:
@@ -376,45 +376,45 @@ def to_result(
         best_node = None
         actions_counter: Dict[str, int] = {}
 
-        if not search_tree.is_finished():
-            status = "running"
+
+        if hasattr(node, "get_best_trajectory"):
+            best_node = node.get_best_trajectory()
         else:
-            best_node = search_tree.get_best_trajectory()
-            if not best_node:
-                status = "pending"
-            elif (best_node.action and best_node.action.name == "Error") or best_node.error:
-                status = "error"
-            elif not best_node.file_context.generate_git_patch():
-                status = "no_patch"
-            else:
-                status = "completed"
+            best_node = node.get_leaf_nodes()[-1]
+
+        if not best_node:
+            status = "pending"
+        elif (best_node.action and best_node.action.name == "Error") or best_node.error:
+            status = "error"
+        elif not best_node.file_context.generate_git_patch():
+            status = "no_patch"
+        else:
+            status = "completed"
 
         if external_result:
-            resolved = info.get("instance_id", "") in external_result["resolved_ids"]
+            resolved = instance_id in external_result["resolved_ids"]
 
         elif eval_report:
-            best_node = search_tree.get_best_trajectory()
             if best_node:
                 resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:
-                logger.warning(f"No best node found for {info['instance_id']}")
+                logger.warning(f"No best node found for {instance_id}")
 
-        total_usage = search_tree.total_usage()
+        total_usage = node.total_usage()
 
         result = BenchmarkResult(
-            instance_id=instance["instance_id"],
+            instance_id=instance_id,
             trajectories=[],
             status=status,
             resolved=resolved,
-            duration=info.get("duration", 0),
             total_cost=total_usage.completion_cost,
             prompt_tokens=total_usage.prompt_tokens,
             completion_tokens=total_usage.completion_tokens,
-            cached_tokens=total_usage.cached_tokens,
+            cached_tokens=total_usage.cache_read_tokens,
             resolved_by=len(instance.get("resolved_by", [])),
             llmonkeys_rate=instance.get("llm_monkeys", {}).get("resolved_rate", 0),
             transitions=len(best_node.get_trajectory()) if best_node else 0,
-            all_transitions=len(search_tree.root.get_all_nodes()),
+            all_transitions=len(node.get_all_nodes()),
             solutions=0,
             rejected_solutions=0,
             resolved_solutions=0,
@@ -427,7 +427,7 @@ def to_result(
             flags=[],
         )
 
-        for leaf_node in search_tree.get_leaf_nodes():
+        for leaf_node in node.get_leaf_nodes():
             traj = create_trajectory_stats(
                 leaf_node,
                 instance,
@@ -494,7 +494,7 @@ def to_result(
             result.flags.append("has_retries")
 
     except Exception as e:
-        raise e
+        logger.exception(f"Failed to generate report for {instance_id}")
 
     return result
 

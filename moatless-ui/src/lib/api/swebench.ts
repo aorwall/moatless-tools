@@ -1,3 +1,4 @@
+import { Trajectory } from "../types/trajectory";
 import { apiRequest } from "./config";
 import { AttachmentData } from '@/types/attachments';
 
@@ -63,4 +64,7 @@ export const swebenchApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  getEvaluationInstance: (evaluationName: string, instanceId: string) =>
+    apiRequest<Trajectory>(`/swebench/evaluations/${evaluationName}/instances/${instanceId}`),
 };

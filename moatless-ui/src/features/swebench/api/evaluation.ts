@@ -7,20 +7,22 @@ export interface Dataset {
 }
 
 export interface EvaluationRequest {
-  agent_id: string;
+  flow_id: string;
   model_id: string;
+  name: string;
   dataset: string;
-  num_workers: number;
-  max_iterations: number;
-  max_expansions: number;
+  num_concurrent_instances: number;
 }
 
 export interface EvaluationInstance {
   instance_id: string;
   status: string;
   error?: string;
-  start_time?: string;
-  finish_time?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  evaluated_at?: string;
+  resolved?: boolean;
 }
 
 export interface Evaluation {
@@ -35,9 +37,12 @@ export interface Evaluation {
 
 export interface EvaluationStatusSummary {
   pending: number;
-  started: number;
+  running: number;
+  evaluating: number;
   completed: number;
   error: number;
+  resolved: number;
+  failed: number;
 }
 
 export interface EvaluationListItem {
@@ -48,18 +53,32 @@ export interface EvaluationListItem {
   completed_at?: string;
   instance_count: number;
   status_summary?: EvaluationStatusSummary;
+  total_cost: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens: number;
+  resolved_count: number;
+  failed_count: number;
 }
 
 export interface EvaluationListResponse {
   evaluations: EvaluationListItem[];
 }
 
+export interface StartEvaluationParams {
+  evaluationId: string;
+  numConcurrentInstances: number;
+}
+
 export const evaluationApi = {
   getDatasets: () => 
     apiRequest<{ datasets: Dataset[] }>('/swebench/datasets'),
 
-  startEvaluation: (evaluationId: string) =>
-    apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/start`),
+  startEvaluation: ({ evaluationId, numConcurrentInstances }: StartEvaluationParams) =>
+    apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/start`, {
+      method: 'POST',
+      body: JSON.stringify({ num_concurrent_instances: numConcurrentInstances }),
+    }),
 
   getEvaluation: (evaluationId: string) =>
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}`),

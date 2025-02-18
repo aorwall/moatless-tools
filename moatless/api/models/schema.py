@@ -1,5 +1,7 @@
+from typing import List, Optional
+
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+
 from moatless.completion.base import LLMResponseFormat
 from moatless.schema import MessageHistoryType
 

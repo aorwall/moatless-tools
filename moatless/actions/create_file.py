@@ -9,10 +9,7 @@ from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
-from moatless.index import CodeIndex
 from moatless.repository.file import do_diff
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)

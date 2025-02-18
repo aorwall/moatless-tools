@@ -1,25 +1,24 @@
-import mimetypes
-from bookkeeper.receipt.artifact import ReceiptArtifactFileHandler
-from bookkeeper.verification.artifact import VerificationArtifactFileHandler
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
-from typing import List, Optional
-from datetime import datetime, timezone
-from pathlib import Path
-import os
 import asyncio
-import logging
 import base64
+import logging
+import mimetypes
+import os
+from datetime import datetime, timezone
+from typing import List, Optional
 
-from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
 from moatless.api.loop.schema import LoopResponseDTO
-from moatless.runner import agentic_runner
-from moatless.loop import AgenticLoop
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.artifacts.file import FileArtifactHandler, FileArtifact
 from moatless.config.agent_config import get_agent
 from moatless.config.model_config import create_completion_model
+from moatless.flow.loop import AgenticLoop
+from moatless.flow.runner import agentic_runner
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -50,6 +49,8 @@ async def start_loop(request: LoopRequest):
         file_handler = FileArtifactHandler(trajectory_dir=trajectory_dir)
         
         # TODO: Move out custom handlers!
+        from bookkeeper.receipt.artifact import ReceiptArtifactFileHandler
+        from bookkeeper.verification.artifact import VerificationArtifactFileHandler
         receipt_handler = ReceiptArtifactFileHandler(trajectory_dir=trajectory_dir)
         verification_handler = VerificationArtifactFileHandler(trajectory_dir=trajectory_dir)
         artifact_changes = []

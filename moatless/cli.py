@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """Modern CLI interface for running and monitoring Moatless validation flows."""
 
-import os
-import sys
+import argparse
 import asyncio
 import logging
-import argparse
+import os
+import sys
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, List
+from typing import List
+
 from rich.console import Console
 from rich.live import Live
-from rich.table import Table
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-import json
-from rich.pretty import pprint
+from rich.table import Table
 
-from moatless.runner import agentic_runner
-from moatless.events import BaseEvent, event_bus, SystemEvent
-from moatless.validation.code_flow_validation import CodeFlowValidation
-from moatless.config.model_config import get_model_config, get_all_configs
 from moatless.config.agent_config import get_agent as get_agent_config, get_all_agents as get_all_agent_configs
+from moatless.config.model_config import get_model_config, get_all_configs
+from moatless.events import BaseEvent, event_bus
+from moatless.runner import agentic_runner
+from moatless.validation.code_flow_validation import CodeFlowValidation
 
 logger = logging.getLogger(__name__)
 console = Console()

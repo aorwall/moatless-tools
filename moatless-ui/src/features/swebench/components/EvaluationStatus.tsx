@@ -63,8 +63,8 @@ export default function EvaluationStatus({ evaluationName }: EvaluationStatusPro
                   <TableCell>
                     <Badge variant={getStatusColor(instance.status)}>{instance.status}</Badge>
                   </TableCell>
-                  <TableCell>{instance.start_time ? new Date(instance.start_time).toLocaleString() : "-"}</TableCell>
-                  <TableCell>{instance.finish_time ? new Date(instance.finish_time).toLocaleString() : "-"}</TableCell>
+                  <TableCell>{instance.started_at ? new Date(instance.started_at).toLocaleString() : "-"}</TableCell>
+                  <TableCell>{instance.completed_at ? new Date(instance.completed_at).toLocaleString() : "-"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

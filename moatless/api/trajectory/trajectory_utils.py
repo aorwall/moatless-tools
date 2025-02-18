@@ -1,7 +1,9 @@
 import json
 import logging
 from typing import Dict, Any, List
+
 from fastapi import HTTPException
+
 from moatless.api.trajectory.schema import (
     TrajectoryDTO,
     NodeDTO,
@@ -16,8 +18,8 @@ from moatless.api.trajectory.schema import (
     FileContextSpanDTO,
 )
 from moatless.api.trajectory.timeline_utils import generate_timeline_items
-from moatless.node import Node
 from moatless.file_context import FileContext
+from moatless.node import Node
 from moatless.runtime.runtime import TestStatus
 
 logger = logging.getLogger(__name__)

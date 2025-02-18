@@ -1,7 +1,7 @@
 import importlib
 import logging
-import pkgutil
 import os
+import pkgutil
 import sys
 from typing import Dict, Type, Any
 
@@ -9,8 +9,6 @@ logger = logging.getLogger(__name__)
 
 class DynamicClassLoadingMixin:
     """Mixin providing dynamic class loading functionality"""
-    
-    
     
     @classmethod
     def _load_classes(cls, base_package: str, base_class: Type) -> Dict[str, Type[Any]]:
@@ -24,8 +22,7 @@ class DynamicClassLoadingMixin:
         registered_classes.update(cls._scan_for_classes(package.__path__, base_package, base_class))
         
         # Support custom path via environment variable
-        env_var = f"MOATLESS_ACTIONS_PATH"
-        custom_path = os.getenv(env_var)
+        custom_path = os.getenv("MOATLESS_COMPONENTS_PATH")
         if custom_path and os.path.isdir(custom_path):
             try:
                 # Find root package directory
@@ -37,15 +34,22 @@ class DynamicClassLoadingMixin:
                 parent_dir = os.path.dirname(root_dir)
                 sys.path.insert(0, parent_dir)
                 
-                logger.debug(f"Scanning package '{package_name}' in {root_dir}")
-                registered_classes.update(cls._scan_classes_in_paths([root_dir], package_name, base_class))
+                # Look for components in the appropriate subpackage
+                component_type = cls.get_component_type()  # e.g., "selector", "value_function"
+                component_path = os.path.join(root_dir, component_type)
+                
+                if os.path.isdir(component_path):
+                    logger.debug(f"Scanning custom {component_type} components in {component_path}")
+                    registered_classes.update(
+                        cls._scan_classes_in_paths([component_path], f"{package_name}.{component_type}", base_class)
+                    )
                 
             finally:
                 sys.path.pop(0)
         elif custom_path:
             logger.warning(f"Custom path {custom_path} is not a directory")
 
-        logger.debug(f"Registered classes: {registered_classes.keys()}")
+        logger.debug(f"Registered {cls.get_component_type()} classes: {registered_classes.keys()}")
         return registered_classes
 
     @classmethod

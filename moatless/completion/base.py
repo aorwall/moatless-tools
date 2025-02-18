@@ -14,11 +14,10 @@ from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionCachedContent,
 )
-from moatless.events import BaseEvent, EventBus
+from moatless.events import BaseEvent
+from moatless.events import event_bus
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
-
-from moatless.events import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +132,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def initialize(
         self,
         response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]],
-        system_prompt: str,
+        system_prompt: str | None = None,
     ) -> None:
         """Initialize the completion model with response schema and system prompt.
 
@@ -182,13 +181,14 @@ class BaseCompletionModel(BaseModel, ABC):
     async def create_completion(
         self,
         messages: List[dict],
+        system_prompt: str | None = None,
     ) -> CompletionResponse:
         if not self._initialized:
             raise ValueError(
                 "Model must be initialized with response schema and system prompt before creating completion"
             )
 
-        prepared_messages = self._prepare_messages(messages, self._system_prompt)
+        prepared_messages = self._prepare_messages(messages, system_prompt or self._system_prompt)
         return await self._create_completion_with_retries(messages=prepared_messages)
 
 
@@ -353,7 +353,7 @@ class BaseCompletionModel(BaseModel, ABC):
         """
         import litellm
         from litellm import BadRequestError, RateLimitError
-        from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+        from tenacity import retry, wait_exponential, stop_after_attempt
 
         params = self._completion_params.copy()
 

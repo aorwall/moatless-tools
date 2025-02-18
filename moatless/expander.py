@@ -20,7 +20,7 @@ class Expander(BaseModel):
         description="The settings for the agent model",
     )
 
-    def expand(self, node: Node) -> None | Node:
+    async def expand(self, node: Node) -> None | Node:
         if node.is_fully_expanded():
             return None
 

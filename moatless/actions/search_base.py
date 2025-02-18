@@ -1,12 +1,11 @@
 import logging
 from abc import ABC
-from typing import List, Optional, Type, Any, ClassVar, Tuple
+from typing import List, Optional, Type, ClassVar, Tuple
 
-from pydantic import Field, PrivateAttr, BaseModel, field_validator, model_validator
+from pydantic import Field, BaseModel, field_validator
 
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
-from moatless.completion import BaseCompletionModel
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
@@ -15,10 +14,7 @@ from moatless.completion.schema import (
 from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
-from moatless.index import CodeIndex
 from moatless.index.types import SearchCodeResponse
-from moatless.repository.repository import Repository
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

@@ -66,6 +66,16 @@ export function RootLayout() {
               >
                 Models
               </Link>
+              <Link
+                to="/settings/flows"
+                className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                  isActivePath("/settings/flows")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                }`}
+              >
+                Flows
+              </Link>
             </div>
           </nav>
         </div>

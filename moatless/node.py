@@ -14,7 +14,6 @@ from moatless.completion.model import (
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

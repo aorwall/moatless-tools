@@ -20,10 +20,16 @@ import { TrajectoryPage } from "@/pages/trajectories/[id]/index";
 import { NewAgentPage } from "@/pages/settings/agents/new";
 import { LoopPage } from "@/pages/loop";
 import { TrajectoriesPage } from "@/pages/trajectories";
-import EvaluationPage from "@/pages/swebench/evaluation";
+import { FlowsLayout } from "@/pages/settings/flows/layout";
+import { FlowsPage } from "@/pages/settings/flows";
+import { FlowDetailPage } from "@/pages/settings/flows/[id]";
+import { NewFlowPage } from "@/pages/settings/flows/new";
+
 import { EvaluationsPage } from "@/pages/swebench/evaluation";
 import { CreateEvaluationPage } from "@/pages/swebench/evaluation/create";
 import { EvaluationDetailsPage } from "@/pages/swebench/evaluation/[id]";
+import { EvaluationInstancePage } from "@/pages/swebench/evaluation/[id]/[instanceId]";
+import { EvaluationLayout } from "@/pages/swebench/evaluation/components/EvaluationLayout";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -58,6 +64,11 @@ function App() {
                     <Route index element={<ModelsPage />} />
                     <Route path=":id" element={<ModelDetailPage />} />
                   </Route>
+                  <Route path="flows" element={<FlowsLayout />}>
+                    <Route index element={<FlowsPage />} />
+                    <Route path="new" element={<NewFlowPage />} />
+                    <Route path=":id" element={<FlowDetailPage />} />
+                  </Route>
                 </Route>
 
                 <Route path="/trajectories" element={<TrajectoriesPage />} />
@@ -66,7 +77,10 @@ function App() {
                   <Route path="evaluation">
                     <Route index element={<EvaluationsPage />} />
                     <Route path="create" element={<CreateEvaluationPage />} />
-                    <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
+                    <Route element={<EvaluationLayout />}>
+                      <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
+                      <Route path=":evaluationId/:instanceId" element={<EvaluationInstancePage />} />
+                    </Route>
                   </Route>
                 </Route>
               </Route>

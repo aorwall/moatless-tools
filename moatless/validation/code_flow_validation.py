@@ -11,10 +11,10 @@ from typing import Dict, List, Optional
 import litellm
 from dotenv import load_dotenv
 
-from moatless.runner import agentic_runner
+from moatless.flow.runner import agentic_runner
 from moatless.benchmark.utils import get_moatless_instance
 from moatless.completion.model import Usage
-from moatless.loop import AgenticLoop
+from moatless.flow.loop import AgenticLoop
 from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.index import CodeIndex

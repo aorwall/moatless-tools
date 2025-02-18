@@ -2,9 +2,10 @@
 
 import logging
 from typing import List
-from fastapi import APIRouter, HTTPException
+
+from fastapi import APIRouter
+
 from moatless.actions.action import Action
-from moatless.actions.schema import ActionSchema
 from moatless.agent.agent import ActionAgent
 from moatless.config.agent_config import (
     get_agent,

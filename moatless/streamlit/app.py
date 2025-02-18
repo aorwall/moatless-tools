@@ -3,17 +3,15 @@ import json
 import logging
 import os
 
-from moatless.loop import AgenticLoop
-from moatless.streamlit.list_visualization import create_linear_table
 import streamlit as st
 from dotenv import load_dotenv
-from moatless.streamlit.investigate_node import investigate_node
 
 from moatless.benchmark.report import generate_report
 from moatless.benchmark.utils import get_moatless_instance
-from moatless.search_tree import SearchTree
+from moatless.flow.loop import AgenticLoop
+from moatless.streamlit.investigate_node import investigate_node
+from moatless.streamlit.list_visualization import create_linear_table
 from moatless.streamlit.shared import trajectory_table
-from moatless.streamlit.tree_visualization import update_visualization
 
 logger = logging.getLogger(__name__)
 

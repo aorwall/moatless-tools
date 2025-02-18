@@ -1,13 +1,7 @@
-import importlib
 import logging
-import pkgutil
 from abc import ABC, abstractmethod
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
-import inspect
-import os
-import sys
 
-from docstring_parser import parse
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from moatless.actions.schema import (
@@ -23,12 +17,10 @@ from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.component import MoatlessComponent
 from moatless.workspace import Workspace
-from moatless.utils.class_loading import DynamicClassLoadingMixin
 
 logger = logging.getLogger(__name__)
-
-_actions: Dict[str, Type["Action"]] = {}
 
 class CompletionModelMixin:
     """Mixin to provide completion model functionality to actions that need it"""
@@ -47,34 +39,39 @@ class CompletionModelMixin:
             self._completion_model = value.clone()
             self._initialize_completion_model()
 
-    @abstractmethod
     def _initialize_completion_model(self):
         """Override this method to customize completion model initialization"""
         pass
 
 
-class Action(BaseModel, ABC, DynamicClassLoadingMixin):
+class Action(MoatlessComponent):
+    """Base class for all actions."""
     args_schema: ClassVar[Type[ActionArguments]]
-
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
     _workspace: Workspace = PrivateAttr(default=None)
+    
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "action"
+        
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.actions"
+        
+    @classmethod
+    def _get_base_class(cls) -> Type:
+        return Action
 
     async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
-        """
-        Execute the action.
-        """
-
+        """Execute the action."""
         if not self._workspace:
             raise RuntimeError("No workspace set")
 
-        message = self._execute(args, file_context=file_context)
+        message = await self._execute(args, file_context=file_context)
         return Observation.create(message)
 
     async def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
-        """
-        Execute the action and return the updated FileContext.
-        """
+        """Execute the action and return the updated FileContext."""
         raise NotImplementedError("Subclasses must implement this method.")
 
     @property
@@ -159,12 +156,12 @@ class Action(BaseModel, ABC, DynamicClassLoadingMixin):
         return min_reward, max_reward
 
     @classmethod
-    def get_value_function_prompt(cls) -> str:
+    def get_value_function_prompt(cls) -> str | None:
         """
         Get the base prompt for the value function.
         This method can be overridden in subclasses to provide action-specific prompts.
         """
-        pass
+        return None
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -202,50 +199,12 @@ class Action(BaseModel, ABC, DynamicClassLoadingMixin):
         """
         Dynamically import and return the appropriate Action class for the given action name.
         """
-        cls._initialize_actions_map()
-        return _actions.get(action_name)
-    
-    @classmethod
-    def _initialize_actions_map(cls):
-        global _actions
-        if not _actions:
-            _actions = cls._load_classes("moatless.actions", Action)
-
-    @classmethod
-    def model_validate(cls, obj: Any) -> "Action":
-        if isinstance(obj, dict):
-            obj = obj.copy()
-
-            if obj.get("action_class"):
-                action_class_path = obj["action_class"]
-                # TODO: Keep backwards compatibility for old claude text editor package
-                if action_class_path == "moatless.actions.edit":
-                    action_class_path = "moatless.actions.claude_text_editor"
-
-                try:
-                    # Ensure actions are loaded
-                    cls._initialize_actions_map()
-                    
-                    # Try to find action by full class path first
-                    module_name, class_name = action_class_path.rsplit(".", 1)
-                    action_class = cls.get_action_by_name(class_name)
-                    
-                    if not action_class:
-                        logger.warning(f"Invalid action class: {class_name}. Available actions: {_actions.keys()}")
-                        raise ValueError(f"Invalid action class: {class_name}")
-                    
-                    return action_class(**obj)
-                except Exception as e:
-                    logger.warning(f"Failed to load action class {action_class_path}: {e}")
-                    raise ValueError(f"Failed to load action class {action_class_path}") from e
-            else:
-                raise ValueError(f"action_class is required in {obj}")
-
-        return super().model_validate(obj)
+        cls._initialize_components()
+        return cls._get_components().get(action_name)
     
     @classmethod
     def create_by_name(cls, name: str, **kwargs) -> "Action":
-        cls._initialize_actions_map()
+        cls._initialize_components()
 
         action_class = cls.get_action_by_name(name)
         if not action_class:
@@ -284,11 +243,11 @@ class Action(BaseModel, ABC, DynamicClassLoadingMixin):
     @classmethod
     def get_available_actions(cls) -> List[ActionSchema]:
         """Get all available actions with their schema."""
-        cls._initialize_actions_map()
+        cls._initialize_components()
 
         return [
             action_class.get_action_schema() 
-            for action_class in _actions.values()
+            for action_class in cls._get_components().values()
         ]
 
     @classmethod

@@ -1,10 +1,10 @@
-from datetime import datetime
-from enum import Enum
 import json
 import logging
 import os
 import threading
 from abc import ABC, abstractmethod
+from datetime import datetime
+from enum import Enum
 from typing import Optional, List
 
 from moatless.benchmark.schema import Evaluation, EvaluationInstance

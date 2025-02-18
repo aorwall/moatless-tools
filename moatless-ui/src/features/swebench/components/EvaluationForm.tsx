@@ -4,7 +4,6 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, For
 import { Input } from "@/lib/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/lib/components/ui/select";
 import { Separator } from "@/lib/components/ui/separator";
-import { AgentSelector } from "@/lib/components/selectors/AgentSelector";
 import { ModelSelector } from "@/lib/components/selectors/ModelSelector";
 import { useDatasetsList } from "../hooks/useDatasetsList";
 import type { EvaluationRequest } from "../api/evaluation";
@@ -13,20 +12,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { toast } from "sonner";
 import { useLastUsedStore } from "@/lib/stores/lastUsedStore";
+import { FlowSelector } from "@/lib/components/selectors/FlowSelector";
+import { format } from "date-fns";
+import React from "react";
 
 const evaluationSchema = z.object({
+  name: z.string().min(1, "Evaluation name is required"),
   dataset: z.string().min(1, "Please select a dataset"),
-  agent_id: z.string().min(1, "Please select an agent"),
-  model_id: z.string().min(1, "Please select a model"),
-  num_workers: z.number()
-    .min(1, "Must have at least 1 worker")
-    .max(10, "Maximum 10 workers allowed"),
-  max_iterations: z.number()
-    .min(1, "Must have at least 1 iteration")
-    .max(50, "Maximum 50 iterations allowed"),
-  max_expansions: z.number()
-    .min(1, "Must have at least 1 expansion")
-    .max(10, "Maximum 10 expansions allowed"),
+  flow_id: z.string().min(1, "Please select a flow"),
+  model_id: z.string().min(1, "Please select a model")
 });
 
 type EvaluationFormData = z.infer<typeof evaluationSchema>;
@@ -38,19 +32,34 @@ interface EvaluationFormProps {
 
 export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormProps) {
   const { data: datasetsResponse, isError } = useDatasetsList();
-  const { lastUsedAgent, lastUsedModel } = useLastUsedStore();
+  const { lastUsedModel } = useLastUsedStore();
+  
+  const generateDefaultName = (values: Partial<EvaluationFormData>) => {
+    const date = format(new Date(), 'yyyyMMdd');
+    return `${date}_${values.flow_id || 'flow'}_${values.model_id || 'model'}_${values.dataset || 'dataset'}`;
+  };
   
   const form = useForm<EvaluationFormData>({
     resolver: zodResolver(evaluationSchema),
     defaultValues: {
-      agent_id: lastUsedAgent,
+      name: generateDefaultName({}),
+      flow_id: "",
       model_id: lastUsedModel,
       dataset: "",
-      num_workers: 1,
-      max_iterations: 15,
-      max_expansions: 1,
+      num_concurrent_instances: 1,
     },
   });
+
+  // Watch for changes in relevant fields to update the name
+  const watchedFields = form.watch(['flow_id', 'model_id', 'dataset']);
+  React.useEffect(() => {
+    const newName = generateDefaultName({
+      flow_id: watchedFields[0],
+      model_id: watchedFields[1],
+      dataset: watchedFields[2],
+    });
+    form.setValue('name', newName);
+  }, [watchedFields]);
 
   if (isError) {
     toast.error("Failed to load datasets");
@@ -58,10 +67,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
 
   const handleSubmit = (data: EvaluationFormData) => {
     onSubmit({
-      ...data,
-      num_workers: Number(data.num_workers),
-      max_iterations: Number(data.max_iterations),
-      max_expansions: Number(data.max_expansions),
+      ...data
     });
   };
 
@@ -73,6 +79,29 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
+            {/* Evaluation Name Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Evaluation Name</h3>
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      A unique identifier for this evaluation
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <Separator />
+
             {/* Dataset Selection Section */}
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Dataset</h3>
@@ -107,24 +136,24 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
 
             <Separator />
 
-            {/* Agent and Model Section */}
+            {/* Flow and Model Section */}
             <div className="space-y-4">
-              <h3 className="text-lg font-medium">Agent & Model Configuration</h3>
+              <h3 className="text-lg font-medium">Flow & Model Configuration</h3>
               <div className="grid gap-6 sm:grid-cols-2">
                 <FormField
                   control={form.control}
-                  name="agent_id"
+                  name="flow_id"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Agent</FormLabel>
+                      <FormLabel>Flow</FormLabel>
                       <FormControl>
-                        <AgentSelector
-                          selectedAgentId={field.value}
-                          onAgentSelect={field.onChange}
+                        <FlowSelector
+                          selectedFlowId={field.value}
+                          onFlowSelect={field.onChange}
                         />
                       </FormControl>
                       <FormDescription>
-                        The agent that will process the instances
+                        The flow that will process the instances
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -145,83 +174,6 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                       </FormControl>
                       <FormDescription>
                         The language model to use for evaluation
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* Evaluation Settings Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Evaluation Settings</h3>
-              <div className="grid gap-6 sm:grid-cols-3">
-                <FormField
-                  control={form.control}
-                  name="num_workers"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Workers</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          min={1} 
-                          max={10}
-                          {...field}
-                          onChange={e => field.onChange(Number(e.target.value))}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Number of parallel workers (1-10)
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="max_iterations"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Max Iterations</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          min={1} 
-                          max={50}
-                          {...field}
-                          onChange={e => field.onChange(Number(e.target.value))}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Maximum iterations per instance (1-50)
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="max_expansions"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Max Expansions</FormLabel>
-                      <FormControl>
-                        <Input 
-                          type="number" 
-                          min={1} 
-                          max={10}
-                          {...field}
-                          onChange={e => field.onChange(Number(e.target.value))}
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Maximum expansions per iteration (1-10)
                       </FormDescription>
                       <FormMessage />
                     </FormItem>

@@ -55,6 +55,11 @@ export function EvaluationDetailsPage() {
     ),
   });
 
+  const handleInstanceSelect = (instance: EvaluationInstance) => {
+    setSelectedInstance(instance);
+    navigate(`/swebench/evaluation/${evaluationId}/${instance.instance_id}`);
+  };
+
   if (isLoading) {
     return (
       <div className="h-full">
@@ -98,50 +103,15 @@ export function EvaluationDetailsPage() {
     );
   }
 
-  const instancesList = (
-    <div className="flex h-full flex-col">
-      <EvaluationOverview
-        evaluation={evaluation}
-        getStatusColor={getStatusColor}
-        calculateProgress={calculateProgress}
-      />
-      <div className="flex-1 min-h-0">
-        <DataExplorer
-          items={evaluation.instances}
-          filterFields={[
-            { name: "status", type: "select", options: ["pending", "running", "completed", "error"] },
-            { name: "instance_id", type: "text" },
-          ]}
-          itemDisplay={getInstanceDisplay}
-          onSelect={setSelectedInstance}
-          selectedItem={selectedInstance}
-          compareItems={(a, b) => a.instance_id === b.instance_id}
-        />
-      </div>
-    </div>
-  );
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex-1 min-h-0">
-        <SplitLayout
-          left={instancesList}
-          right={
-            selectedInstance ? (
-              <InstanceDetails
-                instance={selectedInstance}
-                getStatusColor={getStatusColor}
-                formatDate={formatDate}
-              />
-            ) : (
-              <EvaluationDetails
-                evaluation={evaluation}
-                getStatusColor={getStatusColor}
-                formatDate={formatDate}
-                calculateProgress={calculateProgress}
-              />
-            )
-          }
+      <div className="flex-1 min-h-0 overflow-auto">
+        <EvaluationDetails
+          evaluation={evaluation}
+          getStatusColor={getStatusColor}
+          formatDate={formatDate}
+          calculateProgress={calculateProgress}
         />
       </div>
     </div>

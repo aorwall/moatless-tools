@@ -1,16 +1,17 @@
 import json
-import os
 import logging
-import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from moatless.utils.moatless import get_moatless_dir
-from moatless.benchmark.evaluation_runner import EvaluationRunner, TreeSearchSettings, Evaluation, EvaluationInstance
-from moatless.benchmark.schema import EvaluationStatus, InstanceStatus
-from moatless.events import BaseEvent, event_bus
+import filelock
+
+from moatless.benchmark.evaluation_runner import EvaluationRunner, Evaluation, EvaluationInstance
 from moatless.benchmark.schema import EvaluationEvent
+from moatless.benchmark.schema import EvaluationStatus
+from moatless.events import event_bus
+from moatless.utils.moatless import get_moatless_dir
+from moatless.flow.manager import get_flow_config
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,8 @@ class EvaluationManager:
         self.evals_dir = get_moatless_dir() / "evals"
         self.evals_dir.mkdir(parents=True, exist_ok=True)
         event_bus.subscribe(self._handle_evaluation_event)
+        self.locks_dir = self.evals_dir / ".locks"
+        self.locks_dir.mkdir(exist_ok=True)
 
     def get_evaluation_dir(self, evaluation_name: str) -> Path:
         """Get the directory for a specific evaluation."""
@@ -30,53 +33,54 @@ class EvaluationManager:
 
     def create_evaluation(
         self,
-        dataset_name: str,
-        instance_ids: List[str],
-        agent_id: str,
+        flow_id: str,
         model_id: str,
-        num_workers: int = 1,
-        max_iterations: int = 10,
-        max_expansions: int = 1,
-    ) -> str:
+        evaluation_name: str | None = None,
+        dataset_name: str | None = None,
+        instance_ids: Optional[List[str]] = None,
+    ) -> Evaluation:
         """Create a new evaluation and return its ID."""
-        evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{dataset_name}_{agent_id}_{model_id}_iter_{max_iterations}"
-        logger.info(f"Creating evaluation: {evaluation_name}")
+        if not dataset_name and not instance_ids:
+            raise ValueError("Either dataset_name or instance_ids must be provided")
         
+        if not dataset_name:
+            dataset_name = "instance_ids"
+
+        if not evaluation_name:
+            evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{model_id}_{dataset_name}"
+        logger.info(f"Creating evaluation: {evaluation_name}")
+        if not instance_ids:
+            instance_ids = self.get_dataset_instance_ids(dataset_name)
+            logger.info(f"Found {len(instance_ids)} instances in dataset {dataset_name}")
+
         eval_dir = self.get_evaluation_dir(evaluation_name)
         eval_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Evaluation directory created: {eval_dir}")
 
-        settings = TreeSearchSettings(
-            agent_id=agent_id,
-            model_id=model_id,
-            max_iterations=max_iterations,
-            max_expansions=max_expansions
-        )
+        flow = get_flow_config(flow_id)
+        if not flow:
+            raise ValueError(f"Flow {flow_id} not found")
+        
+        logger.info(f"Flow: {flow}")
 
         evaluation = Evaluation(
             evaluation_name=evaluation_name,
             dataset_name=dataset_name,
             status=EvaluationStatus.PENDING,
-            num_workers=num_workers,
-            settings=settings,
+            flow_id=flow_id,
+            model_id=model_id,
             instances=[
-                EvaluationInstance(instance_id=instance_id)
+                EvaluationInstance(instance_id=instance_id)  # Will default to CREATED state
                 for instance_id in instance_ids
             ]
         )
 
         self._save_evaluation(evaluation)
-
-        for instance in evaluation.instances:
-            instance_dir = self.get_instance_dir(evaluation_name, instance.instance_id)
-            instance_dir.mkdir(parents=True, exist_ok=True)
-            self._save_instance(evaluation_name, instance)
-
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
-        return evaluation_name
+        return evaluation
 
-    async def _handle_evaluation_event(self, trajectory_id: str, event: EvaluationEvent):
-        """Handle events from the evaluation runner."""
+    async def _handle_evaluation_event(self, trajectory_id: str | None, event: EvaluationEvent):
+        """Handle events from evaluation runners."""
         if not isinstance(event, EvaluationEvent):
             return
 
@@ -85,75 +89,30 @@ class EvaluationManager:
             logger.warning(f"Received event for unknown evaluation: {event.evaluation_name}")
             return
 
-        if event.event_type == "evaluation_started":
-            evaluation.status = EvaluationStatus.RUNNING
-            evaluation.started_at = datetime.now(timezone.utc)
-            self._save_evaluation(evaluation)
-
-        elif event.event_type == "evaluation_completed":
-            evaluation.status = EvaluationStatus.COMPLETED
-            evaluation.completed_at = datetime.now(timezone.utc)
-            self._save_evaluation(evaluation)
-
-        elif event.event_type == "instance_completed":
-            instance_id = event.data["instance_id"]
-            instance = evaluation.get_instance(instance_id)
-            if instance:
-                instance.status = InstanceStatus.COMPLETED
-                instance.completed_at = datetime.now(timezone.utc)
-                self._save_instance(evaluation.evaluation_name, instance)
-
-        elif event.event_type == "instance_error":
-            instance_id = event.data["instance_id"]
-            error = event.data["error"]
-            instance = evaluation.get_instance(instance_id)
-            if instance:
-                instance.status = InstanceStatus.ERROR
-                instance.error = error
-                self._save_instance(evaluation.evaluation_name, instance)
+        # Update evaluation based on event
+#        self._update_evaluation_from_event(evaluation, event)
+        self._save_evaluation(evaluation)
 
         # Log status summary after handling any event
-        completed = sum(1 for i in evaluation.instances if i.status == InstanceStatus.COMPLETED)
-        running = sum(1 for i in evaluation.instances if i.status == InstanceStatus.STARTED)
-        pending = sum(1 for i in evaluation.instances if i.status == InstanceStatus.PENDING)
-        errors = sum(1 for i in evaluation.instances if i.status == InstanceStatus.ERROR)
-        
+        summary = evaluation.get_summary()
         logger.info(
             f"Evaluation {evaluation.evaluation_name} status - "
-            f"Completed: {completed}, Running: {running}, Pending: {pending}, Errors: {errors}"
+            f"Created: {summary['counts'].get('created', 0)}, "
+            f"Setting up: {summary['counts'].get('setting_up', 0)}, "
+            f"Pending: {summary['counts'].get('pending', 0)}, "
+            f"Running: {summary['counts'].get('running', 0)}, "
+            f"Evaluating: {summary['counts'].get('evaluating', 0)}, "
+            f"Evaluated: {summary['counts'].get('evaluated', 0)}, "
+            f"Errors: {summary['counts'].get('errors', 0)}"
         )
 
-        # Check if all instances are finished
-        total_finished = completed + errors
-        if total_finished == len(evaluation.instances) and evaluation.status == EvaluationStatus.RUNNING:
-            logger.info(f"All instances finished for evaluation {evaluation.evaluation_name}")
-            evaluation.status = EvaluationStatus.COMPLETED
-            evaluation.completed_at = datetime.now(timezone.utc)
-            self._save_evaluation(evaluation)
-            
-            # Emit completion event
-            await event_bus.publish(
-                EvaluationEvent(
-                    evaluation_name=evaluation.evaluation_name,
-                    event_type="evaluation_completed",
-                    data={
-                        "total_completed": completed,
-                        "total_errors": errors
-                    }
-                )
-            )
-
-    async def start_evaluation(
+    async def create_evaluation_runner(
         self,
         evaluation_name: str,
-        agent_id: str,
-        model_id: str,
-        num_workers: int,
-        max_iterations: int,
-        max_expansions: int,
-    ):
-        """Start an evaluation run."""
-        logger.info(f"Starting evaluation: {evaluation_name}")
+        num_concurrent_instances: int
+    ) -> EvaluationRunner:
+        """Create and configure an evaluation runner."""
+        logger.info(f"Creating runner for evaluation: {evaluation_name}")
         evaluation = self._load_evaluation(evaluation_name)
         if not evaluation:
             logger.error(f"Evaluation {evaluation_name} not found")
@@ -162,48 +121,29 @@ class EvaluationManager:
         if evaluation.status in [EvaluationStatus.RUNNING, EvaluationStatus.COMPLETED]:
             logger.warning(f"Evaluation {evaluation_name} cannot be started in its current state: {evaluation.status}")
             raise ValueError("Evaluation cannot be started in its current state")
-
-        tree_settings = TreeSearchSettings(
-            agent_id=agent_id,
-            model_id=model_id,
-            max_iterations=max_iterations,
-            max_expansions=max_expansions
-        )
         
-        evaluation.settings = tree_settings
         self._save_evaluation(evaluation)
 
         runner = EvaluationRunner(
             evaluation=evaluation,
-            num_workers=num_workers,
+            num_concurrent_instances=num_concurrent_instances,
             evaluations_dir=str(self.evals_dir)
         )
 
-        try:
-            await runner.run_evaluation()
-        except Exception as e:
-            evaluation.status = EvaluationStatus.ERROR
-            evaluation.error = str(e)
-            self._save_evaluation(evaluation)
-            raise
+        return runner
 
     def save_evaluation(self, evaluation: Evaluation):
         """Save evaluation metadata to evaluation.json."""
         self._save_evaluation(evaluation)
-        for instance in evaluation.instances:
-            self._save_instance(evaluation.evaluation_name, instance)
 
     def _save_evaluation(self, evaluation: Evaluation):
-        """Save evaluation metadata to evaluation.json."""
+        """Save evaluation metadata to evaluation.json in a thread-safe manner."""
         eval_path = self.get_evaluation_dir(evaluation.evaluation_name) / "evaluation.json"
-        with open(eval_path, "w") as f:
-            json.dump(evaluation.model_dump(), f, indent=2, default=str)
-
-    def _save_instance(self, evaluation_name: str, instance: EvaluationInstance):
-        """Save instance metadata to instance.json."""
-        instance_path = self.get_instance_dir(evaluation_name, instance.instance_id) / "instance.json"
-        with open(instance_path, "w") as f:
-            json.dump(instance.model_dump(), f, indent=2, default=str)
+        lock_path = self.locks_dir / f"{evaluation.evaluation_name}.lock"
+        
+        with filelock.FileLock(lock_path):
+            with open(eval_path, "w") as f:
+                json.dump(evaluation.model_dump(), f, indent=2, default=str)
 
     def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from evaluation.json."""
@@ -230,44 +170,14 @@ class EvaluationManager:
                 logger.error(f"Failed to load evaluation {eval_dir.name}: {e}")
                 continue
         
-        return sorted(evaluations, key=lambda x: x.start_time, reverse=True)
+        return sorted(evaluations, key=lambda x: x.created_at, reverse=True)
 
     def get_dataset_instance_ids(self, dataset_name: str) -> List[str]:
         """Get instance IDs for a dataset."""
-        dataset_path = f"datasets/{dataset_name}_dataset.json"
-        if not os.path.exists(dataset_path):
+        dataset_path = Path(__file__).parent / "datasets" / f"{dataset_name}_dataset.json"
+        if not dataset_path.exists():
             raise ValueError(f"Dataset {dataset_name} not found at {dataset_path}")
             
         with open(dataset_path, 'r') as f:
             dataset = json.load(f)
             return dataset["instance_ids"]
-
-    async def wait_for_completion(self, evaluation_name: str, check_interval: float = 1.0) -> Evaluation:
-        """Wait for an evaluation to complete and return the final evaluation object."""
-        last_status = None
-        while True:
-            evaluation = self._load_evaluation(evaluation_name)
-            if not evaluation:
-                raise ValueError(f"Evaluation {evaluation_name} not found")
-
-            # Log status changes
-            if evaluation.status != last_status:
-                logger.info(f"Evaluation {evaluation_name} status changed to: {evaluation.status}")
-                last_status = evaluation.status
-
-            if evaluation.status == EvaluationStatus.COMPLETED:
-                logger.info(f"Evaluation {evaluation_name} completed successfully")
-                return evaluation
-            elif evaluation.status == EvaluationStatus.ERROR:
-                logger.error(f"Evaluation {evaluation_name} failed with error: {evaluation.error}")
-                raise RuntimeError(f"Evaluation failed: {evaluation.error}")
-
-            # Log instance status summary
-            completed = sum(1 for i in evaluation.instances if i.status == InstanceStatus.COMPLETED)
-            running = sum(1 for i in evaluation.instances if i.status == InstanceStatus.STARTED)
-            pending = sum(1 for i in evaluation.instances if i.status == InstanceStatus.PENDING)
-            errors = sum(1 for i in evaluation.instances if i.status == InstanceStatus.ERROR)
-            
-            logger.debug(f"Status summary - Completed: {completed}, Running: {running}, Pending: {pending}, Errors: {errors}")
-
-            await asyncio.sleep(check_interval)

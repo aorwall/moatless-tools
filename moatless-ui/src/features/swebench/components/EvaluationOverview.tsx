@@ -15,22 +15,6 @@ interface EvaluationOverviewProps {
 }
 
 export function EvaluationOverview({ evaluation, getStatusColor, calculateProgress }: EvaluationOverviewProps) {
-  const { mutate: startEvaluation, isPending } = useStartEvaluation();
-
-  const handleStart = () => {
-    startEvaluation(evaluation.evaluation_name, {
-      onSuccess: () => {
-        toast.success("Evaluation started successfully");
-      },
-      onError: (error) => {
-        toast.error("Failed to start evaluation", {
-          description: error instanceof Error ? error.message : "Unknown error",
-        });
-      },
-    });
-  };
-
-  const canStart = !["running", "completed"].includes(evaluation.status.toLowerCase());
 
   return (
     <div className="border-b bg-muted/40 p-4">

@@ -1,18 +1,16 @@
 import json
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, Optional, Any, List
+from typing import Optional, Any, List
 
 from pydantic import BaseModel, Field, ConfigDict
 
-from moatless.agent.settings import AgentSettings
 from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.events import BaseEvent
 from moatless.feedback import BaseFeedbackGenerator
-from moatless.schema import MessageHistoryType, CompletionModelSettings
+from moatless.schema import MessageHistoryType
 from moatless.selector import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
@@ -86,9 +84,12 @@ class TreeSearchSettings(BaseModel):
 
 
 class InstanceStatus(str, Enum):
+    CREATED = "created"
+    SETTING_UP = "setting_up"
     PENDING = "pending"
-    STARTED = "started"
+    RUNNING = "running"
     COMPLETED = "completed"
+    EVALUATING = "evaluating"
     EVALUATED = "evaluated"
     ERROR = "error"
 
@@ -117,25 +118,25 @@ class EvaluationInstance(BaseModel):
     )
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    status: InstanceStatus = Field(default=InstanceStatus.PENDING, description="Current status of the instance")
+    status: InstanceStatus = Field(default=InstanceStatus.CREATED, description="Current status of the instance")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the instance was created",
     )
-    started_at: Optional[datetime] = Field(default=None, description="When instance started")
-    completed_at: Optional[datetime] = Field(default=None, description="When instance completed")
+    started_at: Optional[datetime] = Field(default=None, description="When the instance started")
+    completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if instance failed")
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
-    benchmark_result: Optional[Dict[str, Any]] = Field(default=None, description="Benchmark result")
+    benchmark_result: Optional[BenchmarkResult] = Field(default=None, description="Benchmark result")
 
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
 
     def start(self):
-        self.status = InstanceStatus.STARTED
+        self.status = InstanceStatus.RUNNING
         self.started_at = datetime.now(timezone.utc)
 
     def complete(
@@ -160,6 +161,11 @@ class EvaluationInstance(BaseModel):
         if self.started_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
 
+    def model_dump(self, *args, **kwargs) -> dict:
+        data = super().model_dump(*args, **kwargs)
+        if self.benchmark_result and isinstance(self.benchmark_result, BenchmarkResult):
+            data["benchmark_result"] = self.benchmark_result.model_dump(**kwargs)
+        return data
 
 class Evaluation(BaseModel):
     model_config = ConfigDict(
@@ -171,22 +177,53 @@ class Evaluation(BaseModel):
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
+        
+    flow_id: str = Field(..., description="ID of the flow configuration to use for the evaluation")
+    model_id: str = Field(..., description="ID of the model to use for the evaluation")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the evaluation was created",
     )
+    
     started_at: Optional[datetime] = Field(default=None, description="When the evaluation started")
     completed_at: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
+    error: Optional[str] = Field(default=None, description="Error message if evaluation failed")
     instances: List[EvaluationInstance] = Field(default_factory=list, description="Instances of the evaluation")
-    settings: TreeSearchSettings = Field(..., description="Settings for the evaluation")
-    num_workers: int = Field(default=1, description="Number of workers for the evaluation")
+
     def get_instance(self, instance_id: str) -> EvaluationInstance | None:
         for instance in self.instances:
             if instance.instance_id == instance_id:
                 return instance
         return None
 
+    def get_summary(self) -> dict:
+        """Get a summary of evaluation status and instance counts."""
+        completed = sum(1 for i in self.instances if i.status == InstanceStatus.COMPLETED)
+        running = sum(1 for i in self.instances if i.status == InstanceStatus.RUNNING)
+        evaluating = sum(1 for i in self.instances if i.status == InstanceStatus.EVALUATING)
+        evaluated = sum(1 for i in self.instances if i.status == InstanceStatus.EVALUATED)
+        pending = sum(1 for i in self.instances if i.status == InstanceStatus.PENDING)
+        errors = sum(1 for i in self.instances if i.status == InstanceStatus.ERROR)
+
+        return {
+            "status": self.status,
+            "error": self.error,
+            "counts": {
+                "completed": completed,
+                "running": running,
+                "evaluating": evaluating,
+                "evaluated": evaluated,
+                "pending": pending,
+                "errors": errors,
+                "total": len(self.instances)
+            }
+        }
+
+    def model_dump(self, *args, **kwargs) -> dict:
+        data = super().model_dump(*args, **kwargs)
+        data["instances"] = [i.model_dump(**kwargs) for i in self.instances]
+        return data
 
 class EvaluationDatasetSplit(BaseModel):
     model_config = ConfigDict(

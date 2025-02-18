@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from moatless.artifacts.artifact import Artifact
 
+
 class ArtifactConnector(BaseModel, ABC):
 
     @abstractmethod

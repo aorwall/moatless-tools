@@ -1,11 +1,11 @@
 import logging
-from typing import List, Optional, Tuple, Type, ClassVar
 import os
+from fnmatch import fnmatch
+from typing import List, Optional, Tuple, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from fnmatch import fnmatch
-from moatless.actions.schema import ActionArguments, FewShotExample, Observation
+from moatless.actions.schema import ActionArguments, FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 

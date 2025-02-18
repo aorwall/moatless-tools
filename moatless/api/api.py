@@ -1,5 +1,11 @@
 """Main API module for Moatless."""
 
+import importlib.resources as pkg_resources
+import json
+import logging
+from pathlib import Path
+from typing import List, Dict, Any, Set
+
 from fastapi import (
     FastAPI,
     HTTPException,
@@ -8,28 +14,24 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from typing import List, Dict, Any, Set
 from fastapi.middleware.cors import CORSMiddleware
-import json
-import logging
-from moatless.workspace import Workspace
-from moatless.artifacts.artifact import ArtifactListItem
+from fastapi.staticfiles import StaticFiles
+
+from moatless.api.agents.api import router as agent_router
+from moatless.api.artifacts.api import router as artifact_router
+from moatless.api.loop.api import router as loop_router
+from moatless.api.models.api import router as model_router
+from moatless.api.swebench.api import router as swebench_router
+from moatless.api.settings.api import router as settings_router
+from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import (
     load_trajectory_from_file,
     create_trajectory_dto,
 )
-from fastapi.staticfiles import StaticFiles
-import importlib.resources as pkg_resources
-from pathlib import Path
-from moatless.api.models.api import router as model_router
-from moatless.api.agents.api import router as agent_router
-from moatless.api.swebench.api import router as swebench_router
-from moatless.api.trajectories.api import router as trajectory_router
-from moatless.api.loop.api import router as loop_router
-from moatless.api.artifacts.api import router as artifact_router
+from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
-
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +189,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
 
     # Include model, agent, and loop configuration routers
+    router.include_router(settings_router, prefix="/settings", tags=["settings"])
     router.include_router(model_router, prefix="/models", tags=["models"])
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
     router.include_router(swebench_router, prefix="/swebench", tags=["swebench"])

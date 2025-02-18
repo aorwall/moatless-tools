@@ -1,18 +1,28 @@
 import os
 from pathlib import Path
-from moatless.context_data import current_evaluation_name
+
+from moatless.context_data import moatless_dir, current_evaluation_name
 
 
 def get_moatless_dir() -> Path:
     """Get the moatless directory."""
-    moatless_dir = Path(os.getenv("MOATLESS_DIR", ".moatless"))
-    if not moatless_dir.exists():
-        moatless_dir.mkdir(parents=True, exist_ok=True)
-    return moatless_dir
+    if not moatless_dir.get():
+        dir_path = Path(os.getenv("MOATLESS_DIR", ".moatless"))
+    else:
+        dir_path = Path(moatless_dir.get())
+        
+    if not dir_path.exists():
+        dir_path.mkdir(parents=True, exist_ok=True)
+    return dir_path
 
-def get_moatless_trajectories_dir() -> Path:
+def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     """Get the moatless trajectories directory."""
-    eval_name = current_evaluation_name.get()
+
+    if evaluation_name:
+        eval_name = evaluation_name
+    else:
+        eval_name = current_evaluation_name.get()
+
     if eval_name:
         # If evaluation context exists, use evals/eval_name/trajs
         trajectories_dir = get_moatless_dir() / "evals" / eval_name / "trajs"
@@ -25,9 +35,9 @@ def get_moatless_trajectories_dir() -> Path:
     return trajectories_dir
 
 
-def get_moatless_trajectory_dir(trajectory_id: str | None = None) -> Path:
+def get_moatless_trajectory_dir(trajectory_id: str | None = None, evaluation_name: str | None = None) -> Path:
     """Get the moatless trajectory directory."""
-    trajectory_base_dir = get_moatless_trajectories_dir()
+    trajectory_base_dir = get_moatless_trajectories_dir(evaluation_name)
     if not trajectory_id:
         return trajectory_base_dir
     trajectory_dir = trajectory_base_dir / trajectory_id

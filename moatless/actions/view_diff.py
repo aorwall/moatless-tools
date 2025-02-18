@@ -6,7 +6,6 @@ from pydantic import ConfigDict
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation, FewShotExample
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 

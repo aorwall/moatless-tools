@@ -6,20 +6,31 @@ import { ScrollArea } from "@/lib/components/ui/scroll-area";
 import EvaluationForm from "@/features/swebench/components/EvaluationForm";
 import EvaluationStatus from "@/features/swebench/components/EvaluationStatus";
 import { useEvaluationStart } from "@/features/swebench/hooks/useEvaluationCreate";
-import type { EvaluationRequest } from "@/features/swebench/api/evaluation";
+import type { EvaluationRequest, EvaluationListItem } from "@/features/swebench/api/evaluation";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/lib/components/ui/button";
-import { Plus } from "lucide-react";
+import { Plus, Coins, Cpu, MessageSquare, Zap } from "lucide-react";
 import { useEvaluationsList } from "@/features/swebench/hooks/useEvaluationsList";
 import { Card, CardContent, CardHeader, CardTitle } from "@/lib/components/ui/card";
 import { Badge } from "@/lib/components/ui/badge";
 import { Skeleton } from "@/lib/components/ui/skeleton";
+import React from "react";
+import { Progress } from "@/lib/components/ui/progress";
+import { formatNumber } from "@/lib/utils/format";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 export function EvaluationsPage() {
   const navigate = useNavigate();
-  const { data: evaluations, isLoading } = useEvaluationsList();
+  const { data: evaluations, isLoading, error } = useEvaluationsList();
+
+  React.useEffect(() => {
+    if (error) {
+      toast.error('Failed to fetch evaluations', {
+        description: error.message || 'Please try again later'
+      });
+    }
+  }, [error]);
 
   const getStatusColor = (status: string): BadgeVariant => {
     switch (status.toLowerCase()) {
@@ -33,6 +44,15 @@ export function EvaluationsPage() {
 
   const formatDate = (date: string) => {
     return new Date(date).toLocaleString();
+  };
+
+  const getProgressPercentage = (evaluation: EvaluationListItem) => {
+    if (!evaluation.status_summary) return 0;
+    const total = evaluation.instance_count;
+    const completed = evaluation.status_summary.completed + 
+                     evaluation.status_summary.resolved + 
+                     evaluation.status_summary.failed;
+    return (completed / total) * 100;
   };
 
   return (
@@ -76,46 +96,73 @@ export function EvaluationsPage() {
                     <div>
                       <p className="text-sm font-medium">Started</p>
                       <p className="text-sm text-muted-foreground">
-                        {formatDate(evaluation.start_time)}
+                        {formatDate(evaluation.started_at)}
                       </p>
                     </div>
-                    {evaluation.finish_time && (
+                    {evaluation.completed_at && (
                       <div>
                         <p className="text-sm font-medium">Finished</p>
                         <p className="text-sm text-muted-foreground">
-                          {formatDate(evaluation.finish_time)}
+                          {formatDate(evaluation.completed_at)}
                         </p>
                       </div>
                     )}
                   </div>
 
+                  <div>
+                    <div className="flex justify-between text-sm mb-2">
+                      <span className="font-medium">Progress</span>
+                      <span className="text-muted-foreground">
+                        {Math.round(getProgressPercentage(evaluation))}%
+                      </span>
+                    </div>
+                    <Progress value={getProgressPercentage(evaluation)} className="h-2" />
+                  </div>
+
                   {evaluation.status_summary && (
-                    <div>
-                      <p className="text-sm font-medium mb-2">Progress</p>
-                      <div className="grid grid-cols-4 gap-2">
-                        <div>
-                          <Badge variant="outline" className="w-full justify-center">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="col-span-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          <Badge variant="outline" className="justify-center">
+                            {evaluation.status_summary.resolved} resolved
+                          </Badge>
+                          <Badge variant="outline" className="justify-center">
+                            {evaluation.status_summary.failed} failed
+                          </Badge>
+                          <Badge variant="outline" className="justify-center">
                             {evaluation.status_summary.pending} pending
-                          </Badge>
-                        </div>
-                        <div>
-                          <Badge variant="outline" className="w-full justify-center">
-                            {evaluation.status_summary.started} running
-                          </Badge>
-                        </div>
-                        <div>
-                          <Badge variant="outline" className="w-full justify-center">
-                            {evaluation.status_summary.completed} completed
-                          </Badge>
-                        </div>
-                        <div>
-                          <Badge variant="outline" className="w-full justify-center">
-                            {evaluation.status_summary.error} failed
                           </Badge>
                         </div>
                       </div>
                     </div>
                   )}
+
+                  <div className="grid grid-cols-4 gap-2 pt-2 border-t">
+                    <div className="flex items-center gap-2">
+                      <Coins className="h-4 w-4 text-muted-foreground" />
+                      <div className="text-sm">
+                        ${formatNumber(evaluation.total_cost, 2)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                      <div className="text-sm">
+                        {formatNumber(evaluation.prompt_tokens)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-4 w-4 text-muted-foreground" />
+                      <div className="text-sm">
+                        {formatNumber(evaluation.completion_tokens)}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-4 w-4 text-muted-foreground" />
+                      <div className="text-sm">
+                        {formatNumber(evaluation.cached_tokens)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>

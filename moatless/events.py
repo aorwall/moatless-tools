@@ -1,18 +1,15 @@
 import asyncio
-from datetime import datetime
-from enum import Enum
 import json
 import logging
-import os
-from pathlib import Path
+from datetime import datetime, timezone
+from enum import Enum
+from typing import List, Any, Callable
+
 import aiofiles
-from typing import Optional, List, Dict, Any, Callable
-import contextvars
+from pydantic import BaseModel
 
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from . import context_data
-
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +41,14 @@ class LoopStartData(BaseModel):
     initial_node_id: int
 
 
+class FailureEvent(BaseModel):
+    """Failure-specific event"""
+
+    event_type: str = "failure"
+    scope: str
+    node_id: int
+    error: str
+
 class LoopCompletedData(BaseModel):
     """Loop-specific event"""
 
@@ -51,6 +56,17 @@ class LoopCompletedData(BaseModel):
     total_iterations: int
     total_cost: float
     final_node_id: int
+
+
+class FlowStartedEvent(BaseEvent):
+    """Flow-specific event"""
+
+    event_type: str = "flow_started"
+
+class FlowCompletedEvent(BaseEvent):
+    """Flow-specific event"""
+
+    event_type: str = "flow_completed"
 
 
 class SystemEventType(Enum):
@@ -84,11 +100,17 @@ class EventBus:
         self._subscribers.append(callback)
         logger.info(f"Subscribed to {len(self._subscribers)} events")
 
+    def unsubscribe(self, callback: Callable):
+        logger.info(f"Unsubscribing from event: {callback.__name__}")
+        self._subscribers.remove(callback)
+        logger.info(f"Unsubscribed from {len(self._subscribers)} events")
+
     async def publish(self, event: BaseEvent):
         """Publish event, handling both sync and async subscribers and saving to jsonl"""
         trajectory_id = context_data.current_trajectory_id.get()
+        evaluation_name = context_data.current_evaluation_name.get()
         
-        logger.info(f"Publishing event: {event.event_type} for trajectory {trajectory_id} to {len(self._subscribers)} subscribers")
+        logger.info(f"Publishing event: {event.event_type} for trajectory {trajectory_id} and evaluation {evaluation_name} to {len(self._subscribers)} subscribers")
         
         # Save event to trajectory-specific events.jsonl
         await self._save_event(trajectory_id, event)
@@ -98,19 +120,24 @@ class EventBus:
 
     async def _save_event(self, trajectory_id: str, event: BaseEvent):
         """Thread-safe event saving to trajectory-specific events.jsonl"""
-        traj_dir = get_moatless_trajectory_dir(trajectory_id)
-        events_path = traj_dir / 'events.jsonl'
+        try:
+            traj_dir = get_moatless_trajectory_dir(trajectory_id)
+            events_path = traj_dir / 'events.jsonl'
 
-        event_dict = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "trajectory_id": trajectory_id,
-            "event_type": event.event_type,
-            "data": event.model_dump(exclude_none=True, exclude={'event_type'})
-        }
+            event_dict = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "trajectory_id": trajectory_id,
+                "event_type": event.event_type,
+                "data": event.model_dump(exclude_none=True, exclude={'event_type'})
+            }
 
-        async with self._lock:
-            async with aiofiles.open(events_path, mode='a', encoding='utf-8') as f:
-                await f.write(json.dumps(event_dict) + '\n')
+            async with self._lock:
+                async with aiofiles.open(events_path, mode='a', encoding='utf-8') as f:
+                    await f.write(json.dumps(event_dict) + '\n')
+                    await f.flush()
+        except Exception as e:
+            logger.exception(f"Error saving event: {str(e)}")
+            raise
 
     async def _run_async_callback(self, callback: Callable, trajectory_id: str | None, event: BaseEvent):
         """Helper method to run a single async callback"""

@@ -3,19 +3,20 @@ import logging
 import os
 import re
 import time
-import threading
+from pathlib import Path
 
 from moatless.codeblocks.module import Module
-from moatless.loop import AgenticLoop
+from moatless.flow.loop import AgenticLoop
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
-from moatless.search_tree import SearchTree
+from moatless.flow import SearchTree
 
 IGNORED_SPANS = ["docstring", "imports"]
 
 logger = logging.getLogger(__name__)
 _moatless_instances = {}
 
+_moatless_datasets = {}
 
 def load_moatless_datasets(split: str | None = None):
     global _moatless_instances
@@ -392,3 +393,35 @@ def trace_metadata(instance_id: str, session_id: str, trace_name: str):
         "trace_id": trace_id,
         "tags": [instance_id],
     }
+
+
+def get_moatless_dataset_splits() -> dict[str, dict]:
+    """Get all available datasets with their metadata."""
+    global _moatless_datasets
+    if not _moatless_datasets:
+        datasets = {}
+        dataset_dir = Path(__file__).parent / "datasets"
+        
+        for dataset_file in dataset_dir.glob("*_dataset.json"):
+            try:
+                with open(dataset_file, 'r') as f:
+                    data = json.load(f)
+                    if "name" in data and "instance_ids" in data:
+                        datasets[data.get("name", "")] = {
+                            "name": data.get("name", ""),   
+                            "description": data.get("description", ""),
+                            "instance_count": len(data.get("instance_ids", [])),
+                            "instance_ids": data.get("instance_ids", []),
+                        }
+            except Exception as e:
+                logger.exception(f"Failed to load dataset {dataset_file}: {e}")
+                continue
+
+        _moatless_datasets = datasets
+            
+    return _moatless_datasets
+
+
+def get_moatless_dataset_split(name: str) -> dict:
+    """Get a dataset by name."""
+    return get_moatless_dataset_splits().get(name, None)

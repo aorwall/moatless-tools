@@ -2,19 +2,19 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 interface LastUsedStore {
-  lastUsedAgent: string;
   lastUsedModel: string;
-  setLastUsedAgent: (id: string) => void;
+  lastUsedFlow: string;
   setLastUsedModel: (id: string) => void;
+  setLastUsedFlow: (id: string) => void;
 }
 
 export const useLastUsedStore = create<LastUsedStore>()(
   persist(
     (set) => ({
-      lastUsedAgent: "",
       lastUsedModel: "",
-      setLastUsedAgent: (id) => set({ lastUsedAgent: id }),
-      setLastUsedModel: (id) => set({ lastUsedModel: id }),
+      lastUsedFlow: "",
+      setLastUsedModel: (id: string) => set({ lastUsedModel: id }),
+      setLastUsedFlow: (id: string) => set({ lastUsedFlow: id }),
     }),
     {
       name: "last-used-store",

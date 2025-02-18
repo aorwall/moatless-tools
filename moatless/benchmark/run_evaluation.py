@@ -12,7 +12,6 @@ from typing import Optional
 import litellm
 from dotenv import load_dotenv
 
-from moatless.agent.settings import AgentSettings
 from moatless.benchmark.evaluation_factory import (
     create_evaluation,
     create_evaluation_name,
@@ -24,10 +23,9 @@ from moatless.benchmark.schema import (
     InstanceStatus,
     TreeSearchSettings,
 )
-from moatless.config.model_config import get_all_configs
 from moatless.completion.base import LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
-from moatless.schema import CompletionModelSettings
+from moatless.config.model_config import get_all_configs
 from moatless.schema import MessageHistoryType
 
 # Default evaluation settings

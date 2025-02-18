@@ -30,7 +30,6 @@ from moatless.agent.code_prompts import (
     generate_guideline_prompt,
 )
 from moatless.completion.base import (
-    LLMResponseFormat,
     BaseCompletionModel,
 )
 from moatless.index import CodeIndex

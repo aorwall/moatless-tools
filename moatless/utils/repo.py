@@ -1,13 +1,14 @@
+import asyncio
+import hashlib
 import logging
 import os
 import random
 import subprocess
 import time
-import filelock
+from contextlib import contextmanager, asynccontextmanager
 from pathlib import Path
-import hashlib
-from contextlib import contextmanager
-import asyncio
+
+import filelock
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,73 @@ def get_repo_lock_path(repo_url: str) -> str:
     return str(lock_dir / f"repo_{url_hash}.lock")
 
 
+def get_repo_async_lock_path(repo_url: str) -> str:
+    """Get the async lock file path for a repository URL."""
+    url_hash = hashlib.sha256(repo_url.encode()).hexdigest()[:16]
+    lock_dir = Path("/tmp/repo_locks")
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    
+    pid = os.getpid()
+    return str(lock_dir / f"repo_{url_hash}_async_{pid}.lock")
+
+
 @contextmanager
 def repo_operation_lock(repo_url: str):
     """Context manager to ensure thread-safe git operations on a repository."""
     lock_path = get_repo_lock_path(repo_url)
-    lock = filelock.FileLock(lock_path)
-    with lock:
+    lock = filelock.FileLock(lock_path, timeout=60)  # 1 minute timeout for sync operations
+    try:
+        lock.acquire()
         yield
+    finally:
+        if lock.is_locked:
+            lock.release()
+
+
+@asynccontextmanager
+async def repo_operation_async_lock(repo_url: str):
+    """Async context manager for thread-safe git operations."""
+    lock_path = get_repo_async_lock_path(repo_url)
+    lock = filelock.FileLock(lock_path, timeout=300)  # Increase timeout to 5 minutes
+    
+    try:
+        # Add exponential backoff retry logic
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                await asyncio.to_thread(lock.acquire)
+                break
+            except filelock.Timeout:
+                if attempt == max_attempts - 1:
+                    logger.error(f"Failed to acquire lock for {repo_url} after {max_attempts} attempts")
+                    raise
+                wait_time = (2 ** attempt) + (random.random())
+                logger.warning(f"Lock acquisition failed, retrying in {wait_time:.1f}s (attempt {attempt + 1})")
+                await asyncio.sleep(wait_time)
+        yield
+    except Exception as e:
+        logger.error(f"Error during repo operation: {str(e)}")
+        # Clean up stale lock if needed
+        if os.path.exists(lock_path):
+            try:
+                if not lock.is_locked:
+                    os.remove(lock_path)
+                    logger.info(f"Cleaned up stale lock file: {lock_path}")
+            except Exception as cleanup_error:
+                logger.error(f"Failed to clean up lock file: {cleanup_error}")
+        raise
+    finally:
+        if lock.is_locked:
+            try:
+                await asyncio.to_thread(lock.release)
+            except Exception as e:
+                logger.error(f"Error releasing lock: {str(e)}")
+                # Force remove lock file in case of release failure
+                try:
+                    os.remove(lock_path)
+                    logger.info(f"Forcibly removed lock file: {lock_path}")
+                except Exception:
+                    pass
 
 
 def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos") -> str:
@@ -142,45 +203,42 @@ def clone_and_checkout(repo_url, repo_dir, commit):
 
 async def async_clone_and_checkout(repo_url, repo_dir, commit):
     """Clone and checkout a specific commit asynchronously."""
-    with repo_operation_lock(repo_url):
-        if os.path.exists(f"{repo_dir}/.git"):
-            if verify_commit_exists(repo_dir, commit):
-                await run_git_command(["git", "checkout", commit], repo_dir)
-                logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
-                return
-            else:
-                logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
-                await run_git_command(["rm", "-rf", repo_dir])
-
-        try:
-            # For local file:// URLs, do a shallow clone
-            if repo_url.startswith("file://"):
-                logger.info(f"Starting shallow clone from local repo {repo_url} to {repo_dir}")
-                await run_git_command([
-                    "git", "clone", "--depth", "1", "--no-single-branch",
-                    repo_url, repo_dir
-                ])
-                logger.info(f"Local shallow clone completed, fetching commit {commit}")
-                await run_git_command(["git", "fetch", "origin", commit], repo_dir)
-            else:
-                # For remote URLs, do a full clone
-                logger.info(f"Starting full clone of {repo_url} to {repo_dir}")
-                await run_git_command(["git", "clone", repo_url, repo_dir])
-                try:
-                    await run_git_command(["git", "fetch", "origin", commit], repo_dir)
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"Failed to fetch specific commit, trying full fetch: {e}")
-                    await run_git_command(["git", "fetch", "--unshallow"], repo_dir)
-
-            logger.info(f"Fetch completed, checking out commit {commit}")
+    if os.path.exists(f"{repo_dir}/.git"):
+        if await asyncio.to_thread(verify_commit_exists, repo_dir, commit):
+            logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
             await run_git_command(["git", "checkout", commit], repo_dir)
-            logger.info(f"Successfully completed all git operations for {repo_url} at {commit}")
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Git operation failed: {e.stderr}")
+            logger.info(f"Checked out commit {commit} in {repo_dir}")
+            return
+        else:
+            logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
             if os.path.exists(repo_dir):
-                await run_git_command(["rm", "-rf", repo_dir])
-            raise
+                import shutil
+                shutil.rmtree(repo_dir)
+
+    try:
+        if repo_url.startswith("file://"):
+            logger.info(f"Starting shallow clone from local repo {repo_url} to {repo_dir}")
+            await run_git_command([
+                "git", "clone", "--depth", "1", "--no-single-branch",
+                repo_url, repo_dir
+            ])
+            await run_git_command(["git", "fetch", "origin", commit], repo_dir)
+        else:
+            logger.info(f"Starting full clone of {repo_url} to {repo_dir}")
+            await async_retry_clone(repo_url, repo_dir)
+            try:
+                await run_git_command(["git", "fetch", "origin", commit], repo_dir)
+            except subprocess.CalledProcessError:
+                await run_git_command(["git", "fetch", "--unshallow"], repo_dir)
+
+        await run_git_command(["git", "checkout", commit], repo_dir)
+
+    except Exception as e:
+        logger.error(f"Git operation failed: {e}")
+        if os.path.exists(repo_dir):
+            import shutil
+            shutil.rmtree(repo_dir)
+        raise
 
 
 async def async_retry_clone(repo_url, repo_dir, max_attempts=3):
@@ -204,32 +262,41 @@ async def async_retry_clone(repo_url, repo_dir, max_attempts=3):
 
 
 async def run_git_command(command, cwd=None):
-    """Run a git command asynchronously"""
-    process = await asyncio.create_subprocess_exec(
-        *command,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-    )
-    stdout, stderr = await process.communicate()
-    
-    if process.returncode != 0:
-        raise subprocess.CalledProcessError(
-            process.returncode,
-            command,
-            stdout.decode(),
-            stderr.decode()
+    """Run a git command asynchronously with timeout."""
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
-    return stdout.decode()
+        
+        # Add timeout to prevent hanging
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
+        except asyncio.TimeoutError:
+            process.kill()
+            raise TimeoutError(f"Git command timed out after 300s: {' '.join(command)}")
+            
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(
+                process.returncode,
+                command,
+                stdout.decode(),
+                stderr.decode()
+            )
+        return stdout.decode()
+    except Exception as e:
+        logger.error(f"Git command failed: {command} - {str(e)}")
+        raise
 
 
 async def maybe_clone_async(repo_url, repo_dir):
     """Clone a repo if it doesn't exist."""
-    with repo_operation_lock(repo_url):
+    async with repo_operation_async_lock(repo_url):
         if not os.path.exists(f"{repo_dir}/.git"):
             logger.info(f"Cloning repo '{repo_url}' to '{repo_dir}'")
             try:
-                # For GitHub URLs, convert to HTTPS if needed
                 if repo_url.startswith("file://") and not os.path.exists(repo_url[7:]):
                     repo_url = f"https://github.com/{repo_url.split('/')[-1]}.git"
                     logger.info(f"Converting to GitHub URL: {repo_url}")
@@ -238,6 +305,9 @@ async def maybe_clone_async(repo_url, repo_dir):
                 logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
             except Exception as e:
                 logger.error(f"Clone failed: {e}")
+                if os.path.exists(repo_dir):
+                    import shutil
+                    shutil.rmtree(repo_dir)
                 raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
 
 

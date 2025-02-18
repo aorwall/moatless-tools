@@ -1,49 +1,32 @@
-from abc import ABC, abstractmethod
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Callable, Union
-import uuid
 import traceback
+import uuid
+from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional, Dict, Any, List, Callable, Union
 
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
-from moatless.events import BaseEvent, SystemEvent
-from moatless.file_context import FileContext
-from moatless.node import Node, generate_ascii_tree
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.index.code_index import CodeIndex
-from moatless.utils.moatless import get_moatless_trajectory_dir
-from moatless.workspace import Workspace
 from moatless.config.agent_config import get_agent
 from moatless.config.model_config import create_completion_model
-from moatless.events import event_bus
 from moatless.context_data import current_trajectory_id
+from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent
+from moatless.events import event_bus
+from moatless.file_context import FileContext
+from moatless.flow.events import FlowErrorEvent
+from moatless.index.code_index import CodeIndex
+from moatless.node import Node
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.utils.moatless import get_moatless_trajectory_dir
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
-
-
-class FlowStartedEvent(BaseEvent):
-    event_type: str = "flow_started"
-
-class FlowCompletedEvent(BaseEvent):
-    event_type: str = "flow_completed"
-    finish_reason: str | None = None
-
-class FlowErrorEvent(BaseEvent):
-    event_type: str = "flow_error"
-    error: str
-
-class NodeExpandedEvent(BaseEvent):
-    event_type: str = "node_expanded"
-    parent_node_id: int
-    child_node_id: int
-
 
 class RunAttempt(BaseModel):
     """Information about a single run attempt"""
@@ -58,7 +41,7 @@ class RunAttempt(BaseModel):
 
 class SystemStatus(BaseModel):
     """System status information"""
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     status: str = "running"  # running, error, completed
     error: Optional[str] = None
@@ -101,7 +84,7 @@ class SystemStatus(BaseModel):
         return SystemStatus.model_validate_json(status_path.read_text())
 
 
-class AgenticSystem(BaseModel, ABC):
+class AgenticFlow(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     root: Node = Field(..., description="The root node of the system.")
@@ -113,7 +96,7 @@ class AgenticSystem(BaseModel, ABC):
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
 
-    persist_dir: Optional[Path] = Field(None, description="Directory to persist system state")
+    persist_dir: Optional[Path] = Field(None, description="Directory to persist system state", exclude=True)
     
     _status: SystemStatus = PrivateAttr(default_factory=SystemStatus)
     _events_file: Optional[Any] = PrivateAttr(default=None)
@@ -136,9 +119,10 @@ class AgenticSystem(BaseModel, ABC):
         persist_path: Optional[str] = None,
         persist_dir: Union[str, Path] | None = None,
         max_iterations: int = 10,
+        max_expansions: Optional[int] = None,
         max_cost: Optional[float] = None,
         **kwargs,
-    ) -> "AgenticSystem":
+    ) -> "AgenticFlow":
         if not root and not message:
             raise ValueError("Either a root node or a message must be provided.")
 
@@ -164,6 +148,7 @@ class AgenticSystem(BaseModel, ABC):
                 node_id=0,
                 user_message=message,
                 file_context=file_context,
+                max_expansions=max_expansions,
             )
 
         if isinstance(persist_dir, str):
@@ -283,11 +268,11 @@ class AgenticSystem(BaseModel, ABC):
                 logger.error(f"Error loading existing status: {e}")
         
         if not self._status:
-            self._status = SystemStatus(
-                started_at=datetime.now(timezone.utc),
-                status="running",
-                metadata=self.metadata
-            )
+            self._status = SystemStatus()
+
+        self._status.started_at = datetime.now(timezone.utc)
+        self._status.status = "running"
+        self._status.metadata = self.metadata
 
         # Start new attempt
         attempt = self._status.start_new_attempt()
@@ -357,7 +342,7 @@ class AgenticSystem(BaseModel, ABC):
         cls,
         obj: Any,
         repository: Repository | None = None,
-    ) -> "AgenticSystem":
+    ) -> "AgenticFlow":
         """Validate and reconstruct a system from a dictionary."""
         if isinstance(obj, dict):
             obj = obj.copy()
@@ -407,7 +392,7 @@ class AgenticSystem(BaseModel, ABC):
         )
 
     @classmethod
-    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "AgenticSystem":
+    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "AgenticFlow":
         """Load a system instance from a file."""
         with open(file_path, "r") as f:
             data = json.load(f)
@@ -415,7 +400,7 @@ class AgenticSystem(BaseModel, ABC):
         return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
     
     @classmethod
-    def from_trajectory_id(cls, trajectory_id: str, agent_id: str | None = None, model_id: str | None = None) -> "AgenticSystem":
+    def from_trajectory_id(cls, trajectory_id: str, agent_id: str | None = None, model_id: str | None = None) -> "AgenticFlow":
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id)
         workspace = Workspace(trajectory_dir=trajectory_dir)
         

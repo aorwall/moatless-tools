@@ -1,8 +1,9 @@
-from typing import List, Dict, Any, Literal
+from typing import List, Any
 
 from moatless.actions.schema import Observation
 from moatless.api.trajectory.schema import TimelineItemDTO, TimelineItemType
 from moatless.node import Node, ActionStep
+
 
 def create_user_message_item(node: Node) -> TimelineItemDTO | None:
     """Create timeline item for user message."""

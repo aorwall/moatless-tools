@@ -1,6 +1,8 @@
 from enum import Enum
 from typing import List, Optional, Union
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel
+
 
 class BlockType(str, Enum):
     text = "text"

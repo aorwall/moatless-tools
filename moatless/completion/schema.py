@@ -1,7 +1,6 @@
 import json
 from typing import (
     ClassVar,
-    Any,
     Self,
     Union,
     TypedDict,
@@ -13,7 +12,7 @@ from typing import (
 )
 
 from docstring_parser import parse
-from pydantic import BaseModel, ValidationError, ConfigDict
+from pydantic import BaseModel, ValidationError
 
 from moatless.completion.model import logger
 

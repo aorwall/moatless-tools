@@ -1,6 +1,5 @@
 import streamlit as st
 
-from moatless.node import Node
 from moatless.search_tree import SearchTree
 from moatless.streamlit.shared import show_completion
 

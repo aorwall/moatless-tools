@@ -22,11 +22,36 @@ import { Artifacts } from "../components/Artifacts";
 import { cn } from "@/lib/utils";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { TrajectoryError } from "../components/TrajectoryError";
+import { Trajectory } from "@/lib/types/trajectory";
 
-export function TrajectoryPage() {
-  const { trajectoryId } = useParams();
+interface TrajectoryViewProps {
+  trajectoryId?: string;
+  trajectory?: Trajectory;
+  isLoading?: boolean;
+  isError?: boolean;
+  error?: Error;
+}
+
+export function TrajectoryView({ 
+  trajectoryId, 
+  trajectory: providedTrajectory,
+  isLoading: providedIsLoading,
+  isError: providedIsError,
+  error: providedError
+}: TrajectoryViewProps) {
   const { setTrajectoryId } = useTrajectoryStore();
-  const { data: trajectoryData, isError, error } = useGetTrajectory(trajectoryId!);
+  const { 
+    data: fetchedTrajectory, 
+    isError: fetchedIsError, 
+    error: fetchedError,
+    isLoading: fetchedIsLoading
+  } = useGetTrajectory(trajectoryId ?? "");
+  
+  const trajectoryData = providedTrajectory ?? fetchedTrajectory;
+  const isError = providedIsError ?? fetchedIsError;
+  const error = providedError ?? fetchedError;
+  const isLoading = providedIsLoading ?? fetchedIsLoading;
+
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
 
@@ -43,14 +68,10 @@ export function TrajectoryPage() {
 
   if (!trajectoryId) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            No trajectory id found  
-          </AlertDescription>
-        </Alert>
-      </div>
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertDescription>No trajectory id found</AlertDescription>
+      </Alert>
     );
   }
 
@@ -231,6 +252,27 @@ export function TrajectoryPage() {
           <TimelineItemDetails trajectoryId={trajectoryId!} />
         </ResizablePanel>
       </ResizablePanelGroup>
+    </div>
+  );
+}
+
+export function TrajectoryPage() {
+  const { trajectoryId } = useParams();
+
+  if (!trajectoryId) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>No trajectory id found</AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto p-6">
+      <TrajectoryView trajectoryId={trajectoryId} />
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { ActionSchema } from "@/lib/types/agent";
 import { agentsApi } from "@/lib/api/agents";
 
 interface ActionStore {
-  actions: Record<string, ActionSchema>;
+  actions: ActionSchema[];
   isLoading: boolean;
   error: Error | null;
   hasLoaded: boolean;
@@ -13,7 +13,7 @@ interface ActionStore {
 }
 
 export const useActionStore = create<ActionStore>((set, get) => ({
-  actions: {},
+  actions: [],
   isLoading: false,
   error: null,
   hasLoaded: false,
@@ -42,7 +42,7 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const response = await agentsApi.getAvailableActions();
-      set({ actions: response.actions, isLoading: false, hasLoaded: true });
+      set({ actions: response, isLoading: false, hasLoaded: true });
     } catch (error) {
       set({ error: error as Error, isLoading: false });
     }

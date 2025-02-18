@@ -1,19 +1,18 @@
 """Validation manager for SWEBench validations."""
 
+import logging
 import os
 import uuid
-import logging
-import asyncio
-from typing import Dict, Optional, Callable, Awaitable
 from dataclasses import dataclass
+from typing import Dict, Optional, Callable, Awaitable
 
-from moatless.loop import AgenticLoop
-from moatless.benchmark.utils import get_moatless_instances
 from moatless.benchmark.swebench import create_repository
-from moatless.index import CodeIndex
-from moatless.runtime.testbed import TestbedEnvironment
-from moatless.config.model_config import create_completion_model
+from moatless.benchmark.utils import get_moatless_instances
 from moatless.config.agent_config import get_agent
+from moatless.config.model_config import create_completion_model
+from moatless.index import CodeIndex
+from moatless.flow.loop import AgenticLoop
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)

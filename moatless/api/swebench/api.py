@@ -1,82 +1,43 @@
 """API endpoints for SWEBench validation."""
 
-import os
-import logging
-import json
-from typing import Optional, List
 import asyncio
+import json
+import logging
+import os
 from datetime import datetime, timezone
 from glob import glob
+from typing import Optional
 
-from pydantic import create_model, BaseModel
-from fastapi import APIRouter, HTTPException, Query
-from moatless.benchmark.schema import EvaluationStatus, InstanceStatus
-from moatless.benchmark.utils import get_moatless_instances
-from moatless.benchmark.evaluation_runner import EvaluationRunner, TreeSearchSettings, Evaluation
+from fastapi import APIRouter, HTTPException
+
+from moatless.api.trajectories.api import load_trajectory_events, load_trajectory_status
+from moatless.api.trajectories.schema import TrajectoryResponseDTO
+from moatless.api.trajectory.trajectory_utils import load_trajectory_from_file
+from moatless.benchmark.evaluation_manager import EvaluationManager
+from moatless.benchmark.evaluation_runner import EvaluationRunner
+from moatless.benchmark.schema import EvaluationStatus
+from moatless.benchmark.utils import get_moatless_dataset_split, get_moatless_dataset_splits, get_moatless_instances
+from moatless.utils.moatless import get_moatless_trajectory_dir
+from moatless.validation.code_flow_validation import CodeFlowValidation
 from .schema import (
     SWEBenchInstanceDTO,
     SWEBenchInstancesResponseDTO,
     SWEBenchValidationRequestDTO,
-    SWEBenchValidationResponseDTO
+    SWEBenchValidationResponseDTO,
+    EvaluationListItemDTO,
+    EvaluationListResponseDTO,
+    EvaluationResponseDTO,
+    EvaluationInstanceDTO,
+    EvaluationRequestDTO,
+    DatasetDTO,
+    DatasetsResponseDTO,
+    StartEvaluationRequestDTO,
+    get_instance_status
 )
-from moatless.validation.code_flow_validation import CodeFlowValidation
-from moatless.benchmark.evaluation_manager import EvaluationManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-# Add new schema classes
-class DatasetDTO(BaseModel):
-    name: str
-    description: str
-    instance_count: int
-
-class DatasetsResponseDTO(BaseModel):
-    datasets: List[DatasetDTO]
-
-class EvaluationRequestDTO(BaseModel):
-    agent_id: str
-    model_id: str
-    num_workers: int = 1
-    dataset: str
-    max_iterations: int = 10
-    max_expansions: int = 1
-
-class EvaluationInstanceDTO(BaseModel):
-    instance_id: str
-    status: str
-    error: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-
-class EvaluationResponseDTO(BaseModel):
-    evaluation_name: str
-    dataset_name: str
-    status: str
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    instances: List[EvaluationInstanceDTO]
-
-class EvaluationStatusSummaryDTO(BaseModel):
-    pending: int = 0
-    started: int = 0
-    completed: int = 0
-    error: int = 0
-
-class EvaluationListItemDTO(BaseModel):
-    evaluation_name: str
-    dataset_name: str
-    status: str
-    started_at: datetime
-    completed_at: Optional[datetime] = None
-    instance_count: int
-    status_summary: Optional[EvaluationStatusSummaryDTO] = None
-
-class EvaluationListResponseDTO(BaseModel):
-    evaluations: List[EvaluationListItemDTO]
-
 
 @router.get("/instances", response_model=SWEBenchInstancesResponseDTO)
 async def list_instances(page: int = 1, limit: int = 20, sort_by: str = 'instance_id', order: str = 'asc', search: Optional[str] = None):
@@ -149,20 +110,10 @@ async def validate_instance(request: SWEBenchValidationRequestDTO):
 async def list_datasets():
     """List all available datasets with their descriptions and instance counts."""
     try:
-        datasets = []
-        dataset_files = glob("datasets/*.json")
-        
-        for dataset_file in dataset_files:
-            with open(dataset_file, 'r') as f:
-                data = json.load(f)
-                if "name" in data and "instance_ids" in data:
-                    datasets.append(DatasetDTO(
-                        name=data.get("name", ""),
-                        description=data.get("description", ""),
-                        instance_count=len(data.get("instance_ids", []))
-                    ))
-        
-        return DatasetsResponseDTO(datasets=datasets)
+        datasets = get_moatless_dataset_splits()
+        return DatasetsResponseDTO(datasets=[
+            DatasetDTO(**dataset) for dataset in datasets.values()
+        ])
     except Exception as e:
         logger.exception(f"Failed to list datasets: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -171,27 +122,18 @@ async def list_datasets():
 async def create_evaluation(request: EvaluationRequestDTO):
     """Create a new evaluation run for a dataset."""
     try:
-        dataset_path = f"datasets/{request.dataset}_dataset.json"
-        if not os.path.exists(dataset_path):
-            logger.error(f"No dataset found on {dataset_path}")
+        dataset = get_moatless_dataset_split(request.dataset)
+        if not dataset:
             raise HTTPException(status_code=400, detail=f"Dataset {request.dataset} not found")
-            
-        with open(dataset_path, 'r') as f:
-            dataset = json.load(f)
 
         manager = EvaluationManager()
         
-        evaluation_name = manager.create_evaluation(
+        evaluation = manager.create_evaluation(
             dataset_name=request.dataset,
             instance_ids=dataset["instance_ids"],
-            agent_id=request.agent_id,
+            flow_id=request.flow_id,
             model_id=request.model_id,
-            num_workers=request.num_workers,
-            max_iterations=request.max_iterations,
-            max_expansions=request.max_expansions
         )
-
-        evaluation = manager._load_evaluation(evaluation_name)
         
         return EvaluationResponseDTO(
             evaluation_name=evaluation.evaluation_name,
@@ -200,22 +142,24 @@ async def create_evaluation(request: EvaluationRequestDTO):
             created_at=evaluation.created_at,
             started_at=evaluation.started_at,
             completed_at=evaluation.completed_at,
-            settings=evaluation.settings,
-            num_workers=evaluation.num_workers,
+            flow_id=evaluation.flow_id,
+            model_id=evaluation.model_id,
             instances=[
                 EvaluationInstanceDTO(
                     instance_id=instance.instance_id,
-                    status=instance.status.value,
+                    status=get_instance_status(instance),
                     error=instance.error,
                     started_at=instance.started_at,
-                    completed_at=instance.completed_at
+                    completed_at=instance.completed_at,
+                    evaluated_at=instance.evaluated_at,
+                    resolved=instance.resolved
                 )
                 for instance in evaluation.instances
             ]
         )
         
     except Exception as e:
-        logger.exception(f"Failed to start evaluation: {str(e)}")
+        logger.exception(f"Failed to create evaluation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/evaluations/{evaluation_name}", response_model=EvaluationResponseDTO)
@@ -235,13 +179,18 @@ async def get_evaluation(evaluation_name: str):
             created_at=evaluation.created_at,
             started_at=evaluation.started_at,
             completed_at=evaluation.completed_at,
+            flow_id=evaluation.flow_id,
+            model_id=evaluation.model_id,
             instances=[
                 EvaluationInstanceDTO(
                     instance_id=instance.instance_id,
-                    status=instance.status.value,
+                    status=get_instance_status(instance),
                     error=instance.error,
+                    created_at=instance.created_at,
                     started_at=instance.started_at,
-                    completed_at=instance.completed_at
+                    completed_at=instance.completed_at,
+                    evaluated_at=instance.evaluated_at,
+                    resolved=instance.resolved
                 )
                 for instance in evaluation.instances
             ]
@@ -257,34 +206,10 @@ async def list_evaluations():
         manager = EvaluationManager()
         evaluations = manager.list_evaluations()
         
-        response_items = []
-        for eval in evaluations:
-            # Create status summary if evaluation is not finished
-            status_summary = None
-            if eval.status != EvaluationStatus.COMPLETED:
-                summary = EvaluationStatusSummaryDTO()
-                for instance in eval.instances:
-                    if instance.status == InstanceStatus.PENDING:
-                        summary.pending += 1
-                    elif instance.status == InstanceStatus.STARTED:
-                        summary.started += 1
-                    elif instance.status == InstanceStatus.COMPLETED:
-                        summary.completed += 1
-                    elif instance.status == InstanceStatus.ERROR:
-                        summary.error += 1
-                status_summary = summary
-
-            response_items.append(
-                EvaluationListItemDTO(
-                    evaluation_name=eval.evaluation_name,
-                    dataset_name=eval.dataset_name,
-                    status=eval.status.value,
-                    started_at=eval.start_time,
-                    completed_at=eval.finish_time,
-                    instance_count=len(eval.instances),
-                    status_summary=status_summary
-                )
-            )
+        response_items = [
+            EvaluationListItemDTO.from_evaluation(eval)
+            for eval in evaluations
+        ]
         
         return EvaluationListResponseDTO(evaluations=response_items)
         
@@ -293,7 +218,7 @@ async def list_evaluations():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/evaluations/{evaluation_name}/start", response_model=EvaluationResponseDTO)
-async def start_evaluation(evaluation_name: str):
+async def start_evaluation(evaluation_name: str, request: StartEvaluationRequestDTO):
     """Start an existing evaluation."""
     try:
         manager = EvaluationManager()
@@ -305,16 +230,18 @@ async def start_evaluation(evaluation_name: str):
         if evaluation.status in [EvaluationStatus.RUNNING, EvaluationStatus.COMPLETED]:
             raise HTTPException(status_code=400, detail="Evaluation cannot be started in its current state")
 
+        runner = EvaluationRunner(evaluation=evaluation, num_concurrent_instances=request.num_concurrent_instances)
+        asyncio.create_task(runner.run_evaluation())
+            
         evaluation.status = EvaluationStatus.RUNNING
         evaluation.started_at = datetime.now(timezone.utc)
         manager._save_evaluation(evaluation)
         
-        runner = EvaluationRunner(evaluation=evaluation)
-        asyncio.create_task(runner.run_evaluation(evaluation_name))
-            
         return EvaluationResponseDTO(
             evaluation_name=evaluation.evaluation_name,
             dataset_name=evaluation.dataset_name,
+            flow_id=evaluation.flow_id,
+            model_id=evaluation.model_id,
             status=evaluation.status.value,
             started_at=evaluation.started_at,
             completed_at=evaluation.completed_at,
@@ -331,4 +258,40 @@ async def start_evaluation(evaluation_name: str):
         )
     except Exception as e:
         logger.exception(f"Failed to start evaluation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/evaluations/{evaluation_name}/instances/{instance_id}", response_model=TrajectoryResponseDTO)
+async def get_evaluation_instance(evaluation_name: str, instance_id: str):
+    """Get a specific instance of an evaluation."""
+    try:
+        manager = EvaluationManager()
+        trajectory_dir = get_moatless_trajectory_dir(instance_id, evaluation_name)
+        trajectory_path = trajectory_dir / 'trajectory.json'
+        if not trajectory_path.exists():
+            raise HTTPException(status_code=404, detail="Trajectory not found")
+        try:
+            trajectory = load_trajectory_from_file(trajectory_path)
+            status = "finished"
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Trajectory not found")
+
+        system_status = load_trajectory_status(trajectory_dir)
+        if system_status.status == "running":
+            system_status.status = "stopped"
+        
+        status = system_status.status
+
+        events = load_trajectory_events(trajectory_dir)
+
+        return TrajectoryResponseDTO(
+            status=status,
+            system_status=system_status,
+                agent_id=system_status.metadata.get("agent_id"),
+                model_id=system_status.metadata.get("model_id"),
+                events=events,
+                **trajectory.model_dump()
+            )
+    except Exception as e:
+        logger.exception(f"Failed to get evaluation instance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

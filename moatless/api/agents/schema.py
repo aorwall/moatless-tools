@@ -1,8 +1,8 @@
-from typing import Any, Dict, List, Optional
+from typing import Dict, List
+
 from pydantic import BaseModel, Field
-from moatless.actions.action import Action
+
 from moatless.actions.schema import ActionSchema
-from moatless.message_history import MessageHistoryGenerator
 
 
 class ActionConfigDTO(BaseModel):

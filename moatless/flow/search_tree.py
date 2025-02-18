@@ -1,29 +1,29 @@
 import json
 import logging
-from datetime import datetime
 from typing import Optional, Dict, Any, List, Callable
 
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import Field, model_validator, ConfigDict
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
-from moatless.events import BaseEvent, SystemEvent
+from moatless.events import FailureEvent
 from moatless.exceptions import RuntimeError, RejectError
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
+from moatless.flow import AgenticFlow
+from moatless.flow.events import NodeExpandedEvent, FeedbackGeneratedEvent, NodeRewardEvent, NodeRewardFailureEvent, NodeSelectedEvent
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from moatless.agentic_system import AgenticSystem
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-class SearchTree(AgenticSystem):
+class SearchTree(AgenticFlow):
     selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
     expander: Optional[Expander] = Field(None, description="Expander for expanding nodes.")
     value_function: Optional[BaseValueFunction] = Field(None, description="Value function for reward calculation.")
@@ -59,8 +59,6 @@ class SearchTree(AgenticSystem):
         value_function: Optional[BaseValueFunction] = None,
         feedback_generator: Optional[BaseFeedbackGenerator] = None,
         discriminator: Optional[BaseDiscriminator] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-        persist_path: Optional[str] = None,
         max_expansions: int = 1,
         max_iterations: int = 10,
         max_cost: Optional[float] = None,
@@ -69,18 +67,16 @@ class SearchTree(AgenticSystem):
         reward_threshold: Optional[float] = None,
         max_depth: Optional[int] = None,
         **kwargs,
-    ) -> "SearchTree":
+    ):
         expander = expander or Expander(max_expansions=max_expansions)
 
-        return cls(
+        return super().create(
             selector=selector,
             expander=expander,
             agent=agent,
             value_function=value_function,
             feedback_generator=feedback_generator,
             discriminator=discriminator,
-            metadata=metadata or {},
-            persist_path=persist_path,
             max_expansions=max_expansions,
             max_iterations=max_iterations,
             max_cost=max_cost,
@@ -91,41 +87,7 @@ class SearchTree(AgenticSystem):
             **kwargs,
         )
 
-    @classmethod
-    def model_validate(
-        cls,
-        obj: Any,
-        repository: Repository | None = None,
-        runtime: RuntimeEnvironment | None = None,
-    ):
-        if isinstance(obj, dict):
-            obj = obj.copy()
-
-            # Remove repository from validation since it's handled separately
-            obj.pop("repository", None)
-
-            if "selector" in obj and isinstance(obj["selector"], dict):
-                obj["selector"] = BaseSelector.model_validate(obj["selector"])
-
-            if "agent" in obj and isinstance(obj["agent"], dict):
-                obj["agent"] = ActionAgent.model_validate(obj["agent"])
-
-            if "value_function" in obj and isinstance(obj["value_function"], dict):
-                obj["value_function"] = BaseValueFunction.model_validate(obj["value_function"])
-
-            if "feedback_generator" in obj and isinstance(obj["feedback_generator"], dict):
-                obj["feedback_generator"] = BaseFeedbackGenerator.model_validate(obj["feedback_generator"])
-
-            if "discriminator" in obj and isinstance(obj["discriminator"], dict):
-                obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
-
-            if "root" in obj and isinstance(obj["root"], dict):
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
-
-        instance = super().model_validate(obj)
-        return instance
-
-    async def _run(self) -> tuple[Node, str]:
+    async def _run(self, message: str | None = None) -> tuple[Node, str]:
         """Run the search tree algorithm with the given node."""
         if not self.root:
             raise ValueError("No node provided to run")
@@ -138,6 +100,8 @@ class SearchTree(AgenticSystem):
                 f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
             )
 
+
+        node = self.root
         finish_reason = None
         while not (finish_reason := self.is_finished()):
             total_cost = self.total_usage().completion_cost
@@ -147,14 +111,27 @@ class SearchTree(AgenticSystem):
                 cost=total_cost,
             )
 
-            node = self._select(self.root)
+            node = await self._select(node)
 
             if node:
-                new_node = self._expand(node)
-                self._simulate(new_node)
-                self._backpropagate(new_node)
-                self.maybe_persist()
-                self.log(logger.info, generate_ascii_tree(self.root, new_node))
+                new_node = await self._expand(node)
+                if new_node:
+                    await self._simulate(new_node)
+                    self._backpropagate(new_node)
+                    node = new_node
+                    self.maybe_persist()
+                else:
+                    self.log(logger.warning, f"No node expanded from Node{node.node_id}")
+                    self.emit_event(
+                        FailureEvent(
+                            scope="search_tree",
+                            node_id=node.node_id,
+                            error="No node expanded",
+                        )
+                    )
+                    break
+
+                self.log(logger.info, generate_ascii_tree(self.root, node))
 
             else:
                 self.log(logger.info, "Search complete: no more nodes to expand.")
@@ -173,18 +150,29 @@ class SearchTree(AgenticSystem):
 
         return self.get_best_trajectory(), finish_reason
 
-    def _select(self, node: Node) -> Optional[Node]:
+    async def _select(self, node: Node) -> Optional[Node]:
         """Select a node for expansion using the UCT algorithm."""
-        expandable_nodes = node.get_expandable_descendants()
+        root = node.get_root()
+        expandable_nodes = root.get_expandable_descendants()
 
         if not expandable_nodes:
             self.log(logger.info, "No expandable nodes found.")
             return None
 
-        # If we have a finished node or exceeded depth, use normal selection
-        return self.selector.select(expandable_nodes)
+        previous_node_id = node.node_id
 
-    def _expand(self, node: Node) -> Node:
+        node = await self.selector.select(expandable_nodes)
+
+        await self.emit_event(
+            NodeSelectedEvent(
+                previous_node_id=previous_node_id,
+                selected_node_id=node.node_id,
+            )
+        )
+
+        return node
+
+    async def _expand(self, node: Node) -> Node | None:
         """Expand the node and return a child node."""
 
         # Check if any action step was not executed, if so return the node
@@ -192,42 +180,44 @@ class SearchTree(AgenticSystem):
             self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
             return node
 
-        child_node = self.expander.expand(node)
+        parent_node_id = node.node_id
+        child_node = await self.expander.expand(node)
+        if not child_node:
+            self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
+            return None
 
+        await self.emit_event(
+            NodeExpandedEvent(
+                parent_node_id=parent_node_id,
+                child_node_id=child_node.node_id,
+            )
+        )
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator and len(node.children) >= 2:
-            feedback_data = self.feedback_generator.generate_feedback(
-                child_node,
-                self.agent.actions,
+            feedback_data = await self.feedback_generator.generate_feedback(
+                child_node
             )
 
             if feedback_data:
                 child_node.feedback_data = feedback_data
                 child_node.user_message = feedback_data.feedback
 
-                self.emit_event(
-                    SystemEvent(
-                        event_type="feedback_generated",
-                        event={
-                            "node_id": child_node.node_id,
-                            "parent_id": node.node_id,
-                            "feedback": child_node.feedback_data.model_dump(),
-                            "action": child_node.action.name if child_node.action else None,
-                            "depth": child_node.get_depth(),
-                        }
+                await self.emit_event(
+                    FeedbackGeneratedEvent(
+                        node_id=child_node.node_id,
                     )
                 )
-
+                
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
-    def _simulate(self, node: Node):
+    async def _simulate(self, node: Node):
         """Simulate a playout by executing the action and evaluating the result."""
 
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
-            self.agent.run(node)
+            await self.agent.run(node)
             logger.info(f"Node{node.node_id}: Action executed. Depth: {node.get_depth()} ({self.max_depth})")
 
             if self.max_depth and node.get_depth() >= self.max_depth and not node.terminal:
@@ -237,7 +227,7 @@ class SearchTree(AgenticSystem):
         if self.value_function and not node.is_duplicate and node.observation:
             try:
                 logger.info(f"Node{node.node_id}: Evaluating value function")
-                node.reward, completion_response = self.value_function.get_reward(node=node)
+                node.reward, completion_response = await self.value_function.get_reward(node=node)
 
                 if completion_response:
                     node.completions["value_function"] = completion_response
@@ -248,15 +238,10 @@ class SearchTree(AgenticSystem):
                         f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
                     )
                     
-                    self.emit_event(
-                        SystemEvent(
-                            event_type="reward_generated",
-                            event={
-                                "node_id": node.node_id,
-                                "reward": node.reward.value,
-                                "action": node.action.name if node.action else None,
-                                "depth": node.get_depth(),
-                            },
+                    await self.emit_event(
+                        NodeRewardEvent(
+                            node_id=node.node_id,
+                            reward=node.reward.value,
                         )
                     )
                 else:
@@ -268,6 +253,12 @@ class SearchTree(AgenticSystem):
                 self.log(
                     logger.warning,
                     f"Node{node.node_id}: Value function rejected: {e.message}",
+                )
+                await self.emit_event(
+                    NodeRewardFailureEvent(
+                        node_id=node.node_id,
+                        error=str(e),
+                    )
                 )
                 node.reward = None
             except RuntimeError as e:
@@ -420,6 +411,40 @@ class SearchTree(AgenticSystem):
             self.max_depth = self.max_iterations
         return self
 
+    @classmethod
+    def model_validate(
+        cls,
+        obj: Any,
+        repository: Repository | None = None,
+        runtime: RuntimeEnvironment | None = None,
+    ):
+        if isinstance(obj, dict):
+            obj = obj.copy()
+
+            # Remove repository from validation since it's handled separately
+            obj.pop("repository", None)
+
+            if "selector" in obj and isinstance(obj["selector"], dict):
+                obj["selector"] = BaseSelector.model_validate(obj["selector"])
+
+            if "agent" in obj and isinstance(obj["agent"], dict):
+                obj["agent"] = ActionAgent.model_validate(obj["agent"])
+
+            if "value_function" in obj and isinstance(obj["value_function"], dict):
+                obj["value_function"] = BaseValueFunction.model_validate(obj["value_function"])
+
+            if "feedback_generator" in obj and isinstance(obj["feedback_generator"], dict):
+                obj["feedback_generator"] = BaseFeedbackGenerator.model_validate(obj["feedback_generator"])
+
+            if "discriminator" in obj and isinstance(obj["discriminator"], dict):
+                obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
+
+            if "root" in obj and isinstance(obj["root"], dict):
+                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
+
+        instance = super().model_validate(obj)
+        return instance
+
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """
         Generate a dictionary representation of the SearchTree.
@@ -445,6 +470,7 @@ class SearchTree(AgenticSystem):
         }
 
         data.pop("persist_path", None)
+        data.pop("persist_dir", None)
 
         data["selector"] = self.selector.model_dump(**kwargs)
         data["expander"] = self.expander.model_dump(**kwargs)

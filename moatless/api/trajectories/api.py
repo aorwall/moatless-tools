@@ -1,24 +1,22 @@
 """API endpoints for run status and trajectory data."""
 
-import os
 import json
 import logging
-import time
-from typing import List
-from fastapi import APIRouter, HTTPException
-from moatless.agentic_system import SystemStatus
-from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.loop import AgenticLoop
-from moatless.node import Node
-from moatless.runner import agentic_runner
-from moatless.api.trajectory.trajectory_utils import convert_nodes, create_trajectory_dto, load_trajectory_from_file
-from moatless.utils.moatless import get_moatless_trajectories_dir, get_moatless_trajectory_dir
-from moatless.workspace import Workspace
-from moatless.config.agent_config import get_agent
-from moatless.config.model_config import create_completion_model
-from .schema import RetryTrajectoryRequest, StartTrajectoryRequest, TrajectoryEventDTO, TrajectoryListItem, TrajectoryResponseDTO
-from pathlib import Path
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import List
+
+from fastapi import APIRouter, HTTPException
+
+from moatless.api.trajectory.schema import TrajectoryDTO
+from moatless.api.trajectory.trajectory_utils import convert_nodes, load_trajectory_from_file
+from moatless.flow.runner import agentic_runner
+from moatless.flow.flow import SystemStatus
+from moatless.flow.loop import AgenticLoop
+from moatless.utils.moatless import get_moatless_trajectories_dir, get_moatless_trajectory_dir
+from .schema import RetryTrajectoryRequest, StartTrajectoryRequest, TrajectoryEventDTO, TrajectoryListItem, \
+    TrajectoryResponseDTO
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,10 @@
-from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from datetime import datetime
-from moatless.agentic_system import SystemStatus
+
+from pydantic import BaseModel, Field
+
 from moatless.api.trajectory.schema import TrajectoryDTO
+from moatless.flow.flow import SystemStatus
+
 
 class AttachmentData(BaseModel):
     name: str = Field(description="Original filename of the attachment")

@@ -1,6 +1,4 @@
 from typing import Optional, Dict
-from pydantic import BaseModel, Field
-from datetime import datetime
 
 from moatless.events import BaseEvent
 

@@ -1,6 +1,5 @@
-from typing import Any, List
+from typing import Any, List, Optional
 
-from moatless.completion.model import Usage
 
 
 class MoatlessError(Exception):
@@ -31,7 +30,7 @@ class CompletionError(MoatlessError):
         message: str,
         last_completion: Any | None = None,
         messages: List[dict] | None = None,
-        accumulated_usage: Usage | None = None,
+        accumulated_usage: Optional["Usage"] = None,
     ):
         super().__init__(message)
         self.last_completion = last_completion

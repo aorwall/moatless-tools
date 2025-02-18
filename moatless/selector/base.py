@@ -1,21 +1,35 @@
 import importlib
 import logging
 from abc import ABC
-from typing import Any, List
+from typing import Any, List, Type
 
 from pydantic import BaseModel
 
 from moatless.node import Node
+from moatless.flow.base import FlowComponentMixin
+from moatless.component import MoatlessComponent
 
 logger = logging.getLogger(__name__)
 
 
-class BaseSelector(BaseModel, ABC):
-    def select(self, expandable_nodes: List[Node]) -> Node | None:
+class BaseSelector(MoatlessComponent):
+    async def select(self, expandable_nodes: List[Node]) -> Node | None:
         if not expandable_nodes:
             return None
 
         return expandable_nodes[0]
+
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "selector"
+
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.selector"
+
+    @classmethod
+    def _get_base_class(cls) -> Type:
+        return BaseSelector
 
     @classmethod
     def model_validate(cls, obj: Any):
