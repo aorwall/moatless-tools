@@ -3,6 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from moatless.completion.base import LLMResponseFormat
+from moatless.config.model_config import ModelConfig
 from moatless.schema import MessageHistoryType
 
 
@@ -48,32 +49,8 @@ class ModelConfigUpdateDTO(BaseModel):
     )
 
 
-class ModelConfigDTO(BaseModel):
-    """Full model configuration including base and specific settings"""
-
-    id: str = Field(..., description="Unique identifier for the model")
-    model: str = Field(..., description="Model identifier used in LiteLLM")
-    model_base_url: Optional[str] = Field(None, description="Base URL for the model API")
-    model_api_key: Optional[str] = Field(None, description="API key for the model")
-    temperature: Optional[float] = Field(..., description="Temperature for model sampling")
-    max_tokens: Optional[int] = Field(..., description="Maximum number of tokens to generate")
-    timeout: float = Field(..., description="Timeout in seconds for model requests")
-    thoughts_in_action: bool = Field(..., description="Whether to include thoughts in actions")
-    disable_thoughts: bool = Field(..., description="Whether to disable thoughts completely")
-    merge_same_role_messages: bool = Field(..., description="Whether to merge consecutive messages with same role")
-    message_cache: bool = Field(..., description="Whether to enable message caching")
-    few_shot_examples: bool = Field(..., description="Whether to use few-shot examples")
-    response_format: LLMResponseFormat = Field(..., description="Format for model responses")
-    message_history_type: MessageHistoryType = Field(..., description="Type of message history to use")
-
-    class Config:
-        """Pydantic config"""
-
-        alias_generator = None
-        populate_by_name = True
-
 
 class ModelsResponseDTO(BaseModel):
     """Response model for listing all models"""
 
-    models: List[ModelConfigDTO] = Field(..., description="List of model configurations")
+    models: List[ModelConfig] = Field(..., description="List of model configurations")

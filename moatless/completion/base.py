@@ -92,6 +92,7 @@ class CompletionResponse(BaseModel):
 
 
 class BaseCompletionModel(BaseModel, ABC):
+    model_id: str = Field(..., description="The ID of the model")
     model: str = Field(..., description="The model to use for completion")
     temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
     max_tokens: Optional[int] = Field(2000, description="The maximum number of tokens to generate")
@@ -112,7 +113,7 @@ class BaseCompletionModel(BaseModel, ABC):
         default=False,
         description="Whether to disable to use thoughts at all.",
     )
-    use_few_shots: bool = Field(False, description="Whether to use few-shot examples for generating completions")
+    few_shot_examples: bool = Field(False, description="Whether to use few-shot examples for generating completions")
     message_history_type: MessageHistoryType = Field(
         default=MessageHistoryType.MESSAGES,
         description="The type of message history to use",
@@ -125,6 +126,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
     _response_schema: Optional[List[type[ResponseSchema]]] = PrivateAttr(default=None)
     _system_prompt: Optional[str] = PrivateAttr(default=None)
+    _few_shot_prompt: Optional[str] = PrivateAttr(default=None)
 
     _completion_params: Optional[Dict[str, Union[str, Dict, List]]] = None
     _initialized: bool = False
@@ -171,6 +173,12 @@ class BaseCompletionModel(BaseModel, ABC):
 
         self._response_schema = schemas
         self._completion_params = self._get_completion_params(self._response_schema)
+        
+        if self.few_shot_examples:
+            self._few_shot_prompt = self._generate_few_shot_examples()
+        else:
+            self._few_shot_prompt = None
+            
         self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
         self._initialized = True
 
@@ -211,9 +219,35 @@ class BaseCompletionModel(BaseModel, ABC):
         """
         return system_prompt
 
+    def _generate_few_shot_examples(self) -> str:
+        """Generate few-shot examples in the model's format.
+        
+        Returns:
+            Formatted few-shot examples string
+        """
+        if not self._response_schema:
+            return ""
+            
+        few_shot_examples = []
+        for schema in self._response_schema:
+            if hasattr(schema, "get_few_shot_examples"):
+                examples = schema.get_few_shot_examples()
+                if examples:
+                    few_shot_examples.extend(examples)
+                    
+        if not few_shot_examples:
+            return ""
+            
+        prompt = "\n\n# Examples\nExamples of how to use the available actions:\n\n"
+        return prompt
+
     def _prepare_messages(self, messages: List[dict], system_prompt: str) -> List[dict]:
-        """Prepare messages with system prompt"""
+        """Prepare messages with system prompt and few-shot examples"""
         messages = messages.copy()
+        
+        if self._few_shot_prompt:
+            system_prompt = system_prompt + "\n\n" + self._few_shot_prompt
+                
         messages.insert(0, {"role": "system", "content": system_prompt})
         return messages
 
@@ -589,3 +623,36 @@ class BaseCompletionModel(BaseModel, ABC):
             merged.append({"role": "user", "content": "\n".join(current_content)})
 
         return merged
+
+    def __str__(self) -> str:
+        """Return a nice string representation of the completion model."""
+        components = []
+        
+        components.extend([
+            f"Model: {self.model}",
+            f"Response format: {self.response_format.value}",
+            f"Temperature: {self.temperature}",
+            f"Max tokens: {self.max_tokens}",
+            f"Timeout: {self.timeout}s"
+        ])
+
+        if self.model_base_url:
+            components.append(f"Base URL: {self.model_base_url}")
+            
+        if self.metadata:
+            components.append(f"Metadata: {self.metadata}")
+            
+        components.extend([
+            f"Message cache: {self.message_cache}",
+            f"Thoughts in action: {self.thoughts_in_action}",
+            f"Disable thoughts: {self.disable_thoughts}",
+            f"Few shot examples: {self.few_shot_examples}",
+            f"Message history type: {self.message_history_type.value}",
+            f"Merge same role messages: {self.merge_same_role_messages}"
+        ])
+
+        if self._response_schema:
+            schema_names = [schema.__name__ for schema in self._response_schema]
+            components.append(f"Response schemas: {', '.join(schema_names)}")
+
+        return f"Completion Model '{self.model}':\n" + "\n".join(f"- {c}" for c in components)

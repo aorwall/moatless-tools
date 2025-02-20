@@ -12,7 +12,7 @@ import litellm
 from dotenv import load_dotenv
 
 from moatless.flow.runner import agentic_runner
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.completion.model import Usage
 from moatless.flow.loop import AgenticLoop
 from moatless.agent.code_agent import CodingAgent

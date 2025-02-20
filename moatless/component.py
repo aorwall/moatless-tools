@@ -39,23 +39,27 @@ class MoatlessComponent(BaseModel, ABC):
     def model_validate(cls, obj: Any):
         if isinstance(obj, dict):
             obj = obj.copy()
-            class_path = obj.pop(f"{cls.get_component_type()}_class", None)
-            if class_path:
-                try:
-                    cls._initialize_components()
-                    module_name, class_name = class_path.rsplit(".", 1)
-                    component_class = cls.get_component_by_name(class_name)
-                    
-                    if not component_class:
-                        available = cls._get_components().keys()
-                        logger.warning(f"Invalid {cls.get_component_type()} class: {class_name}. Available: {available}")
-                        raise ValueError(f"Invalid {cls.get_component_type()} class: {class_name}")
-                    return component_class(**obj)
-                except Exception as e:
-                    logger.warning(f"Failed to load {cls.get_component_type()} class {class_path}: {e}")
-                    raise ValueError(f"Failed to load {cls.get_component_type()} class {class_path}") from e
+            discriminator_key = f"{cls.get_component_type()}_class"
+
+            if discriminator_key in obj:
+                class_path = obj.pop(discriminator_key, None)
+                if class_path:
+                    try:
+                        cls._initialize_components()
+                        module_name, class_name = class_path.rsplit(".", 1)
+                        component_class = cls.get_component_by_name(class_name)
+                        
+                        if not component_class:
+                            available = cls._get_components().keys()
+                            logger.warning(f"Invalid {cls.get_component_type()} class: {class_name}. Available: {available}")
+                            raise ValueError(f"Invalid {cls.get_component_type()} class: {class_name}")
+                        return component_class.model_validate(obj)
+                    except Exception as e:
+                        raise Exception(f"Failed to load {cls.get_component_type()} class {class_path}: {e}") from e
+                else:
+                    raise ValueError(f"No {cls.get_component_type()} class path found on {obj}")
             else:
-                return None
+                return super().model_validate(obj)
 
         return obj
 
@@ -116,7 +120,7 @@ class MoatlessComponent(BaseModel, ABC):
         """Scan for component classes in a package."""
         registered_classes = {}
         try:
-            logger.info(f"Scanning package {package} for {base_class.__name__} subclasses")
+            logger.debug(f"Scanning package {package} for {base_class.__name__} subclasses")
             package_module = importlib.import_module(package)
             package_path = package_module.__path__
             
@@ -124,20 +128,21 @@ class MoatlessComponent(BaseModel, ABC):
             for finder, modname, ispkg in pkgutil.walk_packages(package_path, prefix=package + '.'):
                 try:
                     module = importlib.import_module(modname)
-                    logger.info(f"Loading module {modname}: module.__dict__: {module.__dict__.keys()}")
+                    logger.debug(f"Loading module {modname}: module.__dict__: {module.__dict__.keys()}")
                     for name, obj in module.__dict__.items():
                         try:
                             if (isinstance(obj, type) and 
                                 issubclass(obj, base_class) and 
-                                obj != base_class and 
+                                
                                 not getattr(obj, '__abstractmethods__', False) and
                                 not name.endswith('Mixin')):  # Skip mixin classes
-                                # Use class name as key for backward compatibility
-                                if name in registered_classes:
-                                    logger.info(f"Duplicate class name: {name} from {modname}")
+
+                                qualified_name = f"{obj.__module__}.{name}"
+                                if qualified_name in registered_classes:
+                                    logger.debug(f"Duplicate class name: {qualified_name} from {modname}")
                                 else:
-                                    logger.info(f"Found {base_class.__name__} subclass: {name}")
-                                    registered_classes[name] = obj
+                                    logger.debug(f"Found {base_class.__name__} subclass: {qualified_name}")
+                                    registered_classes[qualified_name] = obj
                             else:
                                 # log why it was skipped
                                 if not isinstance(obj, type):
@@ -156,15 +161,15 @@ class MoatlessComponent(BaseModel, ABC):
                             # Skip objects that can't be checked with issubclass
                             continue
                 except Exception as e:
-                    logger.exception(f"Failed to load from module {modname}")
+                    logger.debug(f"Failed to load from module {modname}: {e}")
 
             # Log all found classes
-            logger.info(f"Found {len(registered_classes)} classes in {package}: {list(registered_classes.keys())}")
+            logger.debug(f"Found {len(registered_classes)} classes in {package}: {list(registered_classes.keys())}")
 
             # Then check for custom components if MOATLESS_COMPONENTS_PATH is set
             custom_path = os.getenv("MOATLESS_COMPONENTS_PATH")
             if custom_path and os.path.isdir(custom_path):
-                logger.info(f"Custom components path found: {custom_path}")
+                logger.debug(f"Custom components path found: {custom_path}")
                 sys.path.insert(0, os.path.dirname(custom_path))
                 try:
                     package_name = os.path.basename(custom_path)
@@ -178,20 +183,20 @@ class MoatlessComponent(BaseModel, ABC):
                                     not getattr(obj, '__abstractmethods__', False)):
                                     qualified_name = f"{obj.__module__}.{name}"
                                     if qualified_name in registered_classes:
-                                        logger.info(f"Duplicate class: {qualified_name} from {modname}")
+                                        logger.debug(f"Duplicate class: {qualified_name} from {modname}")
                                     else:
-                                        logger.info(f"Loaded custom {base_class.__name__}: {qualified_name} from {modname}")
+                                        logger.debug(f"Loaded custom {base_class.__name__}: {qualified_name} from {modname}")
                                         registered_classes[qualified_name] = obj
                         except Exception as e:
-                            logger.exception(f"Failed to load from custom module {modname}")
+                            logger.debug(f"Failed to load from custom module {modname}: {e}")
                 finally:
                     sys.path.pop(0)
             else:
-                logger.info(f"No custom components path found for {cls.get_component_type()}")
+                logger.debug(f"No custom components path found for {cls.get_component_type()}")
         except Exception as e:
-            logger.exception(f"Failed to scan package {package}")
+            logger.debug(f"Failed to scan package {package}: {e}")
 
         if not registered_classes:
             logger.warning(f"No {cls.get_component_type()} classes found")
             
-        return registered_classes 
+        return registered_classes

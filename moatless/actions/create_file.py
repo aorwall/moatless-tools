@@ -40,6 +40,42 @@ class CreateFileArgs(ActionArguments):
     def format_schema_for_llm(cls) -> str:
         return cls.format_xml_schema({"path": "file/path.py", "file_text": "\ncomplete file content\n"})
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Create a new Python file for handling user authentication",
+                action=CreateFileArgs(
+                    thoughts="Creating a new authentication module with basic user authentication functionality",
+                    path="auth/user_auth.py",
+                    file_text="""import logging
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+class UserAuth:
+    def __init__(self):
+        self._users = {}
+
+    def authenticate(self, username: str, password: str) -> bool:
+        if username not in self._users:
+            logger.warning(f"Authentication failed: User {username} not found")
+            return False
+
+        return self._users[username] == password
+
+    def register(self, username: str, password: str) -> bool:
+        if username in self._users:
+            logger.error(f"Registration failed: User {username} already exists")
+            return False
+
+        self._users[username] = password
+        logger.info(f"User {username} registered successfully")
+        return True""",
+                ),
+            )
+        ]
+
 
 class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
     """
@@ -86,39 +122,3 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
             observation.message += f"\n\n{test_summary}"
 
         return observation
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Create a new Python file for handling user authentication",
-                action=CreateFileArgs(
-                    thoughts="Creating a new authentication module with basic user authentication functionality",
-                    path="auth/user_auth.py",
-                    file_text="""import logging
-from typing import Optional
-
-logger = logging.getLogger(__name__)
-
-class UserAuth:
-    def __init__(self):
-        self._users = {}
-
-    def authenticate(self, username: str, password: str) -> bool:
-        if username not in self._users:
-            logger.warning(f"Authentication failed: User {username} not found")
-            return False
-
-        return self._users[username] == password
-
-    def register(self, username: str, password: str) -> bool:
-        if username in self._users:
-            logger.error(f"Registration failed: User {username} already exists")
-            return False
-
-        self._users[username] = password
-        logger.info(f"User {username} registered successfully")
-        return True""",
-                ),
-            )
-        ]

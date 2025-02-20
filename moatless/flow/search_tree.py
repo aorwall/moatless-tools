@@ -20,8 +20,6 @@ from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 
 class SearchTree(AgenticFlow):
     selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
@@ -414,18 +412,14 @@ class SearchTree(AgenticFlow):
     @classmethod
     def model_validate(
         cls,
-        obj: Any,
-        repository: Repository | None = None,
-        runtime: RuntimeEnvironment | None = None,
+        obj: Any
     ):
         if isinstance(obj, dict):
             obj = obj.copy()
 
-            # Remove repository from validation since it's handled separately
-            obj.pop("repository", None)
-
             if "selector" in obj and isinstance(obj["selector"], dict):
                 obj["selector"] = BaseSelector.model_validate(obj["selector"])
+            logger.info(f"Validated selector: {obj.get('selector')}")
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])
@@ -439,11 +433,8 @@ class SearchTree(AgenticFlow):
             if "discriminator" in obj and isinstance(obj["discriminator"], dict):
                 obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
 
-            if "root" in obj and isinstance(obj["root"], dict):
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository, runtime=runtime)
-
-        instance = super().model_validate(obj)
-        return instance
+            return super().model_validate(obj)
+        return obj
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """
@@ -452,26 +443,7 @@ class SearchTree(AgenticFlow):
         Returns:
             Dict[str, Any]: A dictionary representation of the search tree.
         """
-        # Get all fields except the ones we'll handle separately
-        data = {
-            field: getattr(self, field)
-            for field in self.model_fields
-            if field
-            not in [
-                "root",
-                "selector",
-                "repository",
-                "agent",
-                "value_function",
-                "feedback_generator",
-                "discriminator",
-                "persist_path"
-            ]
-        }
-
-        data.pop("persist_path", None)
-        data.pop("persist_dir", None)
-
+        data = super().model_dump(**kwargs)
         data["selector"] = self.selector.model_dump(**kwargs)
         data["expander"] = self.expander.model_dump(**kwargs)
         data["agent"] = self.agent.model_dump(**kwargs)
@@ -482,8 +454,6 @@ class SearchTree(AgenticFlow):
             data["feedback_generator"] = self.feedback_generator.model_dump(**kwargs)
         if self.discriminator:
             data["discriminator"] = self.discriminator.model_dump(**kwargs)
-
-        data["root"] = self.root.model_dump(**kwargs)
 
         return data
 

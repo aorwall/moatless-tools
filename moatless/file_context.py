@@ -25,6 +25,7 @@ from moatless.runtime.runtime import TestStatus
 from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -789,7 +790,7 @@ class TestFile(BaseModel):
 
 class FileContext(BaseModel):
     _repo: Repository | None = PrivateAttr(None)
-    _runtime: RuntimeEnvironment = PrivateAttr(None)
+    _runtime: RuntimeEnvironment | None = PrivateAttr(None)
 
     _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
     _test_files: Dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
@@ -894,6 +895,15 @@ class FileContext(BaseModel):
             "files": files,
             "test_files": test_files,
         }
+
+    @property
+    def workspace(self):
+        raise AttributeError("workspace property is write-only")
+
+    @workspace.setter 
+    def workspace(self, workspace: Workspace):
+        self._repo = workspace.repository
+        self._runtime = workspace.runtime
 
     def snapshot(self):
         dict = self.model_dump()

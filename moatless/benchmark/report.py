@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from moatless.benchmark.utils import (
+from moatless.evaluation.utils import (
     has_identified_spans,
     has_identified_files,
     count_identified_files,
@@ -388,13 +388,14 @@ def to_result(
             status = "error"
         elif not best_node.file_context.generate_git_patch():
             status = "no_patch"
+            resolved = False
         else:
             status = "completed"
 
         if external_result:
             resolved = instance_id in external_result["resolved_ids"]
 
-        elif eval_report:
+        elif eval_report and resolved is None:
             if best_node:
                 resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:

@@ -5,7 +5,7 @@ import os
 import pandas as pd
 
 from moatless.benchmark.swebench import setup_swebench_repo, sorted_instances
-from moatless.benchmark.utils import get_file_spans_from_patch
+from moatless.evaluation.utils import get_file_spans_from_patch
 from moatless.repository import FileRepository
 
 

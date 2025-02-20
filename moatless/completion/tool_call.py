@@ -160,3 +160,24 @@ class ToolCallCompletionModel(BaseCompletionModel):
         for r in self._response_schema:
             if r.name == tool_name:
                 return r
+
+    def _generate_few_shot_examples(self) -> str:
+        """Generate few-shot examples in tool call format"""
+        base_prompt = super()._generate_few_shot_examples()
+        if not base_prompt:
+            return ""
+            
+        few_shot_examples = []
+        for schema in self._response_schema:
+            if hasattr(schema, "get_few_shot_examples"):
+                examples = schema.get_few_shot_examples()
+                if examples:
+                    for example in examples:
+                        action_json = {
+                            "action": example.action.model_dump(),
+                            "action_type": example.action.name,
+                        }
+                        prompt = f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
+                        few_shot_examples.append(prompt)
+                        
+        return base_prompt + "\n".join(few_shot_examples)

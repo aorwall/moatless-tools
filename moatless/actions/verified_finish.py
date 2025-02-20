@@ -39,6 +39,43 @@ class VerifiedFinishArgs(ActionArguments):
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, VerifiedFinishArgs)
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Add input validation to the process_order function",
+                action=VerifiedFinishArgs(
+                    thoughts="I've added input validation and comprehensive tests to verify all validation cases",
+                    finish_reason="Added robust input validation to process_order function with proper error handling",
+                    test_verification=(
+                        "Added new test file test_order_validation.py with comprehensive test cases:\n"
+                        "1. test_valid_order: Verifies successful order processing with valid input\n"
+                        "2. test_invalid_quantity: Tests rejection of negative and zero quantities\n"
+                        "3. test_invalid_price: Verifies handling of invalid price formats\n"
+                        "4. test_missing_fields: Ensures proper error messages for missing required fields\n"
+                        "All tests pass and cover both success and error scenarios."
+                    ),
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Fix the bug in the date parsing logic",
+                action=VerifiedFinishArgs(
+                    thoughts="I've fixed the date parsing bug and added tests to prevent regression",
+                    finish_reason="Fixed date parsing bug that was incorrectly handling timezone conversions",
+                    test_verification=(
+                        "Modified tests/test_date_utils.py to add new test cases:\n"
+                        "1. Added test_timezone_conversion to verify correct timezone handling\n"
+                        "2. Extended test_parse_date with edge cases:\n"
+                        "   - Dates crossing DST boundaries\n"
+                        "   - Various timezone formats (UTC, GMT, named zones)\n"
+                        "   - Invalid date formats\n"
+                        "3. Added test_date_validation for boundary conditions\n"
+                        "All tests pass, confirming the bug is fixed and won't regress."
+                    ),
+                ),
+            ),
+        ]
+
 
 class VerifiedFinish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = VerifiedFinishArgs
@@ -106,40 +143,3 @@ class VerifiedFinish(Action):
                 ),
             ]
         )
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Add input validation to the process_order function",
-                action=VerifiedFinishArgs(
-                    thoughts="I've added input validation and comprehensive tests to verify all validation cases",
-                    finish_reason="Added robust input validation to process_order function with proper error handling",
-                    test_verification=(
-                        "Added new test file test_order_validation.py with comprehensive test cases:\n"
-                        "1. test_valid_order: Verifies successful order processing with valid input\n"
-                        "2. test_invalid_quantity: Tests rejection of negative and zero quantities\n"
-                        "3. test_invalid_price: Verifies handling of invalid price formats\n"
-                        "4. test_missing_fields: Ensures proper error messages for missing required fields\n"
-                        "All tests pass and cover both success and error scenarios."
-                    ),
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Fix the bug in the date parsing logic",
-                action=VerifiedFinishArgs(
-                    thoughts="I've fixed the date parsing bug and added tests to prevent regression",
-                    finish_reason="Fixed date parsing bug that was incorrectly handling timezone conversions",
-                    test_verification=(
-                        "Modified tests/test_date_utils.py to add new test cases:\n"
-                        "1. Added test_timezone_conversion to verify correct timezone handling\n"
-                        "2. Extended test_parse_date with edge cases:\n"
-                        "   - Dates crossing DST boundaries\n"
-                        "   - Various timezone formats (UTC, GMT, named zones)\n"
-                        "   - Invalid date formats\n"
-                        "3. Added test_date_validation for boundary conditions\n"
-                        "All tests pass, confirming the bug is fixed and won't regress."
-                    ),
-                ),
-            ),
-        ]

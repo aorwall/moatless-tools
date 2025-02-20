@@ -84,9 +84,8 @@ class TreeSearchSettings(BaseModel):
 
 
 class InstanceStatus(str, Enum):
-    CREATED = "created"
-    SETTING_UP = "setting_up"
     PENDING = "pending"
+    SETTING_UP = "setting_up"
     RUNNING = "running"
     COMPLETED = "completed"
     EVALUATING = "evaluating"
@@ -118,7 +117,7 @@ class EvaluationInstance(BaseModel):
     )
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    status: InstanceStatus = Field(default=InstanceStatus.CREATED, description="Current status of the instance")
+    status: InstanceStatus = Field(default=InstanceStatus.PENDING, description="Current status of the instance")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the instance was created",
@@ -126,6 +125,7 @@ class EvaluationInstance(BaseModel):
     started_at: Optional[datetime] = Field(default=None, description="When the instance started")
     completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
+    error_at: Optional[datetime] = Field(default=None, description="When instance encountered an error")
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if instance failed")
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")

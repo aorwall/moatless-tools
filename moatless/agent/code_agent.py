@@ -130,7 +130,7 @@ class CodingAgent(ActionAgent):
             actions=actions,
             system_prompt=system_prompt,
             message_generator=message_generator,
-            use_few_shots=few_shot_examples,
+            few_shot_examples=few_shot_examples,
             thoughts_in_action=thoughts_in_action,
             **kwargs,
         )

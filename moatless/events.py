@@ -108,17 +108,16 @@ class EventBus:
     async def publish(self, event: BaseEvent):
         """Publish event, handling both sync and async subscribers and saving to jsonl"""
         trajectory_id = context_data.current_trajectory_id.get()
-        evaluation_name = context_data.current_evaluation_name.get()
+        current_project_id = context_data.current_project_id.get()
         
-        logger.info(f"Publishing event: {event.event_type} for trajectory {trajectory_id} and evaluation {evaluation_name} to {len(self._subscribers)} subscribers")
+        logger.debug(f"Publishing event: {event.event_type} for trajectory {trajectory_id} and project {current_project_id} to {len(self._subscribers)} subscribers")
         
-        # Save event to trajectory-specific events.jsonl
-        await self._save_event(trajectory_id, event)
+        await self._save_event(trajectory_id, current_project_id, event)
         
         # Notify subscribers
-        await asyncio.gather(*[self._run_async_callback(callback, trajectory_id, event) for callback in self._subscribers])
+        await asyncio.gather(*[self._run_async_callback(callback, trajectory_id, current_project_id, event) for callback in self._subscribers])
 
-    async def _save_event(self, trajectory_id: str, event: BaseEvent):
+    async def _save_event(self, trajectory_id: str, project_id: str, event: BaseEvent):
         """Thread-safe event saving to trajectory-specific events.jsonl"""
         try:
             traj_dir = get_moatless_trajectory_dir(trajectory_id)
@@ -127,6 +126,7 @@ class EventBus:
             event_dict = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "trajectory_id": trajectory_id,
+                "project_id": project_id,
                 "event_type": event.event_type,
                 "data": event.model_dump(exclude_none=True, exclude={'event_type'})
             }
@@ -139,9 +139,9 @@ class EventBus:
             logger.exception(f"Error saving event: {str(e)}")
             raise
 
-    async def _run_async_callback(self, callback: Callable, trajectory_id: str | None, event: BaseEvent):
+    async def _run_async_callback(self, callback: Callable, trajectory_id: str | None, project_id: str | None, event: BaseEvent):
         """Helper method to run a single async callback"""
-        await callback(trajectory_id, event)
+        await callback(trajectory_id, project_id, event)
 
 
 event_bus = EventBus.get_instance()

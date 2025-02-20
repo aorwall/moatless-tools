@@ -1,15 +1,17 @@
 import logging
 from textwrap import dedent
 from typing import List, Dict, Any, Type, Optional
+import json
 
-from moatless.completion import BaseCompletionModel
+from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
+from moatless.completion.json import JsonCompletionModel
 from moatless.completion.schema import ResponseSchema, ChatCompletionUserMessage
 
 logger = logging.getLogger(__name__)
 
 
-class ReActCompletionModel(BaseCompletionModel):
+class ReActCompletionModel(JsonCompletionModel):
     """ReAct-specific implementation of the completion model.
 
     This class handles:
@@ -32,6 +34,11 @@ class ReActCompletionModel(BaseCompletionModel):
         Returns:
             System prompt with ReAct format instructions
         """
+
+        # Fall back to JSON completion model if the action is not an ActionArguments
+        if not self._supports_react_format():
+            return super()._prepare_system_prompt(system_prompt, response_schema)
+
         action_input_schemas = []
         for action in response_schema:
             action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
@@ -57,6 +64,15 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         params = super()._get_completion_params(schema)
         params["stop"] = ["Observation:"]
         return params
+    
+    def _supports_react_format(self) -> bool:
+        if not isinstance(self._response_schema, list):
+            return False
+        for schema in self._response_schema:
+            from moatless.actions.schema import ActionArguments
+            if not issubclass(schema, ActionArguments):
+                return False
+        return True
 
     def _validate_completion(
         self,
@@ -83,6 +99,11 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             CompletionRejectError: For invalid format that should be retried
             CompletionRuntimeError: For fundamentally invalid responses
         """
+
+        # Fall back to JSON completion model if the action is not an ActionArguments
+        if not self._supports_react_format():
+            return super()._validate_completion(completion_response)
+        
         try:
             response_text = completion_response.choices[0].message.content
 
@@ -230,3 +251,52 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             raise ValueError(f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}")
 
         return action_class
+
+    def _generate_few_shot_examples(self) -> str:
+        """Generate few-shot examples in ReAct format"""
+        base_prompt = super()._generate_few_shot_examples()
+        if not base_prompt:
+            return ""
+            
+        few_shot_examples = []
+        for schema in self._response_schema:
+            if hasattr(schema, "get_few_shot_examples"):
+                examples = schema.get_few_shot_examples()
+                if examples:
+                    for i, example in enumerate(examples):
+                        prompt = f"\n**Example {i + 1}**"
+                        action_data = example.action.model_dump()
+                        thoughts = action_data.pop("thoughts", "")
+                        
+                        prompt += f"\nTask: {example.user_input}\n"
+                        if not self.disable_thoughts:
+                            prompt += f"\nThought: {thoughts}\n"
+                        prompt += f"Action: {example.action.name}\n"
+                        
+                        # Handle special action types
+                        # TODO: Move to the action implementations
+                        if example.action.__class__.__name__ in [
+                            "StringReplaceArgs",
+                            "CreateFileArgs",
+                            "AppendStringArgs",
+                            "InsertLinesArgs",
+                            "FindCodeSnippetArgs",
+                        ]:
+                            if "path" in action_data:
+                                prompt += f"<path>{action_data['path']}</path>\n"
+                            if "old_str" in action_data:
+                                prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
+                            if "new_str" in action_data:
+                                prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
+                            if "file_text" in action_data:
+                                prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
+                            if "insert_line" in action_data:
+                                prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
+                            if "code_snippet" in action_data:
+                                prompt += f"<code_snippet>{action_data['code_snippet']}</code_snippet>\n"
+                        else:
+                            prompt += f"{json.dumps(action_data)}\n"
+                            
+                        few_shot_examples.append(prompt)
+                        
+        return base_prompt + "\n".join(few_shot_examples)

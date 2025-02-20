@@ -1,4 +1,4 @@
-import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle } from 'lucide-react';
+import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Node } from '@/lib/types/trajectory';
 import { useRetryNode } from "@/lib/hooks/useRetryNode";
@@ -13,6 +13,7 @@ interface NodeCircleProps {
   isLastNode: boolean;
   isRunning: boolean;
   onClick: () => void;
+  isExpanded: boolean;
 }
 
 const COLOR_MAPPINGS = {
@@ -53,6 +54,17 @@ const COLOR_MAPPINGS = {
   },
 } as const;
 
+const NODE_LAYOUT = {
+  size: {
+    circle: 'h-10 w-10',
+    actionButton: 'h-3 w-3',
+    indicator: 'h-4 w-4'
+  },
+  spacing: {
+    actionButtonsOffset: '-top-8',
+    indicatorOffset: '-right-6'
+  }
+} as const;
 
 function getNodeColor(node: Node, isRunning: boolean): string {
     if (node.nodeId === 0) return "blue";
@@ -63,7 +75,7 @@ function getNodeColor(node: Node, isRunning: boolean): string {
     return "gray";
   }
   
-export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleProps) {
+export function NodeCircle({ node, isLastNode, isRunning, onClick, isExpanded }: NodeCircleProps) {
   const nodeColor = getNodeColor(node, isRunning);
   const colors = COLOR_MAPPINGS[nodeColor as keyof typeof COLOR_MAPPINGS] || COLOR_MAPPINGS.default;
   const showSpinner = node.nodeId !== 0 && isRunning && isLastNode;
@@ -112,16 +124,15 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
       {/* Invisible hover area that extends upward */}
       <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-24 h-16" />
 
-      {/* Action buttons */}
+      {/* Action buttons container */}
       {node.nodeId !== 0 && (
         <div className={cn(
-          "absolute -top-8 left-1/2 transform -translate-x-1/2",
+          "absolute left-1/2 transform -translate-x-1/2",
+          NODE_LAYOUT.spacing.actionButtonsOffset,
           "flex items-center justify-center gap-1",
           "opacity-0 translate-y-2 pointer-events-none",
-          "transition-all duration-200 ease-in-out",
           "group-hover/node:opacity-100 group-hover/node:translate-y-0 group-hover/node:pointer-events-auto",
-          "bg-white rounded-full px-2 py-1 shadow-sm",
-          "z-30"
+          "bg-white rounded-full px-2 py-1 shadow-sm z-30"
         )}>
           <TooltipProvider>
             <Tooltip>
@@ -203,16 +214,22 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
         </div>
       )}
 
+      {/* Main circle button */}
       <button
         className={cn(
           'relative z-20 flex items-center justify-center',
-          'h-10 w-10 rounded-full border-2 bg-white',
+          NODE_LAYOUT.size.circle,
+          'rounded-full border-2 bg-white',
           'transition-all duration-200 ease-in-out',
-          'shadow-sm hover:shadow-md',
-          '-ml-5 -mr-5',
+          'shadow-sm hover:shadow-md -ml-5 -mr-5',
           colors.border,
           colors.hover,
-          'hover:scale-105'
+          'hover:scale-105',
+          isExpanded && [
+            'ring-4 ring-gray-100',
+            'border-primary-500',
+            'bg-primary-50'
+          ]
         )}
         onClick={onClick}
       >
@@ -239,18 +256,35 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
         )}
       </button>
 
+      {/* Status indicators */}
       {(node.error || node.allNodeWarnings.length > 0) && (
-        <div className="absolute -right-6 top-0 flex flex-col gap-1 z-20">
+        <div className={cn(
+          "absolute flex flex-col gap-1 z-20",
+          NODE_LAYOUT.spacing.indicatorOffset,
+          "top-0"
+        )}>
           {node.error && (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-red-100 shadow-sm">
-              <AlertTriangle className="h-3 w-3 text-red-500" />
+            <span className={cn(
+              "flex items-center justify-center rounded-full bg-red-100 shadow-sm",
+              NODE_LAYOUT.size.indicator
+            )}>
+              <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
             </span>
           )}
           {node.allNodeWarnings.length > 0 && (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-yellow-100 shadow-sm">
-              <AlertTriangle className="h-3 w-3 text-yellow-500" />
+            <span className={cn(
+              "flex items-center justify-center rounded-full bg-yellow-100 shadow-sm",
+              NODE_LAYOUT.size.indicator
+            )}>
+              <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
             </span>
           )}
+        </div>
+      )}
+
+      {isExpanded && (
+        <div className="absolute -right-2 -top-2 h-4 w-4 rounded-full bg-primary-500 text-white flex items-center justify-center">
+          <ChevronDown className="h-3 w-3" />
         </div>
       )}
 

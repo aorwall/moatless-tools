@@ -29,6 +29,25 @@ class ListFilesArgs(ActionArguments):
         param_str = f"directory={self.directory}"
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Show me what files are in the tests directory",
+                action=ListFilesArgs(
+                    thoughts="I'll list the contents of the tests directory to see what test files are available.",
+                    directory="tests",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="What files are in the root directory?",
+                action=ListFilesArgs(
+                    thoughts="I'll list the contents of the root directory to see the project structure.",
+                    directory="",
+                ),
+            ),
+        ]
+
 
 class ListFiles(Action):
     args_schema = ListFilesArgs
@@ -80,23 +99,4 @@ class ListFiles(Action):
             "Directory Path Validity: Ensure the requested directory path exists and is valid.",
             "Usefulness: Assess if listing the directory contents is helpful for the current task.",
             "Efficiency: Evaluate if the action is being used at an appropriate time in the workflow.",
-        ]
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Show me what files are in the tests directory",
-                action=ListFilesArgs(
-                    thoughts="I'll list the contents of the tests directory to see what test files are available.",
-                    directory="tests",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="What files are in the root directory?",
-                action=ListFilesArgs(
-                    thoughts="I'll list the contents of the root directory to see the project structure.",
-                    directory="",
-                ),
-            ),
         ]

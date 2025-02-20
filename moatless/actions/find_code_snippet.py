@@ -53,6 +53,34 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="I need to understand how the User class is structured in our authentication system. Let me find its definition.",
+                action=FindCodeSnippetArgs(
+                    thoughts="To find the User class definition, I'll search for the exact class declaration line 'class User(BaseModel):'",
+                    code_snippet="class User(BaseModel):",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="The system seems to use a default timeout value. I should check where DEFAULT_TIMEOUT is defined in the configuration.",
+                action=FindCodeSnippetArgs(
+                    thoughts="To find the timeout configuration, I'll search for the exact variable declaration 'DEFAULT_TIMEOUT =' in config files",
+                    code_snippet="DEFAULT_TIMEOUT =",
+                    file_pattern="**/config/*.py",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="To understand how request processing works, I need to examine the _handlers dictionary in the processor service.",
+                action=FindCodeSnippetArgs(
+                    thoughts="To find the handlers mapping, I'll search for the exact dictionary declaration '_handlers =' in the processor service",
+                    code_snippet="_handlers =",
+                    file_pattern="services/processor.py",
+                ),
+            ),
+        ]
+
 
 class FindCodeSnippet(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
@@ -84,31 +112,3 @@ class FindCodeSnippet(SearchBaseAction):
             search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
 
         return search_result_context, False
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="I need to understand how the User class is structured in our authentication system. Let me find its definition.",
-                action=FindCodeSnippetArgs(
-                    thoughts="To find the User class definition, I'll search for the exact class declaration line 'class User(BaseModel):'",
-                    code_snippet="class User(BaseModel):",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="The system seems to use a default timeout value. I should check where DEFAULT_TIMEOUT is defined in the configuration.",
-                action=FindCodeSnippetArgs(
-                    thoughts="To find the timeout configuration, I'll search for the exact variable declaration 'DEFAULT_TIMEOUT =' in config files",
-                    code_snippet="DEFAULT_TIMEOUT =",
-                    file_pattern="**/config/*.py",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="To understand how request processing works, I need to examine the _handlers dictionary in the processor service.",
-                action=FindCodeSnippetArgs(
-                    thoughts="To find the handlers mapping, I'll search for the exact dictionary declaration '_handlers =' in the processor service",
-                    code_snippet="_handlers =",
-                    file_pattern="services/processor.py",
-                ),
-            ),
-        ]

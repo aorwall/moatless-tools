@@ -116,6 +116,122 @@ class StringReplaceArgs(ActionArguments):
         return f"{self.name}({param_str})"
 
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Update the error message in the validate_user method",
+                action=StringReplaceArgs(
+                    thoughts="Improving the error message to be more descriptive",
+                    path="auth/validator.py",
+                    old_str="""    if not user.is_active:
+        raise ValueError("Invalid user")
+    return user""",
+                    new_str="""    if not user.is_active:
+        raise ValueError(f"Invalid user: {username} does not meet the required criteria")
+    return user""",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Update the user validation logic",
+                action=StringReplaceArgs(
+                    thoughts="Adding email validation and password strength check",
+                    path="auth/validator.py",
+                    old_str="""def validate_user(username, password):
+    if len(username) < 3:
+        return False
+    if len(password) < 8:
+        return False
+    return True""",
+                    new_str="""def validate_user(username, password):
+    if len(username) < 3 or not is_valid_email(username):
+        return False
+    if len(password) < 12 or not has_special_chars(password):
+        return False
+    if not has_numbers(password):
+        return False
+    return True""",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Add a new helper function to validate passwords",
+                action=StringReplaceArgs(
+                    thoughts="Adding a new function to check password complexity",
+                    path="auth/validator.py",
+                    old_str="""def validate_user(username, password):
+    if len(username) < 3 or not is_valid_email(username):
+        return False
+    if len(password) < 12 or not has_special_chars(password):
+        return False
+    if not has_numbers(password):
+        return False
+    return True""",
+                    new_str="""def is_password_complex(password: str) -> bool:
+    has_uppercase = any(c.isupper() for c in password)
+    has_lowercase = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_special = any(not c.isalnum() for c in password)
+    return all([has_uppercase, has_lowercase, has_digit, has_special])
+
+def validate_user(username, password):
+    if len(username) < 3 or not is_valid_email(username):
+        return False
+    if len(password) < 12 or not has_special_chars(password):
+        return False
+    if not has_numbers(password) or not is_password_complex(password):
+        return False
+    return True""",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Remove the deprecated logging configuration",
+                action=StringReplaceArgs(
+                    thoughts="Removing old logging setup that's no longer needed",
+                    path="utils/logger.py",
+                    old_str="""    # Legacy logging configuration
+    if legacy_mode:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="[%(levelname)s] %(message)s",
+            filename="legacy.log"
+        )
+        logger.warning("Using deprecated legacy logging configuration")
+""",
+                    new_str="",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Add a new test case for password validation with special characters",
+                action=StringReplaceArgs(
+                    thoughts="Adding a new test method for special character validation.",
+                    path="tests/test_validator.py",
+                    old_str="""def test_validate_user():
+    # Test basic validation
+    assert validate_user("bob@example.com", "password123") is True
+    assert validate_user("alice@example.com", "short") is False
+    
+    # Test email format
+    assert validate_user("invalid-email", "password123") is False
+
+""",
+                    new_str="""def test_validate_user():
+    # Test basic validation
+    assert validate_user("bob@example.com", "password123") is True
+    assert validate_user("alice@example.com", "short") is False
+    
+    # Test email format
+    assert validate_user("invalid-email", "password123") is False
+
+def test_validate_password_special_chars():
+    # Test passwords with special characters
+    assert validate_user("bob@example.com", "Pass!@#123") is True
+    assert validate_user("alice@example.com", "NoSpecialChars123") is False
+    assert validate_user("carol@example.com", "!@#$%^&*(") is False  # No alphanumeric chars""",
+                ),
+            ),
+        ]
+
+
 class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
     """
     Action to replace strings in a file.
@@ -347,122 +463,6 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             observation.message += f"\n\n{test_summary}"
 
         return observation
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Update the error message in the validate_user method",
-                action=StringReplaceArgs(
-                    thoughts="Improving the error message to be more descriptive",
-                    path="auth/validator.py",
-                    old_str="""    if not user.is_active:
-        raise ValueError("Invalid user")
-    return user""",
-                    new_str="""    if not user.is_active:
-        raise ValueError(f"Invalid user: {username} does not meet the required criteria")
-    return user""",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Update the user validation logic",
-                action=StringReplaceArgs(
-                    thoughts="Adding email validation and password strength check",
-                    path="auth/validator.py",
-                    old_str="""def validate_user(username, password):
-    if len(username) < 3:
-        return False
-    if len(password) < 8:
-        return False
-    return True""",
-                    new_str="""def validate_user(username, password):
-    if len(username) < 3 or not is_valid_email(username):
-        return False
-    if len(password) < 12 or not has_special_chars(password):
-        return False
-    if not has_numbers(password):
-        return False
-    return True""",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Add a new helper function to validate passwords",
-                action=StringReplaceArgs(
-                    thoughts="Adding a new function to check password complexity",
-                    path="auth/validator.py",
-                    old_str="""def validate_user(username, password):
-    if len(username) < 3 or not is_valid_email(username):
-        return False
-    if len(password) < 12 or not has_special_chars(password):
-        return False
-    if not has_numbers(password):
-        return False
-    return True""",
-                    new_str="""def is_password_complex(password: str) -> bool:
-    has_uppercase = any(c.isupper() for c in password)
-    has_lowercase = any(c.islower() for c in password)
-    has_digit = any(c.isdigit() for c in password)
-    has_special = any(not c.isalnum() for c in password)
-    return all([has_uppercase, has_lowercase, has_digit, has_special])
-
-def validate_user(username, password):
-    if len(username) < 3 or not is_valid_email(username):
-        return False
-    if len(password) < 12 or not has_special_chars(password):
-        return False
-    if not has_numbers(password) or not is_password_complex(password):
-        return False
-    return True""",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Remove the deprecated logging configuration",
-                action=StringReplaceArgs(
-                    thoughts="Removing old logging setup that's no longer needed",
-                    path="utils/logger.py",
-                    old_str="""    # Legacy logging configuration
-    if legacy_mode:
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="[%(levelname)s] %(message)s",
-            filename="legacy.log"
-        )
-        logger.warning("Using deprecated legacy logging configuration")
-""",
-                    new_str="",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Add a new test case for password validation with special characters",
-                action=StringReplaceArgs(
-                    thoughts="Adding a new test method for special character validation.",
-                    path="tests/test_validator.py",
-                    old_str="""def test_validate_user():
-    # Test basic validation
-    assert validate_user("bob@example.com", "password123") is True
-    assert validate_user("alice@example.com", "short") is False
-    
-    # Test email format
-    assert validate_user("invalid-email", "password123") is False
-
-""",
-                    new_str="""def test_validate_user():
-    # Test basic validation
-    assert validate_user("bob@example.com", "password123") is True
-    assert validate_user("alice@example.com", "short") is False
-    
-    # Test email format
-    assert validate_user("invalid-email", "password123") is False
-
-def test_validate_password_special_chars():
-    # Test passwords with special characters
-    assert validate_user("bob@example.com", "Pass!@#123") is True
-    assert validate_user("alice@example.com", "NoSpecialChars123") is False
-    assert validate_user("carol@example.com", "!@#$%^&*(") is False  # No alphanumeric chars""",
-                ),
-            ),
-        ]
-
 
 def normalize_indentation(s):
     return "\n".join(line.strip() for line in s.splitlines())

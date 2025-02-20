@@ -5,25 +5,97 @@ import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { NodeCircle } from '@/lib/components/trajectory/NodeCircle';
 import { cn } from "@/lib/utils";
 
+export const TIMELINE_CONFIG = {
+  // Horizontal spacing
+  nodePadding: {
+    sm: '12px',  // For wider screens
+    default: '12px' // For mobile
+  },
+  // Vertical spacing between nodes
+  nodeSpacing: {
+    sm: '32px', // 8rem
+    default: '16px' // 4rem
+  },
+  // Left offset for the main timeline
+  timelineOffset: {
+    sm: '150px',
+    default: '80px'
+  },
+  // New configuration for lines
+  lines: {
+    circleSize: '40px',
+    verticalOffset: '16px',
+    horizontalConnector: '24px',
+    verticalLine: {
+      offset: '20px',  // Change from 50% to fixed pixel value
+      parentOffset: '48px',
+    },
+    item: {
+      offset: '20px', // Aligns with the circle's center
+      verticalOffset: '24px'
+    }
+  }
+} as const;
+
 interface TimelineProps {
   nodes: Node[];
   instanceId?: string;
   isRunning: boolean;
 }
 
-function getAllDescendants(node: Node): number {
-  let count = 0;
-  const processNode = (n: Node) => {
-    if (n.children) {
-      n.children.forEach(child => {
-        count++;
-        processNode(child);
-      });
-    }
-  };
-  processNode(node);
-  return count;
+// First create a new component for the lines
+interface ConnectionLinesProps {
+  level: number;
+  hasChildren: boolean;
+  isLastInLevel: boolean;
+  parentNodes: Array<{
+    hasNextSibling: boolean;
+    level: number;
+  }>;
 }
+
+const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: ConnectionLinesProps) => {
+  return (
+    <>
+      {/* Main vertical line for current node */}
+      {!isLastInLevel && (
+        <div 
+          className="absolute w-px bg-gray-200"
+          style={{
+            left: level === 0 ? '20px' : `calc(${TIMELINE_CONFIG.timelineOffset.default} + 20px)`,
+            top: '0',
+            height: '100%'
+          }}
+        />
+      )}
+
+      {/* Parent connection lines - only for non-root levels */}
+      {level > 0 && parentNodes.map((parent, index) => (
+        <div 
+          key={index}
+          className="absolute w-px bg-gray-200"
+          style={{
+            right: `calc(${TIMELINE_CONFIG.lines.verticalLine.parentOffset} + ${parent.level * 48}px)`,
+            top: '-32px',
+            bottom: '0'
+          }}
+        />
+      ))}
+
+      {/* Horizontal connector - only for non-root levels */}
+      {level > 0 && (
+        <div 
+          className="absolute h-px bg-gray-200"
+          style={{
+            right: '100%',
+            top: TIMELINE_CONFIG.lines.verticalOffset,
+            width: TIMELINE_CONFIG.lines.horizontalConnector
+          }}
+        />
+      )}
+    </>
+  );
+};
 
 function renderNodes(
   nodes: Node[], 
@@ -31,15 +103,24 @@ function renderNodes(
   instanceId: string, 
   isRunning: boolean,
   isExpanded: (nodeId: number) => boolean,
-  handleNodeClick: (nodeId: number) => void
+  handleNodeClick: (nodeId: number) => void,
+  parentNodes: Array<{hasNextSibling: boolean, level: number}> = []
 ) {
   return nodes.map((node, index) => {
     const isLastNode = index === nodes.length - 1;
     const hasChildren = node.children && node.children.length > 0;
-    const descendantCount = getAllDescendants(node);
     
+    // Only include parent nodes for non-root levels
+    const currentParentNodes = level > 0 ? [
+      ...parentNodes,
+      { hasNextSibling: !isLastNode, level: level - 1 } // Adjust level to start from 0
+    ] : [];
+
     return (
-      <li key={node.nodeId} className="mb-4 sm:mb-8">
+      <li key={node.nodeId} className={cn(
+        "mb-4 sm:mb-8 relative",
+        { [`ml-[${TIMELINE_CONFIG.nodePadding.default}] sm:ml-[${TIMELINE_CONFIG.nodePadding.sm}]`]: level > 0 }
+      )}>
         <div className={cn("group relative", {
           "ml-[24px] sm:ml-[48px]": level > 0
         })}>
@@ -62,22 +143,12 @@ function renderNodes(
 
               {/* Node circle with connection lines */}
               <div className="relative">
-                {/* Parent's vertical line - extends down to last descendant */}
-                {hasChildren && (
-                  <div 
-                    className="absolute left-1/2 top-[16px] w-px -translate-x-1/2 bg-gray-200"
-                    style={{ 
-                      height: `calc(100% + ${descendantCount * 48}px)` 
-                    }}
-                  />
-                )}
-
-                {/* Horizontal line connecting to parent's vertical line */}
-                {level > 0 && (
-                  <div 
-                    className="absolute right-full top-[16px] h-px w-[24px] bg-gray-200"
-                  />
-                )}
+                <ConnectionLines 
+                  level={level}
+                  hasChildren={hasChildren}
+                  isLastInLevel={isLastNode}
+                  parentNodes={currentParentNodes}
+                />
 
                 <NodeCircle
                   node={node}
@@ -104,7 +175,13 @@ function renderNodes(
 
           {/* Timeline items */}
           {isExpanded(node.nodeId) && (
-            <div className="mt-8 transition-all duration-200 ease-in-out">
+            <div className="mt-8 ml-8 relative transition-all duration-200 ease-in-out">
+              {/* Add subtle background container */}
+              <div className="absolute inset-0 bg-gray-50/50 rounded-lg border border-gray-100 -m-4 p-4" />
+              
+              {/* Add visual connector from node to expanded content */}
+              <div className="absolute -left-8 top-0 w-8 h-px bg-gray-200" />
+              
               {node.items.map((item, index) => (
                 <TimelineItem
                   key={index}
@@ -114,6 +191,8 @@ function renderNodes(
                   nodeId={node.nodeId}
                   instanceId={instanceId}
                   itemId={index.toString()}
+                  isLast={index === node.items.length - 1}
+                  hasNextSibling={!isLastNode || hasChildren}
                 />
               ))}
             </div>
@@ -129,7 +208,8 @@ function renderNodes(
                   instanceId, 
                   isRunning,
                   isExpanded,
-                  handleNodeClick
+                  handleNodeClick,
+                  currentParentNodes
                 )}
               </ol>
             </div>
@@ -139,6 +219,29 @@ function renderNodes(
     );
   });
 }
+
+const VerticalLine = ({ 
+  height, 
+  offset = TIMELINE_CONFIG.timelineOffset.default,
+  className 
+}: { 
+  height?: string | number,
+  offset?: string,
+  className?: string 
+}) => (
+  <div
+    className={cn(
+      "absolute w-px bg-gray-200",
+      className
+    )}
+    style={{ 
+      left: offset,
+      height: height ? height : '100%',
+      top: 0,
+      bottom: height ? undefined : 0
+    }}
+  />
+);
 
 export function Timeline({ nodes, instanceId = "standalone", isRunning = false }: TimelineProps) {
   const { isNodeExpanded, toggleNode } = useTrajectoryStore();
@@ -154,11 +257,7 @@ export function Timeline({ nodes, instanceId = "standalone", isRunning = false }
   return (
     <div className="w-full">
       <div className="relative">
-        <div
-          className="absolute bottom-0 left-[80px] top-0 w-px bg-gray-200 sm:left-[150px]"
-          style={isTerminal ? { bottom: "2rem" } : undefined}
-        />
-
+        
         <ol className="relative">
           {renderNodes(nodes, 0, instanceId, isRunning, isExpanded, handleNodeClick)}
 

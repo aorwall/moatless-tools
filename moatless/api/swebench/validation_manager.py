@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Callable, Awaitable
 
 from moatless.benchmark.swebench import create_repository
-from moatless.benchmark.utils import get_moatless_instances
+from moatless.evaluation.utils import get_moatless_instances
 from moatless.config.agent_config import get_agent
 from moatless.config.model_config import create_completion_model
 from moatless.index import CodeIndex

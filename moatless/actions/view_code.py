@@ -76,6 +76,30 @@ class ViewCodeArgs(ActionArguments):
         param_str = ", ".join(param_strs)
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
+                action=ViewCodeArgs(
+                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
+                    files=[
+                        CodeSpan(
+                            file_path="auth/service.py",
+                            span_ids=["AuthenticationService.authenticate"],
+                        )
+                    ],
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Show me lines 50-75 of the database configuration file",
+                action=ViewCodeArgs(
+                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
+                    files=[CodeSpan(file_path="config/database.py", start_line=50, end_line=75)],
+                ),
+            ),
+        ]
+
 
 class ViewCode(Action, IdentifyMixin):
     args_schema = ViewCodeArgs
@@ -221,30 +245,6 @@ class ViewCode(Action, IdentifyMixin):
 
     def _select_span_instructions(self, search_result) -> str:
         return "The requested code is too large. You must identify the most relevant code sections to view."
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
-                action=ViewCodeArgs(
-                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
-                    files=[
-                        CodeSpan(
-                            file_path="auth/service.py",
-                            span_ids=["AuthenticationService.authenticate"],
-                        )
-                    ],
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Show me lines 50-75 of the database configuration file",
-                action=ViewCodeArgs(
-                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
-                    files=[CodeSpan(file_path="config/database.py", start_line=50, end_line=75)],
-                ),
-            ),
-        ]
 
     def create_retry_message(self, file: ContextFile, message: str):
         retry_message = f"\n\nProblems when trying to find spans in {file.file_path}. "

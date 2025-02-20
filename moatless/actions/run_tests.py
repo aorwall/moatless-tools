@@ -34,6 +34,10 @@ class RunTestsArgs(ActionArguments):
     def to_prompt(self):
         return f"Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return []
+
 
 class RunTests(Action):
     args_schema = RunTestsArgs
@@ -158,7 +162,3 @@ class RunTests(Action):
                 description="The action is counterproductive, demonstrating misunderstanding or causing setbacks, test failures are severe and could have been anticipated.",
             ),
         ]
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return []

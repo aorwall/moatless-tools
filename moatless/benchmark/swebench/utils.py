@@ -6,7 +6,7 @@ import shutil
 import signal
 from typing import Optional
 
-from moatless.benchmark.utils import (
+from moatless.evaluation.utils import (
     get_missing_files,
     get_missing_spans,
     get_moatless_instance,
@@ -201,6 +201,11 @@ def create_index(
     )
     return code_index
 
+
+def repository_exists(instance: dict, repo_base_dir: str):
+    instance_repo_path = os.path.normpath(os.path.join(repo_base_dir, f"swe-bench_{instance['instance_id']}"))
+    return os.path.exists(instance_repo_path)
+        
 
 async def create_repository_async(
     instance: Optional[dict] = None,

@@ -30,11 +30,6 @@ class Expander(BaseModel):
                 logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
                 return child
 
-        num_expansions = node.max_expansions or self.max_expansions
-        if len(node.children) >= num_expansions:
-            logger.info(f"Max expansions reached for node {node.node_id}")
-            return None
-
         settings_to_use = self._get_agent_settings(node)
 
         child_node = Node(

@@ -33,19 +33,34 @@ export const ExpandableItem = ({
   };
 
   return (
-    <div
-      className={cn("mb-4 flex items-start sm:mb-8", isExpandable && "group")}
-    >
-      <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
+    <div className={cn(
+      "mb-4 flex items-start sm:mb-8",
+      isExpandable && "group/expandable",
+      "relative"
+    )}>
+      <div className={cn(
+        "absolute inset-0 rounded-lg transition-colors duration-200",
+        "opacity-0 group-hover/expandable:opacity-100",
+        isExpandable && "bg-gray-50/50"
+      )} />
+
+      <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px] relative">
         <div className="mr-3 flex h-8 flex-col justify-center text-right sm:mr-6">
           <div>
             <button
               className={cn(
-                "text-xs font-medium text-gray-600 group-hover:text-gray-900",
-                isExpandable ? "cursor-pointer" : "cursor-default",
+                "text-xs font-medium",
+                "transition-colors duration-200",
+                isExpandable ? [
+                  "text-primary-600 group-hover/expandable:text-primary-700",
+                  "cursor-pointer"
+                ] : [
+                  "text-gray-600",
+                  "cursor-default"
+                ],
                 "max-w-[60px] truncate sm:max-w-[120px]",
               )}
-              onClick={handleClick}
+              onClick={() => isExpandable && onExpandChange(!expandedState)}
             >
               {label}
             </button>

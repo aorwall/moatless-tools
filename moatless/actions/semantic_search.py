@@ -49,6 +49,27 @@ class SemanticSearchArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Find all implementations of database connection pooling in our codebase",
+                action=SemanticSearchArgs(
+                    thoughts="To find implementations of database connection pooling, we should search for code related to managing database connections efficiently. This might include classes or functions that handle connection creation, reuse, and management.",
+                    query="database connection pooling implementation",
+                    category="implementation",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="We need to find all test cases related to user authentication in our test suite",
+                action=SemanticSearchArgs(
+                    thoughts="To find test cases related to user authentication, we should search for test files that contain assertions and scenarios specifically testing authentication functionality.",
+                    query="user authentication test cases",
+                    file_pattern="tests/*.py",
+                    category="test",
+                ),
+            ),
+        ]
 
 class SemanticSearch(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
@@ -82,24 +103,3 @@ class SemanticSearch(SearchBaseAction):
         )
         return criteria
 
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Find all implementations of database connection pooling in our codebase",
-                action=SemanticSearchArgs(
-                    thoughts="To find implementations of database connection pooling, we should search for code related to managing database connections efficiently. This might include classes or functions that handle connection creation, reuse, and management.",
-                    query="database connection pooling implementation",
-                    category="implementation",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="We need to find all test cases related to user authentication in our test suite",
-                action=SemanticSearchArgs(
-                    thoughts="To find test cases related to user authentication, we should search for test files that contain assertions and scenarios specifically testing authentication functionality.",
-                    query="user authentication test cases",
-                    file_pattern="tests/*.py",
-                    category="test",
-                ),
-            ),
-        ]

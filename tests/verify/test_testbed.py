@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from moatless.benchmark.swebench import setup_swebench_repo
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.repository import FileRepository
 from moatless.runtime.runtime import TestStatus
 from moatless.runtime.testbed import TestbedEnvironment

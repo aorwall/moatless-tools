@@ -9,7 +9,7 @@ import {
   GitFork,
   ChevronDown,
 } from "lucide-react";
-import type { Node } from "@/lib/types/trajectory";
+import type { Node, ActionStep } from "@/lib/types/trajectory";
 import { truncateMessage } from "@/lib/utils/text";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { cn } from "@/lib/utils";
@@ -22,9 +22,9 @@ interface TrajectoryNodeProps {
 }
 
 interface ActionGroup {
-  action: Node['actionSteps'][0];
+  action: ActionStep;
   count: number;
-  references?: { step: number; count: number }[];
+  references: { step: number; count: number }[];
 }
 
 // File Updates Section
@@ -85,12 +85,12 @@ export const TrajectoryNode = ({
         lastGroup.count++;
         return acc;
       }
-      acc.push({ action: step, count: 1 });
+      acc.push({ action: step, count: 1, references: [] });
       return acc;
     }, []);
   }, [node.actionSteps]);
 
-  const formatActionDisplay = (action: Action) => {
+  const formatActionDisplay = (action: ActionStep['action']) => {
     // Extract the path from properties if it exists
     const path = action.properties?.path;
     
@@ -191,7 +191,7 @@ export const TrajectoryNode = ({
               )}
 
               {/* References */}
-              {group.references?.length > 0 && (
+              {group.references && group.references.length > 0 && (
                 <span className="text-[10px] text-gray-400">
                   Same as step{' '}
                   {group.references.map((ref, i) => (

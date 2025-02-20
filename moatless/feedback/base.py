@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import BaseCompletionModel
 from moatless.node import Node, FeedbackData
-from moatless.flow.base import FlowComponentMixin
 from moatless.component import MoatlessComponent
 
 logger = logging.getLogger(__name__)

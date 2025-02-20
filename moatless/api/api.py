@@ -81,10 +81,11 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def handle_system_event(trajectory_id: str, event: BaseEvent):
+async def handle_system_event(trajectory_id: str, project_id: str, event: BaseEvent):
     """Handle system events and broadcast them via WebSocket"""
     message = {
         'trajectory_id': trajectory_id,
+        'project_id': project_id,
         'event_type': event.event_type,
         'data': event.model_dump(exclude_none=True, exclude={'event_type'})
     }

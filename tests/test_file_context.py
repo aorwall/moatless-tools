@@ -8,7 +8,7 @@ import pytest
 from git import Repo
 
 from moatless.benchmark.swebench import setup_swebench_repo
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.file_context import FileContext, ContextFile

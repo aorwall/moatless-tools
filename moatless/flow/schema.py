@@ -83,6 +83,7 @@ class FlowConfig(BaseModel):
             BaseSelector: lambda v: v.model_dump(),
             BaseValueFunction: lambda v: v.model_dump(),
             BaseFeedbackGenerator: lambda v: v.model_dump(),
+            BaseDiscriminator: lambda v: v.model_dump(),
         }
     }
 
@@ -98,6 +99,8 @@ class FlowConfig(BaseModel):
                 data["value_function"] = BaseValueFunction.model_validate(data["value_function"])
             if "feedback_generator" in data and data["feedback_generator"]:
                 data["feedback_generator"] = BaseFeedbackGenerator.model_validate(data["feedback_generator"])
+            if "discriminator" in data and data["discriminator"]:
+                data["discriminator"] = BaseDiscriminator.model_validate(data["discriminator"])
 
         return data
 

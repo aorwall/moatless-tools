@@ -477,14 +477,14 @@ class Node(BaseModel):
             return cls.model_validate(node_data)
 
     @classmethod
-    def from_file(cls, file_path: str, repo: Repository | None = None, **kwargs) -> "Node":
+    def from_file(cls, file_path: str, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None, **kwargs) -> "Node":
         with open(file_path, "r") as f:
             data = json.load(f)
 
         if "root" in data:
-            return Node.reconstruct(data["root"], repo=repo)
+            return Node.reconstruct(data["root"], repo=repo, runtime=runtime)
         elif "nodes" in data:
-            return Node.reconstruct(data["nodes"], repo=repo)
+            return Node.reconstruct(data["nodes"], repo=repo, runtime=runtime)
         else:
             raise ValueError("No root or nodes found in data")
 

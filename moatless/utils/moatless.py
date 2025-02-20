@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from moatless.context_data import moatless_dir, current_evaluation_name
+from moatless.context_data import moatless_dir, current_project_id
 
 
 def get_moatless_dir() -> Path:
@@ -21,7 +21,7 @@ def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     if evaluation_name:
         eval_name = evaluation_name
     else:
-        eval_name = current_evaluation_name.get()
+        eval_name = current_project_id.get()
 
     if eval_name:
         # If evaluation context exists, use evals/eval_name/trajs

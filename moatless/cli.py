@@ -98,7 +98,7 @@ class ValidationCLI:
         self.events_file = None
         event_bus.subscribe(self.handle_event_sync)
         
-    async def handle_event_sync(self, run_id: str, event: BaseEvent):
+    async def handle_event_sync(self, run_id: str, project_id: str, event: BaseEvent):
         """Synchronous event handler for immediate console output"""
         # Get event data
         event_data = event.model_dump()

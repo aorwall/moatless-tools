@@ -134,6 +134,7 @@ class NodeDTO(BaseModel):
     """Node information in the tree."""
 
     nodeId: int
+    children: List["NodeDTO"] = Field(default_factory=list, description="Children nodes of this node")
     executed: bool = Field(default=False, description="Whether this node has been executed")
     userMessage: Optional[str] = None
     assistantMessage: Optional[str] = None

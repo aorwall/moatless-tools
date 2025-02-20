@@ -4,7 +4,7 @@ from moatless.actions.view_code import (
     CodeSpan,
 )
 from moatless.benchmark.swebench import create_repository
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.file_context import FileContext
 
 

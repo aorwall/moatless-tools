@@ -3,8 +3,9 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.benchmark.schema import Evaluation, EvaluationInstance, InstanceStatus
-
+from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
+from moatless.flow.schema import FlowConfig
+from moatless.config.model_config import ModelConfig
 
 class SWEBenchInstanceDTO(BaseModel):
     """Schema for a SWEBench instance"""
@@ -46,6 +47,8 @@ class EvaluationStatusSummaryDTO(BaseModel):
 class EvaluationListItemDTO(BaseModel):
     evaluation_name: str
     dataset_name: str
+    flow_id: str
+    model_id: str
     status: str
     created_at: datetime
     started_at: Optional[datetime] = None
@@ -108,10 +111,10 @@ class EvaluationListItemDTO(BaseModel):
         return cls(
             evaluation_name=evaluation.evaluation_name,
             dataset_name=evaluation.dataset_name,
-            status=evaluation.status.value,
-            created_at=evaluation.created_at,
             flow_id=evaluation.flow_id,
             model_id=evaluation.model_id,
+            status=evaluation.status.value,
+            created_at=evaluation.created_at,
             started_at=evaluation.started_at,
             completed_at=evaluation.completed_at,
             instance_count=len(evaluation.instances),
@@ -147,6 +150,7 @@ class EvaluationInstanceDTO(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     evaluated_at: Optional[datetime] = None
+    error_at: Optional[datetime] = None
 
 class EvaluationResponseDTO(BaseModel):
     """Response containing evaluation details"""
@@ -156,8 +160,8 @@ class EvaluationResponseDTO(BaseModel):
     created_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
-    flow_id: str
-    model_id: str
+    flow: FlowConfig
+    model: ModelConfig
     instances: List[EvaluationInstanceDTO]
 
 class StartEvaluationRequestDTO(BaseModel):

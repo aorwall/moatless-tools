@@ -7,7 +7,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 from moatless.benchmark.report import generate_report
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.flow.loop import AgenticLoop
 from moatless.streamlit.investigate_node import investigate_node
 from moatless.streamlit.list_visualization import create_linear_table

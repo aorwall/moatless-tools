@@ -44,6 +44,46 @@ class InsertLinesArgs(ActionArguments):
 {self.new_str}
 </new_str>"""
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Add a new import statement at the beginning of the file",
+                action=InsertLinesArgs(
+                    thoughts="Adding import for datetime module",
+                    path="utils/time_helper.py",
+                    insert_line=1,
+                    new_str="from datetime import datetime, timezone",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Add a new method to the UserProfile class",
+                action=InsertLinesArgs(
+                    thoughts="Adding a method to update user preferences",
+                    path="models/user.py",
+                    insert_line=15,
+                    new_str="""    def update_preferences(self, preferences: dict) -> None:
+        self._preferences.update(preferences)
+        self._last_updated = datetime.now(timezone.utc)
+        logger.info(f"Updated preferences for user {self.username}")""",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Add a new configuration option",
+                action=InsertLinesArgs(
+                    thoughts="Adding Redis configuration settings",
+                    path="config/settings.py",
+                    insert_line=25,
+                    new_str="""REDIS_CONFIG = {
+    'host': 'localhost',
+    'port': 6379,
+    'db': 0,
+    'password': None
+}""",
+                ),
+            ),
+        ]
+
 
 class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
     """
@@ -137,43 +177,3 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             observation.message += f"\n\n{test_summary}"
 
         return observation
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Add a new import statement at the beginning of the file",
-                action=InsertLinesArgs(
-                    thoughts="Adding import for datetime module",
-                    path="utils/time_helper.py",
-                    insert_line=1,
-                    new_str="from datetime import datetime, timezone",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Add a new method to the UserProfile class",
-                action=InsertLinesArgs(
-                    thoughts="Adding a method to update user preferences",
-                    path="models/user.py",
-                    insert_line=15,
-                    new_str="""    def update_preferences(self, preferences: dict) -> None:
-        self._preferences.update(preferences)
-        self._last_updated = datetime.now(timezone.utc)
-        logger.info(f"Updated preferences for user {self.username}")""",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Add a new configuration option",
-                action=InsertLinesArgs(
-                    thoughts="Adding Redis configuration settings",
-                    path="config/settings.py",
-                    insert_line=25,
-                    new_str="""REDIS_CONFIG = {
-    'host': 'localhost',
-    'port': 6379,
-    'db': 0,
-    'password': None
-}""",
-                ),
-            ),
-        ]

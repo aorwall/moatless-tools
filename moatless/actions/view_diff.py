@@ -22,6 +22,15 @@ class ViewDiffArgs(ActionArguments):
     model_config = ConfigDict(title="ViewDiff")
 
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Show me the current changes in the workspace",
+                action=ViewDiffArgs(thoughts="Viewing current git diff of all changes"),
+            )
+        ]
+
 class ViewDiff(Action):
     """
     Action to view the current git diff of all changes.
@@ -42,12 +51,3 @@ class ViewDiff(Action):
             message="Current changes in workspace:",
             properties={"diff": diff, "success": True},
         )
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Show me the current changes in the workspace",
-                action=ViewDiffArgs(thoughts="Viewing current git diff of all changes"),
-            )
-        ]

@@ -33,6 +33,10 @@ class FinishArgs(ActionArguments):
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, FinishArgs)
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return []
+
 
 class Finish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
@@ -123,7 +127,3 @@ class Finish(Action):
     @classmethod
     def get_value_function_prompt(cls) -> str:
         return """Your role is to evaluate the executed action of the search tree that our AI agents are traversing, with the goal of ensuring that a complete and verified solution is in place. The agent believes that it has finished solving the programming issue."""
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return []

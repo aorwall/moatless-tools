@@ -331,14 +331,48 @@ def calculate_token_metrics(trajectory_data: Dict[str, Any]) -> Dict[str, int]:
 
 
 def convert_nodes(root_node: Node) -> List[NodeDTO]:
-    """Convert nodes from trajectory data to NodeDTOs."""
-    nodes = []
+    """Convert nodes from trajectory data to NodeDTOs.
+    
+    If any node has multiple children, creates a tree structure at branch points.
+    Otherwise returns a completely flat list.
+    """
     action_history = {}  # Track action dumps to detect duplicates
-    for node in root_node.get_all_nodes():
+    
+    def has_branch_nodes(node: Node) -> bool:
+        """Check if this node or any descendants have multiple children"""
+        if len(node.children) > 1:
+            return True
+        return any(has_branch_nodes(child) for child in node.children)
+    
+    def process_tree(node: Node) -> List[NodeDTO]:
+        """Process nodes preserving tree structure at branch points"""
         node_dto = convert_moatless_node_to_api_node(node, action_history)
-        nodes.append(node_dto)
+        
+        if len(node.children) > 1:
+            # Multiple children - create branching structure
+            node_dto.children = [process_tree(child)[0] for child in node.children]
+            return [node_dto]
+        elif len(node.children) == 1:
+            # Single child - create flat list
+            result = [node_dto]
+            result.extend(process_tree(node.children[0]))
+            return result
+        else:
+            # No children - return single node
+            return [node_dto]
+            
+    def process_flat(node: Node) -> List[NodeDTO]:
+        """Process nodes into completely flat list"""
+        result = [convert_moatless_node_to_api_node(node, action_history)]
+        for child in node.children:
+            result.extend(process_flat(child))
+        return result
 
-    return nodes
+    # Check if we need tree structure
+    if has_branch_nodes(root_node):
+        return process_tree(root_node)
+    else:
+        return process_flat(root_node)
 
 
 def create_trajectory_dto(node: Node) -> TrajectoryDTO:

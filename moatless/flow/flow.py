@@ -5,13 +5,14 @@ import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable, Union
+from typing import Optional, Dict, Any, List, Callable, Type, Union
 
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
+from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
 from moatless.config.model_config import create_completion_model
 from moatless.context_data import current_trajectory_id
@@ -84,12 +85,13 @@ class SystemStatus(BaseModel):
         return SystemStatus.model_validate_json(status_path.read_text())
 
 
-class AgenticFlow(BaseModel, ABC):
+class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    root: Node = Field(..., description="The root node of the system.")
     run_id: str = Field(..., description="The run ID of the system.")
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
+
+    root: Optional[Node] = Field(None, description="The root node of the system.")
 
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     persist_path: Optional[str] = Field(None, description="Path to persist the system state.")
@@ -100,6 +102,18 @@ class AgenticFlow(BaseModel, ABC):
     
     _status: SystemStatus = PrivateAttr(default_factory=SystemStatus)
     _events_file: Optional[Any] = PrivateAttr(default=None)
+
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "flow"
+
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.flow"
+
+    @classmethod
+    def _get_base_class(cls) -> Type:
+        return AgenticFlow
 
     @classmethod
     def create(
@@ -166,23 +180,35 @@ class AgenticFlow(BaseModel, ABC):
             persist_dir=persist_dir,
             max_iterations=max_iterations,
             max_cost=max_cost,
+            max_expansions=max_expansions,
             **kwargs,
         )
+    
+    @property
+    def workspace(self) -> Workspace:
+        return self.agent.workspace
+    
+    @workspace.setter
+    def workspace(self, workspace: Workspace):
+        self.agent.workspace = workspace
 
     async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
+        if not self.root:
+            raise ValueError("Root node is not set")
+
         try:
             current_trajectory_id.set(self.run_id)
             self._initialize_run_state()
             await event_bus.publish(FlowStartedEvent())
-            result, finish_reason = await self._run(message)
+            node, finish_reason = await self._run(message)
             
             # Complete attempt successfully
             self._status.complete_current_attempt("completed")
             self._status.status = "completed"
             self._status.finished_at = datetime.now(timezone.utc)
             await event_bus.publish(FlowCompletedEvent(finish_reason=finish_reason))
-            return result
+            return node
         except Exception as e:
             # Complete attempt with error
             logger.exception(f"Error running flow {self.run_id}")
@@ -195,6 +221,7 @@ class AgenticFlow(BaseModel, ABC):
             await event_bus.publish(FlowErrorEvent(error=str(e)))
             raise
         finally:
+            self.maybe_persist()
             self._save_status()
             if self._events_file:
                 self._events_file.close()
@@ -224,6 +251,8 @@ class AgenticFlow(BaseModel, ABC):
             raise ValueError(f"Node with ID {node_id} is the root node and cannot be reset")
 
         node.reset()
+
+
 
     async def emit_event(self, event: BaseEvent):
         """Emit an event."""
@@ -282,6 +311,8 @@ class AgenticFlow(BaseModel, ABC):
         #    event_bus.publish(self.run_id, BaseEvent(event_type="flow_restarted"))
 
         self._save_status()
+
+    
 
     def _save_status(self):
         """Save current status to status.json"""
@@ -399,6 +430,27 @@ class AgenticFlow(BaseModel, ABC):
 
         return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
     
+
+    @classmethod
+    def from_dir(cls, trajectory_dir: Path, workspace: Workspace | None = None) -> "AgenticFlow":
+        """Load a system instance from a directory."""
+        settings_path = trajectory_dir / "settings.json"
+        if not settings_path.exists():
+            raise FileNotFoundError(f"Settings file not found in {trajectory_dir}")
+        
+        trajectory_path = trajectory_dir / "trajectory.json"
+        if not trajectory_path.exists():
+            raise FileNotFoundError(f"Trajectory file not found in {trajectory_dir}")
+
+        with open(settings_path, "r") as f:
+            settings = json.load(f)
+        
+        flow = cls.model_validate(settings)
+        flow.root = Node.from_file(trajectory_path, repo=workspace.repository, runtime=workspace.runtime)
+
+        return flow
+
+
     @classmethod
     def from_trajectory_id(cls, trajectory_id: str, agent_id: str | None = None, model_id: str | None = None) -> "AgenticFlow":
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id)
@@ -439,7 +491,6 @@ class AgenticFlow(BaseModel, ABC):
 
         return flow
     
-
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the system."""
         data = super().model_dump(exclude={"agent", "root", "persist_dir", "persist_path"})

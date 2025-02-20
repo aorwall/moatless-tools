@@ -10,7 +10,7 @@ import streamlit as st
 from plotly.subplots import make_subplots
 
 from moatless.benchmark.report import analyse_file_context
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.node import Node
 from moatless.search_tree import SearchTree
 from moatless.streamlit.list_visualization import create_linear_table

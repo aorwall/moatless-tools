@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Cpu,
   LucideIcon,
+  ChevronRight,
 } from "lucide-react";
 import {
   ActionTrajectoryItem,
@@ -40,6 +41,8 @@ import {
   ArtifactTrajectoryItem,
   ArtifactTimelineContent,
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
+import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
+import { cn } from "@/lib/utils";
 
 interface TimelineItemProps {
   type: string;
@@ -48,6 +51,8 @@ interface TimelineItemProps {
   instanceId: string;
   itemId: string;
   label: string;
+  isLast: boolean;
+  hasNextSibling: boolean;
 }
 
 export const TimelineItem = ({
@@ -57,6 +62,8 @@ export const TimelineItem = ({
   instanceId,
   itemId,
   label,
+  isLast,
+  hasNextSibling,
 }: TimelineItemProps) => {
   const { setSelectedItem } = useTrajectoryStore();
 
@@ -165,7 +172,35 @@ export const TimelineItem = ({
   const Icon = getIcon(type);
 
   return (
-    <div onClick={handleSelect} className="cursor-pointer">
+    <div 
+      onClick={handleSelect} 
+      className={cn(
+        "cursor-pointer relative group/item",
+        "hover:bg-white hover:shadow-sm hover:border-gray-200",
+        "rounded-lg transition-all duration-200",
+        "p-3 -mx-3", // Negative margin to allow hover effect to extend
+        {
+          "mb-4": !isLast // Space between items
+        }
+      )}
+    >
+      {/* Add subtle hover effect indicator */}
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity">
+        <ChevronRight className="h-4 w-4 text-gray-400" />
+      </div>
+      
+      {/* Vertical line extending down if not last or if parent has more nodes */}
+      {(!isLast || hasNextSibling) && (
+        <div 
+          className="absolute w-px bg-gray-200"
+          style={{
+            left: TIMELINE_CONFIG.lines.item.offset,
+            top: TIMELINE_CONFIG.lines.item.verticalOffset,
+            bottom: `-${TIMELINE_CONFIG.nodeSpacing.default}`
+          }}
+        />
+      )}
+      
       <ExpandableItem
         label={label}
         icon={Icon}

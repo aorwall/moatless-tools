@@ -53,11 +53,14 @@ async def read_flow_config(config_id: str) -> FlowConfig:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.put("/flows/{config_id}")
-async def update_flow_config_api(update: FlowConfig):
+async def update_flow_config_api(config_id: str, update: FlowConfig):
     """Update configuration for a specific flow"""
     try:
-        logger.info(f"Updating flow config with {update.model_dump(exclude_none=True)}")
-        config = update_flow_config(update)
+        if config_id != update.id:
+            raise HTTPException(status_code=400, detail="Config ID in path must match config ID in body")
+            
+        logger.info(f"Updating flow config {config_id} with {update.model_dump(exclude_none=True)}")
+        update_flow_config(update)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

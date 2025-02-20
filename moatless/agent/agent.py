@@ -21,6 +21,7 @@ from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.model import Completion
+from moatless.component import MoatlessComponent
 from moatless.events import event_bus
 from moatless.exceptions import (
     CompletionError,
@@ -34,18 +35,20 @@ from moatless.node import Node, ActionStep
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
+from moatless.config.model_config import create_completion_model
+
 logger = logging.getLogger(__name__)
 
 
-class ActionAgent(BaseModel):
+class ActionAgent(MoatlessComponent):
     agent_id: str = Field(..., description="Agent ID")
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
     actions: List[Action] = Field(default_factory=list)
 
-    _completion_model: BaseCompletionModel | None = PrivateAttr()
-    _message_generator: MessageHistoryGenerator | None = PrivateAttr(default_factory=MessageHistoryGenerator)
+    _completion_model: BaseCompletionModel | None = PrivateAttr(default=None)
+    _message_generator: MessageHistoryGenerator | None = PrivateAttr(default=None)
     _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
-    _workspace: Workspace | None = PrivateAttr()
+    _workspace: Workspace | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -67,8 +70,6 @@ class ActionAgent(BaseModel):
             **data,
         )
         
-        self.completion_model = completion_model
-
         if workspace:
             self.workspace = workspace
         elif repository and runtime and code_index and artifact_handlers:
@@ -79,7 +80,10 @@ class ActionAgent(BaseModel):
                 artifact_handlers=artifact_handlers,
             )
         else:
-            self.workspace = None
+            self._workspace = None
+        
+        self._message_generator = MessageHistoryGenerator()
+        self.completion_model = completion_model
 
     @classmethod
     def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
@@ -91,7 +95,19 @@ class ActionAgent(BaseModel):
             system_prompt=agent_settings.system_prompt,
             actions=actions,
         )
+    
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "agent"
+    
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.agent"
 
+    @classmethod
+    def _get_base_class(cls) -> Type:
+        return ActionAgent
+    
     @property
     def completion_model(self):
         return self._completion_model
@@ -120,8 +136,7 @@ class ActionAgent(BaseModel):
             if not action_args:
                 raise RuntimeError("No actions found")
         
-            system_prompt = self.generate_system_prompt()
-            self._completion_model.initialize(action_args, system_prompt)
+            self._completion_model.initialize(action_args, self.system_prompt)
 
             for action in self.actions:
                 if hasattr(action, "completion_model"):
@@ -150,7 +165,7 @@ class ActionAgent(BaseModel):
 
         if node.is_executed():
             raise RuntimeError("Node already executed")
-
+        
         node.possible_actions = [action.name for action in self.actions]
 
         try:
@@ -263,7 +278,7 @@ class ActionAgent(BaseModel):
                 action_step.completion = Completion.from_llm_completion(
                     input_messages=e.messages,
                     completion_response=e.last_completion,
-                    model=self.completion_model,
+                    model=self.completion_model.model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             node.error = traceback.format_exc()
@@ -276,124 +291,32 @@ class ActionAgent(BaseModel):
             node.terminal = True
             raise e
 
-    def generate_system_prompt(self) -> str:
-        """Generate a system prompt for the agent."""
-
-        system_prompt = self.system_prompt
-        if self._completion_model and self._completion_model.use_few_shots:
-            system_prompt += "\n\n" + self.generate_few_shots()
-
-        return system_prompt
-
-    def generate_few_shots(self) -> str:
-        few_shot_examples = []
-        for action in self.actions:
-            examples = action.get_few_shot_examples()
-            if examples:
-                few_shot_examples.extend(examples)
-
-        prompt = ""
-        if few_shot_examples:
-            prompt += "\n\n# Examples\nHere are some examples of how to use the available actions:\n\n"
-            for i, example in enumerate(few_shot_examples):
-                if self.completion_model.response_format == LLMResponseFormat.REACT:
-                    prompt += f"\n**Example {i + 1}**"
-                    action_data = example.action.model_dump()
-                    thoughts = action_data.pop("thoughts", "")
-
-                    # Special handling for StringReplace and CreateFile action
-                    if example.action.__class__.__name__ in [
-                        "StringReplaceArgs",
-                        "CreateFileArgs",
-                        "AppendStringArgs",
-                        "InsertLinesArgs",
-                        "FindCodeSnippetArgs",
-                    ]:
-                        prompt += f"\nTask: {example.user_input}\n"
-                        if not self.disable_thoughts:
-                            prompt += f"\nThought: {thoughts}\n"
-                        prompt += f"Action: {str(example.action.name)}\n"
-
-                        if example.action.__class__.__name__ == "StringReplaceArgs":
-                            prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += f"<old_str>\n{action_data['old_str']}\n</old_str>\n"
-                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                        elif example.action.__class__.__name__ == "AppendStringArgs":
-                            prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                        elif example.action.__class__.__name__ == "CreateFileArgs":
-                            prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += f"<file_text>\n{action_data['file_text']}\n</file_text>\n"
-                        elif example.action.__class__.__name__ == "InsertLinesArgs":
-                            prompt += f"<path>{action_data['path']}</path>\n"
-                            prompt += f"<insert_line>{action_data['insert_line']}</insert_line>\n"
-                            prompt += f"<new_str>\n{action_data['new_str']}\n</new_str>\n"
-                        elif example.action.__class__.__name__ == "FindCodeSnippetArgs":
-                            if "file_pattern" in action_data:
-                                prompt += f"<file_pattern>{action_data['file_pattern']}</file_pattern>\n"
-                            prompt += f"<code_snippet>{action_data['code_snippet']}</code_snippet>\n"
-                    else:
-                        # Original JSON format for other actions
-                        prompt += (
-                            f"\nTask: {example.user_input}"
-                            f"\nThought: {thoughts}\n"
-                            f"Action: {str(example.action.name)}\n"
-                            f"{json.dumps(action_data)}\n\n"
-                        )
-
-                elif self.completion_model.response_format == LLMResponseFormat.JSON:
-                    action_json = {
-                        "action": example.action.model_dump(),
-                        "action_type": example.action.name,
-                    }
-                    prompt += (
-                        f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
-                    )
-
-                elif self.completion_model.response_format == LLMResponseFormat.TOOLS:
-                    tools_json = {"tool": example.action.name}
-                    if self.disable_thoughts:
-                        tools_json.update(example.action.model_dump(exclude={"thoughts"}))
-                    else:
-                        tools_json.update(example.action.model_dump())
-
-                    prompt += f"Task: {example.user_input}\n"
-                    if not self.disable_thoughts:
-                        prompt += f"<thoughts>{example.action.thoughts}</thoughts>\n"
-                    prompt += json.dumps(tools_json)
-                    prompt += "\n\n"
-
-        return prompt
-
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         dump = super().model_dump(**kwargs)
+
         dump["actions"] = []
-        dump["agent_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         for action in self.actions:
             dump["actions"].append(action.model_dump(**kwargs))
+
+        if self.completion_model:
+            dump["model_id"] = self.completion_model.model_id
+    
         return dump
 
     @classmethod
     def model_validate(cls, obj: Any) -> "ActionAgent":
         if isinstance(obj, dict):
             obj = obj.copy()
-            agent_class_path = obj.pop("agent_class", None)
-
-            logger.info(f"Validating agent with actions: {obj.get('actions', [])}")
 
             obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
-            if agent_class_path:
-                module_name, class_name = agent_class_path.rsplit(".", 1)
-                module = importlib.import_module(module_name)
-                agent_class = getattr(module, class_name)
-                instance = agent_class(**obj)
-            else:
-                instance = cls(**obj)
+            
+            if "model_id" in obj:
+                obj["completion_model"] = create_completion_model(obj["model_id"])
 
-            return instance
+            return super().model_validate(obj)
 
-        return super().model_validate(obj)
+        return obj
 
     @model_validator(mode="after")
     def verify_actions(self) -> "ActionAgent":

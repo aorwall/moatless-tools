@@ -3,14 +3,32 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 
-from moatless.agent.agent import ActionAgent
+from pydantic import BaseModel, Field
+
 from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.schema import MessageHistoryType
 from moatless.utils.moatless import get_moatless_dir
 
 logger = logging.getLogger(__name__)
+
+class ModelConfig(BaseModel):
+
+    id: str = Field(..., description="Unique identifier for the model")
+    model: str = Field(..., description="Model identifier used in LiteLLM")
+    model_base_url: Optional[str] = Field(None, description="Base URL for the model API")
+    model_api_key: Optional[str] = Field(None, description="API key for the model")
+    temperature: Optional[float] = Field(..., description="Temperature for model sampling")
+    max_tokens: Optional[int] = Field(..., description="Maximum number of tokens to generate")
+    timeout: float = Field(..., description="Timeout in seconds for model requests")
+    thoughts_in_action: bool = Field(..., description="Whether to include thoughts in actions")
+    disable_thoughts: bool = Field(..., description="Whether to disable thoughts completely")
+    merge_same_role_messages: bool = Field(..., description="Whether to merge consecutive messages with same role")
+    message_cache: bool = Field(..., description="Whether to enable message caching")
+    few_shot_examples: bool = Field(..., description="Whether to use few-shot examples")
+    response_format: LLMResponseFormat = Field(..., description="Format for model responses")
+    message_history_type: MessageHistoryType = Field(..., description="Type of message history to use")
 
 
 class ModelConfigManager:
@@ -35,7 +53,7 @@ class ModelConfigManager:
 
         return base_path / "config" / "model_overrides.json"
 
-    def _load_model_configs(self):
+    def _load_model_configs(self) -> Dict[str, ModelConfig]:
         """Load model configurations from JSON file."""
         config_path = Path(__file__).parent / "model_config.json"
         with open(config_path) as f:
@@ -43,15 +61,18 @@ class ModelConfigManager:
 
         # Convert string response formats to enum
         base_config = config_data["base_config"]
-        models_config = config_data["models"]
 
-        for model_config in models_config.values():
+        models_config = config_data["models"]
+        for model_id, model_config in models_config.items():
+            
             if "response_format" in model_config:
                 model_config["response_format"] = LLMResponseFormat(model_config["response_format"])
             if "message_history_type" in model_config:
                 model_config["message_history_type"] = MessageHistoryType(model_config["message_history_type"])
             # Merge base config with model specific config
             model_config.update({k: v for k, v in base_config.items() if k not in model_config})
+
+            models_config[model_id] = ModelConfig(**model_config, id=model_id)
 
         return models_config
 
@@ -79,7 +100,7 @@ class ModelConfigManager:
         except Exception as e:
             print(f"Failed to save model overrides: {e}")
 
-    def get_model_config(self, model_id: str) -> ActionAgent:
+    def get_model_config(self, model_id: str) -> ModelConfig:
         """Get configuration for a specific model with any runtime overrides applied.
 
         Args:
@@ -98,21 +119,18 @@ class ModelConfigManager:
         if model_id in self._runtime_overrides:
             config.update(self._runtime_overrides[model_id])
 
-        config["id"] = model_id
+        config.id = model_id
         return config
 
-    def get_all_configs(self) -> Dict[str, ActionAgent]:
+    def get_all_configs(self) -> List[ModelConfig]:
         """Get all model configurations with runtime overrides applied.
 
         Returns:
             Dictionary mapping model IDs to their configurations with overrides applied.
         """
-        configs = {}
-        for model_id in self._base_configs:
-            configs[model_id] = self.get_model_config(model_id)
-        return configs
+        return list(self._base_configs.values())
 
-    def update_model_config(self, model_id: str, updates: Dict[str, Any]) -> ActionAgent:
+    def update_model_config(self, model_id: str, updates: ModelConfig) -> ModelConfig:
         """Update configuration for a specific model.
 
         Args:
@@ -142,7 +160,7 @@ class ModelConfigManager:
         # Return merged configuration
         config = self._base_configs[model_id].copy()
         config.update(current_overrides)
-        return ActionAgent.model_validate(config)
+        return ModelConfig.model_validate(config)
 
     def reset_model_config(self, model_id: str) -> Dict[str, Any]:
         """Reset model configuration to defaults by removing overrides.
@@ -183,14 +201,10 @@ class ModelConfigManager:
             raise ValueError(f"Model {model_id} not found")
 
         # Convert string enums to proper enum types
-        if isinstance(config.get("response_format"), str):
-            config["response_format"] = LLMResponseFormat(config["response_format"])
-        if isinstance(config.get("message_history_type"), str):
-            config["message_history_type"] = MessageHistoryType(config["message_history_type"])
-
+        
         logger.debug(f"Creating completion model for {model_id} with config: {config}")
 
-        return BaseCompletionModel.create(**config)
+        return BaseCompletionModel.create(**config.model_dump(), model_id=model_id)
 
 
 # Create singleton instance

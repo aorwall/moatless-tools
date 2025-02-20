@@ -44,6 +44,26 @@ class FindClassArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="I need to see the implementation of the DatabaseManager class to understand how it handles transactions",
+                action=FindClassArgs(
+                    thoughts="To examine how the DatabaseManager class handles transactions, we need to locate its implementation in the codebase.",
+                    class_name="DatabaseManager",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Show me the UserAuthentication class in the auth module",
+                action=FindClassArgs(
+                    thoughts="Looking for the UserAuthentication class specifically in the authentication module.",
+                    class_name="UserAuthentication",
+                    file_pattern="auth/*.py",
+                ),
+            ),
+        ]
+
 
 class FindClass(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindClassArgs
@@ -78,23 +98,3 @@ class FindClass(SearchBaseAction):
             ]
         )
         return criteria
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="I need to see the implementation of the DatabaseManager class to understand how it handles transactions",
-                action=FindClassArgs(
-                    thoughts="To examine how the DatabaseManager class handles transactions, we need to locate its implementation in the codebase.",
-                    class_name="DatabaseManager",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Show me the UserAuthentication class in the auth module",
-                action=FindClassArgs(
-                    thoughts="Looking for the UserAuthentication class specifically in the authentication module.",
-                    class_name="UserAuthentication",
-                    file_pattern="auth/*.py",
-                ),
-            ),
-        ]

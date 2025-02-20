@@ -1,6 +1,6 @@
 from moatless.actions.find_function import FindFunction, FindFunctionArgs
 from moatless.benchmark.swebench import create_repository, create_index
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
 from moatless.file_context import FileContext
 

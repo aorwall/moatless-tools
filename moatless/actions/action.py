@@ -164,14 +164,6 @@ class Action(MoatlessComponent):
         return None
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        """
-        Returns a list of few-shot examples specific to this action.
-        Override this method in subclasses to provide custom examples.
-        """
-        return []
-
-    @classmethod
     def get_action_by_args_class(cls, args_class: Type[ActionArguments]) -> Optional[Type["Action"]]:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.

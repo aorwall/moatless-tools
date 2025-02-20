@@ -54,6 +54,27 @@ class FindFunctionArgs(SearchBaseArgs):
         return f"{self.name}({param_str})"
 
 
+    @classmethod
+    def get_few_shot_examples(cls) -> List[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Find the calculate_interest function in our financial module to review its logic",
+                action=FindFunctionArgs(
+                    thoughts="To review the logic of the calculate_interest function, we need to locate its implementation in the financial module.",
+                    function_name="calculate_interest",
+                    file_pattern="financial/**/*.py",
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Show me the validate_token method in the JWTAuthenticator class",
+                action=FindFunctionArgs(
+                    thoughts="Looking for the validate_token method specifically within the JWTAuthenticator class to examine the token validation logic.",
+                    function_name="validate_token",
+                    class_name="JWTAuthenticator",
+                ),
+            ),
+        ]
+
 class FindFunction(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindFunctionArgs
 
@@ -109,24 +130,3 @@ class FindFunction(SearchBaseAction):
             ]
         )
         return criteria
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Find the calculate_interest function in our financial module to review its logic",
-                action=FindFunctionArgs(
-                    thoughts="To review the logic of the calculate_interest function, we need to locate its implementation in the financial module.",
-                    function_name="calculate_interest",
-                    file_pattern="financial/**/*.py",
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Show me the validate_token method in the JWTAuthenticator class",
-                action=FindFunctionArgs(
-                    thoughts="Looking for the validate_token method specifically within the JWTAuthenticator class to examine the token validation logic.",
-                    function_name="validate_token",
-                    class_name="JWTAuthenticator",
-                ),
-            ),
-        ]
