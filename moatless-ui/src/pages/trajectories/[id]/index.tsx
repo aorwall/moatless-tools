@@ -25,7 +25,6 @@ import { TrajectoryError } from "../components/TrajectoryError";
 import { Trajectory } from "@/lib/types/trajectory";
 
 interface TrajectoryViewProps {
-  trajectoryId?: string;
   trajectory?: Trajectory;
   isLoading?: boolean;
   isError?: boolean;
@@ -33,40 +32,28 @@ interface TrajectoryViewProps {
 }
 
 export function TrajectoryView({ 
-  trajectoryId, 
-  trajectory: providedTrajectory,
-  isLoading: providedIsLoading,
-  isError: providedIsError,
-  error: providedError
+  trajectory,
+  isLoading,
+  isError,
+  error
 }: TrajectoryViewProps) {
   const { setTrajectoryId } = useTrajectoryStore();
-  const { 
-    data: fetchedTrajectory, 
-    isError: fetchedIsError, 
-    error: fetchedError,
-    isLoading: fetchedIsLoading
-  } = useGetTrajectory(trajectoryId ?? "");
-  
-  const trajectoryData = providedTrajectory ?? fetchedTrajectory;
-  const isError = providedIsError ?? fetchedIsError;
-  const error = providedError ?? fetchedError;
-  const isLoading = providedIsLoading ?? fetchedIsLoading;
-
+ 
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
 
   useEffect(() => {
-    if (!trajectoryId) return;
-    setTrajectoryId(trajectoryId);
+    if (!trajectory) return;
+    setTrajectoryId(trajectory.id);
     
-    const unsubscribe = subscribe(`trajectory.${trajectoryId}`, () => {
-      queryClient.invalidateQueries({ queryKey: ["trajectory", trajectoryId] });
+    const unsubscribe = subscribe(`trajectory.${trajectory.id}`, () => {
+      queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
     });
 
     return () => unsubscribe();
-  }, [trajectoryId, subscribe, queryClient]);
+  }, [trajectory?.id, subscribe, queryClient]);
 
-  if (!trajectoryId) {
+  if (!trajectory) {
     return (
       <Alert variant="destructive">
         <AlertCircle className="h-4 w-4" />
@@ -88,7 +75,7 @@ export function TrajectoryView({
     );
   }
 
-  if (!trajectoryData) {
+  if (!trajectory) {
     return (
       <div className="container mx-auto p-6">
         <Card>
@@ -110,7 +97,7 @@ export function TrajectoryView({
   }
   
   const tabs: TabItem[] = [
-    ...(trajectoryData?.system_status.error ? [{
+    ...(trajectory?.system_status.error ? [{
       id: "error",
       label: "Error",
       icon: <AlertCircle className="h-4 w-4" />,
@@ -151,7 +138,7 @@ export function TrajectoryView({
                 </div>
                 <ScrollArea className="flex-1">
                   <TrajectoryStatus
-                    trajectory={trajectoryData}
+                    trajectory={trajectory}
                   />
                 </ScrollArea>
               </div>
@@ -169,7 +156,7 @@ export function TrajectoryView({
                   <h2 className="font-semibold">Events</h2>
                 </div>
                 <ScrollArea className="flex-1">
-                  <TrajectoryEvents events={trajectoryData.events} />
+                  <TrajectoryEvents events={trajectory.events} />
                 </ScrollArea>
               </div>
             </ResizablePanel>
@@ -181,13 +168,13 @@ export function TrajectoryView({
         {/* Middle Panel */}
         <ResizablePanel defaultSize={50} className="border-x">
           <Tabs 
-            defaultValue={trajectoryData?.system_status.error ? "error" : "timeline"} 
+            defaultValue={trajectory?.system_status.error ? "error" : "timeline"} 
             className="flex h-full flex-col"
           >
             <TabsList 
               className={cn(
                 "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
-                trajectoryData?.system_status.error ? "grid-cols-4" : "grid-cols-3"
+                trajectory?.system_status.error ? "grid-cols-4" : "grid-cols-3"
               )}
             >
               {tabs.map((tab) => (
@@ -208,12 +195,12 @@ export function TrajectoryView({
               ))}
             </TabsList>
 
-            {trajectoryData?.system_status.error && (
+            {trajectory?.system_status.error && (
               <TabsContent 
                 value="error" 
                 className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
               >
-                <TrajectoryError trajectory={trajectoryData} />
+                <TrajectoryError trajectory={trajectory} />
               </TabsContent>
             )}
 
@@ -223,8 +210,8 @@ export function TrajectoryView({
             >
               <ScrollArea className="flex-1 w-full">
                 <div className="p-6 min-w-[600px]">
-                  {trajectoryData.nodes && (
-                    <Timeline nodes={trajectoryData.nodes} isRunning={trajectoryData.status === "running"} />
+                  {trajectory.nodes && (
+                    <Timeline nodes={trajectory.nodes} isRunning={trajectory.status === "running"} />
                   )}
                 </div>
               </ScrollArea>
@@ -234,14 +221,14 @@ export function TrajectoryView({
               value="chat" 
               className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
             >
-              <Chat trajectoryId={trajectoryId!} />
+              <Chat trajectory={trajectory} />
             </TabsContent>
 
             <TabsContent 
               value="artifacts" 
               className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
             >
-              <Artifacts trajectoryId={trajectoryId!} />
+              <Artifacts trajectoryId={trajectory.id} />
             </TabsContent>
           </Tabs>
         </ResizablePanel>
@@ -249,7 +236,7 @@ export function TrajectoryView({
         <ResizableHandle className="bg-border hover:bg-ring" />
 
         <ResizablePanel defaultSize={25}>
-          <TimelineItemDetails trajectoryId={trajectoryId!} />
+          <TimelineItemDetails trajectoryId={trajectory.id} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
@@ -270,9 +257,11 @@ export function TrajectoryPage() {
     );
   }
 
+  const { data: trajectory, isLoading, isError, error } = useGetTrajectory(trajectoryId);
+
   return (
     <div className="container mx-auto p-6">
-      <TrajectoryView trajectoryId={trajectoryId} />
+      <TrajectoryView trajectory={trajectory} isLoading={isLoading} isError={isError} error={error} />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
-import { useGetTrajectory } from "@/lib/hooks/useGetTrajectory";
-import { Node, TimelineItem } from "@/lib/types/trajectory";
+import { Node, TimelineItem, Trajectory } from "@/lib/types/trajectory";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Bot, MessageSquare } from "lucide-react";
@@ -13,17 +12,16 @@ import { ChatInput, ChatInputRef } from "./ChatInput";
 import { useResumeTrajectory } from "@/lib/hooks/useResumeTrajectory";
 
 interface ChatProps {
-  trajectoryId: string;
+  trajectory: Trajectory;
 }
 
-export function Chat({ trajectoryId }: ChatProps) {
-  const { data: trajectoryData } = useGetTrajectory(trajectoryId);
+export function Chat({ trajectory }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputRef>(null);
   const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
   const resumeTrajectory = useResumeTrajectory();
 
-  const disabled = trajectoryData?.status === "running" || resumeTrajectory.isPending;
+  const disabled = trajectory.status === "running" || resumeTrajectory.isPending;
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
@@ -39,9 +37,9 @@ export function Chat({ trajectoryId }: ChatProps) {
     const timeoutId = setTimeout(scrollToBottom, 100);
     
     return () => clearTimeout(timeoutId);
-  }, [trajectoryData?.nodes?.length]);
+  }, [trajectory.nodes?.length]);
 
-  if (!trajectoryData) {
+  if (!trajectory.nodes) {
     return (
       <div className="flex h-full items-center justify-center">
         <span className="text-muted-foreground">Loading chat...</span>
@@ -51,7 +49,7 @@ export function Chat({ trajectoryId }: ChatProps) {
 
   // Transform trajectory nodes into chat messages
   const messages: ChatMessage[] = [];
-  trajectoryData.nodes.forEach((node: Node) => {
+  trajectory.nodes.forEach((node: Node) => {
     // Add items in sequence
     node.items?.forEach((item: TimelineItem) => {
       if (["user_message", "assistant_message", "thought", "action", "artifact"].includes(item.type)) {
@@ -59,7 +57,7 @@ export function Chat({ trajectoryId }: ChatProps) {
           ...item,
           nodeId: node.nodeId,
           id: `${node.nodeId}-${item.type}-${messages.length}`,
-          trajectoryId,
+          trajectoryId: trajectory.id,
           timestamp: new Date().toISOString(),
         });
       }
@@ -104,7 +102,7 @@ export function Chat({ trajectoryId }: ChatProps) {
 
   const onSendMessage = (message: string, agentId: string, modelId: string) => {
     resumeTrajectory.mutate({ 
-      trajectoryId, 
+      trajectoryId: trajectory.id, 
       agentId, 
       modelId, 
       message,
@@ -191,8 +189,8 @@ export function Chat({ trajectoryId }: ChatProps) {
         ref={chatInputRef}
         onSend={onSendMessage}
         disabled={disabled}
-        agentId={trajectoryData.agent_id}
-        modelId={trajectoryData.model_id}
+        agentId={trajectory.agent_id}
+        modelId={trajectory.model_id}
       />
     </div>
   );

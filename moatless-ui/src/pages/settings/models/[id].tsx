@@ -13,15 +13,24 @@ export function ModelDetailPage() {
 
   const handleSubmit = async (formData: ModelConfig) => {
     try {
-      await updateModelMutation.mutateAsync(formData);
+      await updateModelMutation.mutateAsync({
+        ...formData,
+        id: id!,
+      });
       toast.success("Changes saved successfully");
     } catch (error) {
-      toast.error("Failed to save changes");
+      // Better error handling
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as any)?.response?.data?.detail || "Failed to save changes";
+      
+      toast.error(errorMessage);
       throw error;
     }
   };
 
-  if (isLoading) {
+  // Show loading state while initial data is being fetched
+  if (isLoading || !id) {
     return (
       <div className="flex h-full w-full items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />

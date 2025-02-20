@@ -164,6 +164,7 @@ export interface TestResultsSummary {
 
 export interface Node {
   nodeId: number;
+  children: Node[];
   executed: boolean;
   userMessage?: string;
   assistantMessage?: string;

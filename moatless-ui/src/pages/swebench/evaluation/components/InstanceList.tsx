@@ -45,14 +45,16 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
   });
 
   const getRelevantTimestamp = (instance: EvaluationInstance) => {
-    switch (instance.status.toLowerCase()) {
-      case 'completed':
-      case 'error':
-        return instance.completed_at;
-      case 'running':
-        return instance.started_at;
-      default:
-        return instance.created_at;
+    if (instance.error) {
+      return instance.error_at;
+    } else if (instance.evaluated_at) {
+      return instance.evaluated_at;
+    } else if (instance.completed_at) {
+      return instance.completed_at;
+    } else if (instance.started_at) {
+      return instance.started_at;
+    } else {
+      return instance.created_at;
     }
   };
 
@@ -87,7 +89,7 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filteredInstances.map((instance) => {
-          const isPending = instance.status.toLowerCase() === 'pending';
+          const isPending = !instance.started_at;
           const Container = isPending ? 'div' : Link;
           const containerProps = isPending ? {} : {
             to: `/swebench/evaluation/${evaluation.evaluation_name}/${instance.instance_id}`

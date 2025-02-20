@@ -3,6 +3,7 @@ import { devtools } from "zustand/middleware";
 
 export type WebSocketMessage = {
   trajectory_id: string;
+  project_id: string;
   type: string;
   message?: string;
   iteration?: number;
@@ -235,23 +236,35 @@ export const useWebSocketStore = create<WebSocketStore>()(
       },
 
       addMessage: (message: WebSocketMessage) => {
-        const trajectoryId = message.trajectory_id;
-        if (!trajectoryId) return;
-
-        // Notify subscribers
-        const channel = `trajectory.${trajectoryId}`;
-        const subscribers = get().subscribers[channel];
-        console.log("Subscribers:", subscribers);
-        if (subscribers) {
-          subscribers.forEach((callback) => callback(message));
+        const { trajectory_id, project_id } = message;
+        
+        // Notify trajectory subscribers
+        if (trajectory_id) {
+          const trajectoryChannel = `trajectory.${trajectory_id}`;
+          const trajectorySubscribers = get().subscribers[trajectoryChannel];
+          if (trajectorySubscribers) {
+            trajectorySubscribers.forEach((callback) => callback(message));
+          }
         }
 
-        set((state) => ({
-          messages: {
-            ...state.messages,
-            [trajectoryId]: [...(state.messages[trajectoryId] || []), message],
-          },
-        }));
+        // Notify project subscribers
+        if (project_id) {
+          const projectChannel = `project.${project_id}`;
+          const projectSubscribers = get().subscribers[projectChannel];
+          if (projectSubscribers) {
+            projectSubscribers.forEach((callback) => callback(message));
+          }
+        }
+
+        // Store message in state
+        if (trajectory_id) {
+          set((state) => ({
+            messages: {
+              ...state.messages,
+              [trajectory_id]: [...(state.messages[trajectory_id] || []), message],
+            },
+          }));
+        }
       },
     }),
     { name: "websocket-store" },

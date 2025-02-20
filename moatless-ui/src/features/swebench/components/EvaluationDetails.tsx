@@ -96,14 +96,17 @@ export function EvaluationDetails({
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="font-semibold">Dataset</h2>
-          <p className="text-sm text-muted-foreground">{evaluation.dataset_name}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {canStart && (
-            <>
+      {/* Header Section */}
+      <div className="border-b pb-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">{evaluation.evaluation_name}</h1>
+            <p className="text-xs text-muted-foreground mt-1">
+              Created {formatDate(evaluation.created_at)}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            {canStart && (
               <div className="flex items-center gap-2">
                 <TooltipProvider>
                   <Tooltip>
@@ -134,14 +137,54 @@ export function EvaluationDetails({
                   Start
                 </Button>
               </div>
-            </>
-          )}
-          <Badge variant={getStatusColor(evaluation.status)}>
-            {evaluation.status}
-          </Badge>
+            )}
+            <Badge variant={getStatusColor(evaluation.status)}>
+              {evaluation.status}
+            </Badge>
+          </div>
         </div>
       </div>
 
+      {/* Overview Cards */}
+      <div className="grid grid-cols-3 gap-4">
+        {/* Model Info */}
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-medium">Model</h3>
+            <span className="text-xs text-muted-foreground">ID: {evaluation.model.id}</span>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Name:</span> {evaluation.model.model}</p>
+            <p><span className="text-muted-foreground">Response Format:</span> {evaluation.model.response_format}</p>
+            <p><span className="text-muted-foreground">Temperature:</span> {evaluation.model.temperature || 'N/A'}</p>
+          </div>
+        </div>
+
+        {/* Flow Info */}
+        <div className="rounded-lg border p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-medium">Flow</h3>
+            <span className="text-xs text-muted-foreground">ID: {evaluation.flow.id}</span>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Type:</span> {evaluation.flow.flow_type}</p>
+            <p><span className="text-muted-foreground">Max Cost:</span> ${evaluation.flow.max_cost}</p>
+            <p><span className="text-muted-foreground">Max Iterations:</span> {evaluation.flow.max_iterations}</p>
+          </div>
+        </div>
+
+        {/* Dataset Info */}
+        <div className="rounded-lg border p-4">
+          <h3 className="font-medium mb-2">Dataset</h3>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-muted-foreground">Name:</span> {evaluation.dataset_name}</p>
+            <p><span className="text-muted-foreground">Instances:</span> {evaluation.instances.length}</p>
+            <p><span className="text-muted-foreground">Workers:</span> {evaluation.num_workers}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Progress Section */}
       <div>
         <p className="font-medium mb-2">Progress</p>
         <div className="space-y-2">
@@ -154,12 +197,14 @@ export function EvaluationDetails({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p className="font-medium">Started At</p>
-          <p className="text-sm text-muted-foreground">
-            {formatDate(evaluation.started_at)}
-          </p>
-        </div>
+        {evaluation.started_at && (
+          <div>
+            <p className="font-medium">Started At</p>
+            <p className="text-sm text-muted-foreground">
+              {formatDate(evaluation.started_at)}
+            </p>
+          </div>
+        )}
         {evaluation.completed_at && (
           <div>
             <p className="font-medium">Completed At</p>

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { modelsApi } from "@/lib/api/models";
+import type { ModelConfig } from '@/lib/types/model';
 
 export const modelKeys = {
   all: ["models"] as const,
@@ -20,7 +21,7 @@ export function useModels() {
 
 export function useModel(id: string) {
   return useQuery({
-    queryKey: modelKeys.detail(id),
+    queryKey: ['model', id],
     queryFn: () => modelsApi.getModel(id),
     enabled: !!id,
   });
@@ -32,8 +33,8 @@ export function useUpdateModel() {
   return useMutation({
     mutationFn: modelsApi.updateModel,
     onSuccess: (updatedModel) => {
-      queryClient.invalidateQueries({ queryKey: modelKeys.lists() });
-      queryClient.setQueryData(modelKeys.detail(updatedModel.id), updatedModel);
+      queryClient.setQueryData(['model', updatedModel.id], updatedModel);
+      queryClient.invalidateQueries({ queryKey: ['models'] });
     },
   });
 }

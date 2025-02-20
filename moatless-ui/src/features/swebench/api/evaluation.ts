@@ -1,4 +1,6 @@
 import { apiRequest } from '@/lib/api/config';
+import { FlowConfig } from '@/lib/types/flow';
+import { ModelConfig } from '@/lib/types/model';
 
 export interface Dataset {
   name: string;
@@ -22,6 +24,7 @@ export interface EvaluationInstance {
   started_at?: string;
   completed_at?: string;
   evaluated_at?: string;
+  error_at?: string;
   resolved?: boolean;
 }
 
@@ -29,10 +32,14 @@ export interface Evaluation {
   evaluation_name: string;
   dataset_name: string;
   status: string;
-  started_at: string;
+  created_at: string;
+  started_at?: string;
   completed_at?: string;
+  flow: FlowConfig;
+  model: ModelConfig;
   instances: EvaluationInstance[];
   num_workers: number;
+  description?: string;
 }
 
 export interface EvaluationStatusSummary {
@@ -52,6 +59,8 @@ export interface EvaluationListItem {
   started_at: string;
   completed_at?: string;
   instance_count: number;
+  flow_id: string;
+  model_id: string;
   status_summary?: EvaluationStatusSummary;
   total_cost: number;
   prompt_tokens: number;

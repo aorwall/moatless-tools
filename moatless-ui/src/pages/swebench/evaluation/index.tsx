@@ -3,10 +3,6 @@
 import { toast } from "sonner";
 import { PageLayout } from "@/lib/components/layouts/PageLayout";
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
-import EvaluationForm from "@/features/swebench/components/EvaluationForm";
-import EvaluationStatus from "@/features/swebench/components/EvaluationStatus";
-import { useEvaluationStart } from "@/features/swebench/hooks/useEvaluationCreate";
-import type { EvaluationRequest, EvaluationListItem } from "@/features/swebench/api/evaluation";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/lib/components/ui/button";
 import { Plus, Coins, Cpu, MessageSquare, Zap } from "lucide-react";
@@ -49,9 +45,9 @@ export function EvaluationsPage() {
   const getProgressPercentage = (evaluation: EvaluationListItem) => {
     if (!evaluation.status_summary) return 0;
     const total = evaluation.instance_count;
-    const completed = evaluation.status_summary.completed + 
+    const completed = evaluation.status_summary.error + 
                      evaluation.status_summary.resolved + 
-                     evaluation.status_summary.failed;
+                     evaluation.status_summary.completed;
     return (completed / total) * 100;
   };
 
@@ -79,11 +75,17 @@ export function EvaluationsPage() {
             >
               <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">
-                  <div>
-                    <CardTitle className="text-lg">{evaluation.dataset_name}</CardTitle>
-                    <p className="text-sm text-muted-foreground mt-1">
+                  <div className="space-y-2">
+                    <CardTitle className="text-lg">
                       {evaluation.evaluation_name}
-                    </p>
+                    </CardTitle>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="font-medium">{evaluation.flow_id}</span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-medium">{evaluation.model_id}</span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-medium">{evaluation.dataset_name}</span>
+                    </div>
                   </div>
                   <Badge variant={getStatusColor(evaluation.status)}>
                     {evaluation.status}
@@ -122,12 +124,18 @@ export function EvaluationsPage() {
                   {evaluation.status_summary && (
                     <div className="grid grid-cols-2 gap-4">
                       <div className="col-span-2">
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-4 gap-2">
+                          <Badge 
+                            variant="outline" 
+                            className="justify-center text-destructive border-destructive"
+                          >
+                            {evaluation.status_summary.error} error
+                          </Badge>
                           <Badge variant="outline" className="justify-center">
                             {evaluation.status_summary.resolved} resolved
                           </Badge>
                           <Badge variant="outline" className="justify-center">
-                            {evaluation.status_summary.failed} failed
+                            {evaluation.status_summary.completed} completed
                           </Badge>
                           <Badge variant="outline" className="justify-center">
                             {evaluation.status_summary.pending} pending

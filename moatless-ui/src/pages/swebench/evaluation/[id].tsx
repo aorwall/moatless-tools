@@ -6,18 +6,49 @@ import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { EvaluationInstance } from "@/features/swebench/api/evaluation";
 import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 import { DataExplorer } from "@/lib/components/DataExplorer";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { EvaluationOverview } from "@/features/swebench/components/EvaluationOverview";
 import { InstanceDetails } from "@/features/swebench/components/InstanceDetails";
 import { EvaluationDetails } from "@/features/swebench/components/EvaluationDetails";
+import { useWebSocketStore } from "@/lib/stores/websocketStore";
+import { useQueryClient } from "@tanstack/react-query";
+import debounce from "lodash/debounce";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 export function EvaluationDetailsPage() {
   const { evaluationId } = useParams();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { subscribe } = useWebSocketStore();
+  const lastUpdateTime = useRef<number>(0);
   const { data: evaluation, isLoading, error } = useEvaluation(evaluationId!);
   const [selectedInstance, setSelectedInstance] = useState<EvaluationInstance | null>(null);
+
+  // Create debounced refresh function
+  const debouncedRefresh = debounce(() => {
+    const now = Date.now();
+    // Only refresh if more than 1 second has passed since last update
+    if (now - lastUpdateTime.current >= 1000) {
+      queryClient.invalidateQueries({ queryKey: ["evaluation", evaluationId] });
+      lastUpdateTime.current = now;
+    }
+  }, 1000, { maxWait: 1000 }); // Maximum wait of 1 second between updates
+
+  useEffect(() => {
+    if (!evaluationId) return;
+
+    // Subscribe to project events for this evaluation
+    const unsubscribe = subscribe(`project.${evaluationId}`, (message) => {
+      console.log("Received evaluation update:", message);
+      debouncedRefresh();
+    });
+
+    return () => {
+      unsubscribe();
+      debouncedRefresh.cancel();
+    };
+  }, [evaluationId, subscribe, queryClient]);
 
   const getStatusColor = (status: string): BadgeVariant => {
     switch (status.toLowerCase()) {

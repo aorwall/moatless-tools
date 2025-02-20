@@ -45,8 +45,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
       name: generateDefaultName({}),
       flow_id: "",
       model_id: lastUsedModel,
-      dataset: "",
-      num_concurrent_instances: 1,
+      dataset: ""
     },
   });
 
@@ -79,63 +78,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
       <CardContent>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
-            {/* Evaluation Name Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Evaluation Name</h3>
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} />
-                    </FormControl>
-                    <FormDescription>
-                      A unique identifier for this evaluation
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <Separator />
-
-            {/* Dataset Selection Section */}
-            <div className="space-y-4">
-              <h3 className="text-lg font-medium">Dataset</h3>
-              <FormField
-                control={form.control}
-                name="dataset"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Select Dataset</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Choose a dataset to evaluate" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {datasetsResponse?.datasets.map((dataset) => (
-                          <SelectItem key={dataset.name} value={dataset.name}>
-                            {dataset.name} ({dataset.instance_count} instances)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      The dataset containing instances to evaluate
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <Separator />
-
+            
             {/* Flow and Model Section */}
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Flow & Model Configuration</h3>
@@ -180,6 +123,64 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                   )}
                 />
               </div>
+            </div>
+
+            <Separator />
+
+            {/* Dataset Selection Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Dataset</h3>
+              <FormField
+                control={form.control}
+                name="dataset"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Select Dataset</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Choose a dataset to evaluate" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {datasetsResponse?.datasets.map((dataset) => (
+                          <SelectItem key={dataset.name} value={dataset.name}>
+                            {dataset.name} ({dataset.instance_count} instances)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      The dataset containing instances to evaluate
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+
+            <Separator />
+
+            
+            {/* Evaluation Name Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Evaluation Name</h3>
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      A unique identifier for this evaluation
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
             </div>
 
             <div className="flex justify-end">

@@ -5,6 +5,7 @@ import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
 
 export function Trajectory() {
   const [searchParams, setSearchParams] = useSearchParams();
+
   const path = searchParams.get("path");
 
   const handleLoadTrajectory = (path: string) => {

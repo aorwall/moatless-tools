@@ -13,7 +13,7 @@ import { Input } from "@/lib/components/ui/input";
 import { Button } from "@/lib/components/ui/button";
 import { Textarea } from "@/lib/components/ui/textarea";
 import { FlowConfigSchema, type FlowConfig } from "@/lib/types/flow";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Select,
   SelectContent,
@@ -53,6 +53,11 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
     resolver: zodResolver(FlowConfigSchema),
     defaultValues: flow,
   });
+
+  useEffect(() => {
+    form.reset(flow);
+  }, [flow, form]);
+
   const flowType = form.watch("flow_type");
   const { data: agents, isLoading: isLoadingAgents } = useAgents();
   const selectedAgentId = form.watch("agent_id");

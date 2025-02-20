@@ -83,12 +83,13 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
   
   // Only continue if we have instances to show
   if (sortedInstances.length === 0) {
-    return <div>No active instances</div>;
+    return <div>No started instances</div>;
   }
   
   // Update the getEndTime function with validation
   const getEndTime = (instance: Evaluation["instances"][number]) => {
     if (instance.completed_at && isValidDate(instance.completed_at)) return instance.completed_at;
+    if (instance.error_at && isValidDate(instance.error_at)) return instance.error_at;
     // For running instances, end 5 seconds before current time
     return new Date(now.getTime() - 5000).toISOString();
   };
@@ -109,8 +110,8 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
   const totalDuration = endTime.getTime() - startTime.getTime();
 
   // Update getPositionPercentage with validation
-  const getPositionPercentage = (timestamp: string | null) => {
-    if (!isValidDate(timestamp)) return 0;
+  const getPositionPercentage = (timestamp: string | null | undefined) => {
+    if (!timestamp || !isValidDate(timestamp)) return 0;
     const time = new Date(timestamp).getTime();
     return ((time - startTime.getTime()) / totalDuration) * 100;
   };

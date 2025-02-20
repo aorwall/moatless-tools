@@ -19,5 +19,5 @@ export function TrajectoryViewer({ trajectoryId }: TrajectoryViewerProps) {
   if (isLoading) return <div>Loading...</div>;
   if (!trajectory) return <div>No trajectory found</div>;
 
-  return <Timeline nodes={trajectory.nodes} instanceId={trajectoryId} />;
+  return <Timeline nodes={trajectory.nodes} instanceId={trajectoryId} isRunning={trajectory.status === "running"} />;
 }

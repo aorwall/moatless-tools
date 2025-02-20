@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/lib/components/ui/select";
 import { ModelConfigSchema, type ModelConfig } from "@/lib/types/model";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Loader2 } from "lucide-react";
 
 interface ModelDetailProps {
   model: ModelConfig;
@@ -36,238 +37,346 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Reset form when model changes
+  useEffect(() => {
+    form.reset(model);
+  }, [form, model]);
+
   const handleSubmit = async (data: ModelConfig) => {
     try {
       setIsSaving(true);
       setError(null);
       await onSubmit(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "An error occurred");
+      const errorMessage = e instanceof Error 
+        ? e.message 
+        : (e as any)?.response?.data?.detail || "An unexpected error occurred";
+      
+      setError(errorMessage);
       throw e;
     } finally {
       setIsSaving(false);
     }
   };
 
+  // Only show loading when form is validating and not dirty
+  if (form.formState.isValidating && !form.formState.isDirty) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-        <div className="space-y-4">
-          <FormField
-            control={form.control}
-            name="model"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Model Name</FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    placeholder="e.g. anthropic/claude-3-sonnet-20240229"
-                  />
-                </FormControl>
-                <FormDescription>
-                  The LiteLLM model identifier to use. See{" "}
-                  <a
-                    href="https://docs.litellm.ai/docs/providers"
-                    target="_blank"
-                    className="text-primary hover:underline"
-                  >
-                    LiteLLM providers
-                  </a>{" "}
-                  for available models.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="model_base_url"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Model Base URL</FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    placeholder="e.g. http://localhost:8000/v1"
-                  />
-                </FormControl>
-                <FormDescription>
-                  Optional base URL for the model API. Leave empty to use the
-                  default provider URL.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="model_api_key"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Model API Key</FormLabel>
-                <FormControl>
-                  <Input
-                    {...field}
-                    type="password"
-                    placeholder="Optional, will use CUSTOM_LLM_API_KEY env var if not set"
-                  />
-                </FormControl>
-                <FormDescription>
-                  Optional API key for the model. If not set, will use
-                  CUSTOM_LLM_API_KEY environment variable.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="responseFormat"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Response Format</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  defaultValue={field.value}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select response format" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="react">React</SelectItem>
-                    <SelectItem value="tool_call">Tool Call</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormDescription>
-                  Format for model responses - 'react' uses structured ReACT
-                  format with thought/action/params in XML/JSON, 'tool_call'
-                  uses function calling
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="messageHistoryType"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Message History Type</FormLabel>
-                <Select
-                  onValueChange={field.onChange}
-                  defaultValue={field.value}
-                >
-                  <FormControl>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select message history type" />
-                    </SelectTrigger>
-                  </FormControl>
-                  <SelectContent>
-                    <SelectItem value="react">React</SelectItem>
-                    <SelectItem value="messages">Messages</SelectItem>
-                  </SelectContent>
-                </Select>
-                <FormDescription>
-                  How message history is formatted in completions - 'messages'
-                  keeps full message list unchanged, 'react' uses ReACT format
-                  with optimized history to reduce tokens
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="temperature"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Temperature</FormLabel>
-                <FormControl>
-                  <Input {...field} type="number" min="0" max="1" step="0.1" />
-                </FormControl>
-                <FormDescription>
-                  Temperature for model sampling - higher values make output
-                  more random, lower values more deterministic
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="maxTokens"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Max Tokens</FormLabel>
-                <FormControl>
-                  <Input {...field} type="number" />
-                </FormControl>
-                <FormDescription>
-                  Maximum number of tokens to generate in the response
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="timeout"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Timeout (seconds)</FormLabel>
-                <FormControl>
-                  <Input {...field} type="number" min="1" step="1" />
-                </FormControl>
-                <FormDescription>
-                  Timeout in seconds for model requests
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-
-        <div className="space-y-4 mt-6">
-          <h2 className="text-lg font-semibold">Features</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Left Column - Basic Settings */}
           <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Basic Settings</h2>
+            
             <FormField
               control={form.control}
-              name="disableThoughts"
+              name="model"
               render={({ field }) => (
-                <FormItem className="flex items-center space-x-2">
+                <FormItem>
+                  <FormLabel>Model Name</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      placeholder="e.g. anthropic/claude-3-sonnet-20240229"
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    The LiteLLM model identifier to use. See{" "}
+                    <a
+                      href="https://docs.litellm.ai/docs/providers"
+                      target="_blank"
+                      className="text-primary hover:underline"
+                    >
+                      LiteLLM providers
+                    </a>
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="model_base_url"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Model Base URL</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      value={field.value ?? ''}
+                      placeholder="e.g. http://localhost:8000/v1"
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Optional base URL for the model API
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="model_api_key"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Model API Key</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      value={field.value ?? ''}
+                      type="password"
+                      placeholder="Optional API key"
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    Optional API key for the model
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="timeout"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Timeout (seconds)</FormLabel>
+                  <FormControl>
+                    <Input {...field} type="number" min="1" step="1" />
+                  </FormControl>
+                  <FormDescription>
+                    Request timeout in seconds
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {/* Right Column - Model Parameters */}
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Model Parameters</h2>
+            
+            <FormField
+              control={form.control}
+              name="response_format"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Response Format</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select response format" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="react">React</SelectItem>
+                      <SelectItem value="tool_call">Tool Call</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Format for model responses
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="message_history_type"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Message History Type</FormLabel>
+                  <Select
+                    onValueChange={field.onChange}
+                    value={field.value}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select history type" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="react">React</SelectItem>
+                      <SelectItem value="messages">Messages</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    Message history format
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="temperature"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Temperature</FormLabel>
+                  <FormControl>
+                    <Input {...field} type="number" min="0" max="1" step="0.1" />
+                  </FormControl>
+                  <FormDescription>
+                    Randomness in model output
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="max_tokens"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Max Tokens</FormLabel>
+                  <FormControl>
+                    <Input {...field} type="number" />
+                  </FormControl>
+                  <FormDescription>
+                    Maximum tokens to generate
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        </div>
+
+        {/* Features Section - Full Width */}
+        <div className="mt-6">
+          <h2 className="text-lg font-semibold mb-4">Features</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="thoughts_in_action"
+              render={({ field }) => (
+                <FormItem className="flex items-start space-x-3 space-y-0">
                   <FormControl>
                     <Checkbox
-                      checked={field.value}
+                      checked={field.value as boolean}
                       onCheckedChange={field.onChange}
                     />
                   </FormControl>
-                  <div className="space-y-1">
-                    <FormLabel>Disable Thoughts</FormLabel>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel>Thoughts in Action</FormLabel>
                     <FormDescription>
-                      Disable thought generation completely. Works better with
-                      reasoning models like Claude-1 and Deepseek R1
+                      Include thought generation in action steps
                     </FormDescription>
                   </div>
                 </FormItem>
               )}
             />
 
-            {/* Add other feature checkboxes similarly */}
+            <FormField
+              control={form.control}
+              name="disable_thoughts"
+              render={({ field }) => (
+                <FormItem className="flex items-start space-x-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value as boolean}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel>Disable Thoughts</FormLabel>
+                    <FormDescription>
+                      Disable thought generation completely
+                    </FormDescription>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="merge_same_role_messages"
+              render={({ field }) => (
+                <FormItem className="flex items-start space-x-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value as boolean}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel>Merge Same Role Messages</FormLabel>
+                    <FormDescription>
+                      Combine consecutive messages from the same role
+                    </FormDescription>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="message_cache"
+              render={({ field }) => (
+                <FormItem className="flex items-start space-x-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value as boolean}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel>Message Cache</FormLabel>
+                    <FormDescription>
+                      Enable caching of message responses
+                    </FormDescription>
+                  </div>
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="few_shot_examples"
+              render={({ field }) => (
+                <FormItem className="flex items-start space-x-3 space-y-0">
+                  <FormControl>
+                    <Checkbox
+                      checked={field.value as boolean}
+                      onCheckedChange={field.onChange}
+                    />
+                  </FormControl>
+                  <div className="space-y-1 leading-none">
+                    <FormLabel>Few Shot Examples</FormLabel>
+                    <FormDescription>
+                      Include few-shot examples in prompts
+                    </FormDescription>
+                  </div>
+                </FormItem>
+              )}
+            />
           </div>
         </div>
 
         <div className="mt-8 flex items-center justify-end gap-4">
-          {error && <p className="text-sm text-red-500">{error}</p>}
+          {error && (
+            <p className="text-sm text-red-500 flex-1 break-words">
+              {error}
+            </p>
+          )}
           <Button type="submit" disabled={isSaving}>
             {isSaving ? "Saving..." : "Save Changes"}
           </Button>

@@ -23,7 +23,6 @@ export function EvaluationInstancePage() {
     error: trajectoryErrorData,
     isLoading
   } = useEvaluationInstance(evaluationId!, instanceId!);
-  const navigate = useNavigate();
 
   if (!evaluationId || !instanceId) {
     return (
@@ -70,7 +69,6 @@ export function EvaluationInstancePage() {
         <ResizableHandle className="bg-border hover:bg-ring" />
         <ResizablePanel defaultSize={85}>
           <TrajectoryView 
-            trajectoryId={instanceId}
             trajectory={trajectory}
             isLoading={isLoading}
             isError={trajectoryError}
