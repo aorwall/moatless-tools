@@ -1,4 +1,4 @@
-import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle, ChevronDown } from 'lucide-react';
+import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Node } from '@/lib/types/trajectory';
 import { useRetryNode } from "@/lib/hooks/useRetryNode";
@@ -13,7 +13,6 @@ interface NodeCircleProps {
   isLastNode: boolean;
   isRunning: boolean;
   onClick: () => void;
-  isExpanded: boolean;
 }
 
 const COLOR_MAPPINGS = {
@@ -75,7 +74,7 @@ function getNodeColor(node: Node, isRunning: boolean): string {
     return "gray";
   }
   
-export function NodeCircle({ node, isLastNode, isRunning, onClick, isExpanded }: NodeCircleProps) {
+export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleProps) {
   const nodeColor = getNodeColor(node, isRunning);
   const colors = COLOR_MAPPINGS[nodeColor as keyof typeof COLOR_MAPPINGS] || COLOR_MAPPINGS.default;
   const showSpinner = node.nodeId !== 0 && isRunning && isLastNode;
@@ -224,12 +223,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick, isExpanded }:
           'shadow-sm hover:shadow-md -ml-5 -mr-5',
           colors.border,
           colors.hover,
-          'hover:scale-105',
-          isExpanded && [
-            'ring-4 ring-gray-100',
-            'border-primary-500',
-            'bg-primary-50'
-          ]
+          'hover:scale-105'
         )}
         onClick={onClick}
       >
@@ -279,12 +273,6 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick, isExpanded }:
               <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
             </span>
           )}
-        </div>
-      )}
-
-      {isExpanded && (
-        <div className="absolute -right-2 -top-2 h-4 w-4 rounded-full bg-primary-500 text-white flex items-center justify-center">
-          <ChevronDown className="h-3 w-3" />
         </div>
       )}
 

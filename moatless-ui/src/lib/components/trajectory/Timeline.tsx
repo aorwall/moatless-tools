@@ -175,13 +175,7 @@ function renderNodes(
 
           {/* Timeline items */}
           {isExpanded(node.nodeId) && (
-            <div className="mt-8 ml-8 relative transition-all duration-200 ease-in-out">
-              {/* Add subtle background container */}
-              <div className="absolute inset-0 bg-gray-50/50 rounded-lg border border-gray-100 -m-4 p-4" />
-              
-              {/* Add visual connector from node to expanded content */}
-              <div className="absolute -left-8 top-0 w-8 h-px bg-gray-200" />
-              
+            <div className="mt-8 transition-all duration-200 ease-in-out">
               {node.items.map((item, index) => (
                 <TimelineItem
                   key={index}

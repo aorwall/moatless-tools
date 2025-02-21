@@ -8,7 +8,6 @@ import {
   AlertTriangle,
   Cpu,
   LucideIcon,
-  ChevronRight,
 } from "lucide-react";
 import {
   ActionTrajectoryItem,
@@ -42,7 +41,6 @@ import {
   ArtifactTimelineContent,
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
 import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
-import { cn } from "@/lib/utils";
 
 interface TimelineItemProps {
   type: string;
@@ -172,23 +170,7 @@ export const TimelineItem = ({
   const Icon = getIcon(type);
 
   return (
-    <div 
-      onClick={handleSelect} 
-      className={cn(
-        "cursor-pointer relative group/item",
-        "hover:bg-white hover:shadow-sm hover:border-gray-200",
-        "rounded-lg transition-all duration-200",
-        "p-3 -mx-3", // Negative margin to allow hover effect to extend
-        {
-          "mb-4": !isLast // Space between items
-        }
-      )}
-    >
-      {/* Add subtle hover effect indicator */}
-      <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 transition-opacity">
-        <ChevronRight className="h-4 w-4 text-gray-400" />
-      </div>
-      
+    <div onClick={handleSelect} className="cursor-pointer relative">
       {/* Vertical line extending down if not last or if parent has more nodes */}
       {(!isLast || hasNextSibling) && (
         <div 
