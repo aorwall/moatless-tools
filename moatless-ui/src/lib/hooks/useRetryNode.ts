@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 interface RetryNodeParams {
   trajectoryId: string;
+  projectId: string;
   nodeId: number;
   onSuccess?: () => void;
 }
@@ -13,8 +14,8 @@ export const useRetryNode = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ trajectoryId, nodeId, onSuccess }: RetryNodeParams) => 
-      trajectoriesApi.retryNode(trajectoryId, nodeId),
+    mutationFn: ({ trajectoryId, projectId, nodeId, onSuccess }: RetryNodeParams) => 
+      trajectoriesApi.retryNode(trajectoryId, projectId, nodeId),
     onSuccess: (_, { trajectoryId, onSuccess }) => {
       if (onSuccess) {
         onSuccess();

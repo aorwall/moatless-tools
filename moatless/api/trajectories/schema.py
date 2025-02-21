@@ -34,6 +34,8 @@ class TrajectoryEventDTO(BaseModel):
 
 class TrajectoryResponseDTO(TrajectoryDTO):
     """Response containing run status, trajectory data, and events."""
+    id: str
+    project_id: Optional[str] = None
     status: str
     agent_id: Optional[str] = None
     model_id: Optional[str] = None

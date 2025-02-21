@@ -185,7 +185,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         try:
             content = await file.read()
             trajectory_data = json.loads(content.decode())
-            return create_trajectory_dto(trajectory_data)
+            return create_trajectory_dto(trajectory_data, trajectory_id=file.filename)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
 

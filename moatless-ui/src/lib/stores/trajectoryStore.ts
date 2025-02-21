@@ -1,14 +1,26 @@
 import { create } from "zustand";
+import { TrajectoryEvent } from '@/lib/types/trajectory';
 
 interface TrajectoryState {
   // Only track expansion states by instanceId
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
+  events: TrajectoryEvent[];
+  selectedItem: {
+    instanceId: string;
+    nodeId: number;
+    itemId: string;
+    type: string;
+    content: any;
+  } | null;
 
   // Actions
   toggleNode: (instanceId: string, nodeId: number) => void;
   toggleItem: (instanceId: string, nodeId: number, itemId: string) => void;
   resetInstance: (instanceId: string) => void;
+  setSelectedItem: (item: TrajectoryState["selectedItem"]) => void;
+  setEvents: (events: TrajectoryEvent[]) => void;
+  addEvent: (event: TrajectoryEvent) => void;
 
   // State getters
   isNodeExpanded: (instanceId: string, nodeId: number) => boolean;
@@ -23,6 +35,8 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
   // State
   expandedNodes: {},
   expandedItems: {},
+  events: [],
+  selectedItem: null,
 
   // Actions
   toggleNode: (instanceId, nodeId) =>
@@ -76,6 +90,21 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
         ...state.expandedItems,
         [instanceId]: {},
       },
+    })),
+
+  setSelectedItem: (item) =>
+    set((state) => ({
+      selectedItem: item,
+    })),
+
+  setEvents: (events) =>
+    set((state) => ({
+      events,
+    })),
+
+  addEvent: (event) =>
+    set((state) => ({
+      events: [...state.events, event],
     })),
 
   // Getters

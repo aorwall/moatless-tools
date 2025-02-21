@@ -78,8 +78,8 @@ class SystemStatus(BaseModel):
             attempt.error_trace = error_trace
 
     @classmethod
-    def from_trajectory_id(cls, trajectory_id: str) -> "SystemStatus":
-        status_path = get_moatless_trajectory_dir(trajectory_id) / 'status.json'
+    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None) -> "SystemStatus":
+        status_path = get_moatless_trajectory_dir(trajectory_id, project_id) / 'status.json'
         if not status_path.exists():
             raise FileNotFoundError(f"Status file not found for trajectory {trajectory_id}")
         return SystemStatus.model_validate_json(status_path.read_text())
@@ -192,6 +192,11 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
+        # TODO: Workaround to set up soon to be deprecated legacy solution
+        if self.root:
+            for node in self.root.get_all_nodes():
+                node.file_context.workspace = workspace
+
     async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:
@@ -250,8 +255,7 @@ class AgenticFlow(MoatlessComponent):
         if not node.parent:
             raise ValueError(f"Node with ID {node_id} is the root node and cannot be reset")
 
-        node.reset()
-
+        node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
 
     async def emit_event(self, event: BaseEvent):
@@ -447,49 +451,18 @@ class AgenticFlow(MoatlessComponent):
         
         flow = cls.model_validate(settings)
         flow.root = Node.from_file(trajectory_path, repo=workspace.repository, runtime=workspace.runtime)
+        flow.workspace = workspace
+        flow.persist_dir = trajectory_dir
 
         return flow
 
 
     @classmethod
-    def from_trajectory_id(cls, trajectory_id: str, agent_id: str | None = None, model_id: str | None = None) -> "AgenticFlow":
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id)
+    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None) -> "AgenticFlow":
+        trajectory_dir = get_moatless_trajectory_dir(trajectory_id, project_id)
         workspace = Workspace(trajectory_dir=trajectory_dir)
+        return cls.from_dir(trajectory_dir, workspace)
         
-        if not agent_id or not model_id:
-            status = SystemStatus.from_trajectory_id(trajectory_id)
-            if not agent_id:
-                agent_id = status.metadata.get("agent_id")
-            if not model_id:
-                model_id = status.metadata.get("model_id")
-        
-        if not model_id:
-            raise ValueError("Model ID is required to resume a trajectory")
-        
-        if not agent_id:
-            raise ValueError("Agent ID is required to resume a trajectory")
-        
-        agent = get_agent(agent_id=agent_id)
-        completion_model = create_completion_model(model_id)
-        agent.completion_model = completion_model
-        agent.workspace = workspace
-
-        root_node = Node.from_file(
-            trajectory_dir / 'trajectory.json',
-        )
-
-        flow = cls(
-            run_id=trajectory_id,
-            agent=agent,
-            root=root_node,
-            metadata={
-                "agent_id": agent_id,
-                "model_id": model_id,
-            },
-            persist_dir=trajectory_dir, 
-        )
-
-        return flow
     
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the system."""

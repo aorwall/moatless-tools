@@ -162,8 +162,14 @@ export interface TestResultsSummary {
   skipped: number;
 }
 
+export interface Reward {
+  value: number;
+  explanation?: string;
+}
+
 export interface Node {
   nodeId: number;
+  reward?: Reward;
   children: Node[];
   executed: boolean;
   userMessage?: string;
@@ -213,6 +219,7 @@ export interface TrajectoryStatus {
 
 export interface Trajectory {
   id: string;
+  project_id: string;
   status: "running" | "error" | "finished" | "unknown";
   agent_id: string;
   model_id: string;

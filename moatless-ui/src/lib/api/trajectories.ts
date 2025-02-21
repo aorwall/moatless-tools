@@ -31,11 +31,11 @@ export const trajectoriesApi = {
     });
   },
 
-  retryNode: async (trajectoryId: string, nodeId: number, params?: {
+  retryNode: async (trajectoryId: string, projectId: string, nodeId: number, params?: {
     agent_id?: string;
     model_id?: string;
   }): Promise<{ run_id: string }> => {
-    return apiRequest(`/trajectories/${trajectoryId}/retry`, {
+    return apiRequest(`/trajectories/${projectId}/${trajectoryId}/retry`, {
       method: 'POST',
       body: JSON.stringify({ ...params, node_id: nodeId }),
     });

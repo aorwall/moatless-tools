@@ -1,9 +1,11 @@
-import { Node } from "@/lib/types/trajectory";
+import { Node, Trajectory } from "@/lib/types/trajectory";
 import { TimelineItem } from "@/lib/components/trajectory/TimelineItem";
 import { TrajectoryNode } from "@/lib/components/trajectory/TrajectoryNode";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { NodeCircle } from '@/lib/components/trajectory/NodeCircle';
 import { cn } from "@/lib/utils";
+import { useTrajectoryActions } from "@/pages/trajectory/stores/trajectoryStore";
+import { ChevronDown } from "lucide-react";
 
 export const TIMELINE_CONFIG = {
   // Horizontal spacing
@@ -38,8 +40,7 @@ export const TIMELINE_CONFIG = {
 } as const;
 
 interface TimelineProps {
-  nodes: Node[];
-  instanceId?: string;
+  trajectory: Trajectory;
   isRunning: boolean;
 }
 
@@ -98,9 +99,9 @@ const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: Con
 };
 
 function renderNodes(
+  trajectory: Trajectory,
   nodes: Node[], 
   level: number = 0, 
-  instanceId: string, 
   isRunning: boolean,
   isExpanded: (nodeId: number) => boolean,
   handleNodeClick: (nodeId: number) => void,
@@ -175,7 +176,16 @@ function renderNodes(
 
           {/* Timeline items */}
           {isExpanded(node.nodeId) && (
-            <div className="mt-8 transition-all duration-200 ease-in-out">
+            <div className={cn(
+              "mt-8 transition-all duration-200 ease-in-out",
+              "relative pl-6 pr-4 py-4",
+              "ml-[150px] mr-4",
+              "border border-gray-200 bg-gray-50/50 rounded-lg",
+              "shadow-sm",
+              "animate-in fade-in slide-in-from-left-1",
+              "before:absolute before:-left-[1px] before:top-4 before:h-px before:w-6 before:bg-gray-200",
+              "after:absolute after:-left-2 after:top-[14px] after:h-3 after:w-3 after:rotate-45 after:border-l after:border-t after:border-gray-200 after:bg-gray-50/50"
+            )}>
               {node.items.map((item, index) => (
                 <TimelineItem
                   key={index}
@@ -183,7 +193,7 @@ function renderNodes(
                   content={item.content}
                   label={item.label}
                   nodeId={node.nodeId}
-                  instanceId={instanceId}
+                  instanceId={trajectory.id}
                   itemId={index.toString()}
                   isLast={index === node.items.length - 1}
                   hasNextSibling={!isLastNode || hasChildren}
@@ -197,9 +207,9 @@ function renderNodes(
             <div className="relative mt-8">
               <ol className="relative">
                 {renderNodes(
+                  trajectory,
                   node.children, 
                   level + 1, 
-                  instanceId, 
                   isRunning,
                   isExpanded,
                   handleNodeClick,
@@ -214,46 +224,23 @@ function renderNodes(
   });
 }
 
-const VerticalLine = ({ 
-  height, 
-  offset = TIMELINE_CONFIG.timelineOffset.default,
-  className 
-}: { 
-  height?: string | number,
-  offset?: string,
-  className?: string 
-}) => (
-  <div
-    className={cn(
-      "absolute w-px bg-gray-200",
-      className
-    )}
-    style={{ 
-      left: offset,
-      height: height ? height : '100%',
-      top: 0,
-      bottom: height ? undefined : 0
-    }}
-  />
-);
 
-export function Timeline({ nodes, instanceId = "standalone", isRunning = false }: TimelineProps) {
-  const { isNodeExpanded, toggleNode } = useTrajectoryStore();
+export function Timeline({ trajectory, isRunning = false }: TimelineProps) {
+  const { isNodeExpanded, toggleNode } = useTrajectoryActions();
   
-  const lastNode = nodes[nodes.length - 1];
+  const lastNode = trajectory.nodes[trajectory.nodes.length - 1];
   const isTerminal = lastNode?.terminal;
 
-  const isExpanded = (nodeId: number) => isNodeExpanded(instanceId, nodeId);
+  const isExpanded = (nodeId: number) => isNodeExpanded(nodeId);
   const handleNodeClick = (nodeId: number) => {
-    toggleNode(instanceId, nodeId);
+    toggleNode(nodeId);
   };
 
   return (
     <div className="w-full">
       <div className="relative">
-        
         <ol className="relative">
-          {renderNodes(nodes, 0, instanceId, isRunning, isExpanded, handleNodeClick)}
+          {renderNodes(trajectory, trajectory.nodes, 0, isRunning, isExpanded, handleNodeClick)}
 
           {/* Terminal node */}
           {isTerminal && !isRunning && (
@@ -268,22 +255,22 @@ export function Timeline({ nodes, instanceId = "standalone", isRunning = false }
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div
-                  className={`relative z-10 -ml-4 flex h-8 min-w-[2rem] items-center justify-center rounded-full border-2 bg-white 
-                    ${
-                      lastNode.error
-                        ? "border-red-500 bg-red-500"
-                        : "border-green-500 bg-green-500"
-                    }`}
-                />
+              <div
+                className={`relative z-10 -ml-4 flex h-8 min-w-[2rem] items-center justify-center rounded-full border-2 bg-white 
+                  ${
+                    lastNode.error
+                      ? "border-red-500 bg-red-500"
+                      : "border-green-500 bg-green-500"
+                  }`}
+              />
 
-                <div className="min-w-0 flex-1 pl-8">
-                  <div className="text-xs text-gray-600">
-                    {lastNode.error
-                      ? "Terminated with error"
-                      : "Successfully completed"}
-                  </div>
+              <div className="min-w-0 flex-1 pl-8">
+                <div className="text-xs text-gray-600">
+                  {lastNode.error
+                    ? "Terminated with error"
+                    : "Successfully completed"}
                 </div>
               </div>
             </li>

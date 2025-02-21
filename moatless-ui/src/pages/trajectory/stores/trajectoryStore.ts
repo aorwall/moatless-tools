@@ -1,8 +1,8 @@
-import { TrajectoryEvent } from "@/lib/types/trajectory";
+import { useTrajectoryContext } from "@/lib/contexts/TrajectoryContext";
+import { TrajectoryEvent, Trajectory } from "@/lib/types/trajectory";
 import { create } from "zustand";
 
 interface TrajectoryState {
-  trajectoryId: string | null;
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
   events: TrajectoryEvent[];
@@ -19,7 +19,6 @@ interface TrajectoryState {
   toggleItem: (instanceId: string, nodeId: number, itemId: string) => void;
   resetInstance: (instanceId: string) => void;
   setSelectedItem: (item: TrajectoryState["selectedItem"]) => void;
-  setTrajectoryId: (trajectoryId: string) => void;
   setEvents: (events: TrajectoryEvent[]) => void;
   addEvent: (event: TrajectoryEvent) => void;
 
@@ -30,11 +29,9 @@ interface TrajectoryState {
     nodeId: number,
     itemId: string,
   ) => boolean;
-
 }
 
 export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
-  trajectoryId: null,
   expandedNodes: {},
   expandedItems: {},
   selectedItem: null,
@@ -95,20 +92,6 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
 
   setSelectedItem: (item) => set({ selectedItem: item }),
 
-  setTrajectoryId: (trajectoryId: string) => 
-    set((state) => {
-      // If instance is different, reset the state for the new instance
-      if (state.trajectoryId !== trajectoryId) {
-        return {
-          trajectoryId: trajectoryId,
-          expandedNodes: {},
-          expandedItems: {},
-          selectedItem: null,
-        };
-      }
-      return { trajectoryId: trajectoryId };
-    }),
-
   isNodeExpanded: (instanceId, nodeId) => {
     const state = get();
     return state.expandedNodes[instanceId]?.has(nodeId) || false;
@@ -123,3 +106,22 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
 
   addEvent: (event: TrajectoryEvent) => set((state) => ({ events: [...state.events, event] })),
 }));
+
+// Custom hook to combine store with context
+export function useTrajectoryActions() {
+  const { trajectory } = useTrajectoryContext();
+  const store = useTrajectoryStore();
+
+  return {
+    toggleNode: (nodeId: number) => store.toggleNode(trajectory.id, nodeId),
+    toggleItem: (nodeId: number, itemId: string) => store.toggleItem(trajectory.id, nodeId, itemId),
+    resetInstance: () => store.resetInstance(trajectory.id),
+    isNodeExpanded: (nodeId: number) => store.isNodeExpanded(trajectory.id, nodeId),
+    isItemExpanded: (nodeId: number, itemId: string) => store.isItemExpanded(trajectory.id, nodeId, itemId),
+    setSelectedItem: store.setSelectedItem,
+    selectedItem: store.selectedItem,
+    events: store.events,
+    setEvents: store.setEvents,
+    addEvent: store.addEvent,
+  };
+}

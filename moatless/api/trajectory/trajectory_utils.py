@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 from fastapi import HTTPException
 
 from moatless.api.trajectory.schema import (
+    RewardDTO,
     TrajectoryDTO,
     NodeDTO,
     ActionDTO,
@@ -182,8 +183,18 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
 
     timeline_items = generate_timeline_items(node)
 
+    if node.reward:
+        reward = RewardDTO(
+            value=node.reward.value,
+            explanation=node.reward.explanation,
+        )
+    else:
+        reward = None
+
+    logger.info(f"Node reward: {reward}")
     return NodeDTO(
         nodeId=node.node_id,
+        reward=reward,
         actionSteps=action_steps,
         executed=node.is_executed(),
         #assistantMessage=node.assistant_message,
@@ -344,22 +355,14 @@ def convert_nodes(root_node: Node) -> List[NodeDTO]:
             return True
         return any(has_branch_nodes(child) for child in node.children)
     
-    def process_tree(node: Node) -> List[NodeDTO]:
+    def process_tree(node: Node) -> NodeDTO:
         """Process nodes preserving tree structure at branch points"""
         node_dto = convert_moatless_node_to_api_node(node, action_history)
+
+        for child in node.children:
+            node_dto.children.append(process_tree(child))
         
-        if len(node.children) > 1:
-            # Multiple children - create branching structure
-            node_dto.children = [process_tree(child)[0] for child in node.children]
-            return [node_dto]
-        elif len(node.children) == 1:
-            # Single child - create flat list
-            result = [node_dto]
-            result.extend(process_tree(node.children[0]))
-            return result
-        else:
-            # No children - return single node
-            return [node_dto]
+        return node_dto
             
     def process_flat(node: Node) -> List[NodeDTO]:
         """Process nodes into completely flat list"""
@@ -370,7 +373,7 @@ def convert_nodes(root_node: Node) -> List[NodeDTO]:
 
     # Check if we need tree structure
     if has_branch_nodes(root_node):
-        return process_tree(root_node)
+        return [process_tree(root_node)]
     else:
         return process_flat(root_node)
 

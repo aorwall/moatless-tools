@@ -535,7 +535,6 @@ class Node(BaseModel):
 
         for node_data in node_list:
             parent_id = node_data.pop("parent_id", None)
-            # Use the core reconstruct method for each node
             node = cls._reconstruct_node(node_data, repo=repo, runtime=runtime)
             nodes_by_id[node.node_id] = (node, parent_id)
 
@@ -549,6 +548,8 @@ class Node(BaseModel):
         if not root_nodes:
             raise ValueError("No root node found in data")
 
+        tree = generate_ascii_tree(root_nodes[0])
+        logger.info(f"Reconstructed tree:\n{tree}")
         return root_nodes[0]
 
     def dump_as_list(self, **kwargs) -> List[Dict[str, Any]]:

@@ -129,6 +129,18 @@ class ArtifactHandler(MoatlessComponent, Generic[T]):
     @classmethod
     def get_type(cls) -> str:
         pass
+
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "artifact_handler"
+    
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.artifacts"
+    
+    @classmethod
+    def _get_base_class(cls) -> Type:
+        return ArtifactHandler
     
     @abstractmethod
     def read(self, artifact_id: str) -> T:
@@ -206,5 +218,16 @@ class ArtifactHandler(MoatlessComponent, Generic[T]):
     @classmethod
     def get_name(cls) -> str:
         return cls.type
-
     
+    @classmethod
+    def initiate_handlers(cls, trajectory_dir: Path) -> List["ArtifactHandler"]:
+        registered_classes = cls.get_available_components()
+
+        logger.info(f"Registered classes: {list(registered_classes.keys())}")
+        handlers = []
+        for handler in registered_classes.values():
+            handler = handler(trajectory_dir=trajectory_dir)
+            handlers.append(handler)
+
+        logger.info(f"Initialized handlers: {list(map(lambda h: h.type, handlers))}")
+        return handlers

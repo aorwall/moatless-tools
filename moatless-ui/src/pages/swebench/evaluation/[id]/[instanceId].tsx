@@ -1,5 +1,5 @@
 import { useParams, useNavigate } from "react-router-dom";
-import { TrajectoryView } from "@/pages/trajectories/[id]";
+import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
 import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationInstance";
 import { InstanceList } from "../components/InstanceList";
@@ -68,7 +68,7 @@ export function EvaluationInstancePage() {
       <ResizablePanelGroup direction="horizontal" className="h-full border rounded-lg">
         <ResizableHandle className="bg-border hover:bg-ring" />
         <ResizablePanel defaultSize={85}>
-          <TrajectoryView 
+          <TrajectoryViewer 
             trajectory={trajectory}
             isLoading={isLoading}
             isError={trajectoryError}

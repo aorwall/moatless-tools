@@ -36,7 +36,8 @@ class AgenticRunner:
         self.active_runs[run_id] = (agentic_system, task_obj)
         return run_id
 
-    async def get_run(self, run_id: str) -> AgenticFlow | None:
+    async def get_run(self, run_id: str, project_id: str | None = None) -> AgenticFlow | None:
+        # TODO: Support project_id
         entry = self.active_runs.get(run_id)
         if entry is None:
             return None

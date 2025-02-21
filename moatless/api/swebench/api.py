@@ -132,13 +132,15 @@ async def get_evaluation_instance(evaluation_name: str, instance_id: str):
         events = load_trajectory_events(trajectory_dir)
 
         return TrajectoryResponseDTO(
+            id=instance_id,
+            project_id=evaluation_name,
             status=status,
             system_status=system_status,
-                agent_id=system_status.metadata.get("agent_id"),
-                model_id=system_status.metadata.get("model_id"),
-                events=events,
-                **trajectory.model_dump()
-            )
+            agent_id=system_status.metadata.get("agent_id"),
+            model_id=system_status.metadata.get("model_id"),
+            events=events,
+            **trajectory.model_dump()
+        )
     except Exception as e:
         logger.exception(f"Failed to get evaluation instance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

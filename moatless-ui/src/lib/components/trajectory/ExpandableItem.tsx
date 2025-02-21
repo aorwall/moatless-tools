@@ -34,16 +34,25 @@ export const ExpandableItem = ({
 
   return (
     <div
-      className={cn("mb-4 flex items-start sm:mb-8", isExpandable && "group")}
+      className={cn(
+        "flex items-start gap-2",
+        "group/expandable transition-all duration-150",
+        isExpandable && "cursor-pointer"
+      )}
     >
       <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
         <div className="mr-3 flex h-8 flex-col justify-center text-right sm:mr-6">
           <div>
             <button
               className={cn(
-                "text-xs font-medium text-gray-600 group-hover:text-gray-900",
-                isExpandable ? "cursor-pointer" : "cursor-default",
+                "text-xs font-medium",
                 "max-w-[60px] truncate sm:max-w-[120px]",
+                "transition-colors duration-150",
+                isExpandable ? (
+                  "text-gray-600 group-hover/expandable:text-gray-900"
+                ) : (
+                  "text-gray-500"
+                )
               )}
               onClick={handleClick}
             >
@@ -56,17 +65,27 @@ export const ExpandableItem = ({
       <div
         className={cn(
           "relative z-10 -ml-2 flex h-8 min-w-[2rem] items-center justify-center",
-          "rounded-full border-2 border-gray-200 bg-white",
-          "transition-colors duration-150 sm:-ml-4",
-          isExpandable ? "cursor-pointer" : "cursor-default",
-          "group-hover:border-gray-300 group-hover:bg-gray-50",
+          "rounded-full border-2 bg-white transition-all duration-150",
+          isExpandable ? (
+            "border-gray-200 group-hover/expandable:border-gray-300 group-hover/expandable:bg-gray-50 group-hover/expandable:shadow-sm"
+          ) : (
+            "border-gray-100"
+          ),
+          "sm:-ml-4"
         )}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="button"
         tabIndex={isExpandable ? 0 : -1}
       >
-        <Icon className="h-4 w-4 text-gray-400 group-hover:text-gray-500" />
+        <Icon className={cn(
+          "h-4 w-4",
+          isExpandable ? (
+            "text-gray-400 group-hover/expandable:text-gray-500"
+          ) : (
+            "text-gray-300"
+          )
+        )} />
       </div>
 
       <div className="min-w-0 flex-1 overflow-x-auto pl-4 sm:pl-8">

@@ -41,6 +41,8 @@ import {
   ArtifactTimelineContent,
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
 import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
+import { useTrajectoryContext } from "@/lib/contexts/TrajectoryContext";
+import { cn } from "@/lib/utils";
 
 interface TimelineItemProps {
   type: string;
@@ -57,13 +59,14 @@ export const TimelineItem = ({
   type,
   content,
   nodeId,
-  instanceId,
   itemId,
   label,
   isLast,
   hasNextSibling,
 }: TimelineItemProps) => {
   const { setSelectedItem } = useTrajectoryStore();
+  const { trajectoryId } = useTrajectoryContext();
+  const instanceId = trajectoryId || "";
 
   const handleSelect = () => {
     setSelectedItem({
@@ -170,11 +173,11 @@ export const TimelineItem = ({
   const Icon = getIcon(type);
 
   return (
-    <div onClick={handleSelect} className="cursor-pointer relative">
+    <div onClick={handleSelect} className="cursor-pointer relative group">
       {/* Vertical line extending down if not last or if parent has more nodes */}
       {(!isLast || hasNextSibling) && (
         <div 
-          className="absolute w-px bg-gray-200"
+          className="absolute w-px bg-gray-200/70"
           style={{
             left: TIMELINE_CONFIG.lines.item.offset,
             top: TIMELINE_CONFIG.lines.item.verticalOffset,
@@ -183,15 +186,21 @@ export const TimelineItem = ({
         />
       )}
       
-      <ExpandableItem
-        label={label}
-        icon={Icon}
-        isExpandable={isExpandable}
-        expandedState={false}
-        onExpandChange={() => handleSelect()}
-      >
-        {renderedContent}
-      </ExpandableItem>
+      <div className={cn(
+        "relative py-2 transition-colors duration-150",
+        "hover:bg-gray-50/50 rounded-md -mx-2 px-2",
+        "group/item"
+      )}>
+        <ExpandableItem
+          label={label}
+          icon={Icon}
+          isExpandable={isExpandable}
+          expandedState={false}
+          onExpandChange={() => handleSelect()}
+        >
+          {renderedContent}
+        </ExpandableItem>
+      </div>
     </div>
   );
 };

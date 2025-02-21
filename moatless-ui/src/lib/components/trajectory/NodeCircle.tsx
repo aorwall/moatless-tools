@@ -1,12 +1,14 @@
 import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Node } from '@/lib/types/trajectory';
+import type { Node, Trajectory } from '@/lib/types/trajectory';
 import { useRetryNode } from "@/lib/hooks/useRetryNode";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { useNavigate } from "react-router-dom";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/lib/components/ui/tooltip";
 import { useState } from "react";
 import { RunLoop } from "@/lib/components/loop/RunLoop";
+import { useNodeActions } from "@/lib/hooks/useNodeActions";
+import { useTrajectoryContext, useTrajectoryId, useTrajectory } from "@/lib/contexts/TrajectoryContext";
 
 interface NodeCircleProps {
   node: Node;
@@ -65,52 +67,53 @@ const NODE_LAYOUT = {
   }
 } as const;
 
+function getRewardColor(reward: number): string {
+  // Clamp the reward value between -100 and 100
+  const clampedReward = Math.max(-100, Math.min(100, reward));
+  
+  if (clampedReward === 0) return "yellow";
+  
+  if (clampedReward < 0) {
+    // For negative values, interpolate between red (-100) and yellow (0)
+    return clampedReward <= -50 ? "red" : "yellow";
+  }
+  
+  // For positive values, interpolate between yellow (0) and green (100)
+  return clampedReward >= 50 ? "green" : "yellow";
+}
+
 function getNodeColor(node: Node, isRunning: boolean): string {
     if (node.nodeId === 0) return "blue";
     if (node.error) return "red";
     if (node.allNodeErrors.length > 0) return "red";
     if (node.allNodeWarnings.length > 0) return "yellow";
+    if (node.reward !== undefined) return getRewardColor(node.reward);
     if (node.executed) return "green";
     return "gray";
-  }
-  
+}
+
+function formatReward(reward: number): string {
+  return Math.round(reward).toString();
+}
+
 export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleProps) {
   const nodeColor = getNodeColor(node, isRunning);
   const colors = COLOR_MAPPINGS[nodeColor as keyof typeof COLOR_MAPPINGS] || COLOR_MAPPINGS.default;
   const showSpinner = node.nodeId !== 0 && isRunning && isLastNode;
-  const hasChildren = node.children && node.children.length > 0;
+  const isBranched = node.children && node.children.length > 1;
   
-  const retryNode = useRetryNode();
-  const trajectoryId = useTrajectoryStore((state) => state.trajectoryId);
-  const navigate = useNavigate();
   const [showRunLoop, setShowRunLoop] = useState(false);
+  const { handleRetry, handleFork, isRetryPending, canPerformActions } = useNodeActions(node.nodeId);
+  const { trajectoryId } = useTrajectoryId();
 
-  const handleRetry = async (e: React.MouseEvent) => {
+  const handleRetryClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!trajectoryId) return;
-
-    await retryNode.mutateAsync({
-      trajectoryId,
-      nodeId: node.nodeId,
-    });
+    await handleRetry();
   };
 
-  const handleFork = async (e: React.MouseEvent) => {
+  const handleForkClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!trajectoryId) return;
-    
-    const response = await fetch(`/api/trajectories/${trajectoryId}/fork`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        nodeId: node.nodeId
-      })
-    });
-    
-    const data = await response.json();
-    navigate(`/trajectory/${data.trajectoryId}`);
+    await handleFork();
   };
 
   const handleBranch = (e: React.MouseEvent) => {
@@ -121,7 +124,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
   return (
     <div className="relative group/node">
       {/* Invisible hover area that extends upward */}
-      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-24 h-16" />
+      <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-24 h-8" />
 
       {/* Action buttons container */}
       {node.nodeId !== 0 && (
@@ -131,19 +134,22 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
           "flex items-center justify-center gap-1",
           "opacity-0 translate-y-2 pointer-events-none",
           "group-hover/node:opacity-100 group-hover/node:translate-y-0 group-hover/node:pointer-events-auto",
-          "bg-white rounded-full px-2 py-1 shadow-sm z-30"
+          "bg-white rounded-full px-2 py-1 shadow-sm z-40"
         )}>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
-                  className="rounded-full p-1 transition-colors duration-200 
-                           text-gray-600 hover:text-gray-900"
-                  onClick={handleRetry}
-                  disabled={retryNode.isPending || !trajectoryId}
+                  className={cn(
+                    "rounded-full p-1 transition-colors duration-200",
+                    "text-gray-600 hover:text-gray-900",
+                    "z-50"
+                  )}
+                  onClick={handleRetryClick}
+                  disabled={isRetryPending || !canPerformActions}
                 >
                   <RotateCcw className={cn("h-3 w-3", {
-                    "animate-spin": retryNode.isPending
+                    "animate-spin": isRetryPending
                   })} />
                 </button>
               </TooltipTrigger>
@@ -160,6 +166,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
                   className="rounded-full p-1 transition-colors duration-200 
                            text-gray-600 hover:text-gray-900"
                   onClick={handleBranch}
+                  disabled={!canPerformActions}
                 >
                   <Split className="h-3 w-3" />
                 </button>
@@ -176,8 +183,8 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
                 <button
                   className="rounded-full p-1 transition-colors duration-200 
                            text-gray-600 hover:text-gray-900"
-                  onClick={handleFork}
-                  disabled={!trajectoryId}
+                  onClick={handleForkClick}
+                  disabled={!canPerformActions}
                 >
                   <GitFork className="h-3 w-3" />
                 </button>
@@ -190,8 +197,40 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
         </div>
       )}
 
-      {hasChildren && (
-        <div className="absolute left-0 top-[90%] -translate-x-full -translate-y-1/2 z-30">
+      {/* Reward Badge */}
+      {node.reward && (
+        <div className="absolute -left-6 -top-1 z-30">
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={cn(
+                  "flex items-center justify-center rounded-full shadow-sm px-1.5 py-0.5",
+                  "text-[10px] font-medium",
+                  "border",
+                  {
+                    "bg-red-50 border-red-200 text-red-700": node.reward.value < -50,
+                    "bg-yellow-50 border-yellow-200 text-yellow-700": node.reward.value >= -50 && node.reward.value <= 50,
+                    "bg-green-50 border-green-200 text-green-700": node.reward.value > 50,
+                  }
+                )}>
+                  {formatReward(node.reward.value)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {node.reward.explanation && (
+                  <p>{node.reward.explanation}</p>
+                )}
+                {!node.reward.explanation && (
+                  <p>No reward explanation available</p>
+                )}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
+      )}
+
+      {isBranched && (
+        <div className="absolute left-1/2 top-full -translate-x-1/2 z-30">
           <div 
             className={cn(
               "flex items-center justify-center",
@@ -199,7 +238,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
               "border shadow-sm",
               colors.border,
               "transition-all duration-200",
-              "mr-2"
+              "mt-1"
             )}
           >
             <GitBranch className={cn("h-3 w-3 mr-0.5", colors.text)} />
@@ -251,37 +290,35 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
       </button>
 
       {/* Status indicators */}
-      {(node.error || node.allNodeWarnings.length > 0) && (
-        <div className={cn(
-          "absolute flex flex-col gap-1 z-20",
-          NODE_LAYOUT.spacing.indicatorOffset,
-          "top-0"
-        )}>
-          {node.error && (
-            <span className={cn(
-              "flex items-center justify-center rounded-full bg-red-100 shadow-sm",
-              NODE_LAYOUT.size.indicator
-            )}>
-              <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
-            </span>
-          )}
-          {node.allNodeWarnings.length > 0 && (
-            <span className={cn(
-              "flex items-center justify-center rounded-full bg-yellow-100 shadow-sm",
-              NODE_LAYOUT.size.indicator
-            )}>
-              <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
-            </span>
-          )}
-        </div>
-      )}
+      <div className={cn(
+        "absolute flex flex-col gap-1 z-20",
+        NODE_LAYOUT.spacing.indicatorOffset,
+        "top-0"
+      )}>
+        {node.error && (
+          <span className={cn(
+            "flex items-center justify-center rounded-full bg-red-100 shadow-sm",
+            NODE_LAYOUT.size.indicator
+          )}>
+            <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
+          </span>
+        )}
+        {node.allNodeWarnings.length > 0 && (
+          <span className={cn(
+            "flex items-center justify-center rounded-full bg-yellow-100 shadow-sm",
+            NODE_LAYOUT.size.indicator
+          )}>
+            <AlertTriangle className={NODE_LAYOUT.size.actionButton} />
+          </span>
+        )}
+      </div>
 
       <RunLoop
         open={showRunLoop}
         onOpenChange={setShowRunLoop}
         defaultMessage={node.userMessage || ""}
         mode="expand"
-        trajectoryId={trajectoryId || undefined}
+        trajectoryId={trajectoryId}
         nodeId={node.nodeId}
       />
     </div>

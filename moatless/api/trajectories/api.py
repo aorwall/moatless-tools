@@ -11,10 +11,14 @@ from fastapi import APIRouter, HTTPException
 
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes, load_trajectory_from_file
+from moatless.benchmark.swebench.utils import create_index, create_repository_async
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.flow.runner import agentic_runner
-from moatless.flow.flow import SystemStatus
+from moatless.flow.flow import AgenticFlow, SystemStatus
 from moatless.flow.loop import AgenticLoop
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.utils.moatless import get_moatless_trajectories_dir, get_moatless_trajectory_dir
+from moatless.workspace import Workspace
 from .schema import RetryTrajectoryRequest, StartTrajectoryRequest, TrajectoryEventDTO, TrajectoryListItem, \
     TrajectoryResponseDTO
 
@@ -101,6 +105,7 @@ async def get_trajectory(trajectory_id: str):
             nodes = convert_nodes(system.root)
 
             trajectory = TrajectoryDTO(
+                id=trajectory_id,
                 nodes=nodes,
                 completionCost=system.root.total_usage().completion_cost,
                 promptTokens=system.root.total_usage().prompt_tokens,
@@ -128,6 +133,7 @@ async def get_trajectory(trajectory_id: str):
         events = load_trajectory_events(trajectory_dir)
 
         return TrajectoryResponseDTO(
+            id=trajectory_id,
             status=status,
             system_status=system_status,
             agent_id=system_status.metadata.get("agent_id"),
@@ -143,28 +149,60 @@ async def get_trajectory(trajectory_id: str):
         raise HTTPException(status_code=500, detail=str(e)) 
   
 
-@router.post("/{trajectory_id}/resume")
-async def resume(trajectory_id: str, request: StartTrajectoryRequest):
+@router.post("/{project_id}/{trajectory_id}/resume")
+async def resume(project_id: str, trajectory_id: str, request: StartTrajectoryRequest):
     """Resume a trajectory."""
-    system = await agentic_runner.get_run(trajectory_id)
+    system = await agentic_runner.get_run(trajectory_id, project_id)
     if system:
         raise HTTPException(status_code=400, detail="Flow is already running")
     
-    agentic_flow = AgenticLoop.from_trajectory_id(trajectory_id, request.agent_id, request.model_id)
+    agentic_flow = AgenticLoop.from_trajectory_id(trajectory_id, project_id, request.agent_id, request.model_id)
     
     await agentic_runner.start(agentic_flow, message=request.message)
 
 
-@router.post("/{trajectory_id}/retry")
-async def retry(trajectory_id: str, request: RetryTrajectoryRequest):
+@router.post("/{project_id}/{trajectory_id}/retry")
+async def retry(project_id: str, trajectory_id: str, request: RetryTrajectoryRequest):
     """Retry a run."""
-    system = await agentic_runner.get_run(trajectory_id)
+    system = await agentic_runner.get_run(trajectory_id, project_id)
     if system:
         raise HTTPException(status_code=400, detail="Flow is already running")
     
-    agentic_flow = AgenticLoop.from_trajectory_id(trajectory_id, request.agent_id, request.model_id)
+    agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+
+    await swebench_setup(agentic_flow, trajectory_id)
+
     await agentic_flow.reset_node(request.node_id)
     agentic_flow.persist()
     await agentic_runner.start(agentic_flow)
     
+    logger.info(f"Started retry for trajectory {trajectory_id}")
+
+async def swebench_setup(flow: AgenticFlow, trajectory_id: str):
+    """Workaround to set up legacy solution for swebench."""
+
+    moatless_instance = get_moatless_instance(trajectory_id)
+    if not moatless_instance:
+        # No instance found, skip setup
+        return
+    
+    logger.info(f"Setting up swebench for trajectory {trajectory_id}")
+    
+    repository = await create_repository_async(moatless_instance)
+    code_index = create_index(moatless_instance, repository=repository)
+
+    runtime = TestbedEnvironment(
+        repository=repository,
+        instance_id=trajectory_id,
+        log_dir=str(get_moatless_trajectory_dir(trajectory_id) / "testbed_logs"),
+        enable_cache=True,
+    )
+    workspace = Workspace(
+        repository=repository,
+        code_index=code_index,
+        runtime=runtime,
+        legacy_workspace=True
+    )
+
+    flow.workspace = workspace
 
