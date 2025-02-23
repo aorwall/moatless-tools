@@ -49,7 +49,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     def _create_retry_message(self, tool_call: Any, error: str):
         return ChatCompletionToolMessage(role="tool", tool_call_id=tool_call.id, content=error)
 
-    def _validate_completion(
+    async def _validate_completion(
         self,
         completion_response: Any,
     ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:

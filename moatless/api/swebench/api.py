@@ -35,7 +35,7 @@ from .schema import (
     get_instance_status
 )
 from moatless.flow.manager import get_flow_config
-from moatless.config.model_config import get_model_config
+from moatless.completion.manager import get_model_config
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def create_evaluation(request: EvaluationRequestDTO):
 
     try:
         manager = EvaluationManager.get_instance()
-        evaluation = manager.create_evaluation(
+        evaluation = await manager.create_evaluation(
             dataset_name=request.dataset,
             flow_id=request.flow_id,
             model_id=request.model_id,
@@ -65,7 +65,7 @@ async def create_evaluation(request: EvaluationRequestDTO):
 async def get_evaluation(evaluation_name: str):
     """Get evaluation status and results."""
     manager = EvaluationManager.get_instance()
-    evaluation = manager._load_evaluation(evaluation_name)
+    evaluation = await manager._load_evaluation(evaluation_name)
     
     if not evaluation:
         raise HTTPException(status_code=404, detail=f"Evaluation {evaluation_name} not found")
@@ -76,7 +76,7 @@ async def list_evaluations():
     """List all evaluations with their status summaries."""
     try:
         manager = EvaluationManager.get_instance()
-        evaluations = manager.list_evaluations()
+        evaluations = await manager.list_evaluations()
         
         response_items = [
             EvaluationListItemDTO.from_evaluation(eval)

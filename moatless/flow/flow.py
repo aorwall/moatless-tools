@@ -14,7 +14,7 @@ from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 from moatless.context_data import current_trajectory_id
 from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent
 from moatless.events import event_bus
@@ -192,11 +192,6 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
-        # TODO: Workaround to set up soon to be deprecated legacy solution
-        if self.root:
-            for node in self.root.get_all_nodes():
-                node.file_context.workspace = workspace
-
     async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:
@@ -236,7 +231,7 @@ class AgenticFlow(MoatlessComponent):
     async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
         raise NotImplementedError("Subclass must implement _run method")
 
-    async def reset_node(self, node_id: int) -> Node:
+    def reset_node(self, node_id: int):
         """Reset a specific node.
         
         Args:
@@ -253,9 +248,9 @@ class AgenticFlow(MoatlessComponent):
             raise ValueError(f"Node with ID {node_id} not found")
         
         if not node.parent:
-            raise ValueError(f"Node with ID {node_id} is the root node and cannot be reset")
-
-        node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
+            node.reset()
+        else:
+            node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
 
     async def emit_event(self, event: BaseEvent):
@@ -458,9 +453,11 @@ class AgenticFlow(MoatlessComponent):
 
 
     @classmethod
-    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None) -> "AgenticFlow":
+    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None, workspace: Workspace | None = None) -> "AgenticFlow":
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id, project_id)
-        workspace = Workspace(trajectory_dir=trajectory_dir)
+        if not workspace:
+            workspace = Workspace(trajectory_dir=trajectory_dir)
+
         return cls.from_dir(trajectory_dir, workspace)
         
     

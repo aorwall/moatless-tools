@@ -3,7 +3,8 @@ from typing import List, Type, ClassVar
 
 from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.schema import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments
+from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
@@ -74,9 +75,9 @@ class FindClass(SearchBaseAction):
             prompt += f" in files matching the pattern: {self.args.file_pattern}"
         return prompt
 
-    def _search(self, args: FindClassArgs) -> SearchCodeResponse:
+    async def _search(self, args: FindClassArgs) -> SearchCodeResponse:
         logger.info(f"{self.name}: {args.class_name} (file_pattern: {args.file_pattern})")
-        return self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
+        return await self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         return (
@@ -84,9 +85,9 @@ class FindClass(SearchBaseAction):
             f"Use the function ViewCode and specify the SpanIDs of the relevant functions to view them.\n"
         )
 
-    def _search_for_alternative_suggestion(self, args: FindClassArgs) -> SearchCodeResponse:
+    async def _search_for_alternative_suggestion(self, args: FindClassArgs) -> SearchCodeResponse:
         if args.file_pattern:
-            return self._code_index.find_class(args.class_name, file_pattern=None)
+            return await self._code_index.find_class(args.class_name, file_pattern=None)
         return SearchCodeResponse()
 
     @classmethod

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.validation.code_flow_validation import BaseCodeFlowValidation
-from moatless.config.model_config import get_model_config, get_all_configs
+from moatless.completion.manager import get_model_config, get_all_configs
 
 logger = logging.getLogger(__name__)
 

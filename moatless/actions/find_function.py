@@ -2,9 +2,10 @@ from typing import Optional, List, Type, ClassVar
 
 from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.schema import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments
+from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
-from moatless.codeblocks import CodeBlockType
+from moatless.codeblocks import CodeBlockType, get_parser_by_path
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 
 
@@ -78,31 +79,36 @@ class FindFunctionArgs(SearchBaseArgs):
 class FindFunction(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindFunctionArgs
 
-    def _search(self, args: FindFunctionArgs) -> SearchCodeResponse:
+    async def _search(self, args: FindFunctionArgs) -> SearchCodeResponse:
         logger.info(
             f"{self.name}: {args.function_name} (class_name: {args.class_name}, file_pattern: {args.file_pattern})"
         )
-        return self._code_index.find_function(
+        return await self._code_index.find_function(
             args.function_name,
             class_name=args.class_name,
             file_pattern=args.file_pattern,
         )
 
-    def _search_for_alternative_suggestion(self, args: FindFunctionArgs) -> SearchCodeResponse:
+    async def _search_for_alternative_suggestion(self, args: FindFunctionArgs) -> SearchCodeResponse:
         """Return methods in the same class or other methods in same file with the method name the method in class is not found."""
-
+        module = None
         if args.class_name and args.file_pattern:
             file = self._repository.get_file(args.file_pattern)
+            if file:
+                parser = get_parser_by_path(file.file_path)
+                if parser:
+                    module = await parser.parse_async(file.content)
+
 
             span_ids = []
-            if file and file.module:
-                class_block = file.module.find_by_identifier(args.class_name)
+            if module:
+                class_block = module.find_by_identifier(args.class_name)
                 if class_block and class_block.type == CodeBlockType.CLASS:
                     function_blocks = class_block.find_blocks_with_type(CodeBlockType.FUNCTION)
                     for function_block in function_blocks:
                         span_ids.append(function_block.belongs_to_span.span_id)
 
-                function_blocks = file.module.find_blocks_with_identifier(args.function_name)
+                function_blocks = module.find_blocks_with_identifier(args.function_name)
                 for function_block in function_blocks:
                     span_ids.append(function_block.belongs_to_span.span_id)
 
@@ -116,7 +122,7 @@ class FindFunction(SearchBaseAction):
                     ]
                 )
 
-            return self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
+            return await self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
 
         return SearchCodeResponse()
 

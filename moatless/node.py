@@ -332,6 +332,7 @@ class Node(BaseModel):
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
+
         self.action_steps = []
         self.assistant_message = None
         self.visits = 0
@@ -625,7 +626,6 @@ def generate_ascii_tree(
     include_diffs: bool = False,
     include_feedback: bool = False,
     include_action_details: bool = False,
-    include_file_context: bool = False,
     use_color: bool = True,
     show_trajectory: bool = False,
 ) -> str:
@@ -645,7 +645,6 @@ def generate_ascii_tree(
         include_diffs,
         include_feedback,
         include_action_details,
-        include_file_context,
         use_color,
         show_trajectory,
     )
@@ -662,7 +661,6 @@ def _append_ascii_node(
     include_diffs: bool = False,
     include_feedback: bool = False,
     include_action_details: bool = False,
-    include_file_context: bool = False,
     use_color: bool = True,
     show_trajectory: bool = False,
 ) -> None:
@@ -777,16 +775,6 @@ def _append_ascii_node(
                 if step.observation.expect_correction:
                     tree_lines.append(f"{content_prefix}│  Expects Correction: True")
 
-    # Add file context if available
-    if include_file_context and node.file_context and not node.file_context.is_empty():
-        tree_lines.append(f"{content_prefix}│ File Context:")
-        context = node.file_context.create_prompt(
-            show_outcommented_code=True,
-            exclude_comments=True,
-            outcomment_code_comment="... code not in context",
-        )
-        _append_wrapped_text(tree_lines, context, content_prefix, "│  ")
-
     # Process children with updated parameters
     child_prefix = prefix + ("    " if is_last else "│   ")
     children = node.children
@@ -801,7 +789,6 @@ def _append_ascii_node(
             include_diffs,
             include_feedback,
             include_action_details,
-            include_file_context,
             use_color,
             show_trajectory,
         )

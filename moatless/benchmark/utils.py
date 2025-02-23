@@ -184,8 +184,9 @@ def get_file_spans_from_patch(repository: FileRepository, patch: str) -> dict[st
         change_file, change_start, change_end, change_type = diff_line
         file = repository.get_file(change_file)
 
-        if file is None or file.module is None:
+        if file is None:
             continue
+        
 
         if file.file_path not in expected_files_with_spans:
             expected_files_with_spans[file.file_path] = []

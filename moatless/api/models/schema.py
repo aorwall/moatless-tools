@@ -3,7 +3,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from moatless.completion.base import LLMResponseFormat
-from moatless.config.model_config import ModelConfig
+from moatless.completion.manager import ModelConfig
 from moatless.schema import MessageHistoryType
 
 
@@ -54,3 +54,13 @@ class ModelsResponseDTO(BaseModel):
     """Response model for listing all models"""
 
     models: List[ModelConfig] = Field(..., description="List of model configurations")
+
+class BaseModelsResponseDTO(BaseModel):
+    """Response model for listing base models"""
+    models: List[ModelConfig] = Field(..., description="List of base model configurations")
+
+class AddModelFromBaseDTO(BaseModel):
+    """Request model for adding a new model from a base model"""
+    base_model_id: str = Field(..., description="ID of the base model to copy from")
+    new_model_id: str = Field(..., description="ID for the new model")
+    updates: Optional[ModelConfigUpdateDTO] = Field(None, description="Optional configuration updates to apply")

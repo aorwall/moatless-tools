@@ -9,7 +9,7 @@ from typing import Dict, Optional, Callable, Awaitable
 from moatless.benchmark.swebench import create_repository
 from moatless.evaluation.utils import get_moatless_instances
 from moatless.config.agent_config import get_agent
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 from moatless.index import CodeIndex
 from moatless.flow.loop import AgenticLoop
 from moatless.runtime.testbed import TestbedEnvironment
@@ -92,7 +92,7 @@ class ValidationManager:
             repository = create_repository(instance)
 
             index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
-            code_index = CodeIndex.from_index_name(
+            code_index = await CodeIndex.from_index_name_async(
                 instance["instance_id"],
                 index_store_dir=index_store_dir,
                 file_repo=repository,

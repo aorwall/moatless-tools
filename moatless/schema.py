@@ -63,10 +63,6 @@ class FileWithSpans(BaseModel):
         if span_id not in self.span_ids:
             self.span_ids.append(span_id)
 
-    def add_span_ids(self, span_ids: list[str]):
-        for span_id in span_ids:
-            self.add_span_id(span_id)
-
     def __eq__(self, other: "FileWithSpans"):
         return self.file_path == other.file_path and self.span_ids == other.span_ids
 

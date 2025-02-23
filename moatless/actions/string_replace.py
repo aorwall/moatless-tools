@@ -10,8 +10,8 @@ from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
-    FewShotExample,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.repository.file import do_diff
 
@@ -78,6 +78,15 @@ class StringReplaceArgs(ActionArguments):
         self.new_str = remove_line_numbers(self.new_str.rstrip("\n"))
 
         return self
+    
+    @field_validator("old_str", mode='before')
+    @classmethod
+    def validate_old_str(cls, v):
+        if v is None or v.strip() == "":
+            raise ValueError(
+                "StringReplace can only be used to replace existing code defined in `old_str`. Therefore `old_str` cannot be empty and must contain existing code to replace."
+            )
+        return v
 
     @field_validator("new_str")
     @classmethod
@@ -251,7 +260,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             logger.warning(f"Error validating file access: {error}")
             return error
 
-        context_file = file_context.get_context_file(str(path))
+        context_file = await file_context.get_context_file(str(path))
         file_content = context_file.content.expandtabs()
         old_str = args.old_str.expandtabs()
         new_str = args.new_str.expandtabs()
@@ -270,7 +279,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         # Filter matches to only those in context
         in_context_exact_matches = [
-            match for match in exact_matches if context_file.lines_is_in_context(match["start_line"], match["end_line"])
+            match for match in exact_matches if await context_file.lines_is_in_context(match["start_line"], match["end_line"])
         ]
 
         # Set flag if we have exactly one in-context match but more total matches
@@ -286,7 +295,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 in_context_potential_matches = [
                     match
                     for match in potential_matches
-                    if context_file.lines_is_in_context(match["start_line"], match["end_line"])
+                    if await context_file.lines_is_in_context(match["start_line"], match["end_line"])
                 ]
 
                 if len(in_context_potential_matches) == 1:
@@ -331,7 +340,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                 in_context_potential_matches = [
                     match
                     for match in potential_matches
-                    if context_file.lines_is_in_context(match["start_line"], match["end_line"])
+                    if await context_file.lines_is_in_context(match["start_line"], match["end_line"])
                 ]
 
                 if len(potential_matches) > 0 and len(in_context_potential_matches) == 1:
@@ -405,7 +414,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         start_line = exact_matches[0]["start_line"]
         end_line = exact_matches[0]["end_line"]
-        if not context_file.lines_is_in_context(start_line, end_line):
+        if not await  context_file.lines_is_in_context(start_line, end_line):
             properties["flags"] = ["lines_not_in_context"]
             logger.warning(f"Lines {start_line}-{end_line} are not in context for {path}")
 
@@ -429,7 +438,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         # Generate diff and apply changes
         diff = do_diff(str(path), file_content, new_file_content)
 
-        context_file.apply_changes(new_file_content)
+        await context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section
         snippet_start_line = max(0, start_line - SNIPPET_LINES - 1)

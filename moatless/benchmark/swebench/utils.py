@@ -202,6 +202,26 @@ def create_index(
     return code_index
 
 
+
+async def create_index_async(
+    instance: dict,
+    repository: Repository | None = None,
+    index_store_dir: Optional[str] = None,
+):
+    """
+    Create a workspace for the given SWE-bench instance.
+    """
+    if not index_store_dir:
+        index_store_dir = os.getenv("INDEX_STORE_DIR", "/tmp/index_store")
+
+    if not repository:
+        repository = await create_repository_async(instance)
+
+    code_index = await CodeIndex.from_index_name_async(
+        instance["instance_id"], index_store_dir=index_store_dir, file_repo=repository
+    )
+    return code_index
+
 def repository_exists(instance: dict, repo_base_dir: str):
     instance_repo_path = os.path.normpath(os.path.join(repo_base_dir, f"swe-bench_{instance['instance_id']}"))
     return os.path.exists(instance_repo_path)

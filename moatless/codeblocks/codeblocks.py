@@ -86,27 +86,8 @@ class CodeBlockType(Enum):
     def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
         if not tag.startswith("definition"):
             return None
-
-        tag_to_block_type = {
-            "definition.assignment": cls.ASSIGNMENT,
-            "definition.block_delimiter": cls.BLOCK_DELIMITER,
-            "definition.call": cls.CALL,
-            "definition.class": cls.CLASS,
-            "definition.code": cls.CODE,
-            "definition.comment": cls.COMMENT,
-            "definition.compound": cls.COMPOUND,
-            "definition.constructor": cls.CONSTRUCTOR,
-            "definition.dependent_clause": cls.DEPENDENT_CLAUSE,
-            "definition.error": cls.ERROR,
-            "definition.export": cls.EXPORT,
-            "definition.function": cls.FUNCTION,
-            "definition.import": cls.IMPORT,
-            "definition.module": cls.MODULE,
-            "definition.statement": cls.STATEMENT,
-            "definition.test_suite": cls.TEST_SUITE,
-            "definition.test_case": cls.TEST_CASE,
-        }
-        return tag_to_block_type.get(tag)
+            
+        return TAG_TO_BLOCK_TYPE.get(tag)
 
 
 NON_CODE_BLOCKS = [
@@ -118,6 +99,26 @@ NON_CODE_BLOCKS = [
     CodeBlockType.ERROR,
     CodeBlockType.SPACE,
 ]
+
+TAG_TO_BLOCK_TYPE = {
+    "definition.assignment": CodeBlockType.ASSIGNMENT,
+    "definition.block_delimiter": CodeBlockType.BLOCK_DELIMITER,
+    "definition.call": CodeBlockType.CALL,
+    "definition.class": CodeBlockType.CLASS,
+    "definition.code": CodeBlockType.CODE,
+    "definition.comment": CodeBlockType.COMMENT,
+    "definition.compound": CodeBlockType.COMPOUND,
+    "definition.constructor": CodeBlockType.CONSTRUCTOR,
+    "definition.dependent_clause": CodeBlockType.DEPENDENT_CLAUSE,
+    "definition.error": CodeBlockType.ERROR,
+    "definition.export": CodeBlockType.EXPORT,
+    "definition.function": CodeBlockType.FUNCTION,
+    "definition.import": CodeBlockType.IMPORT,
+    "definition.module": CodeBlockType.MODULE,
+    "definition.statement": CodeBlockType.STATEMENT,
+    "definition.test_suite": CodeBlockType.TEST_SUITE,
+    "definition.test_case": CodeBlockType.TEST_CASE,
+}
 
 INDEXED_BLOCKS = [
     CodeBlockType.FUNCTION,

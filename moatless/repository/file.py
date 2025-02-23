@@ -1,11 +1,11 @@
+import asyncio
 import difflib
-import glob
 import logging
 import os
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict
+import anyio
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -69,10 +69,6 @@ class CodeFile(BaseModel):
             self._module = None
 
     @property
-    def supports_codeblocks(self):
-        return self.module is not None
-
-    @property
     def content(self):
         if self.has_been_modified():
             with open(os.path.join(self._repo_path, self.file_path)) as f:
@@ -92,7 +88,7 @@ class CodeFile(BaseModel):
                 return None
 
         return self._module
-
+    
 
 class FileRepository(Repository):
     repo_path: str = Field(..., description="The path to the repository")
@@ -149,6 +145,7 @@ class FileRepository(Repository):
         if os.path.exists(full_path):
             with open(full_path) as f:
                 return f.read()
+        logger.warning(f"File {file_path} does not exist, cannot get content")
         return None
 
     def snapshot(self) -> dict:
@@ -204,7 +201,7 @@ class FileRepository(Repository):
         with open(self.get_full_path(file_path), "w") as f:
             f.write(updated_content)
 
-    def matching_files(self, file_pattern: str):
+    async def matching_files(self, file_pattern: str) -> List[str]:
         """
         Returns a list of files matching the given pattern within the repository.
 
@@ -251,10 +248,11 @@ class FileRepository(Repository):
             if pattern_parts[-1] != filename:
                 file_pattern = "/".join(pattern_parts)
 
-            repo_path = Path(self.repo_path)
+            repo_path = anyio.Path(self.repo_path)
             matched_files = []
-            for path in repo_path.glob(file_pattern):
-                if path.is_file():
+            
+            async for path in repo_path.glob(file_pattern):
+                if await path.is_file():
                     # For exact filename matches, verify the filename matches exactly
                     if not has_wildcards and path.name != filename:
                         continue
@@ -266,47 +264,30 @@ class FileRepository(Repository):
 
         return matched_files
 
-    def find_files(self, file_patterns: list[str]) -> set[str]:
-        found_files = set()
-        for file_pattern in file_patterns:
-            matched_files = self.matching_files(file_pattern)
-            found_files.update(matched_files)
-
-        return found_files
-
-    def has_matching_files(self, file_pattern: str):
-        for _matched_file in glob.iglob(file_pattern, root_dir=self.repo_path, recursive=True):
-            return True
-        return False
-
-    def file_match(self, file_pattern: str, file_path: str):
-        match = False
-        for matched_file in glob.iglob(file_pattern, root_dir=self.repo_path, recursive=True):
-            if matched_file == file_path:
-                match = True
-                break
-        return match
-
-    def find_by_pattern(self, patterns: list[str]) -> List[str]:
+    async def find_by_pattern(self, patterns: list[str]) -> List[str]:
+        """
+        Returns a list of files matching the given patterns within the repository.
+        Uses native async file operations via anyio.Path.
+        """
+        
         matched_files = []
         for pattern in patterns:
-            matched_files.extend(glob.iglob(f"**/{pattern}", root_dir=self.repo_path, recursive=True))
+            repo_path = anyio.Path(self.repo_path)
+            async for path in repo_path.glob(f"**/{pattern}"):
+                if await path.is_file():
+                    relative_path = str(path.relative_to(self.repo_path))
+                    matched_files.append(relative_path)
+        
         return matched_files
-
-    def model_dump(self) -> Dict:
-        return {
-            "type": "file",
-            "path": self.repo_path,
-        }
 
     @classmethod
     def model_validate(cls, obj: Dict):
         repo = cls(repo_path=obj["path"])
         return repo
 
-    def find_exact_matches(self, search_text: str, file_pattern: Optional[str] = None) -> List[tuple[str, int]]:
+    async def find_exact_matches(self, search_text: str, file_pattern: Optional[str] = None) -> List[tuple[str, int]]:
         """
-        Uses grep to search for exact text matches in files.
+        Uses grep to search for exact text matches in files asynchronously.
         """
         matches = []
         if not file_pattern:
@@ -340,17 +321,24 @@ class FileRepository(Repository):
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
 
-            result = subprocess.run(cmd, cwd=self.repo_path, capture_output=True, text=True)
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=self.repo_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = await process.communicate()
 
-            if result.returncode not in (0, 1):  # grep returns 1 if no matches found
-                logger.info(f"Grep returned non-standard exit code: {result.returncode}")
-                if result.stderr:
-                    logger.warning(f"Grep error output: {result.stderr}")
+            if process.returncode not in (0, 1):  # grep returns 1 if no matches found
+                logger.info(f"Grep returned non-standard exit code: {process.returncode}")
+                if stderr:
+                    logger.warning(f"Grep error output: {stderr}")
                 return []
 
-            logger.info(f"Found {len(result.stdout.splitlines())} potential matches")
+            logger.info(f"Found {len(stdout.splitlines())} potential matches")
 
-            for line in result.stdout.splitlines():
+            for line in stdout.splitlines():
                 try:
                     parts = line.split(":", 2)
                     if len(parts) < 2:
@@ -375,7 +363,7 @@ class FileRepository(Repository):
                     logger.info(f"Error parsing line '{line}': {e}")
                     continue
 
-        except subprocess.SubprocessError as e:
+        except Exception as e:
             logger.info(f"Grep command failed: {e}")
             return []
 

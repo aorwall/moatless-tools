@@ -9,6 +9,9 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# Global component cache
+_GLOBAL_COMPONENT_CACHE: Dict[str, Dict[str, Type["MoatlessComponent"]]] = {}
+
 class MoatlessComponent(BaseModel, ABC):
     """Base class for dynamically loadable components.
     
@@ -16,7 +19,7 @@ class MoatlessComponent(BaseModel, ABC):
     1. Automatically discover and load component classes from a package
     2. Support custom components via MOATLESS_COMPONENTS_PATH
     3. Handle component serialization and deserialization
-    4. Manage component type registration
+    4. Manage component type registration with global caching
     
     Usage:
         class Action(MoatlessComponent):
@@ -96,14 +99,17 @@ class MoatlessComponent(BaseModel, ABC):
 
     @classmethod
     def _initialize_components(cls):
-        if not hasattr(cls, "_components") or not cls._components:
-            cls._components = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
+        component_type = cls.get_component_type()
+        if component_type not in _GLOBAL_COMPONENT_CACHE:
+            _GLOBAL_COMPONENT_CACHE[component_type] = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
+        cls._components = _GLOBAL_COMPONENT_CACHE[component_type]
 
     @classmethod
     def _get_components(cls) -> Dict[str, Type["MoatlessComponent"]]:
-        if not hasattr(cls, "_components"):
+        component_type = cls.get_component_type()
+        if component_type not in _GLOBAL_COMPONENT_CACHE:
             cls._initialize_components()
-        return cls._components
+        return _GLOBAL_COMPONENT_CACHE[component_type]
 
     @classmethod
     def _get_package(cls) -> str:

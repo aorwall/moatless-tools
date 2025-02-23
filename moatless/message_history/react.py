@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
     disable_thoughts: bool = Field(default=False, description="Do not include thoughts messages in the history")
 
-    def generate_messages(self, node: Node) -> List[AllMessageValues]:
-        node_messages = self.get_node_messages(node)
+    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
+        node_messages = await self.get_node_messages(node)
         logger.info(f"Node messages: {len(node_messages)}")
 
         messages = []

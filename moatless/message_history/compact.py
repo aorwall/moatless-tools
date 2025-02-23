@@ -30,10 +30,10 @@ class NodeMessage(BaseModel):
 class CompactMessageHistoryGenerator(MessageHistoryGenerator):
     message_cache: bool = Field(default=False, description="Cache the message history if the LLM supports it")
 
-    def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
         messages = []
 
-        node_messages = self.get_node_messages(node)
+        node_messages = await self.get_node_messages(node)
 
         tool_idx = 0
         tokens = 0
@@ -78,7 +78,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
         return messages
 
-    def get_node_messages(self, node: "Node") -> List[NodeMessage]:
+    async def get_node_messages(self, node: "Node") -> List[NodeMessage]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
         Respects token limits while preserving ViewCode context.
@@ -94,7 +94,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
             return []
 
         # Calculate initial token count
-        total_tokens = node.file_context.context_size()
+        total_tokens = await node.file_context.context_size()
         total_tokens += count_tokens(node.get_root().message)
 
         # Pre-calculate test output tokens if there's a patch
@@ -144,10 +144,10 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         file_path = action_step.action.files[0].file_path
 
                         if file_path not in shown_files:
-                            context_file = previous_node.file_context.get_context_file(file_path)
+                            context_file = await previous_node.file_context.get_context_file(file_path)
                             if context_file and (context_file.span_ids or context_file.show_all_spans):
                                 shown_files.add(context_file.file_path)
-                                observation = context_file.to_prompt(
+                                observation = await context_file.to_prompt_async(
                                     show_span_ids=False,
                                     show_line_numbers=True,
                                     exclude_comments=False,
@@ -186,7 +186,8 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                 if self.include_file_context and previous_node.action.name != "ViewCode":
                     files_to_show = set()
                     has_edits = False
-                    for context_file in previous_node.file_context.get_context_files():
+                    context_files = await previous_node.file_context.get_context_files()
+                    for context_file in context_files:
                         if (
                             context_file.was_edited or context_file.was_viewed
                         ) and context_file.file_path not in shown_files:
@@ -202,7 +203,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         observations = []
 
                         for file_path in files_to_show:
-                            context_file = previous_node.file_context.get_context_file(file_path)
+                            context_file = await previous_node.file_context.get_context_file(file_path)
                             if context_file.show_all_spans:
                                 code_spans.append(CodeSpan(file_path=file_path))
                             elif context_file.span_ids:
@@ -215,15 +216,14 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                             else:
                                 continue
 
-                            observations.append(
-                                context_file.to_prompt(
-                                    show_span_ids=False,
-                                    show_line_numbers=True,
-                                    exclude_comments=False,
-                                    show_outcommented_code=True,
-                                    outcomment_code_comment="... rest of the code",
-                                )
+                            prompt = await context_file.to_prompt_async(
+                                show_span_ids=False,
+                                show_line_numbers=True,
+                                exclude_comments=False,
+                                show_outcommented_code=True,
+                                outcomment_code_comment="... rest of the code",
                             )
+                            observations.append(prompt)
 
                         if code_spans:
                             thought = f"Let's view the content in the updated files"

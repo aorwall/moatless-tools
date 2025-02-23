@@ -18,7 +18,7 @@ from moatless.utils.moatless import get_moatless_dir
 from moatless.value_function.base import BaseValueFunction
 
 from moatless.config.agent_config import get_agent
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ from moatless.flow.loop import AgenticLoop
 from moatless.agent.code_agent import CodingAgent
 from moatless.benchmark.swebench import create_repository
 from moatless.index import CodeIndex
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 from moatless.config.agent_config import get_agent
 from moatless.completion.log_handler import LogHandler
 from moatless.events import BaseEvent, event_bus

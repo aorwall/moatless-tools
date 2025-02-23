@@ -10,6 +10,7 @@ from moatless.actions.action import Action
 from moatless.actions.action import CompletionModelMixin
 from moatless.actions.schema import (
     ActionArguments,
+    Observation,
 )
 from moatless.agent.events import (
     AgentEvent,
@@ -35,7 +36,7 @@ from moatless.node import Node, ActionStep
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 
 logger = logging.getLogger(__name__)
 
@@ -170,12 +171,11 @@ class ActionAgent(MoatlessComponent):
 
         try:
             await self._emit_event(AgentStarted(agent_id=self.agent_id, node_id=node.node_id))
-            if self._message_generator:
-                messages = self._message_generator.generate_messages(node)
-                logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
+            messages = await self._message_generator.generate_messages(node)
+            logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
             completion_response = await self._completion_model.create_completion(
-                messages=messages,
+                messages=messages
             )
             node.completions["build_action"] = completion_response.completion
 
@@ -197,7 +197,7 @@ class ActionAgent(MoatlessComponent):
 
         except CompletionError as e:
             node.terminal = True
-            node.error = traceback.format_exc()
+
             if e.last_completion:
                 logger.error(f"Node{node.node_id}: Build action failed with completion error: {e}")
 
@@ -211,12 +211,14 @@ class ActionAgent(MoatlessComponent):
                 logger.exception(f"Node{node.node_id}: Build action failed with error ")
 
             if isinstance(e, CompletionRejectError):
+                node.error = f"Completion validation error: {e.message}"
                 return
             else:
+                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
                 raise e
         except Exception as e:
             node.terminal = True
-            node.error = traceback.format_exc()
+            node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             logger.error(f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}")
 
             raise e
@@ -235,7 +237,7 @@ class ActionAgent(MoatlessComponent):
         for action_step in node.action_steps:
             await self._execute(node, action_step)
 
-    async def _execute(self, node: Node, action_step: ActionStep):
+    async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:
         action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
@@ -246,8 +248,11 @@ class ActionAgent(MoatlessComponent):
                 f"Action {type(node.action)} not found in action map with actions: {self.action_map.keys()}"
             )
 
+        return await action.execute(action_step.action, file_context=node.file_context)
+
+    async def _execute(self, node: Node, action_step: ActionStep):
         try:
-            action_step.observation = await action.execute(action_step.action, file_context=node.file_context)
+            action_step.observation = await self._execute_action_step(node, action_step)
 
             await self._emit_event(
                 AgentActionExecuted(
@@ -272,8 +277,7 @@ class ActionAgent(MoatlessComponent):
                 f"Observation: {action_step.observation.message if node.observation else None}"
             )
 
-        except CompletionRejectError as e:
-            logger.warning(f"Node{node.node_id}: Action rejected: {e.message}")
+        except CompletionError as e:
             if e.last_completion:
                 action_step.completion = Completion.from_llm_completion(
                     input_messages=e.messages,
@@ -281,13 +285,19 @@ class ActionAgent(MoatlessComponent):
                     model=self.completion_model.model,
                     usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
-            node.error = traceback.format_exc()
+
             node.terminal = True
-            raise e
+
+            if isinstance(e, CompletionRejectError):
+                node.error = f"Completion validation error: {e.message}"
+                return
+            else:
+                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                raise e
         
         except Exception as e:
             logger.exception(f"Node{node.node_id}: Execution of action {action_step.action.name} failed.")
-            node.error = traceback.format_exc()
+            node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             node.terminal = True
             raise e
 

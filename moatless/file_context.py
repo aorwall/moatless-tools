@@ -3,8 +3,11 @@ import io
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set, Tuple, Awaitable
+from functools import cached_property
+from typing import Optional, List, Dict, Set, Tuple
+import asyncio
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -53,7 +56,6 @@ class ContextFile(BaseModel):
 
     Attributes:
         file_path (str): The path to the file within the repository.
-        accumulated_patch (Optional[str]): A Git-formatted patch representing all changes from the original content.
         patch (Optional[str]): A Git-formatted patch representing the latest changes applied in this ContextFile.
         spans (List[ContextSpan]): A list of spans associated with this file.
         show_all_spans (bool): A flag to indicate whether to display all spans.
@@ -77,6 +79,8 @@ class ContextFile(BaseModel):
     _cached_base_content: Optional[str] = PrivateAttr(None)
     _cached_content: Optional[str] = PrivateAttr(None)
     _cached_module: Optional[Module] = PrivateAttr(None)
+    _module_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
+    _thread_pool: ThreadPoolExecutor = PrivateAttr(default_factory=lambda: ThreadPoolExecutor(max_workers=1))
 
     _repo: Repository = PrivateAttr()
 
@@ -105,15 +109,17 @@ class ContextFile(BaseModel):
         self._initial_patch = initial_patch
         self._is_new = False if repo is None else not repo.file_exists(file_path)
 
-    def _add_import_span(self):
+    async def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
-        if self.module:
-            # Always include init spans like 'imports' to context file
-            for child in self.module.children:
-                if (child.type == CodeBlockType.IMPORT) and child.belongs_to_span.span_id:
-                    self.add_span(child.belongs_to_span.span_id, pinned=True)
 
-    def get_base_content(self) -> str:
+        module = await self.async_module()
+        if module:
+            # Always include init spans like 'imports' to context file
+            for child in module.children:
+                if (child.type == CodeBlockType.IMPORT) and child.belongs_to_span.span_id:
+                    await self.add_span(child.belongs_to_span.span_id, pinned=True)
+
+    def get_base_content(self) -> str | None:
         """
         Retrieves the base content of the file by applying the initial_patch to the original content.
 
@@ -125,12 +131,13 @@ class ContextFile(BaseModel):
             Exception: If applying the initial_patch fails.
         """
         if not self._repo:
-            return None
+            raise RuntimeError("No repository, cannot get base content")
 
         if self._cached_base_content is not None:
             return self._cached_base_content
 
         if not self._repo.file_exists(self.file_path):
+            logger.warning(f"File {self.file_path} does not exist, cannot get base content")
             original_content = ""
         else:
             original_content = self._repo.get_file_content(self.file_path)
@@ -145,19 +152,50 @@ class ContextFile(BaseModel):
 
         return self._cached_base_content
 
-    @property
+    @cached_property
     def module(self) -> Module | None:
+        """
+        Synchronous access to the module. For async contexts, use async_module instead.
+        This property will block if parsing is needed.
+        """
         if not self._repo:
             return None
 
         if self._cached_module is not None:
             return self._cached_module
+        
+        raise RuntimeError("No cached module, use async_module instead")
 
-        parser = get_parser_by_path(self.file_path)
-        if parser:
-            self._cached_module = parser.parse(self.content)
+    async def async_module(self) -> Module | None:
+        """
+        Asynchronous access to the module that won't block the event loop.
+        Uses the parser's async parse method for better performance.
+        """
+        if not self._repo:
+            logger.warning("No repository, cannot parse module")
+            return None
+        
 
-        return self._cached_module
+        if not self.content:
+            logger.warning("No content, cannot parse module")
+            return None
+
+        if self._cached_module is not None:
+            return self._cached_module
+
+        async with self._module_lock:
+            # Check again in case another task completed the parsing while we were waiting
+            if self._cached_module is not None:
+                return self._cached_module
+
+            parser = get_parser_by_path(self.file_path)
+            if parser:
+                # Use the parser's async parse method directly instead of running sync parse in executor
+                self._cached_module = await parser.parse_async(self.content)
+            else:
+                logger.warning(f"No parser found for {self.file_path}")
+
+            return self._cached_module
 
     @property
     def content(self) -> str:
@@ -182,7 +220,7 @@ class ContextFile(BaseModel):
 
         return self._cached_content
 
-    def apply_changes(self, updated_content: str) -> set[str]:
+    async def apply_changes(self, updated_content: str) -> set[str]:
         """
         Applies new content to the ContextFile by generating a patch between the base content and the new content.
 
@@ -219,7 +257,7 @@ class ContextFile(BaseModel):
 
                 if modified_start is not None:
                     # Add the modified line span to context
-                    span_ids = self.add_line_span(modified_start, modified_end)
+                    span_ids = await self.add_line_span(modified_start, modified_end)
                     new_span_ids.update(span_ids)
 
         # Invalidate cached content
@@ -376,7 +414,7 @@ class ContextFile(BaseModel):
     def span_ids(self):
         return {span.span_id for span in self.spans}
 
-    def to_prompt(
+    async def to_prompt_async(
         self,
         show_span_ids=False,
         show_line_numbers=False,
@@ -387,13 +425,14 @@ class ContextFile(BaseModel):
         only_signatures: bool = False,
         max_tokens: Optional[int] = None,
     ):
-        if self.module:
+        module = await self.async_module()
+        if module:
             if not self.show_all_spans and self.span_ids is not None and len(self.span_ids) == 0:
                 logger.warning(f"No span ids provided for {self.file_path}, return empty")
                 return ""
 
             code = self._to_prompt(
-                code_block=self.module,
+                code_block=module,
                 show_span_id=show_span_ids,
                 show_line_numbers=show_line_numbers,
                 outcomment_code_comment=outcomment_code_comment,
@@ -589,14 +628,15 @@ class ContextFile(BaseModel):
         self._cached_module = None
         self.was_edited = True
 
-    def context_size(self):
-        if self.module:
+    async def context_size(self):
+        module = await self.async_module()
+        if module:
             if self.span_ids is None:
-                return self.module.sum_tokens()
+                return module.sum_tokens()
             else:
                 tokens = 0
                 for span_id in self.span_ids:
-                    span = self.module.find_span_by_id(span_id)
+                    span = module.find_span_by_id(span_id)
                     if span:
                         tokens += span.tokens
                 return tokens
@@ -606,7 +646,7 @@ class ContextFile(BaseModel):
     def has_span(self, span_id: str):
         return span_id in self.span_ids
 
-    def add_spans(
+    async def add_spans(
         self,
         span_ids: Set[str],
         tokens: Optional[int] = None,
@@ -614,9 +654,9 @@ class ContextFile(BaseModel):
         add_extra: bool = True,
     ):
         for span_id in span_ids:
-            self.add_span(span_id, tokens=tokens, pinned=pinned, add_extra=add_extra)
+            await self.add_span(span_id, tokens=tokens, pinned=pinned, add_extra=add_extra)
 
-    def add_span(
+    async def add_span(
         self,
         span_id: str,
         start_line: Optional[int] = None,
@@ -633,7 +673,8 @@ class ContextFile(BaseModel):
             existing_span.pinned = pinned
             return False
         else:
-            span = self.module.find_span_by_id(span_id)
+            module = await self.async_module()
+            span = module.find_span_by_id(span_id)
             if span:
                 self.spans.append(
                     ContextSpan(
@@ -645,13 +686,13 @@ class ContextFile(BaseModel):
                     )
                 )
                 if add_extra:
-                    self._add_class_span(span)
+                    await self._add_class_span(span)
                 return True
             else:
                 logger.warning(f"Tried to add not existing span id {span_id} in file {self.file_path}")
                 return False
 
-    def _add_class_span(self, span: BlockSpan):
+    async def _add_class_span(self, span: BlockSpan):
         if span.initiating_block.type != CodeBlockType.CLASS:
             class_block = span.initiating_block.find_type_in_parents(CodeBlockType.CLASS)
         elif span.initiating_block.type == CodeBlockType.CLASS:
@@ -675,21 +716,22 @@ class ContextFile(BaseModel):
         if class_block.belongs_to_span.span_id not in self.span_ids:
             self.spans.append(ContextSpan(span_id=class_block.belongs_to_span.span_id))
 
-    def add_line_span(self, start_line: int, end_line: int | None = None, add_extra: bool = True) -> list[str]:
+    async def add_line_span(self, start_line: int, end_line: int | None = None, add_extra: bool = True) -> list[str]:
         self.was_viewed = True
 
-        if not self.module:
+        module = await self.async_module()
+        if not module:
             logger.warning(f"Could not find module for file {self.file_path}")
             return []
 
         logger.debug(f"Adding line span {start_line} - {end_line} to {self.file_path}")
-        blocks = self.module.find_blocks_by_line_numbers(start_line, end_line, include_parents=True)
+        blocks = module.find_blocks_by_line_numbers(start_line, end_line, include_parents=True)
 
         added_spans = []
         for block in blocks:
             if block.belongs_to_span and block.belongs_to_span.span_id not in self.span_ids:
                 added_spans.append(block.belongs_to_span.span_id)
-                self.add_span(
+                await self.add_span(
                     block.belongs_to_span.span_id,
                     start_line=start_line,
                     end_line=end_line,
@@ -698,7 +740,7 @@ class ContextFile(BaseModel):
 
         return added_spans
 
-    def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
+    async def lines_is_in_context(self, start_line: int, end_line: int) -> bool:
         """
         Check if the given line range's start and end points are covered by spans in the context.
         A single span can cover both points, or different spans can cover each point.
@@ -713,14 +755,15 @@ class ContextFile(BaseModel):
         if self.show_all_spans:
             return True
 
-        if not self.module:
+        module = await self.async_module()
+        if not module:
             return False
 
         start_covered = False
         end_covered = False
 
         for span in self.spans:
-            block_span = self.module.find_span_by_id(span.span_id)
+            block_span = module.find_span_by_id(span.span_id)
             if block_span:
                 if block_span.start_line <= start_line <= block_span.end_line:
                     start_covered = True
@@ -737,28 +780,17 @@ class ContextFile(BaseModel):
     def remove_all_spans(self):
         self.spans = [span for span in self.spans if span.pinned]
 
-    def get_spans(self) -> List[BlockSpan]:
+    async def get_spans(self) -> List[BlockSpan]:
         block_spans = []
         for span in self.spans:
-            if not self.module:
+            module = await self.async_module()
+            if not module:
                 continue
 
-            block_span = self.module.find_span_by_id(span.span_id)
+            block_span = module.find_span_by_id(span.span_id)
             if block_span:
                 block_spans.append(block_span)
         return block_spans
-
-    def get_block_span(self, span_id: str) -> Optional[BlockSpan]:
-        if not self.module:
-            return None
-        for span in self.spans:
-            if span.span_id == span_id:
-                block_span = self.module.find_span_by_id(span_id)
-                if block_span:
-                    return block_span
-                else:
-                    logger.warning(f"Could not find span with id {span_id} in file {self.file_path}")
-        return None
 
     def get_span(self, span_id: str) -> Optional[ContextSpan]:
         for span in self.spans:
@@ -781,6 +813,11 @@ class ContextFile(BaseModel):
             bool: True if the file is new, False otherwise
         """
         return self._is_new
+
+    def __del__(self):
+        """Cleanup thread pool on object deletion"""
+        if hasattr(self, '_thread_pool'):
+            self._thread_pool.shutdown(wait=False)
 
 
 class TestFile(BaseModel):
@@ -920,11 +957,11 @@ class FileContext(BaseModel):
             FileWithSpans(file_path=file_path, span_ids=list(file.span_ids)) for file_path, file in self._files.items()
         ]
 
-    def add_files_with_spans(self, files_with_spans: List[FileWithSpans]):
+    async def add_files_with_spans(self, files_with_spans: List[FileWithSpans]):
         for file_with_spans in files_with_spans:
-            self.add_spans_to_context(file_with_spans.file_path, set(file_with_spans.span_ids))
+            await self.add_spans_to_context(file_with_spans.file_path, set(file_with_spans.span_ids))
 
-    def add_file(self, file_path: str, show_all_spans: bool = False, add_extra: bool = True) -> ContextFile:
+    async def add_file(self, file_path: str, show_all_spans: bool = False, add_extra: bool = True) -> ContextFile:
         if file_path not in self._files:
             self._files[file_path] = ContextFile(
                 file_path=file_path,
@@ -933,16 +970,16 @@ class FileContext(BaseModel):
                 repo=self._repo,
             )
             if add_extra:
-                self._files[file_path]._add_import_span()
+                await self._files[file_path]._add_import_span()
 
         return self._files[file_path]
 
-    def add_file_with_lines(self, file_path: str, start_line: int, end_line: Optional[int] = None):
+    async def add_file_with_lines(self, file_path: str, start_line: int, end_line: Optional[int] = None):
         end_line = end_line or start_line
         if file_path not in self._files:
-            self.add_file(file_path)
+            await self.add_file(file_path)
 
-        self._files[file_path].add_line_span(start_line, end_line)
+        await self._files[file_path].add_line_span(start_line, end_line)
 
     def remove_file(self, file_path: str):
         if file_path in self._files:
@@ -960,10 +997,14 @@ class FileContext(BaseModel):
         return list(self._files.values())
 
     @property
+    def file_paths(self):
+        return list(self._files.keys())
+
+    @property
     def test_files(self):
         return list(self._test_files.values())
 
-    def add_spans_to_context(
+    async def add_spans_to_context(
         self,
         file_path: str,
         span_ids: Set[str],
@@ -972,16 +1013,16 @@ class FileContext(BaseModel):
         add_extra: bool = True,
     ):
         if not self.has_file(file_path):
-            context_file = self.add_file(file_path)
+            context_file = await self.add_file(file_path)
         else:
-            context_file = self.get_context_file(file_path)
+            context_file = await self.get_context_file(file_path)
 
         if context_file:
-            context_file.add_spans(span_ids, tokens, pinned=pinned, add_extra=add_extra)
+            await context_file.add_spans(span_ids, tokens, pinned=pinned, add_extra=add_extra)
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
 
-    def add_span_to_context(
+    async def add_span_to_context(
         self,
         file_path: str,
         span_id: str,
@@ -990,17 +1031,17 @@ class FileContext(BaseModel):
         add_extra: bool = True,
     ) -> bool:
         if not self.has_file(file_path):
-            context_file = self.add_file(file_path)
+            context_file = await self.add_file(file_path, add_extra=add_extra)
         else:
-            context_file = self.get_context_file(file_path)
+            context_file = await self.get_context_file(file_path)
 
         if context_file:
-            return context_file.add_span(span_id, tokens=tokens, pinned=pinned, add_extra=add_extra)
+            return await context_file.add_span(span_id, tokens=tokens, pinned=pinned, add_extra=add_extra)
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
             return False
 
-    def add_line_span_to_context(
+    async def add_line_span_to_context(
         self,
         file_path: str,
         start_line: int,
@@ -1008,45 +1049,15 @@ class FileContext(BaseModel):
         add_extra: bool = True,
     ) -> List[str]:
         if not self.has_file(file_path):
-            context_file = self.add_file(file_path, add_extra=add_extra)
+            context_file = await self.add_file(file_path, add_extra=add_extra)
         else:
-            context_file = self.get_context_file(file_path)
+            context_file = await self.get_context_file(file_path)
 
         if context_file:
-            return context_file.add_line_span(start_line, end_line, add_extra=add_extra)
+            return await context_file.add_line_span(start_line, end_line, add_extra=add_extra)
         else:
             logger.warning(f"Could not find file {file_path} in the repository")
             return []
-
-    def remove_span_from_context(self, file_path: str, span_id: str, remove_file: bool = False):
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            context_file.remove_span(span_id)
-
-            if not context_file.spans and remove_file:
-                self.remove_file(file_path)
-
-    def remove_spans_from_context(self, file_path: str, span_ids: List[str], remove_file: bool = False):
-        for span_id in span_ids:
-            self.remove_span_from_context(file_path, span_id, remove_file)
-
-    def get_spans(self, file_path: str) -> List[BlockSpan]:
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return context_file.get_spans()
-        return []
-
-    def get_span(self, file_path: str, span_id: str) -> Optional[BlockSpan]:
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return context_file.get_block_span(span_id)
-        return None
-
-    def has_span(self, file_path: str, span_id: str):
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return span_id in context_file.span_ids
-        return False
 
     def apply(self, file_context: "FileContext"):
         """
@@ -1067,8 +1078,8 @@ class FileContext(BaseModel):
     def has_file(self, file_path: str):
         return file_path in self._files and (self._files[file_path].spans or self._files[file_path].show_all_spans)
 
-    def get_file(self, file_path: str) -> Optional[ContextFile]:
-        return self.get_context_file(file_path)
+    async def get_file(self, file_path: str) -> Optional[ContextFile]:
+        return await self.get_context_file(file_path)
 
     def file_exists(self, file_path: str):
         context_file = self._files.get(file_path)
@@ -1077,7 +1088,7 @@ class FileContext(BaseModel):
     def is_directory(self, file_path: str):
         return self._repo.is_directory(file_path)
 
-    def get_context_file(self, file_path: str, add_extra: bool = False) -> Optional[ContextFile]:
+    async def get_context_file(self, file_path: str, add_extra: bool = False) -> Optional[ContextFile]:
         if self._repo and hasattr(self._repo, "get_relative_path"):
             file_path = self._repo.get_relative_path(file_path)
 
@@ -1092,19 +1103,23 @@ class FileContext(BaseModel):
                 logger.info(f"get_context_file({file_path}) File is a directory")
                 return None
 
-            self.add_file(file_path, add_extra=add_extra)
+            await self.add_file(file_path, add_extra=add_extra)
             context_file = self._files[file_path]
 
         return context_file
 
-    def get_context_files(self) -> List[ContextFile]:
+    async def get_context_files(self) -> List[ContextFile]:
         file_paths = list(self._files.keys())
+        context_files = []
         for file_path in file_paths:
-            yield self.get_context_file(file_path)
+            context_file = await self.get_context_file(file_path)
+            if context_file:
+                context_files.append(context_file)
+        return context_files
 
-    def context_size(self):
+    async def context_size(self):
         if self._repo:
-            content = self.create_prompt(
+            content = await self.create_prompt_async(
                 show_span_ids=False,
                 show_line_numbers=True,
                 show_outcommented_code=True,
@@ -1117,8 +1132,8 @@ class FileContext(BaseModel):
         # sum(file.context_size() for file in self._files.values())
         return 0
 
-    def available_context_size(self):
-        return self._max_tokens - self.context_size()
+    async def available_context_size(self):
+        return self._max_tokens - await self.context_size()
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
         self._repo.save_file(file_path, updated_content)
@@ -1133,7 +1148,7 @@ class FileContext(BaseModel):
     def strip_line_breaks_only(self, text):
         return text.lstrip("\n\r").rstrip("\n\r")
 
-    def create_prompt(
+    async def create_prompt_async(
         self,
         show_span_ids=False,
         show_line_numbers=False,
@@ -1147,9 +1162,10 @@ class FileContext(BaseModel):
         file_contexts = []
         current_tokens = 0
 
-        for context_file in self.get_context_files():
+        context_files = await self.get_context_files()
+        for context_file in context_files:
             if not files or context_file.file_path in files:
-                content = context_file.to_prompt(
+                content = await context_file.to_prompt_async(
                     show_span_ids,
                     show_line_numbers,
                     exclude_comments,
@@ -1258,7 +1274,7 @@ class FileContext(BaseModel):
 
         return diff_context
 
-    def create_summary(self) -> str:
+    async def create_summary(self) -> str:
         """
         Creates a summary of the files and spans in the context.
 
@@ -1269,9 +1285,9 @@ class FileContext(BaseModel):
             return "No files in context"
 
         summary = []
-        for context_file in self.get_context_files():
+        for context_file in await self.get_context_files():
             # Get file stats
-            tokens = context_file.context_size()
+            tokens = await context_file.context_size()
 
             # Get patch stats if available
             patch_stats = ""
@@ -1299,9 +1315,10 @@ class FileContext(BaseModel):
 
         return "\n".join(summary)
 
-    def add_file_context(self, other_context: "FileContext") -> List[str]:
+    async def add_file_context(self, other_context: "FileContext", add_extra: bool = True) -> List[str]:
         """
         Adds spans from another FileContext to the current one and returns newly added span IDs.
+        Also copies over cached content and module if they exist.
 
         Args:
             other_context: The FileContext to merge into this one
@@ -1315,18 +1332,25 @@ class FileContext(BaseModel):
             file_path = other_file.file_path
 
             if not self.has_file(file_path):
-                # Create new file if it doesn't exist
-                context_file = self.add_file(file_path)
+                # Create new file if it doesn't exist, preserving cached content and module
+                context_file = ContextFile(
+                    file_path=file_path,
+                    repo=self._repo,
+                )
+                self._files[file_path] = context_file
             else:
-                context_file = self.get_context_file(file_path)
+                context_file = await self.get_context_file(file_path)
 
             # Add spans that don't already exist
             for span in other_file.spans:
-                if context_file.add_span(span.span_id):
+                if await context_file.add_span(span.span_id):
                     new_span_ids.append(span.span_id)
 
             # Copy show_all_spans flag if either context has it enabled
             context_file.show_all_spans = context_file.show_all_spans or other_file.show_all_spans
+
+            if add_extra:
+                await context_file._add_import_span()
 
         return new_span_ids
 
@@ -1381,7 +1405,7 @@ class FileContext(BaseModel):
                 self.add_test_file(test_file)
                 if not self.has_file(test_file):
                     logger.info(f"Adding test file: {test_file} to context")
-                    self.add_file(test_file, add_extra=False)
+                    await self.add_file(test_file, add_extra=False)
         elif self._test_files:
             test_files = list(self._test_files.keys())
         else:
@@ -1484,6 +1508,11 @@ class FileContext(BaseModel):
     def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
         """
         Returns detailed output for each failed or errored test result.
+        For long messages, shows the first and last portions with middle truncated.
+
+        Args:
+            max_tokens (int): Maximum total tokens for all test details
+            max_chars_per_test (int): Maximum characters per test message before truncating
 
         Returns:
             str: Formatted string containing details of failed tests
@@ -1504,8 +1533,11 @@ class FileContext(BaseModel):
                             attributes += f", line: {result.line}"
 
                     if len(result.message) > max_chars_per_test:
-                        truncated_message = result.message[:max_chars_per_test]
-                        truncated_message += "\n...truncated"
+                        # Show first and last portions of the message
+                        chars_per_section = max_chars_per_test // 2
+                        start_section = result.message[:chars_per_section]
+                        end_section = result.message[-chars_per_section:]
+                        truncated_message = f"{start_section}\n\n... {len(result.message) - max_chars_per_test} characters truncated ...\n\n{end_section}"
                     else:
                         truncated_message = result.message
 

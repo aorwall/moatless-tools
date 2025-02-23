@@ -86,6 +86,6 @@ async def delete_agent_config_api(agent_id: str):
 def _create_agent(agent_id: str, action_configs: List[ActionConfigDTO], system_prompt: str) -> ActionAgent:
     actions = []
     for action_config in action_configs:
-        actions.append(Action.create_by_name(action_config.title, **action_config.properties))
+        actions.append(Action.model_validate(action_config.properties))
     logger.info(f"Created actions: {actions}")
     return ActionAgent(agent_id=agent_id, actions=actions, system_prompt=system_prompt)

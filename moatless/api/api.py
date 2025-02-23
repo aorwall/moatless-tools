@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Set
+from collections import defaultdict
 
 from fastapi import (
     FastAPI,
@@ -33,6 +34,14 @@ from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
 from moatless.workspace import Workspace
 
+import psutil
+import os
+import asyncio
+from datetime import datetime
+import gc
+import tracemalloc
+from collections import Counter
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,9 +59,12 @@ class ConnectionManager:
             logger.error(f"Failed to accept WebSocket connection: {e}")
             raise
 
-    def disconnect(self, websocket: WebSocket):
+    async def disconnect(self, websocket: WebSocket):
+        """Safely disconnect a WebSocket connection."""
         try:
             self.active_connections.discard(websocket)
+            if not websocket.client_state.DISCONNECTED:
+                await websocket.close()
             logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
         except Exception as e:
             logger.error(f"Error during WebSocket disconnect: {e}")
@@ -76,7 +88,7 @@ class ConnectionManager:
                 disconnected.add(connection)
     
         for connection in disconnected:
-            self.disconnect(connection)
+            await self.disconnect(connection)
 
 manager = ConnectionManager()
 
@@ -92,12 +104,114 @@ async def handle_system_event(trajectory_id: str, project_id: str, event: BaseEv
     logger.debug(f"Broadcasting event: {message}")
     await manager.broadcast_message(message)
 
+class MemoryMonitor:
+    def __init__(self, interval: int = 300):  # Changed to 5 minutes default
+        self.interval = interval
+        self._memory_log_dir = Path("profiles/memory")
+        self._memory_log_dir.mkdir(parents=True, exist_ok=True)
+        self._task = None
+        self._running = False
+        self._snapshot = None
+        self._sample_count = 0
+        tracemalloc.start(10)  # Reduced from 25 to 10 frames to lower overhead
+
+    def _should_take_detailed_snapshot(self) -> bool:
+        """Only take detailed snapshots periodically to reduce overhead."""
+        self._sample_count += 1
+        return self._sample_count % 5 == 0  # Detailed snapshot every 5th time
+
+    async def start(self):
+        if self._running:
+            return
+        
+        self._running = True
+        self._snapshot = tracemalloc.take_snapshot()
+        self._task = asyncio.create_task(self._monitor())
+        logger.info("Memory monitoring started with tracemalloc")
+
+    async def stop(self):
+        if not self._running:
+            return
+        
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        tracemalloc.stop()
+        logger.info("Memory monitoring stopped")
+
+    async def _monitor(self):
+        while self._running:
+            try:
+                process = psutil.Process(os.getpid())
+                memory_info = process.memory_info()
+                timestamp = datetime.now().isoformat()
+                
+                # Basic metrics always collected
+                log_entry = {
+                    "timestamp": timestamp,
+                    "rss": memory_info.rss,
+                    "vms": memory_info.vms,
+                    "connections": len(manager.active_connections) if hasattr(manager, 'active_connections') else 0
+                }
+
+                # Detailed metrics only collected periodically
+                if self._should_take_detailed_snapshot():
+                    gc.collect()  # Force garbage collection
+                    snapshot = tracemalloc.take_snapshot()
+                    
+                    if self._snapshot:
+                        stats = snapshot.compare_to(self._snapshot, 'lineno')
+                        significant_changes = [
+                            (stat.traceback[0].filename, stat.size_diff)
+                            for stat in stats[:3]  # Only track top 3 changes
+                            if abs(stat.size_diff) > 100000  # Only track significant changes (>100KB)
+                        ]
+                        
+                        if significant_changes:
+                            log_entry["memory_growth"] = {
+                                str(filename): size_diff
+                                for filename, size_diff in significant_changes
+                            }
+                    
+                    self._snapshot = snapshot
+                    
+                    # Basic object counting without expensive type checks
+                    log_entry["gc_stats"] = {
+                        "collections": gc.get_count(),
+                        "objects": len(gc.get_objects()),
+                        "garbage": len(gc.garbage)
+                    }
+                
+                log_file = self._memory_log_dir / f"api_memory_{datetime.now().strftime('%Y%m%d')}.json"
+                with open(log_file, "a") as f:
+                    f.write(json.dumps(log_entry) + "\n")
+                
+                await asyncio.sleep(self.interval)
+            except Exception as e:
+                logger.error(f"Error logging memory usage: {e}")
+                await asyncio.sleep(self.interval)
+
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
     api = FastAPI(title="Moatless API")
     
+    # Initialize memory monitor with 5 minute interval
+    memory_monitor = MemoryMonitor(interval=300)  # Changed from 60 to 300 seconds
+
+    @api.on_event("startup")
+    async def startup_event():
+        await memory_monitor.start()
+
+    @api.on_event("shutdown")
+    async def shutdown_event():
+        await memory_monitor.stop()
+
     # Update CORS middleware configuration
     origins = [
         "http://localhost:5173",  # Development frontend
@@ -143,7 +257,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             logger.error(f"Failed to establish WebSocket connection: {e}")
             raise
         finally:
-            manager.disconnect(websocket)
+            await manager.disconnect(websocket)
 
     if workspace is not None:
 

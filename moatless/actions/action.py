@@ -10,7 +10,6 @@ from moatless.actions.schema import (
     ActionSchema,
     Observation,
     RewardScaleEntry,
-    FewShotExample,
 )
 from moatless.completion.base import BaseCompletionModel
 from moatless.file_context import FileContext
@@ -19,6 +18,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.component import MoatlessComponent
 from moatless.workspace import Workspace
+from moatless.completion.schema import FewShotExample
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +200,7 @@ class Action(MoatlessComponent):
 
         action_class = cls.get_action_by_name(name)
         if not action_class:
-            raise ValueError(f"Unknown action: {name}")
+            raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
         return action_class(**kwargs)
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:

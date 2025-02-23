@@ -5,7 +5,8 @@ from typing import List, Optional, Tuple, Type, ClassVar
 
 from pydantic import Field, model_validator
 
-from moatless.actions.schema import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments
+from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.file_context import FileContext
 
@@ -90,10 +91,10 @@ class FindCodeSnippet(SearchBaseAction):
         description="The maximum number of search results to return. Default is 10.",
     )
 
-    def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
+    async def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
         logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
 
-        matches = self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
+        matches = await self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
 
         if args.file_pattern:
             # Normalize the pattern to handle both **/*.py and *.py cases
@@ -108,7 +109,6 @@ class FindCodeSnippet(SearchBaseAction):
         for file_path, start_line in matches[: self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())
             end_line = start_line + num_lines - 1
-
-            search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
+            await search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
 
         return search_result_context, False

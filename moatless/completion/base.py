@@ -3,10 +3,14 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Optional, List, Union, Any, Dict
+from typing import Optional, List, Union, Any, Dict, Type, Callable, Tuple, Awaitable
 
 import tenacity
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
+
+import litellm
+from litellm import BadRequestError, RateLimitError
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 from moatless.completion.model import Completion, Usage
 from moatless.completion.schema import (
@@ -90,8 +94,13 @@ class CompletionResponse(BaseModel):
             )
         return self.structured_outputs[0] if self.structured_outputs else None
 
+ValidationFunction = Callable[
+    [List[ResponseSchema], Optional[str], List[str]], 
+    Awaitable[Tuple[List[ResponseSchema], Optional[str], List[str]]]
+]
 
 class BaseCompletionModel(BaseModel, ABC):
+
     model_id: str = Field(..., description="The ID of the model")
     model: str = Field(..., description="The model to use for completion")
     temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
@@ -127,6 +136,7 @@ class BaseCompletionModel(BaseModel, ABC):
     _response_schema: Optional[List[type[ResponseSchema]]] = PrivateAttr(default=None)
     _system_prompt: Optional[str] = PrivateAttr(default=None)
     _few_shot_prompt: Optional[str] = PrivateAttr(default=None)
+    _post_validation_fn: Optional[ValidationFunction] = PrivateAttr(default=None)
 
     _completion_params: Optional[Dict[str, Union[str, Dict, List]]] = None
     _initialized: bool = False
@@ -135,6 +145,7 @@ class BaseCompletionModel(BaseModel, ABC):
         self,
         response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]],
         system_prompt: str | None = None,
+        post_validation_fn: Optional[ValidationFunction] = None,
     ) -> None:
         """Initialize the completion model with response schema and system prompt.
 
@@ -144,6 +155,7 @@ class BaseCompletionModel(BaseModel, ABC):
         Args:
             response_schema: The schema(s) to validate responses against
             system_prompt: The system prompt to use for completions
+            post_validation_fn: Optional function to run after _validate_completion for additional validation
 
         Raises:
             CompletionRuntimeError: If any schema is not a subclass of ResponseSchema
@@ -171,15 +183,17 @@ class BaseCompletionModel(BaseModel, ABC):
         if self._system_prompt and self._system_prompt != system_prompt:
             raise ValueError("System prompt cannot be changed after initialization")
 
+
         self._response_schema = schemas
         self._completion_params = self._get_completion_params(self._response_schema)
+        self._post_validation_fn = post_validation_fn
         
         if self.few_shot_examples:
             self._few_shot_prompt = self._generate_few_shot_examples()
-        else:
-            self._few_shot_prompt = None
-            
-        self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
+
+        if system_prompt:
+            self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
+
         self._initialized = True
 
     @property
@@ -193,8 +207,18 @@ class BaseCompletionModel(BaseModel, ABC):
     ) -> CompletionResponse:
         if not self._initialized:
             raise ValueError(
-                "Model must be initialized with response schema and system prompt before creating completion"
+                "Model must be initialized with response schema before creating completion"
             )
+
+        if not system_prompt and not self._system_prompt:
+            raise ValueError(
+                "No system prompt provided"
+            )
+
+        if system_prompt:
+            system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
+        else:
+            system_prompt = self._system_prompt
 
         prepared_messages = self._prepare_messages(messages, system_prompt or self._system_prompt)
         return await self._create_completion_with_retries(messages=prepared_messages)
@@ -251,7 +275,7 @@ class BaseCompletionModel(BaseModel, ABC):
         messages.insert(0, {"role": "system", "content": system_prompt})
         return messages
 
-    def _get_completion_params(self, schema: type[ResponseSchema]) -> dict[str, Union[str, dict, list]]:
+    def _get_completion_params(self, schema: List[Type[ResponseSchema]]) -> dict[str, Union[str, dict, list]]:
         """Get format-specific parameters for the LLM API call.
 
         This method configures how the LLM should structure its response by providing
@@ -315,7 +339,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
             try:
                 # Validate the response - may raise CompletionRejectError
-                structured_outputs, text_response, flags = self._validate_completion(
+                structured_outputs, text_response, flags = await self._validate_completion(
                     completion_response=completion_response,
                 )
             except CompletionRetryError as e:
@@ -324,6 +348,19 @@ class BaseCompletionModel(BaseModel, ABC):
                 if e.retry_messages:
                     messages.extend(e.retry_messages)
                 raise e
+
+            # Run post validation if provided
+            if self._post_validation_fn:
+                try:
+                    structured_outputs, text_response, flags = await self._post_validation_fn(
+                        structured_outputs, text_response, flags
+                    )
+                except CompletionRetryError as e:
+                    await self._send_retry_event(retry_count, str(e))
+                    messages.append(completion_response.choices[0].message.model_dump())
+                    if e.retry_messages:
+                        messages.extend(e.retry_messages)
+                    raise e
 
             response_dict = completion_response.model_dump()
 
@@ -350,7 +387,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 f"Completion failed after {retry_count} retries. Exception: {e}. Completion response: {completion_response}"
             )
             raise CompletionRejectError(
-                f"Completion failed after {retry_count} retries. Exception: {e}. Type: {type(e)}",
+                f"Completion failed after {retry_count} retries. Exception: {e}",
                 messages=messages,
                 last_completion=completion_response.model_dump() if completion_response else None,
                 accumulated_usage=accumulated_usage,
@@ -369,7 +406,7 @@ class BaseCompletionModel(BaseModel, ABC):
     async def _execute_completion(
         self,
         messages: List[Dict[str, str]],
-    ):
+    ) -> Any:
         """Execute a single completion attempt with LiteLLM.
 
         This method:
@@ -385,10 +422,6 @@ class BaseCompletionModel(BaseModel, ABC):
         Raises:
             CompletionRuntimeError: For provider errors
         """
-        import litellm
-        from litellm import BadRequestError, RateLimitError
-        from tenacity import retry, wait_exponential, stop_after_attempt
-
         params = self._completion_params.copy()
 
         if self.merge_same_role_messages:
@@ -418,7 +451,7 @@ class BaseCompletionModel(BaseModel, ABC):
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
                     messages=messages,
-                    metadata=self.metadata,
+                    metadata=self.metadata or {},
                     timeout=self.timeout,
                     **params,
                 )
@@ -431,8 +464,6 @@ class BaseCompletionModel(BaseModel, ABC):
 
                 logger.exception(
                     f"LiteLLM completion failed. Model: {self.model}, "
-                    f"Response Schemas: {', '.join(self._get_schema_names())}, "
-                    f"Completion Params:\n{json.dumps(params, indent=2)}\n"
                     f"Response: {response_text}"
                 )
 
@@ -442,7 +473,6 @@ class BaseCompletionModel(BaseModel, ABC):
             except Exception as e:
                 logger.exception(
                     f"LiteLLM completion failed. Model: {self.model}, "
-                    f"Response Schemas: {', '.join(self._get_schema_names())}, "
                     f"Error: {e}"
                 )
 
@@ -486,7 +516,7 @@ class BaseCompletionModel(BaseModel, ABC):
                     del message["cache_control"]
 
     @abstractmethod
-    def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    async def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:

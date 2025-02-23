@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict
 import asyncio
+import uuid
+import aiofiles
+import aiofiles.os
+import tempfile
 
 import filelock
 
@@ -12,7 +16,7 @@ from moatless.evaluation.schema import EvaluationEvent, EvaluationStatus, Instan
 from moatless.events import event_bus
 from moatless.utils.moatless import get_moatless_dir
 from moatless.flow.manager import get_flow_config
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ class EvaluationManager:
         """Get the directory for a specific instance within an evaluation."""
         return self.get_evaluation_dir(evaluation_name) / instance_id
 
-    def create_evaluation(
+    async def create_evaluation(
         self,
         flow_id: str,
         model_id: str,
@@ -89,7 +93,7 @@ class EvaluationManager:
             ]
         )
 
-        self._save_evaluation(evaluation)
+        await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
         return evaluation
 
@@ -103,7 +107,7 @@ class EvaluationManager:
         if event.evaluation_name in self._active_runners:
             evaluation = self._active_runners[event.evaluation_name].evaluation
         else:
-            evaluation = self._load_evaluation(event.evaluation_name)
+            evaluation = await self._load_evaluation(event.evaluation_name)
 
         if not evaluation:
             logger.warning(f"Received event for unknown evaluation: {event.evaluation_name}")
@@ -114,11 +118,11 @@ class EvaluationManager:
             if event.evaluation_name in self._active_runners:
                 del self._active_runners[event.evaluation_name]
 
-        self._save_evaluation(evaluation)
+        await self._save_evaluation(evaluation)
 
     async def start_evaluation(self, evaluation_name: str, num_concurrent_instances: int) -> Evaluation:
         """Start an evaluation and return the updated evaluation object."""
-        evaluation = self._load_evaluation(evaluation_name)
+        evaluation = await self._load_evaluation(evaluation_name)
         
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
@@ -163,7 +167,7 @@ class EvaluationManager:
         logger.info(completion_model)
 
         evaluation.status = EvaluationStatus.RUNNING
-        self._save_evaluation(evaluation)
+        await self._save_evaluation(evaluation)
         runner = EvaluationRunner(
             evaluation=evaluation,
             num_concurrent_instances=num_concurrent_instances,
@@ -174,18 +178,33 @@ class EvaluationManager:
         return evaluation
 
 
-    def save_evaluation(self, evaluation: Evaluation):
+    async def save_evaluation(self, evaluation: Evaluation):
         """Save evaluation metadata to evaluation.json."""
-        self._save_evaluation(evaluation)
+        await self._save_evaluation(evaluation)
 
-    def _save_evaluation(self, evaluation: Evaluation):
-        """Save evaluation metadata to evaluation.json in a thread-safe manner."""
+    async def _save_evaluation(self, evaluation: Evaluation):
+        """Save evaluation metadata atomically using a temporary file approach."""
         eval_path = self.get_evaluation_dir(evaluation.evaluation_name) / "evaluation.json"
-        lock_path = self.locks_dir / f"{evaluation.evaluation_name}.lock"
         
-        with filelock.FileLock(lock_path):
-            with open(eval_path, "w") as f:
-                json.dump(evaluation.model_dump(), f, indent=2, default=str)
+        eval_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        tmp_path = eval_path.with_suffix(f'.json.{uuid.uuid4()}.tmp')
+        
+        try:
+            async with aiofiles.open(tmp_path, "w") as f:
+                json_data = json.dumps(evaluation.model_dump(), indent=2, default=str)
+                await f.write(json_data)
+                await f.flush()  # Ensure all data is written
+                
+            await aiofiles.os.rename(tmp_path, eval_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to save evaluation {evaluation.evaluation_name}: {e}")
+        
+        try:
+            await aiofiles.os.remove(tmp_path)
+        except:
+            pass
 
     def _should_be_paused(self, evaluation: Evaluation, runner: Optional[EvaluationRunner] = None) -> bool:
         """
@@ -209,7 +228,7 @@ class EvaluationManager:
         # If no runner provided, then it should be paused
         return True
 
-    def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
+    async def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from evaluation.json or active runner if exists."""
         # First check if there's an active runner for this evaluation
         logger.info(f"Loading evaluation: {evaluation_name}, active runners: {list(self._active_runners.keys())}")
@@ -232,10 +251,10 @@ class EvaluationManager:
             evaluation = Evaluation.model_validate(data)
             if self._should_be_paused(evaluation):
                 evaluation.status = EvaluationStatus.PAUSED
-                self._save_evaluation(evaluation)
+                await self._save_evaluation(evaluation)
             return evaluation
 
-    def list_evaluations(self) -> List[Evaluation]:
+    async def list_evaluations(self) -> List[Evaluation]:
         """List all evaluations with their metadata."""
         evaluations = []
         for eval_dir in self.evals_dir.glob("eval_*"):
@@ -260,7 +279,7 @@ class EvaluationManager:
                         evaluation = Evaluation.model_validate(data)
                         if self._should_be_paused(evaluation):
                             evaluation.status = EvaluationStatus.PAUSED
-                            self._save_evaluation(evaluation)
+                            await self._save_evaluation(evaluation)
                         evaluations.append(evaluation)
             except Exception as e:
                 logger.error(f"Failed to load evaluation {eval_dir.name}: {e}")

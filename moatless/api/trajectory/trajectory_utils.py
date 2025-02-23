@@ -191,7 +191,6 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
     else:
         reward = None
 
-    logger.info(f"Node reward: {reward}")
     return NodeDTO(
         nodeId=node.node_id,
         reward=reward,
@@ -214,7 +213,7 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
     )
 
 
-def file_context_to_dto(file_context: FileContext, previous_context: FileContext | None = None) -> FileContextDTO:
+async def file_context_to_dto(file_context: FileContext, previous_context: FileContext | None = None) -> FileContextDTO:
     """Convert FileContext to FileContextDTO."""
     if not file_context:
         return None
@@ -243,7 +242,6 @@ def file_context_to_dto(file_context: FileContext, previous_context: FileContext
                 patch=context_file.patch,
                 spans=[FileContextSpanDTO(**span.model_dump()) for span in context_file.spans],
                 show_all_spans=context_file.show_all_spans,
-                tokens=context_file.context_size(),
                 is_new=context_file._is_new,
                 was_edited=context_file.was_edited,
             )
@@ -252,10 +250,10 @@ def file_context_to_dto(file_context: FileContext, previous_context: FileContext
     # Get updated files by comparing with previous context
     updated_files = []
     if previous_context:
-        updated_files = get_updated_files(previous_context, file_context)
+        updated_files = await get_updated_files(previous_context, file_context)
 
     return FileContextDTO(
-        summary=file_context.create_summary(),
+        #summary=file_context.create_summary(),
         testResults=[result.model_dump() for test_file in file_context.test_files for result in test_file.test_results]
         if file_context.test_files
         else None,
@@ -266,7 +264,7 @@ def file_context_to_dto(file_context: FileContext, previous_context: FileContext
     )
 
 
-def get_updated_files(old_context: FileContext, new_context: FileContext) -> List[UpdatedFileDTO]:
+async def get_updated_files(old_context: FileContext, new_context: FileContext) -> List[UpdatedFileDTO]:
     """
     Compare two FileContexts and return information about files that have been updated.
     Updates include content changes, span additions/removals, and file additions.
@@ -286,6 +284,7 @@ def get_updated_files(old_context: FileContext, new_context: FileContext) -> Lis
     # Check files in current context
     for file_path, current_file in new_context._files.items():
         old_file = old_context._files.get(file_path)
+        context_size = await current_file.context_size()
 
         if old_file is None:
             # New file added
@@ -294,7 +293,7 @@ def get_updated_files(old_context: FileContext, new_context: FileContext) -> Lis
                     file_path=file_path,
                     status="added_to_context",
                     patch=current_file.patch,
-                    tokens=current_file.context_size(),
+                    tokens=context_size,
                 )
             )
         else:
@@ -305,7 +304,7 @@ def get_updated_files(old_context: FileContext, new_context: FileContext) -> Lis
                         file_path=file_path,
                         status="modified",
                         patch=current_file.patch,
-                        tokens=current_file.context_size(),
+                        tokens=context_size,
                     )
                 )
                 continue
@@ -319,7 +318,7 @@ def get_updated_files(old_context: FileContext, new_context: FileContext) -> Lis
                         file_path=file_path,
                         status="updated_context",
                         patch=current_file.patch,
-                        tokens=current_file.context_size(),
+                        tokens=context_size,
                     )
                 )
 

@@ -7,10 +7,10 @@ from moatless.actions.action import Action
 from moatless.actions.identify_mixin import IdentifyMixin
 from moatless.actions.schema import (
     ActionArguments,
-    FewShotExample,
     Observation,
     RewardScaleEntry,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.codeblocks import CodeBlockType
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import Repository
@@ -107,7 +107,7 @@ class ViewCode(Action, IdentifyMixin):
     _repository: Repository = PrivateAttr()
 
     max_tokens: int = Field(
-        3000,
+        8000,
         description="The maximum number of tokens in the requested code.",
     )
 
@@ -133,7 +133,7 @@ class ViewCode(Action, IdentifyMixin):
         # Validate all file spans before processing
         for file_path, file_span in grouped_files.items():
             logger.info(f"Processing file {file_path} with span_ids {file_span.span_ids}")
-            file = file_context.get_file(file_path)
+            file = await file_context.get_file(file_path)
 
             if not file:
                 message = f"The requested file {file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
@@ -149,14 +149,16 @@ class ViewCode(Action, IdentifyMixin):
         completion = None
 
         for file_path, file_span in grouped_files.items():
-            file = file_context.get_file(file_path)
+            file = await file_context.get_file(file_path)
 
             if file_span.span_ids:
                 missing_span_ids = set()
                 found_span_ids = set()
-                if file_span.span_ids and not file.module:
+
+                module = await file.async_module()
+                if file_span.span_ids and not module:
                     logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
-                    message = self.create_retry_message(file, f"No span ids found. Is it empty?")
+                    message = await self.create_retry_message(file, f"No span ids found. Is it empty?")
                     properties["fail_reason"] = "invalid_file"
                     return Observation(
                         message=message,
@@ -165,17 +167,18 @@ class ViewCode(Action, IdentifyMixin):
                     )
 
                 for span_id in file_span.span_ids:
-                    block_span = file.module.find_span_by_id(span_id)
+                    block_span = module.find_span_by_id(span_id)
+
                     if not block_span:
                         # Try to find the relevant code block by code block identifier
                         block_identifier = span_id.split(".")[-1]
-                        blocks = file.module.find_blocks_with_identifier(block_identifier)
+                        blocks = module.find_blocks_with_identifier(block_identifier)
 
                         if not blocks:
                             missing_span_ids.add(span_id)
 
                         for block in blocks:
-                            view_context.add_span_to_context(
+                            await view_context.add_span_to_context(
                                 file_path,
                                 block.belongs_to_span.span_id,
                                 add_extra=False,
@@ -184,27 +187,28 @@ class ViewCode(Action, IdentifyMixin):
                     elif block_span.initiating_block.type == CodeBlockType.CLASS:
                         class_block = block_span.initiating_block
                         found_span_ids.add(block_span.span_id)
-                        view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
+                        await view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
                     else:
-                        view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
+                        await view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
 
             if file_span.start_line:
-                view_context.add_line_span_to_context(
+                await view_context.add_line_span_to_context(
                     file_path, file_span.start_line, file_span.end_line, add_extra=False
                 )
 
             if not file_span.start_line and not file_span.span_ids:
-                view_context.add_file(file_path, show_all_spans=True)
+                await view_context.add_file(file_path, show_all_spans=True)
 
             if file.patch:
-                view_file = view_context.get_file(file_path)
+                view_file = await view_context.get_file(file_path)
                 if view_file:
                     view_file.set_patch(file.patch)
 
-            if view_context.context_size() > self.max_tokens:
+            context_size = await view_context.context_size()
+            if context_size > self.max_tokens:
                 view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
 
-            new_span_ids = file_context.add_file_context(view_context)
+            new_span_ids = await file_context.add_file_context(view_context)
             properties["files"][file_path] = {
                 "new_span_ids": list(new_span_ids),
             }
@@ -217,16 +221,20 @@ class ViewCode(Action, IdentifyMixin):
             summary = "The specified code spans wasn't found."
         else:
             message = "Here's the contents of the file where the not requested code spans have been commented out:\n"
-            message += view_context.create_prompt(
+            prompt = await view_context.create_prompt_async(
                 show_span_ids=False,
                 show_line_numbers=True,
                 exclude_comments=False,
                 show_outcommented_code=True,
                 outcomment_code_comment="Rest of the code...",
             )
+            if not prompt:
+                raise RuntimeError(f"Failed to create prompt with files {view_context.file_paths}")
+            message += prompt
 
             if added_new_spans:
-                summary = f"Showed the following code spans:\n" + view_context.create_summary()
+                context_summary = await view_context.create_summary()
+                summary = f"Showed the following code spans:\n" + context_summary
             else:
                 summary = "The specified code spans has already been viewed in a previous action."
 
@@ -246,7 +254,7 @@ class ViewCode(Action, IdentifyMixin):
     def _select_span_instructions(self, search_result) -> str:
         return "The requested code is too large. You must identify the most relevant code sections to view."
 
-    def create_retry_message(self, file: ContextFile, message: str):
+    async def create_retry_message(self, file: ContextFile, message: str):
         retry_message = f"\n\nProblems when trying to find spans in {file.file_path}. "
         retry_message += message
 
@@ -254,11 +262,11 @@ class ViewCode(Action, IdentifyMixin):
         if hint:
             retry_message += f"\n\n{hint}"
 
-        if file.module and file.span_ids:
+        if file.async_module() and file.span_ids:
             search_result_context = FileContext(repo=self._repository)
-            search_result_context.add_file(file.file_path, show_all_spans=True)
+            await search_result_context.add_file(file.file_path, show_all_spans=True)
 
-            search_result_str = search_result_context.create_prompt(
+            search_result_str = await search_result_context.create_prompt_async(
                 show_span_ids=False,
                 show_line_numbers=False,
                 exclude_comments=False,
@@ -283,7 +291,7 @@ class ViewCode(Action, IdentifyMixin):
         return list_str
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
         criteria = [
             "Relevance of Requested Context: Ensure that the requested context is directly related to the problem and necessary for making progress.",
             "Avoiding Hallucinations: Verify that the agent is requesting context for code that actually exists in the codebase.",

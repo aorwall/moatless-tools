@@ -64,7 +64,7 @@ class CodeModificationMixin:
             file_context.add_test_file(file_path)
         elif self._workspace.code_index:
             # If the file is not a test file, find test files that might be related to the file
-            search_results = self._workspace.code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
+            search_results = await self._workspace.code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
 
             for search_result in search_results:
                 file_context.add_test_file(search_result.file_path)

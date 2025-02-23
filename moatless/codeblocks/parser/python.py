@@ -39,7 +39,7 @@ class PythonParser(CodeParser):
     def language(self):
         return "python"
 
-    def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
+    async def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
         if codeblock.type == CodeBlockType.FUNCTION and codeblock.identifier == "__init__":
             codeblock.type = CodeBlockType.CONSTRUCTOR
 
@@ -56,7 +56,7 @@ class PythonParser(CodeParser):
             )
             codeblock.content_lines[0] = codeblock.content_lines[0] + " \\"
 
-    def post_process(self, codeblock: CodeBlock):
+    async def post_process(self, codeblock: CodeBlock):
         if codeblock.type == CodeBlockType.COMMENT and self.is_outcommented_code(codeblock.content):
             codeblock.type = CodeBlockType.COMMENTED_OUT_CODE
 

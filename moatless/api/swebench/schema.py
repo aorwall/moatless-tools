@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
 from moatless.flow.schema import FlowConfig
-from moatless.config.model_config import ModelConfig
+from moatless.completion.manager import ModelConfig
 
 class SWEBenchInstanceDTO(BaseModel):
     """Schema for a SWEBench instance"""

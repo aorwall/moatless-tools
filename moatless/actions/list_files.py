@@ -6,8 +6,8 @@ from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
-    FewShotExample,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 

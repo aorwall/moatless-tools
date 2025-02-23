@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
-    def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
         previous_nodes = node.get_trajectory()
 
         formatted_history: List[str] = []
@@ -53,7 +53,7 @@ class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
 
         if self.include_file_context:
             content += "\n\nThe following code has already been viewed:\n"
-            content += node.file_context.create_prompt(
+            content += await node.file_context.create_prompt_async(
                 show_span_ids=False,
                 show_line_numbers=True,
                 exclude_comments=False,

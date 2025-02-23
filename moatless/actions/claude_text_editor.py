@@ -178,9 +178,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             )
 
         if args.command == "view":
-            return self._view(file_context, path, args)
+            return await self._view(file_context, path, args)
         elif args.command == "create":
-            return self._create_file.execute(
+            return await  self._create_file.execute(
                 CreateFileArgs(
                     path=args.path,
                     file_text=args.file_text,
@@ -189,7 +189,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context,
             )
         elif args.command == "str_replace":
-            return self._str_replace.execute(
+            return await self._str_replace.execute(
                 StringReplaceArgs(
                     path=args.path,
                     old_str=args.old_str,
@@ -199,11 +199,11 @@ class ClaudeEditTool(Action, CodeModificationMixin):
                 file_context,
             )
         elif args.command == "insert":
-            observation = self._insert(file_context, path, args.insert_line, args.new_str)
+            observation = await self._insert(file_context, path, args.insert_line, args.new_str)
         else:
-            raise Observation(
+            return Observation(
                 message=f"Unknown command: {args.command}",
-                properties={"fail_reason": "file_exists"},
+                properties={"fail_reason": "unknwon_command"},
             )
 
         if not observation.properties or not observation.properties.get("diff"):
@@ -266,25 +266,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         view_code_args = ViewCodeArgs(thoughts=args.thoughts, files=[codespan])
         return self._view_code.execute(view_code_args, file_context=file_context)
 
-    def _create(self, file_context: FileContext, path: Path, file_text: str) -> Observation:
-        if file_context.file_exists(str(path)):
-            return Observation(
-                message=f"File already exists at: {path}",
-                properties={"fail_reason": "file_exists"},
-            )
 
-        context_file = file_context.add_file(str(path))
-        context_file.apply_changes(file_text)
-
-        diff = do_diff(str(path), "", file_text)
-
-        return Observation(
-            message=f"File created successfully at: {path}",
-            properties={"diff": diff},
-        )
-
-    def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
-        context_file = file_context.get_context_file(str(path))
+    async def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
+        context_file = await file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
                 message=f"Could not get context for file: {path}",
@@ -321,7 +305,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         snippet = "\n".join(snippet_lines)
 
         diff = do_diff(str(path), file_text, new_file_text)
-        context_file.apply_changes(new_file_text)
+        await context_file.apply_changes(new_file_text)
 
         success_msg = f"The file {path} has been edited. "
         success_msg += self._make_output(

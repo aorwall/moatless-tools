@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import mimetypes
@@ -7,9 +8,10 @@ import tempfile
 from typing import Optional, TYPE_CHECKING
 
 import requests
+from moatless.codeblocks.module import Module
 from rapidfuzz import fuzz
 
-from moatless.codeblocks import CodeBlock, CodeBlockType
+from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
 from moatless.index.settings import IndexSettings
 from moatless.index.types import (
     CodeSnippet,
@@ -21,6 +23,10 @@ from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
+from moatless.index.simple_faiss import SimpleFaissVectorStore
+
+import asyncio
+import aiofiles
 
 if TYPE_CHECKING:
     from llama_index.core import SimpleDirectoryReader
@@ -81,16 +87,11 @@ class CodeIndex:
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
 
-        logger.info(
-            f"Initiated CodeIndex {self._index_name} with:\n"
-            f" * {len(self._blocks_by_class_name)} classes\n"
-            f" * {len(self._blocks_by_function_name)} functions\n"
-            f" * {len(self._docstore.docs)} vectors\n"
-            f"Using file repository at {self._file_repo.repo_dir if self._file_repo else 'None'}\n"
-        )
+        self._thread_pool = ThreadPoolExecutor(max_workers=5)
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
+        """Synchronous version of from_persist_dir for backward compatibility"""
         from moatless.index.simple_faiss import SimpleFaissVectorStore
         from llama_index.core.storage.docstore import SimpleDocumentStore
 
@@ -122,7 +123,54 @@ class CodeIndex:
         )
 
     @classmethod
+    async def from_persist_dir_async(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
+        """Asynchronous version of from_persist_dir"""
+       
+        # Run CPU-intensive synchronous operations in a thread pool
+        loop = asyncio.get_event_loop()
+        
+        # Use the async version of SimpleFaissVectorStore.from_persist_dir
+        vector_store = await SimpleFaissVectorStore.from_persist_dir_async(persist_dir)
+
+        from moatless.index.embed_model import get_embed_model
+        from llama_index.core.storage.docstore import SimpleDocumentStore
+
+        # These are still synchronous operations
+        docstore, settings = await asyncio.gather(
+            loop.run_in_executor(None, SimpleDocumentStore.from_persist_dir, persist_dir),
+            loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir)
+        )
+
+        class_name_path = os.path.join(persist_dir, "blocks_by_class_name.json")
+        function_name_path = os.path.join(persist_dir, "blocks_by_function_name.json")
+
+        # Read both files concurrently if they exist
+        async def read_json_file(path):
+            if os.path.exists(path):
+                async with aiofiles.open(path) as f:
+                    content = await f.read()
+                    loop = asyncio.get_event_loop()
+                    return await loop.run_in_executor(None, json.loads, content)
+            return {}
+
+        blocks_by_class_name, blocks_by_function_name = await asyncio.gather(
+            read_json_file(class_name_path),
+            read_json_file(function_name_path)
+        )
+
+        return cls(
+            file_repo=file_repo,
+            vector_store=vector_store,
+            docstore=docstore,
+            settings=settings,
+            blocks_by_class_name=blocks_by_class_name,
+            blocks_by_function_name=blocks_by_function_name,
+            **kwargs,
+        )
+
+    @classmethod
     def from_url(cls, url: str, persist_dir: str, file_repo: FileRepository):
+        """Synchronous version of from_url for backward compatibility"""
         try:
             response = requests.get(url, stream=True)
             response.raise_for_status()
@@ -147,12 +195,47 @@ class CodeIndex:
         return cls.from_persist_dir(persist_dir, file_repo)
 
     @classmethod
+    async def from_url_async(cls, url: str, persist_dir: str, file_repo: FileRepository):
+        """Asynchronous version of from_url"""
+        import aiohttp
+        import aiofiles
+        import asyncio
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    response.raise_for_status()
+
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_zip_file = os.path.join(temp_dir, url.split("/")[-1])
+
+                        # Download file in chunks
+                        async with aiofiles.open(temp_zip_file, 'wb') as data:
+                            async for chunk in response.content.iter_chunked(8192):
+                                await data.write(chunk)
+
+                        # Run unpack_archive in thread pool since it's synchronous
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, shutil.unpack_archive, temp_zip_file, persist_dir)
+
+        except aiohttp.ClientError as e:
+            logger.exception(f"HTTP Error while fetching {url}")
+            raise e
+        except Exception as e:
+            logger.exception(f"Failed to download {url}")
+            raise e
+
+        logger.info(f"Downloaded existing index from {url}.")
+        return await cls.from_persist_dir_async(persist_dir, file_repo)
+
+    @classmethod
     def from_index_name(
         cls,
         index_name: str,
         file_repo: Repository,
         index_store_dir: Optional[str] = None,
     ):
+        """Synchronous version of from_index_name for backward compatibility"""
         if not index_store_dir:
             index_store_dir = os.getenv("INDEX_STORE_DIR")
 
@@ -172,10 +255,44 @@ class CodeIndex:
         logger.info(f"Downloading existing index {index_name} from {store_url}.")
         return cls.from_url(store_url, persist_dir, file_repo)
 
+    @classmethod
+    async def from_index_name_async(
+        cls,
+        index_name: str,
+        file_repo: Repository,
+        index_store_dir: Optional[str] = None,
+    ):
+        """Asynchronous version of from_index_name"""
+        if not index_store_dir:
+            index_store_dir = os.getenv("INDEX_STORE_DIR")
+
+        persist_dir = os.path.join(index_store_dir, index_name)
+        if os.path.exists(persist_dir):
+            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
+            return await cls.from_persist_dir_async(persist_dir, file_repo=file_repo)
+        else:
+            logger.info(f"No existing index found at {persist_dir}.")
+
+        if os.getenv("INDEX_STORE_URL"):
+            index_store_url = os.getenv("INDEX_STORE_URL")
+        else:
+            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20250118-voyage-code-3/"
+
+        store_url = os.path.join(index_store_url, f"{index_name}.zip")
+        logger.info(f"Downloading existing index {index_name} from {store_url}.")
+        return await cls.from_url_async(store_url, persist_dir, file_repo)
+
     def dict(self):
         return {"index_name": self._index_name}
+    
+    async def get_module(self, file_path: str, content: str) -> Module | None:
+        parser = get_parser_by_path(file_path)
+        if parser:
+            module = await parser.parse_async(content)
+            return module
+        return None
 
-    def semantic_search(
+    async def semantic_search(
         self,
         query: Optional[str] = None,
         code_snippet: Optional[str] = None,
@@ -193,14 +310,9 @@ class CodeIndex:
 
         message = ""
         if file_pattern:
-            if category and category != "test":
-                exclude_files = self._file_repo.matching_files("**/test*/**")
-            else:
-                exclude_files = []
-
             try:
-                matching_files = self._file_repo.matching_files(file_pattern)
-                matching_files = [file for file in matching_files if file not in exclude_files]
+                matching_files = await self._file_repo.matching_files(file_pattern)
+                matching_files = [file for file in matching_files if not is_test(file)]
             except Exception as e:
                 return SearchCodeResponse(
                     message=f"The file pattern {file_pattern} is invalid.",
@@ -242,7 +354,9 @@ class CodeIndex:
                     f"semantic_search(query={query}, file_pattern={file_pattern}) Could not find search hit file {search_hit.file_path}."
                 )
                 continue
-            elif not file.module:
+
+            module = await self.get_module(file.file_path, file.content)
+            if not module:
                 logger.warning(
                     f"semantic_search(query={query}, file_pattern={file_pattern}) Could not parse module for search hit file {search_hit.file_path}."
                 )
@@ -254,14 +368,14 @@ class CodeIndex:
 
             spans = []
             for span_id in search_hit.span_ids:
-                span = file.module.find_span_by_id(span_id)
+                span = module.find_span_by_id(span_id)
 
                 if span:
                     spans.append(span)
                 else:
                     logger.debug(f"semantic_search() Could not find span with id {span_id} in file {file.file_path}")
 
-                    spans_by_line_number = file.module.find_spans_by_line_numbers(
+                    spans_by_line_number = module.find_spans_by_line_numbers(
                         search_hit.start_line, search_hit.end_line
                     )
 
@@ -326,23 +440,23 @@ class CodeIndex:
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
 
-    def find_class(self, class_name: str, file_pattern: Optional[str] = None):
-        return self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
+    async def find_class(self, class_name: str, file_pattern: Optional[str] = None):
+        return await self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
 
-    def find_function(
+    async def find_function(
         self,
         function_name: str,
         class_name: Optional[str] = None,
         file_pattern: Optional[str] = None,
     ):
-        return self.find_by_name(
+        return await self.find_by_name(
             function_name=function_name,
             class_name=class_name,
             file_pattern=file_pattern,
             strict=True,
         )
 
-    def find_by_name(
+    async def find_by_name(
         self,
         class_name: str = None,
         function_name: str = None,
@@ -365,7 +479,7 @@ class CodeIndex:
             raise ValueError("At least one of class_name or function_name must be provided.")
 
         if file_pattern:
-            include_files = self._file_repo.matching_files(file_pattern)
+            include_files = await self._file_repo.matching_files(file_pattern)
 
             if include_files:
                 filtered_paths = []
@@ -403,11 +517,10 @@ class CodeIndex:
         invalid_blocks = 0
 
         if category and category != "test":
-            exclude_files = self._file_repo.matching_files("**/test*/**")
 
             filtered_paths = []
             for file_path, block_path in paths:
-                if file_path not in exclude_files:
+                if not is_test(file_path):
                     filtered_paths.append((file_path, block_path))
 
             filtered_out_test_files = len(paths) - len(filtered_paths)
@@ -425,13 +538,15 @@ class CodeIndex:
                     f"find_by_name(function_name: {function_name}, class_name: {class_name}, file_pattern: {file_pattern}) Could not find file {file_path}."
                 )
                 continue
-            elif not file.module:
+
+            module = await self.get_module(file.file_path, file.content)
+            if not module:
                 logger.warning(
                     f"find_by_name(funtion_name: {function_name}, class_name: {class_name}, file_pattern: {file_pattern}) Could not parse module for file {file_path}."
                 )
                 continue
 
-            found_block = file.module.find_by_path(block_path)
+            found_block = module.find_by_path(block_path)
 
             if not found_block:
                 invalid_blocks += 1
@@ -505,7 +620,7 @@ class CodeIndex:
             hits=search_hits,
         )
 
-    def find_test_files(
+    async def find_test_files(
         self,
         file_path: str,
         span_id: str | None = None,
@@ -526,12 +641,12 @@ class CodeIndex:
 
         sum_tokens = 0
         files = []
-        matching_file = self._find_by_test_pattern(file_path)
+        matching_file = await self._find_by_test_pattern(file_path)
         if matching_file:
             files.append(FileWithSpans(file_path=matching_file, span_ids=[]))
         elif span_id or query and max_results > 1:
             # Try to find the most similar test file by file name if no exact match on file name
-            files = self.find_test_files(file_path, max_results=1, max_spans=max_spans)
+            files = await self.find_test_files(file_path, max_results=1, max_spans=max_spans)
 
         for result in search_results:
             file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
@@ -545,11 +660,16 @@ class CodeIndex:
                 logger.warning(f"run_tests() File not found {result.file_path}")
                 continue
 
+            module = await self.get_module(file.file_path, file.content)
+            if not module:
+                logger.warning(f"run_tests() Could not parse module for file {file.file_path}")
+                continue
+
             # expect to find methods with the name test in the span id if there are any
-            has_test_names = any(span_id for span_id in file.module.span_ids if "test" in span_id.lower())
+            has_test_names = any(span_id for span_id in module.span_ids if "test" in span_id.lower())
 
             for span_id in result.span_ids:
-                span = file.module.find_span_by_id(span_id)
+                span = module.find_span_by_id(span_id)
                 if (
                     span
                     and span.initiating_block.type in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
@@ -573,7 +693,7 @@ class CodeIndex:
 
         return files
 
-    def _find_by_test_pattern(self, file_path: str) -> str | None:
+    async def _find_by_test_pattern(self, file_path: str) -> str | None:
         """
         Find the test file related to the provided file path.
 
@@ -584,7 +704,7 @@ class CodeIndex:
         dirname = os.path.dirname(file_path)
         test_patterns = [f"test_{filename}", f"{filename}_test.py"]
 
-        matched_files = self._file_repo.find_by_pattern(test_patterns)
+        matched_files = await self._file_repo.find_by_pattern(test_patterns)
         if not matched_files:
             return None
 
@@ -603,12 +723,6 @@ class CodeIndex:
                 best_match_score = score
 
         return best_match
-
-    def _create_search_hit(self, file: FileWithSpans, rank: int = 0):
-        file_hit = SearchCodeHit(file_path=file.file_path)
-        for span_id in file.span_ids:
-            file_hit.add_span(span_id, rank)
-        return file_hit
 
     def _vector_search(
         self,
@@ -663,11 +777,6 @@ class CodeIndex:
         else:
             include_files = []
 
-        if category and category != "test":
-            exclude_files = self._file_repo.find_files(["**/tests/**", "tests*", "*_test.py", "test_*.py"])
-        else:
-            exclude_files = set()
-
         search_results = []
 
         for node_id, distance in zip(result.ids, result.similarities, strict=False):
@@ -677,7 +786,8 @@ class CodeIndex:
                 # TODO: Retry to get top_k results
                 continue
 
-            if exclude_files and node_doc.metadata["file_path"] in exclude_files:
+            is_test_file = is_test(node_doc.metadata["file_path"])
+            if category and category != "test" and is_test_file:
                 filtered_out_snippets += 1
                 continue
 
@@ -685,7 +795,6 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            is_test_file = is_test(node_doc.metadata["file_path"])
             if category == "implementation" and is_test_file:
                 filtered_out_snippets += 1
                 continue

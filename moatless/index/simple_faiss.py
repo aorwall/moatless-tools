@@ -9,6 +9,8 @@ from typing import Any, cast
 import faiss
 import fsspec
 import numpy as np
+import aiofiles
+import asyncio
 from dataclasses_json import DataClassJsonMixin
 from fsspec.implementations.local import LocalFileSystem
 from llama_index.core.bridge.pydantic import PrivateAttr
@@ -38,10 +40,25 @@ DEFAULT_VECTOR_STORE = "default"
 
 
 @dataclass
-class SimpleVectorStoreData(DataClassJsonMixin):
+class SimpleVectorStoreData:
     text_id_to_ref_doc_id: dict[str, str] = field(default_factory=dict)
     vector_id_to_text_id: dict[int, str] = field(default_factory=dict)
     metadata_dict: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "text_id_to_ref_doc_id": self.text_id_to_ref_doc_id,
+            "vector_id_to_text_id": {str(k): v for k, v in self.vector_id_to_text_id.items()},
+            "metadata_dict": self.metadata_dict
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SimpleVectorStoreData":
+        return cls(
+            text_id_to_ref_doc_id=data["text_id_to_ref_doc_id"],
+            vector_id_to_text_id={int(k): v for k, v in data["vector_id_to_text_id"].items()},
+            metadata_dict=data["metadata_dict"]
+        )
 
 
 class SimpleFaissVectorStore(BasePydanticVectorStore):
@@ -241,7 +258,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
     def from_persist_dir(
         cls, persist_dir: str, fs: fsspec.AbstractFileSystem | None = None
     ) -> "SimpleFaissVectorStore":
-        """Create a SimpleKVStore from a persist directory."""
+        """Create a SimpleFaissVectorStore from a persist directory (synchronous version)."""
 
         fs = fs or fsspec.filesystem("file")
         if not fs.exists(persist_dir):
@@ -258,6 +275,38 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         with fs.open(f"{persist_dir}/vector_index.json", "rb") as f:
             data_dict = json.load(f)
             data = SimpleVectorStoreData.from_dict(data_dict)
+
+        logger.info(f"Loading {__name__} from {persist_dir}.")
+
+        return cls(faiss_index=faiss_index, data=data)
+
+    @classmethod
+    async def from_persist_dir_async(
+        cls, persist_dir: str, fs: fsspec.AbstractFileSystem | None = None
+    ) -> "SimpleFaissVectorStore":
+        """Create a SimpleFaissVectorStore from a persist directory (async version)."""
+        fs = fs or fsspec.filesystem("file")
+        if not fs.exists(persist_dir):
+            raise ValueError(f"No existing index store found at {persist_dir}.")
+
+        if fs and not isinstance(fs, LocalFileSystem):
+            raise NotImplementedError("FAISS only supports local storage for now.")
+
+        loop = asyncio.get_event_loop()
+        
+        # Load FAISS index in a thread
+        faiss_index = await loop.run_in_executor(
+            None, faiss.read_index, f"{persist_dir}/vector_index.faiss"
+        )
+
+        logger.debug(f"Loading {__name__} from {persist_dir}.")
+        
+        async with aiofiles.open(f"{persist_dir}/vector_index.json", "rb") as f:
+            content = await f.read()
+        
+        # Parse JSON in a thread to avoid blocking
+        data_dict = await loop.run_in_executor(None, json.loads, content)
+        data = SimpleVectorStoreData.from_dict(data_dict)
 
         logger.info(f"Loading {__name__} from {persist_dir}.")
 

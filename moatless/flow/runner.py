@@ -4,6 +4,7 @@ from typing import Dict, Tuple
 
 from moatless.completion.log_handler import LogHandler
 from moatless.flow.flow import AgenticFlow
+import litellm
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,6 @@ class AgenticRunner:
 
     def __init__(self):
         self.active_runs: Dict[str, Tuple[AgenticFlow, asyncio.Task]] = {}
-        import litellm
         litellm.callbacks = [LogHandler()]
 
     @classmethod

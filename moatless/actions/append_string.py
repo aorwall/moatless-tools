@@ -70,7 +70,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         if error:
             return error
 
-        context_file = file_context.get_context_file(str(path))
+        context_file = await file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
                 message=f"Could not get context for file: {path}",
@@ -103,7 +103,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         new_file_text = file_text + new_str
 
         diff = do_diff(str(path), file_text, new_file_text)
-        context_file.apply_changes(new_file_text)
+        await context_file.apply_changes(new_file_text)
 
         message = (
             f"The file {path} has been edited. "

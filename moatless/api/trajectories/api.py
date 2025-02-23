@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException
 
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes, load_trajectory_from_file
-from moatless.benchmark.swebench.utils import create_index, create_repository_async
+from moatless.benchmark.swebench.utils import create_repository_async
 from moatless.evaluation.utils import get_moatless_instance
 from moatless.flow.runner import agentic_runner
 from moatless.flow.flow import AgenticFlow, SystemStatus
@@ -19,8 +19,8 @@ from moatless.flow.loop import AgenticLoop
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.utils.moatless import get_moatless_trajectories_dir, get_moatless_trajectory_dir
 from moatless.workspace import Workspace
-from .schema import RetryTrajectoryRequest, StartTrajectoryRequest, TrajectoryEventDTO, TrajectoryListItem, \
-    TrajectoryResponseDTO
+from .schema import ExecuteNodeRequest, RetryTrajectoryRequest, StartTrajectoryRequest, TrajectoryEventDTO, TrajectoryListItem, TrajectoryResponseDTO
+from ...benchmark.swebench import create_index_async
 
 logger = logging.getLogger(__name__)
 
@@ -168,41 +168,59 @@ async def retry(project_id: str, trajectory_id: str, request: RetryTrajectoryReq
     if system:
         raise HTTPException(status_code=400, detail="Flow is already running")
     
-    agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+    agentic_flow = await setup_flow(trajectory_id, project_id)
+    agentic_flow.reset_node(request.node_id)
+    # agentic_flow.persist()
 
-    await swebench_setup(agentic_flow, trajectory_id)
-
-    await agentic_flow.reset_node(request.node_id)
-    agentic_flow.persist()
     await agentic_runner.start(agentic_flow)
     
     logger.info(f"Started retry for trajectory {trajectory_id}")
 
-async def swebench_setup(flow: AgenticFlow, trajectory_id: str):
+@router.post("/{project_id}/{trajectory_id}/execute")
+async def execute(project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
+    """Execute a run."""
+    system = await agentic_runner.get_run(trajectory_id, project_id)
+    if system:
+        raise HTTPException(status_code=400, detail="Flow is already running")
+    
+    agentic_flow = await setup_flow(trajectory_id, project_id)
+
+
+    node = agentic_flow.root.get_node_by_id(request.node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="Node not found")
+    
+    # Clone file context from parent node to reset file context
+    node.file_context = node.parent.file_context.clone()
+
+    # TODO: Set action step index
+    return await agentic_flow.agent._execute_action_step(node, node.action_steps[0])
+
+
+async def setup_flow(trajectory_id: str, project_id: str):
     """Workaround to set up legacy solution for swebench."""
 
     moatless_instance = get_moatless_instance(trajectory_id)
-    if not moatless_instance:
-        # No instance found, skip setup
-        return
-    
-    logger.info(f"Setting up swebench for trajectory {trajectory_id}")
-    
-    repository = await create_repository_async(moatless_instance)
-    code_index = create_index(moatless_instance, repository=repository)
+    if moatless_instance:
+        logger.info(f"Setting up swebench for trajectory {trajectory_id}")
+        
+        repository = await create_repository_async(moatless_instance)
+        code_index = await create_index_async(moatless_instance, repository=repository)
 
-    runtime = TestbedEnvironment(
-        repository=repository,
-        instance_id=trajectory_id,
-        log_dir=str(get_moatless_trajectory_dir(trajectory_id) / "testbed_logs"),
-        enable_cache=True,
-    )
-    workspace = Workspace(
-        repository=repository,
-        code_index=code_index,
-        runtime=runtime,
-        legacy_workspace=True
-    )
+        runtime = TestbedEnvironment(
+            repository=repository,
+            instance_id=trajectory_id,
+            log_dir=str(get_moatless_trajectory_dir(trajectory_id) / "testbed_logs"),
+            enable_cache=True,
+        )
+        workspace = Workspace(
+            repository=repository,
+            code_index=code_index,
+            runtime=runtime,
+            legacy_workspace=True
+        )
+        return AgenticFlow.from_trajectory_id(trajectory_id, project_id, workspace=workspace)
+    else:
+        return AgenticFlow.from_trajectory_id(trajectory_id, project_id)
 
-    flow.workspace = workspace
 

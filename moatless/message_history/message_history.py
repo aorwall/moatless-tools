@@ -27,7 +27,7 @@ class MessageHistoryGenerator(BaseModel):
 
     _workspace: Workspace | None = PrivateAttr(default=None)
 
-    def generate_messages(self, node: Node) -> List[AllMessageValues]:  # type: ignore
+    async def generate_messages(self, node: Node) -> List[AllMessageValues]:  # type: ignore
         previous_nodes = node.get_trajectory()
 
         messages = []

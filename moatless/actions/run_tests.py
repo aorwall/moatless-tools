@@ -6,10 +6,10 @@ from pydantic import Field, PrivateAttr, ConfigDict
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
-    FewShotExample,
     Observation,
     RewardScaleEntry,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment

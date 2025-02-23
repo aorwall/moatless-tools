@@ -24,6 +24,10 @@ class RetryTrajectoryRequest(BaseModel):
     model_id: Optional[str] = Field(None, description="The model to use for the loop")
     node_id: Optional[int] = Field(None, description="The node to start the loop from")
     
+class ExecuteNodeRequest(BaseModel):
+    agent_id: Optional[str] = Field(None, description="The agent to use for the loop")
+    model_id: Optional[str] = Field(None, description="The model to use for the loop")
+    node_id: Optional[int] = Field(None, description="The node to start the loop from")
 
 class TrajectoryEventDTO(BaseModel):
     """Single event in a trajectory."""

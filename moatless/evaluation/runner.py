@@ -8,11 +8,16 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Any, Dict
+import uuid
+import sys
+import threading
 
-import filelock
+import aiofiles
+
+from functools import wraps
 
 from moatless.benchmark.report import to_result
-from moatless.benchmark.swebench.utils import create_repository_async, create_index
+from moatless.benchmark.swebench.utils import create_repository_async, create_index_async
 from moatless.evaluation.utils import get_moatless_instance
 from moatless.evaluation.schema import (
     Evaluation,
@@ -32,6 +37,8 @@ from moatless.context_data import current_project_id
 
 from moatless.evaluation.state_manager import StateManager
 from moatless.evaluation.task_scheduler import TaskScheduler
+
+from moatless.utils.block_detector import BlockingDetector
 
 logger = logging.getLogger(__name__)
 
@@ -70,16 +77,21 @@ class EvaluationRunner:
         self._status_log_interval = 30.0
         self._last_status_log = time.time()
 
+        self.blocking_detector = BlockingDetector(threshold_ms=1000)
+
     async def run_evaluation(self) -> None:
         """
         Primary entry point to run an entire evaluation, in the background.
         """
 
         try:
+            # Start blocking detection
+            await self.blocking_detector.start()
+
             current_project_id.set(self.evaluation.evaluation_name)
             self.evaluation.status = EvaluationStatus.RUNNING
             self.evaluation.started_at = datetime.now(timezone.utc)
-            self._save_evaluation()
+            await self._save_evaluation()
             await self._emit_event("evaluation_started")
 
             # Main scheduling loop: until we see all done or an error
@@ -99,7 +111,7 @@ class EvaluationRunner:
             # Mark evaluation completed
             self.evaluation.status = EvaluationStatus.COMPLETED
             self.evaluation.completed_at = datetime.now(timezone.utc)
-            self._save_evaluation()
+            await self._save_evaluation()
             await self._emit_event("evaluation_completed", {
                 "completed": sum(i.status == InstanceStatus.EVALUATED for i in self.evaluation.instances),
                 "errors": sum(i.status == InstanceStatus.ERROR for i in self.evaluation.instances),
@@ -109,7 +121,7 @@ class EvaluationRunner:
             logger.exception("Error running evaluation.")
             self.evaluation.status = EvaluationStatus.ERROR
             self.evaluation.error = str(exc)
-            self._save_evaluation()
+            await self._save_evaluation()
             await self._emit_event("evaluation_error", {"error": str(exc)})
             raise
         finally:
@@ -119,6 +131,16 @@ class EvaluationRunner:
                 
             # Wait for any scheduled tasks to finish
             await self.scheduler.shutdown()
+
+            # Stop and show final statistics
+            await self.blocking_detector.stop()
+            stats = self.blocking_detector.get_blocking_statistics()
+            if stats:
+                logger.info("Final blocking statistics:")
+                for location, count in stats.items():
+                    logger.info(f"  {location}: blocked {count} times")
+            else:
+                logger.info("No blocking detected during run")
 
     async def _process_instances(self) -> None:
         """
@@ -422,7 +444,7 @@ class EvaluationRunner:
         """
         try:
             await self.state_manager.set_status(instance, new_status, error)
-            self._save_evaluation()
+            await self._save_evaluation()
 
             # Merge instance_id into event data
             event_data = event_data or {}
@@ -458,7 +480,7 @@ class EvaluationRunner:
         os.makedirs(testbed_log_dir, exist_ok=True)
 
         repository = await create_repository_async(moatless_instance, repo_base_dir=self.repo_base_dir)
-        code_index = create_index(moatless_instance, repository=repository)
+        code_index = await create_index_async(moatless_instance, repository=repository)
 
         runtime = TestbedEnvironment(
             repository=repository,
@@ -476,12 +498,12 @@ class EvaluationRunner:
         settings_path = trajectory_dir / "settings.json"
         if settings_path.exists():
             flow = AgenticFlow.from_dir(trajectory_dir, workspace=workspace)
-            flow.workspace = workspace
 
             last_node = flow.root.get_all_nodes()[-1]
             if last_node.error:
                 logger.info(f"Last node in flow {instance_id} has error, will remove it and try again")
-                last_node.parent.remove_child(last_node)
+                flow.reset_node(last_node.node_id)
+
         else:
             flow = create_flow(
             id=self.evaluation.flow_id,
@@ -525,16 +547,29 @@ class EvaluationRunner:
                 logger.info(f"Removing repo for {instance.instance_id}")
                 shutil.rmtree(repo_path, ignore_errors=True)
 
-    def _save_evaluation(self) -> None:
-        """
-        Persists the current state of the evaluation to disk.
-        """
+    async def _save_evaluation(self):
+        """Save evaluation metadata atomically using a temporary file approach."""
         eval_path = self.evaluation_dir / "evaluation.json"
-        lock_path = self.locks_dir / f"{self.evaluation.evaluation_name}.lock"
+        
         eval_path.parent.mkdir(parents=True, exist_ok=True)
-        with filelock.FileLock(lock_path):
-            with open(eval_path, "w") as f:
-                json.dump(self.evaluation.model_dump(), f, indent=2, default=str)
+        
+        tmp_path = eval_path.with_suffix(f'.json.{uuid.uuid4()}.tmp')
+        
+        try:
+            async with aiofiles.open(tmp_path, "w") as f:
+                json_data = json.dumps(self.evaluation.model_dump(), indent=2, default=str)
+                await f.write(json_data)
+                await f.flush()  # Ensure all data is written
+                
+            await aiofiles.os.rename(tmp_path, eval_path)
+            
+        except Exception as e:
+            logger.error(f"Failed to save evaluation {self.evaluation.evaluation_name}: {e}")
+        
+        try:
+            await aiofiles.os.remove(tmp_path)
+        except:
+            pass
 
     async def _emit_event(self, event_type: str, data: Any = None) -> None:
         """

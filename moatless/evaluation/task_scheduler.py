@@ -10,11 +10,15 @@ class TaskScheduler:
     """
     def __init__(self):
         self.tasks = set()
+        self._shutting_down = False
 
     def schedule(self, coro: Coroutine, name: str) -> asyncio.Task:
         """
         Create a tracked asyncio Task for the given coroutine.
         """
+        if self._shutting_down:
+            logger.warning(f"Scheduler is shutting down, not scheduling task: {name}")
+            return None
         task = asyncio.create_task(coro, name=name)
         self.tasks.add(task)
         task.add_done_callback(self._cleanup)
@@ -25,11 +29,32 @@ class TaskScheduler:
         """Remove the completed task from the registry."""
         self.tasks.discard(task)
 
-    async def shutdown(self):
+    async def shutdown(self, timeout: float = 5.0):
         """
-        Graceful shutdown of all pending tasks, if needed.
+        Graceful shutdown of all pending tasks with timeout.
+        
+        Args:
+            timeout: Maximum time to wait for tasks to complete gracefully
         """
+        self._shutting_down = True
         remaining = [t for t in self.tasks if not t.done()]
         if remaining:
-            logger.info(f"Waiting for {len(remaining)} remaining tasks to complete...")
-            await asyncio.gather(*remaining, return_exceptions=True)
+            logger.info(f"Cancelling {len(remaining)} remaining tasks...")
+            for task in remaining:
+                task.cancel()
+            
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*remaining, return_exceptions=True),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Shutdown timed out after {timeout}s with {len(remaining)} tasks remaining")
+            except Exception as e:
+                logger.error(f"Error during shutdown: {e}")
+            finally:
+                # Force cancel any remaining tasks
+                for task in remaining:
+                    if not task.done():
+                        task.cancel()
+                self.tasks.clear()

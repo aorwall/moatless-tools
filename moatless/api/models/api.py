@@ -4,14 +4,24 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from moatless.config.model_config import (
+from moatless.completion.manager import (
+    ModelTestResult,
     get_model_config,
     get_all_configs,
+    get_base_model_config,
+    get_all_base_configs,
+    add_model_from_base,
     update_model_config,
-    reset_model_config,
+    delete_model_config,
+    ModelConfig,
+    _manager
 )
-from .schema import ModelConfigUpdateDTO, ModelsResponseDTO
-from moatless.config.model_config import ModelConfig
+from .schema import (
+    ModelConfigUpdateDTO,
+    ModelsResponseDTO,
+    BaseModelsResponseDTO,
+    AddModelFromBaseDTO
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +32,12 @@ async def list_models() -> ModelsResponseDTO:
     """Get all model configurations"""
     configs = get_all_configs()
     return ModelsResponseDTO(models=configs)
-    
+
+@router.get("/base", response_model=BaseModelsResponseDTO)
+async def list_base_models() -> BaseModelsResponseDTO:
+    """Get all base model configurations"""
+    configs = get_all_base_configs()
+    return BaseModelsResponseDTO(models=configs)
 
 @router.get("/{model_id}", response_model=ModelConfig)
 async def read_model_config(model_id: str) -> ModelConfig:
@@ -33,23 +48,64 @@ async def read_model_config(model_id: str) -> ModelConfig:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/base/{model_id}", response_model=ModelConfig)
+async def read_base_model_config(model_id: str) -> ModelConfig:
+    """Get configuration for a specific base model"""
+    try:
+        logger.info(f"Getting base model config for {model_id}")
+        return get_base_model_config(model_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
-@router.put("/{model_id}")
-async def update_model_config_api(model_id: str, update: ModelConfig):
+@router.post("", response_model=ModelConfig)
+async def add_model(request: AddModelFromBaseDTO) -> ModelConfig:
+    """Add a new model configuration based on a base model"""
+    try:
+        logger.info(f"Adding new model {request.new_model_id} from base {request.base_model_id}")
+        updates = request.updates.model_dump() if request.updates else None
+        return add_model_from_base(request.base_model_id, request.new_model_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.put("/{model_id}", response_model=ModelConfig)
+async def update_model(model_id: str, updates: ModelConfig) -> ModelConfig:
     """Update configuration for a specific model"""
     try:
-        logger.info(f"Updating model config for {model_id} with {update.model_dump(exclude_none=True)}")
-        update_model_config(model_id, update.model_dump(exclude_none=True))
+        logger.info(f"Updating model config for {model_id}")
+        return update_model_config(model_id, updates)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-
-@router.delete("/{model_id}/overrides", response_model=ModelConfig)
-async def reset_model_config_api(model_id: str) -> ModelConfig:
-    """Reset model configuration to defaults by removing overrides"""
+@router.delete("/{model_id}")
+async def delete_model(model_id: str) -> None:
+    """Delete a user model configuration"""
     try:
-        config = reset_model_config(model_id)
-        config.id = model_id
-        return config
+        logger.info(f"Deleting model config for {model_id}")
+        delete_model_config(model_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/{model_id}/test", response_model=ModelTestResult)
+async def test_model_config(model_id: str) -> ModelTestResult:
+    """Test if a model configuration works correctly.
+    
+    This endpoint attempts to:
+    1. Create a completion model with the configuration
+    2. Send a simple test message
+    3. Validate the response format
+    
+    Returns detailed information about the test results including:
+    - Success/failure status
+    - Response time
+    - Any error information
+    - The model's response if available
+    """
+    try:
+        logger.info(f"Testing model configuration for {model_id}")
+        return await _manager.test_model_setup(model_id)
+    except Exception as e:
+        logger.exception(f"Error testing model {model_id}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to test model configuration: {str(e)}"
+        )

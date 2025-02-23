@@ -3,6 +3,7 @@ import logging
 from typing import Optional, Any, Union
 
 from pydantic import BaseModel, model_validator, Field
+import litellm
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,6 @@ class Usage(BaseModel):
         cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
 
         try:
-            import litellm
 
             cost = litellm.completion_cost(completion_response=completion_response, model=model)
         except Exception:

@@ -2,7 +2,8 @@ from typing import Optional, List, Type, ClassVar
 
 from pydantic import Field, model_validator, ConfigDict
 
-from moatless.actions.schema import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments
+from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.index.types import SearchCodeResponse
 
@@ -74,17 +75,17 @@ class SemanticSearchArgs(SearchBaseArgs):
 class SemanticSearch(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
 
-    def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
-        return self._code_index.semantic_search(
+    async def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
+        return await self._code_index.semantic_search(
             args.query,
             file_pattern=args.file_pattern,
             max_results=self.max_hits,
             category=args.category,
         )
 
-    def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
+    async def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
         if args.file_pattern:
-            return self._code_index.semantic_search(
+            return await self._code_index.semantic_search(
                 args.query,
                 max_results=self.max_hits,
                 category=args.category,

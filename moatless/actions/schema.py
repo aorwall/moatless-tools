@@ -15,14 +15,6 @@ logger = logging.getLogger(__name__)
 
 _action_args: Dict[str, Type["ActionArguments"]] = {}
 
-class FewShotExample(BaseModel):
-    user_input: str = Field(..., description="The user's input/question")
-    action: ResponseSchema = Field(..., description="The expected response")
-
-    @classmethod
-    def create(cls, user_input: str, action: ResponseSchema) -> "FewShotExample":
-        return cls(user_input=user_input, action=action)
-
 
 class ActionArguments(ResponseSchema, ABC):
     thoughts: str = Field(..., description="Your reasoning for the action.")
@@ -119,10 +111,6 @@ class ActionArguments(ResponseSchema, ABC):
                 action_args_class = getattr(module, class_name)
                 return action_args_class.model_validate(obj)
         return super().model_validate(obj)
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return []
 
 
 class Observation(BaseModel):

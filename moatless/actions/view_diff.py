@@ -4,7 +4,8 @@ from typing import List
 from pydantic import ConfigDict
 
 from moatless.actions.action import Action
-from moatless.actions.schema import ActionArguments, Observation, FewShotExample
+from moatless.actions.schema import ActionArguments, Observation
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)

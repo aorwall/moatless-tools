@@ -49,7 +49,7 @@ class ReActCompletionModel(JsonCompletionModel):
 
 Use the following format:
 {'' if not self.disable_thoughts else '''
-Thought: You should always think about what to do'''}
+Thoughts: You should always think about what to do'''}
 Action: The action to take followed by the input arguments based on the schema below
 
 Use one of the following actions and provide input arguments matching the schema.
@@ -61,10 +61,10 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         return system_prompt
 
     def _get_completion_params(self, schema: ResponseSchema) -> Dict[str, str | Dict | List]:
-        params = super()._get_completion_params(schema)
-        params["stop"] = ["Observation:"]
-        return params
-    
+        #params = super()._get_completion_params(schema)
+        #params["stop"] = ["Observation:"]
+        #return params
+        return {}
     def _supports_react_format(self) -> bool:
         if not isinstance(self._response_schema, list):
             return False
@@ -74,7 +74,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                 return False
         return True
 
-    def _validate_completion(
+    async def _validate_completion(
         self,
         completion_response: Any,
     ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
@@ -102,7 +102,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         # Fall back to JSON completion model if the action is not an ActionArguments
         if not self._supports_react_format():
-            return super()._validate_completion(completion_response)
+            return await super()._validate_completion(completion_response)
         
         try:
             response_text = completion_response.choices[0].message.content
@@ -113,7 +113,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             action_name, action_input = self._parse_action(action_input)
             action_class = self._get_action_class(action_name)
 
-            if action_input.strip().startswith("<") or action_input.strip().startswith("```xml"):
+            if action_input.strip().startswith("<") or action_input.strip().startswith("```"):
                 try:
                     action_request = action_class.model_validate_xml(action_input)
                 except Exception as e:
@@ -155,9 +155,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         # Split into lines and remove empty ones
         lines = [line.strip() for line in response_text.split("\n") if line.strip()]
 
-        # Count occurrences of each section
-        thought_count = sum(1 for line in lines if line.startswith("Thought:"))
-        action_count = sum(1 for line in lines if line.startswith("Action:"))
+        # Count occurrences of each section using case-insensitive matching
+        thought_count = sum(1 for line in lines if line.lower().startswith(("thought:", "thoughts:")))
+        action_count = sum(1 for line in lines if line.lower().startswith("action:"))
 
         # Check for multiple action blocks
         if thought_count > 1 or action_count > 1:
@@ -165,14 +165,14 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         # Check if all sections exist
         if not self.disable_thoughts and thought_count < 1:
-            raise ValueError("The response is incorrect, it should start with 'Thought:'")
+            raise ValueError("The response is incorrect, it should start with 'Thoughts:'")
         if action_count < 1:
             raise ValueError("Response must have one 'Action:' section")
 
         if not self.disable_thoughts:
             # Find the starting lines for each section
-            thought_line = next((i for i, line in enumerate(lines) if line.startswith("Thought:")), -1)
-            action_line = next((i for i, line in enumerate(lines) if line.startswith("Action:")), -1)
+            thought_line = next((i for i, line in enumerate(lines) if line.lower().startswith(("thought:", "thoughts:"))), -1)
+            action_line = next((i for i, line in enumerate(lines) if line.lower().startswith("action:")), -1)
 
             # Check if sections are in correct order
             if not (thought_line < action_line):
@@ -194,19 +194,27 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         """
         thought = ""
         if not self.disable_thoughts:
-            thought_start = response_text.find("Thought:")
-            action_start = response_text.find("Action:")
+            # Find the first occurrence of either "thought:" or "thoughts:" case-insensitive
+            response_lower = response_text.lower()
+            thought_start = min(
+                (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:"))
+                if pos != -1),
+                default=-1
+            )
+            action_start = response_lower.find("action:")
 
             if thought_start == -1 or action_start == -1:
                 raise ValueError("Missing Thought or Action sections")
 
-            thought = response_text[thought_start + 8 : action_start].strip()
-            action_input = response_text[action_start + 7 :].strip()
+            # Find the actual length of the thought prefix to skip
+            thought_prefix_end = response_text.find(":", thought_start) + 1
+            thought = response_text[thought_prefix_end:action_start].strip()
+            action_input = response_text[action_start + 7:].strip()
         else:
-            action_start = response_text.find("Action:")
+            action_start = response_text.lower().find("action:")
             if action_start == -1:
                 raise ValueError("Missing Action section")
-            action_input = response_text[action_start + 7 :].strip()
+            action_input = response_text[action_start + 7:].strip()
 
         return thought, action_input
 
@@ -270,7 +278,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                         
                         prompt += f"\nTask: {example.user_input}\n"
                         if not self.disable_thoughts:
-                            prompt += f"\nThought: {thoughts}\n"
+                            prompt += f"\nThoughts: {thoughts}\n"
                         prompt += f"Action: {example.action.name}\n"
                         
                         # Handle special action types

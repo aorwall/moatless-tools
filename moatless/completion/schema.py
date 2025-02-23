@@ -12,7 +12,7 @@ from typing import (
 )
 
 from docstring_parser import parse
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 
 from moatless.completion.model import logger
 
@@ -116,7 +116,6 @@ class NameDescriptor:
         if hasattr(cls, "model_config") and "title" in cls.model_config:
             return cls.model_config["title"]
         return cls.__name__
-
 
 class ResponseSchema(BaseModel):
     name: ClassVar[NameDescriptor] = NameDescriptor()
@@ -371,6 +370,23 @@ class ResponseSchema(BaseModel):
             example.append(f"<{field_name}>{field_desc}</{field_name}>")
 
         return "\n".join(schema + example)
+
+    @classmethod
+    def get_few_shot_examples(cls) -> List["FewShotExample"]:
+        """
+        Returns a list of few-shot examples specific to this action.
+        Override this method in subclasses to provide custom examples.
+        """
+        return []
+
+
+class FewShotExample(BaseModel):
+    user_input: str = Field(..., description="The user's input/question")
+    action: ResponseSchema = Field(..., description="The expected response")
+
+    @classmethod
+    def create(cls, user_input: str, action: ResponseSchema) -> "FewShotExample":
+        return cls(user_input=user_input, action=action)
 
 
 def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:

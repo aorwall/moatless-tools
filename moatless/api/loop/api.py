@@ -14,7 +14,7 @@ from moatless.api.loop.schema import LoopResponseDTO
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.artifacts.file import FileArtifactHandler, FileArtifact
 from moatless.config.agent_config import get_agent
-from moatless.config.model_config import create_completion_model
+from moatless.completion.manager import create_completion_model
 from moatless.flow.loop import AgenticLoop
 from moatless.flow.runner import agentic_runner
 from moatless.utils.moatless import get_moatless_trajectory_dir
