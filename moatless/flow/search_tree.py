@@ -14,7 +14,10 @@ from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow
 from moatless.flow.events import NodeExpandedEvent, FeedbackGeneratedEvent, NodeRewardEvent, NodeRewardFailureEvent, NodeSelectedEvent
 from moatless.node import Node, generate_ascii_tree
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
+from moatless.telemetry import instrument, add_span_event, set_span_status
 from moatless.value_function.base import BaseValueFunction
 
 logger = logging.getLogger(__name__)
@@ -83,6 +86,7 @@ class SearchTree(AgenticFlow):
             **kwargs,
         )
 
+    @instrument()
     async def _run(self, message: str | None = None) -> tuple[Node, str]:
         """Run the search tree algorithm with the given node."""
         if not self.root:
@@ -95,7 +99,6 @@ class SearchTree(AgenticFlow):
                 logger.info,
                 f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
             )
-
 
         node = self.root
         finish_reason = None
@@ -146,6 +149,7 @@ class SearchTree(AgenticFlow):
 
         return self.get_best_trajectory(), finish_reason
 
+    @instrument()
     async def _select(self, node: Node) -> Optional[Node]:
         """Select a node for expansion using the UCT algorithm."""
         root = node.get_root()
@@ -168,9 +172,9 @@ class SearchTree(AgenticFlow):
 
         return node
 
+    @instrument()
     async def _expand(self, node: Node) -> Node | None:
         """Expand the node and return a child node."""
-
         # Check if any action step was not executed, if so return the node
         if node.action_steps and node.has_unexecuted_actions():
             self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
@@ -207,9 +211,9 @@ class SearchTree(AgenticFlow):
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
+    @instrument()
     async def _simulate(self, node: Node):
         """Simulate a playout by executing the action and evaluating the result."""
-
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:

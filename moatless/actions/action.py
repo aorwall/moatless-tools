@@ -2,6 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
+from moatless.telemetry import instrument
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from moatless.actions.schema import (
@@ -62,6 +63,7 @@ class Action(MoatlessComponent):
     def _get_base_class(cls) -> Type:
         return Action
 
+    @instrument(name=lambda self: f"{self.name}")
     async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """Execute the action."""
         if not self._workspace:

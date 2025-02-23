@@ -13,6 +13,7 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.runtime.runtime import TestResult, TestStatus
 from moatless.schema import RankedFileSpan
+from moatless.telemetry import instrument, add_span_event, set_attributes, set_span_status
 from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
@@ -55,6 +56,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         self._client = None
         self.rerun_failing_tests = rerun_failing_tests
         self.include_relevant_files = include_relevant_files
+    
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(testbed_sdk=TestbedSDK(), repository=repository, instance=instance, **kwargs)
@@ -114,9 +116,18 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         return filtered_results
 
+    @instrument()
     async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> List[TestResult]:
         # Add diagnostic logging for concurrent operations
         self._active_operations += 1
+        set_attributes(
+            {
+                "instance_id": self.instance_id,
+                "run_id": self.run_id,
+                "has_patch": bool(patch),
+                "test_files": str(test_files)
+            }
+        )
         try:
             async with await self.testbed_sdk.create_async_client(
                 instance_id=self.instance_id,
@@ -126,22 +137,22 @@ class TestbedEnvironment(RuntimeEnvironment):
                 logger.info(f"Starting test run for instance {self.instance_id} with run_id {self.run_id}. Active operations: {self._active_operations}")
                 response = await client.run_tests(test_files=test_files, patch=patch, timeout=600)
 
-                log_content = ""
+            log_content = ""
 
-                if response.output:
-                    log_content = "# Test Run\n\n"
-                    log_content += f"Files: {test_files}"
-                    if patch:
-                        log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
-                    log_content += f"\n\n## Log:\n{response.output}\n"
+            if response.output:
+                log_content = "# Test Run\n\n"
+                log_content += f"Files: {test_files}"
+                if patch:
+                    log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+                log_content += f"\n\n## Log:\n{response.output}\n"
 
-                if response.test_results:
-                    log_content += f"\n\n## Testbed test results:"
-                    test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
-                    log_content += f"```json\n{test_results_json}\n```"
+            if response.test_results:
+                log_content += f"\n\n## Testbed test results:"
+                test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
+                log_content += f"```json\n{test_results_json}\n```"
 
-                # Filter using cached tests first
-                test_results = self._filter_failing_tests(response.test_results, patch=patch)
+            # Filter using cached tests first
+            test_results = self._filter_failing_tests(response.test_results, patch=patch)
 
             # Now check for failures only in the filtered results
             if self.rerun_failing_tests and patch and any(test.status in [TestStatus.ERROR, TestStatus.FAILED] for test in test_results):
@@ -177,10 +188,17 @@ class TestbedEnvironment(RuntimeEnvironment):
             self._active_operations -= 1
             logger.info(f"Completed test run for instance {self.instance_id}. Active operations: {self._active_operations}")
 
+    @instrument(
+        attributes={
+            "instance_id": lambda self: self.instance_id,
+            "run_id": lambda self: self.run_id
+        }
+    )
     async def evaluate(self, patch: str) -> EvaluationResult | None:
         # Add diagnostic logging for concurrent operations
         self._active_operations += 1
         try:
+            evaluation_result = None
             # Create a new client for evaluation
             async with await self.testbed_sdk.create_async_client(
                 instance_id=self.instance_id,
@@ -202,6 +220,7 @@ class TestbedEnvironment(RuntimeEnvironment):
                         log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
 
                     log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
+                    
                     return evaluation_result
 
                 except TestbedError as e:

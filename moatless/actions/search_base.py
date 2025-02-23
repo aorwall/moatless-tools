@@ -179,7 +179,8 @@ class SearchBaseAction(Action, CompletionModelMixin):
         # TODO: Refactor
         for file in file_context.files:
             if view_context.has_file(file.file_path) and file.patch:
-                view_context.get_file(file.file_path).set_patch(file.patch)
+                context_file = await view_context.get_file(file.file_path)
+                context_file.set_patch(file.patch)
 
         new_span_ids = await file_context.add_file_context(view_context)
 

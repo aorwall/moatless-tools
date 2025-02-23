@@ -9,6 +9,7 @@ from typing import Optional, TYPE_CHECKING
 
 import requests
 from moatless.codeblocks.module import Module
+from moatless.telemetry import instrument, set_attribute
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
@@ -24,14 +25,15 @@ from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
 from moatless.index.simple_faiss import SimpleFaissVectorStore
+from moatless.index.code_block_index import CodeBlockIndex
 
 import asyncio
 import aiofiles
 
-if TYPE_CHECKING:
-    from llama_index.core import SimpleDirectoryReader
-    from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-    from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
+from llama_index.core.storage.docstore import SimpleDocumentStore
+from moatless.index.embed_model import get_embed_model
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +63,7 @@ class CodeIndex:
         vector_store: "BasePydanticVectorStore | None" = None,
         docstore: "DocumentStore | None" = None,
         embed_model: "BaseEmbedding | None" = None,
-        blocks_by_class_name: Optional[dict] = None,
-        blocks_by_function_name: Optional[dict] = None,
+        code_block_index: CodeBlockIndex | None = None,
         settings: IndexSettings | None = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
@@ -77,11 +78,7 @@ class CodeIndex:
 
         self._file_repo = file_repo
 
-        self._blocks_by_class_name = blocks_by_class_name or {}
-        self._blocks_by_function_name = blocks_by_function_name or {}
-
-        from moatless.index.embed_model import get_embed_model
-        from llama_index.core.storage.docstore import SimpleDocumentStore
+        self._code_block_index = code_block_index
 
         self._embed_model = embed_model or get_embed_model(self._settings.embed_model)
         self._vector_store = vector_store or default_vector_store(self._settings)
@@ -89,43 +86,45 @@ class CodeIndex:
 
         self._thread_pool = ThreadPoolExecutor(max_workers=5)
 
-    @classmethod
-    def from_persist_dir(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
-        """Synchronous version of from_persist_dir for backward compatibility"""
-        from moatless.index.simple_faiss import SimpleFaissVectorStore
-        from llama_index.core.storage.docstore import SimpleDocumentStore
+    async def matching_files(self, file_pattern: str) -> list[str]:
+        """
+        Returns a list of files matching the given pattern within the repository.
+        Uses inverted indexes instead of filesystem operations.
 
-        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
+        Parameters:
+            file_pattern (str): The glob pattern to match files.
 
-        settings = IndexSettings.from_persist_dir(persist_dir)
+        Returns:
+            List[str]: A list of relative file paths matching the pattern.
+        """
+        try:
+            # If absolute path, log warning and remove first slash
+            if file_pattern.startswith("/"):
+                logger.warning(f"Converting absolute path {file_pattern} to relative path")
+                file_pattern = file_pattern[1:]
 
-        if os.path.exists(os.path.join(persist_dir, "blocks_by_class_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_class_name.json")) as f:
-                blocks_by_class_name = json.load(f)
-        else:
-            blocks_by_class_name = {}
+            matched_files = sorted(await self._code_block_index.match_glob_pattern(file_pattern))
+            return matched_files
 
-        if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_function_name.json")) as f:
-                blocks_by_function_name = json.load(f)
-        else:
-            blocks_by_function_name = {}
+        except Exception as e:
+            logger.exception(f"Error finding files for pattern {file_pattern}:")
+            return []
 
-        return cls(
-            file_repo=file_repo,
-            vector_store=vector_store,
-            docstore=docstore,
-            settings=settings,
-            blocks_by_class_name=blocks_by_class_name,
-            blocks_by_function_name=blocks_by_function_name,
-            **kwargs,
-        )
+    async def find_by_pattern(self, patterns: list[str]) -> list[str]:
+        """
+        Returns a list of files matching the given patterns within the repository.
+        Uses inverted indexes instead of filesystem operations.
+        """
+        matched_files = set()
+        for pattern in patterns:
+            matches = await self._code_block_index.match_glob_pattern(f"**/{pattern}")
+            matched_files.update(matches)
+        
+        return sorted(matched_files)
 
     @classmethod
     async def from_persist_dir_async(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
         """Asynchronous version of from_persist_dir"""
-       
         # Run CPU-intensive synchronous operations in a thread pool
         loop = asyncio.get_event_loop()
         
@@ -141,59 +140,17 @@ class CodeIndex:
             loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir)
         )
 
-        class_name_path = os.path.join(persist_dir, "blocks_by_class_name.json")
-        function_name_path = os.path.join(persist_dir, "blocks_by_function_name.json")
-
-        # Read both files concurrently if they exist
-        async def read_json_file(path):
-            if os.path.exists(path):
-                async with aiofiles.open(path) as f:
-                    content = await f.read()
-                    loop = asyncio.get_event_loop()
-                    return await loop.run_in_executor(None, json.loads, content)
-            return {}
-
-        blocks_by_class_name, blocks_by_function_name = await asyncio.gather(
-            read_json_file(class_name_path),
-            read_json_file(function_name_path)
-        )
+        inverted_index = await CodeBlockIndex.from_persist_dir(persist_dir)
 
         return cls(
             file_repo=file_repo,
             vector_store=vector_store,
             docstore=docstore,
             settings=settings,
-            blocks_by_class_name=blocks_by_class_name,
-            blocks_by_function_name=blocks_by_function_name,
+            code_block_index=inverted_index,
             **kwargs,
         )
-
-    @classmethod
-    def from_url(cls, url: str, persist_dir: str, file_repo: FileRepository):
-        """Synchronous version of from_url for backward compatibility"""
-        try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_zip_file = os.path.join(temp_dir, url.split("/")[-1])
-
-                with open(temp_zip_file, "wb") as data:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        data.write(chunk)
-
-                shutil.unpack_archive(temp_zip_file, persist_dir)
-
-        except requests.exceptions.HTTPError as e:
-            logger.exception(f"HTTP Error while fetching {url}")
-            raise e
-        except Exception as e:
-            logger.exception(f"Failed to download {url}")
-            raise e
-
-        logger.info(f"Downloaded existing index from {url}.")
-        return cls.from_persist_dir(persist_dir, file_repo)
-
+    
     @classmethod
     async def from_url_async(cls, url: str, persist_dir: str, file_repo: FileRepository):
         """Asynchronous version of from_url"""
@@ -227,33 +184,6 @@ class CodeIndex:
 
         logger.info(f"Downloaded existing index from {url}.")
         return await cls.from_persist_dir_async(persist_dir, file_repo)
-
-    @classmethod
-    def from_index_name(
-        cls,
-        index_name: str,
-        file_repo: Repository,
-        index_store_dir: Optional[str] = None,
-    ):
-        """Synchronous version of from_index_name for backward compatibility"""
-        if not index_store_dir:
-            index_store_dir = os.getenv("INDEX_STORE_DIR")
-
-        persist_dir = os.path.join(index_store_dir, index_name)
-        if os.path.exists(persist_dir):
-            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
-            return cls.from_persist_dir(persist_dir, file_repo=file_repo)
-        else:
-            logger.info(f"No existing index found at {persist_dir}.")
-
-        if os.getenv("INDEX_STORE_URL"):
-            index_store_url = os.getenv("INDEX_STORE_URL")
-        else:
-            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20250118-voyage-code-3/"
-
-        store_url = os.path.join(index_store_url, f"{index_name}.zip")
-        logger.info(f"Downloading existing index {index_name} from {store_url}.")
-        return cls.from_url(store_url, persist_dir, file_repo)
 
     @classmethod
     async def from_index_name_async(
@@ -292,6 +222,7 @@ class CodeIndex:
             return module
         return None
 
+    @instrument()
     async def semantic_search(
         self,
         query: Optional[str] = None,
@@ -311,7 +242,7 @@ class CodeIndex:
         message = ""
         if file_pattern:
             try:
-                matching_files = await self._file_repo.matching_files(file_pattern)
+                matching_files = await self.matching_files(file_pattern)
                 matching_files = [file for file in matching_files if not is_test(file)]
             except Exception as e:
                 return SearchCodeResponse(
@@ -331,7 +262,7 @@ class CodeIndex:
                         hits=[],
                     )
 
-        search_results = self._vector_search(
+        search_results = await self._vector_search(
             query,
             file_pattern=file_pattern,
             exact_content_match=code_snippet,
@@ -440,9 +371,11 @@ class CodeIndex:
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
 
+    @instrument()
     async def find_class(self, class_name: str, file_pattern: Optional[str] = None):
         return await self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
 
+    @instrument()
     async def find_function(
         self,
         function_name: str,
@@ -472,14 +405,14 @@ class CodeIndex:
 
         # If class name is provided only find the clasees and then filter on function name if necessary
         if class_name:
-            paths = self._blocks_by_class_name.get(class_name, [])
+            paths = await self._code_block_index.get_blocks_by_class(class_name)
         elif function_name:
-            paths = self._blocks_by_function_name.get(function_name, [])
+            paths = await self._code_block_index.get_blocks_by_function(function_name)
         else:
             raise ValueError("At least one of class_name or function_name must be provided.")
 
         if file_pattern:
-            include_files = await self._file_repo.matching_files(file_pattern)
+            include_files = await self.matching_files(file_pattern)
 
             if include_files:
                 filtered_paths = []
@@ -606,7 +539,7 @@ class CodeIndex:
 
         file_paths = [file.file_path for file in files_with_spans.values()]
         if file_pattern:
-            file_paths = _rerank_files(file_paths, file_pattern)
+            file_paths = await self.matching_files(file_pattern)
 
         search_hits = []
         for rank, file_path in enumerate(file_paths):
@@ -615,11 +548,15 @@ class CodeIndex:
                 span.rank = rank
             search_hits.append(file)
 
+        set_attribute("hits", len(search_hits))
+        set_attribute("files", len(files_with_spans))
+
         return SearchCodeResponse(
             message=message,
             hits=search_hits,
         )
 
+    @instrument()
     async def find_test_files(
         self,
         file_path: str,
@@ -637,7 +574,7 @@ class CodeIndex:
         else:
             query = file_path
 
-        search_results = self._vector_search(query, category="test")
+        search_results = await self._vector_search(query, category="test")
 
         sum_tokens = 0
         files = []
@@ -647,6 +584,8 @@ class CodeIndex:
         elif span_id or query and max_results > 1:
             # Try to find the most similar test file by file name if no exact match on file name
             files = await self.find_test_files(file_path, max_results=1, max_spans=max_spans)
+
+        set_attribute("files", len(files))
 
         for result in search_results:
             file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
@@ -688,6 +627,8 @@ class CodeIndex:
             if not max_spans and len(files) >= max_results:
                 break
 
+        set_attribute("files", len(files))
+
         if max_spans:
             files = [f for f in files if len(f.span_ids) > 0]
 
@@ -704,7 +645,7 @@ class CodeIndex:
         dirname = os.path.dirname(file_path)
         test_patterns = [f"test_{filename}", f"{filename}_test.py"]
 
-        matched_files = await self._file_repo.find_by_pattern(test_patterns)
+        matched_files = await self.find_by_pattern(test_patterns)
         if not matched_files:
             return None
 
@@ -724,7 +665,8 @@ class CodeIndex:
 
         return best_match
 
-    def _vector_search(
+    @instrument()
+    async def _vector_search(
         self,
         query: str = "",
         exact_query_match: bool = False,
@@ -747,6 +689,7 @@ class CodeIndex:
 
         logger.debug(f"vector_search() Searching for query [{query[:50]}...] and file pattern [{file_pattern}].")
 
+        # TODO: Make this async
         query_embedding = self._embed_model.get_query_embedding(query)
 
         # FIXME: Filters can't be used ATM. Category isn't set in some instance vector stores
@@ -770,7 +713,7 @@ class CodeIndex:
         sum_tokens_per_file = {}
 
         if file_pattern:
-            include_files = self._file_repo.matching_files(file_pattern)
+            include_files = await self.matching_files(file_pattern)
             if len(include_files) == 0:
                 logger.info(f"vector_search() No files found for file pattern {file_pattern}, return empty result...")
                 return []
@@ -937,21 +880,19 @@ class CodeIndex:
         embedded_tokens = sum([count_tokens(node.get_content(), self._settings.embed_model) for node in embedded_nodes])
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {embedded_tokens} tokens")
 
-        self._blocks_by_class_name = blocks_by_class_name
-        self._blocks_by_function_name = blocks_by_function_name
+        # TODO: Create a new code block index
+        self._code_block_index.blocks_by_class_name = blocks_by_class_name
+        self._code_block_index.blocks_by_function_name = blocks_by_function_name
 
         return len(embedded_nodes), embedded_tokens
 
-    def persist(self, persist_dir: str):
-        self._vector_store.persist(persist_dir)
-        self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
-        self._settings.persist(persist_dir)
-
-        with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "w") as f:
-            f.write(json.dumps(self._blocks_by_class_name, indent=2))
-
-        with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
-            f.write(json.dumps(self._blocks_by_function_name, indent=2))
+    async def persist(self, persist_dir: str):
+        await asyncio.gather(
+            self._vector_store.persist(persist_dir),
+            self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME)),
+            self._settings.persist(persist_dir),
+            self._code_block_index.persist(persist_dir)
+        )
 
 
 def _rerank_files(file_paths: list[str], file_pattern: str):

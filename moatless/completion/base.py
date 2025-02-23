@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, List, Union, Any, Dict, Type, Callable, Tuple, Awaitable
 
+from moatless.telemetry import instrument, set_attribute
 import tenacity
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
@@ -200,11 +201,19 @@ class BaseCompletionModel(BaseModel, ABC):
     def initialized(self) -> bool:
         return self._initialized
 
+    @instrument()
     async def create_completion(
         self,
         messages: List[dict],
         system_prompt: str | None = None,
     ) -> CompletionResponse:
+        set_attribute("model", self.model)
+        set_attribute("model_id", self.model_id)
+        set_attribute("temperature", self.temperature)
+        set_attribute("max_tokens", self.max_tokens)
+        set_attribute("timeout", self.timeout)
+        set_attribute("model_base_url", self.model_base_url)
+        
         if not self._initialized:
             raise ValueError(
                 "Model must be initialized with response schema before creating completion"
@@ -295,6 +304,7 @@ class BaseCompletionModel(BaseModel, ABC):
         """
         return {}
 
+    @instrument()
     async def _create_completion_with_retries(
         self,
         messages: List[dict],
@@ -322,6 +332,11 @@ class BaseCompletionModel(BaseModel, ABC):
             usage = Usage.from_completion_response(completion_response, self.model)
             if usage:
                 accumulated_usage += usage
+                set_attribute("prompt_tokens", usage.prompt_tokens)
+                set_attribute("completion_tokens", usage.completion_tokens)
+                set_attribute("cache_read_tokens", usage.cache_read_tokens)
+                set_attribute("cache_write_tokens", usage.cache_write_tokens)
+                set_attribute("completion_cost", usage.completion_cost)
             else:
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
@@ -403,6 +418,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 accumulated_usage=accumulated_usage,
             ) from e
 
+    @instrument()
     async def _execute_completion(
         self,
         messages: List[Dict[str, str]],

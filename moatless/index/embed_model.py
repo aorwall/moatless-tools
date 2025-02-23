@@ -1,7 +1,5 @@
 import os
 
-from moatless.index.retry_voyage_embedding import VoyageEmbeddingWithRetry
-
 
 def get_embed_model(model_name: str) -> "BaseEmbedding":
     if model_name.startswith("voyage"):
@@ -15,7 +13,7 @@ def get_embed_model(model_name: str) -> "BaseEmbedding":
         if "VOYAGE_API_KEY" not in os.environ:
             raise ValueError("VOYAGE_API_KEY environment variable is not set. Please set it to your Voyage API key.")
 
-        return VoyageEmbeddingWithRetry(
+        return VoyageEmbedding(
             model_name=model_name,
             voyage_api_key=os.environ.get("VOYAGE_API_KEY"),
             truncation=True,

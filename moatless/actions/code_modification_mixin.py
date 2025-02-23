@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
+from moatless.telemetry import instrument
 from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ class CodeModificationMixin:
 
         return path, None
 
+    @instrument()
     async def run_tests(
         self,
         file_path: str,

@@ -3,6 +3,7 @@
 import importlib.resources as pkg_resources
 import json
 import logging
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Set
 from collections import defaultdict
@@ -17,6 +18,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from moatless.api.agents.api import router as agent_router
 from moatless.api.artifacts.api import router as artifact_router
@@ -30,8 +32,10 @@ from moatless.api.trajectory.trajectory_utils import (
     load_trajectory_from_file,
     create_trajectory_dto,
 )
+from moatless.api.logging_config import setup_logging, get_logger
 from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
+from moatless.telemetry import setup_telemetry
 from moatless.workspace import Workspace
 
 import psutil
@@ -42,7 +46,15 @@ import gc
 import tracemalloc
 from collections import Counter
 
-logger = logging.getLogger(__name__)
+setup_logging(
+    log_level=os.getenv("LOG_LEVEL", "INFO"),
+    log_dir=Path("logs"),
+    service_name="moatless-api",
+    environment=os.getenv("DEPLOYMENT_ENV", "development"),
+    use_json=os.getenv("LOG_FORMAT", "").lower() == "json",
+)
+
+logger = get_logger(__name__)
 
 
 class ConnectionManager:
@@ -199,6 +211,29 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
+    # Initialize OpenTelemetry
+    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    app_insights_conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+    
+    # Choose telemetry provider based on environment variables
+    if app_insights_conn_string:
+        setup_telemetry(
+            service_name="moatless-api",
+            provider="azure",
+            logger_name=__name__,
+            resource_attributes={
+                "deployment.environment": os.getenv("DEPLOYMENT_ENV", "development")
+            }
+        )
+    else:
+        setup_telemetry(
+            service_name="moatless-api",
+            endpoint=otlp_endpoint,
+            resource_attributes={
+                "deployment.environment": os.getenv("DEPLOYMENT_ENV", "development")
+            }
+        )
+
     api = FastAPI(title="Moatless API")
     
     # Initialize memory monitor with 5 minute interval
@@ -211,6 +246,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     @api.on_event("shutdown")
     async def shutdown_event():
         await memory_monitor.stop()
+
+    # Initialize FastAPI instrumentation
+    FastAPIInstrumentor.instrument_app(api)
 
     # Update CORS middleware configuration
     origins = [

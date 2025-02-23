@@ -8,12 +8,14 @@ import uuid
 import aiofiles
 import aiofiles.os
 import tempfile
+import threading
 
 import filelock
 
 from moatless.evaluation.runner import EvaluationRunner, Evaluation, EvaluationInstance
 from moatless.evaluation.schema import EvaluationEvent, EvaluationStatus, InstanceStatus
 from moatless.events import event_bus
+from moatless.telemetry import instrument, set_attribute
 from moatless.utils.moatless import get_moatless_dir
 from moatless.flow.manager import get_flow_config
 from moatless.completion.manager import create_completion_model
@@ -120,7 +122,15 @@ class EvaluationManager:
 
         await self._save_evaluation(evaluation)
 
-    async def start_evaluation(self, evaluation_name: str, num_concurrent_instances: int) -> Evaluation:
+    @instrument(name="EvaluationManager.start_evaluation")
+    async def start_evaluation(
+        self,
+        evaluation_name: str,
+        num_concurrent_instances: int
+    ) -> Evaluation:
+        set_attribute("evaluation_name", evaluation_name)
+        set_attribute("num_concurrent_instances", num_concurrent_instances)
+        
         """Start an evaluation and return the updated evaluation object."""
         evaluation = await self._load_evaluation(evaluation_name)
         
@@ -168,15 +178,43 @@ class EvaluationManager:
 
         evaluation.status = EvaluationStatus.RUNNING
         await self._save_evaluation(evaluation)
+        
+        # Create runner instance
         runner = EvaluationRunner(
             evaluation=evaluation,
             num_concurrent_instances=num_concurrent_instances,
             evaluations_dir=str(self.evals_dir)
         )
-        asyncio.create_task(runner.run_evaluation())
+        
+        # Get current trace context before spawning thread
+        from opentelemetry import trace, context
+        current_context = context.get_current()
+        current_span = trace.get_current_span()
+        
+        # Start runner in a separate thread with its own event loop
+        def run_evaluation_in_thread():
+            try:
+                # Create new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Attach the parent trace context
+                token = context.attach(current_context)
+                try:
+                    # Run the evaluation
+                    loop.run_until_complete(runner.run_evaluation())
+                finally:
+                    context.detach(token)
+                    loop.close()
+            except Exception as e:
+                logger.exception("Error in evaluation thread setup")
+
+        # Start the thread
+        thread = threading.Thread(target=run_evaluation_in_thread, daemon=True)
+        thread.start()
+        
         self._active_runners[evaluation.evaluation_name] = runner
         return evaluation
-
 
     async def save_evaluation(self, evaluation: Evaluation):
         """Save evaluation metadata to evaluation.json."""

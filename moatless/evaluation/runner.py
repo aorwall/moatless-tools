@@ -7,10 +7,11 @@ import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 import uuid
 import sys
 import threading
+from contextlib import asynccontextmanager
 
 import aiofiles
 
@@ -34,6 +35,7 @@ from moatless.runtime.testbed import TestbedEnvironment
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 from moatless.context_data import current_project_id
+from moatless.telemetry import instrument, set_attribute
 
 from moatless.evaluation.state_manager import StateManager
 from moatless.evaluation.task_scheduler import TaskScheduler
@@ -44,10 +46,7 @@ logger = logging.getLogger(__name__)
 
 class EvaluationRunner:
     """
-    Orchestrates an Evaluation's lifecycle.  
-    - Uses TaskScheduler for concurrency.  
-    - Relies on StateManager for instance states.  
-    - Schedules separate tasks for setup, run, and evaluate.
+    Enhanced orchestrator for Evaluation lifecycle with robust error handling and state management.
     """
 
     def __init__(
@@ -60,8 +59,12 @@ class EvaluationRunner:
     ):
         self.evaluation = evaluation
         self.state_manager = StateManager()
-        self.scheduler = TaskScheduler()
-
+        
+        # Separate schedulers for different types of tasks
+        self.setup_scheduler = TaskScheduler()  # For repository setup
+        self.run_scheduler = TaskScheduler()    # For running instances
+        self.eval_scheduler = TaskScheduler()   # For evaluation tasks
+        
         self.num_concurrent_instances = num_concurrent_instances
         self.remove_repo_after_evaluation = remove_repo_after_evaluation
 
@@ -72,146 +75,199 @@ class EvaluationRunner:
         self.locks_dir = self.evaluation_dir / ".locks"
         self.locks_dir.mkdir(parents=True, exist_ok=True)
 
-        # Internal
+        # Internal state
         self._state_changed = asyncio.Event()
         self._status_log_interval = 30.0
         self._last_status_log = time.time()
-
+        self._instance_locks: Dict[str, asyncio.Lock] = {}
+        
+        # Monitoring
         self.blocking_detector = BlockingDetector(threshold_ms=1000)
+        
+        # Statistics
+        self._stats = {
+            "setup_attempts": 0,
+            "run_attempts": 0,
+            "eval_attempts": 0,
+            "setup_failures": 0,
+            "run_failures": 0,
+            "eval_failures": 0,
+        }
 
+    @asynccontextmanager
+    async def instance_lock(self, instance_id: str):
+        """Ensure exclusive access to instance state modifications."""
+        if instance_id not in self._instance_locks:
+            self._instance_locks[instance_id] = asyncio.Lock()
+        async with self._instance_locks[instance_id]:
+            yield
+
+    @instrument()
     async def run_evaluation(self) -> None:
         """
-        Primary entry point to run an entire evaluation, in the background.
+        Enhanced primary entry point with better error handling and monitoring.
         """
-
+        set_attribute("evaluation_name", self.evaluation.evaluation_name)
+        set_attribute("num_instances", len(self.evaluation.instances))
+        set_attribute("num_concurrent", self.num_concurrent_instances)
+        
         try:
-            # Start blocking detection
-            await self.blocking_detector.start()
-
-            current_project_id.set(self.evaluation.evaluation_name)
-            self.evaluation.status = EvaluationStatus.RUNNING
-            self.evaluation.started_at = datetime.now(timezone.utc)
-            await self._save_evaluation()
-            await self._emit_event("evaluation_started")
-
-            # Main scheduling loop: until we see all done or an error
-            while True:
-                await self._process_instances()
-                if self._all_instances_finished():
-                    break
-
-                # Wait a short time or until a state change is triggered
-                try:
-                    await asyncio.wait_for(self._state_changed.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    self._state_changed.clear()
-
-            # Mark evaluation completed
-            self.evaluation.status = EvaluationStatus.COMPLETED
-            self.evaluation.completed_at = datetime.now(timezone.utc)
-            await self._save_evaluation()
-            await self._emit_event("evaluation_completed", {
-                "completed": sum(i.status == InstanceStatus.EVALUATED for i in self.evaluation.instances),
-                "errors": sum(i.status == InstanceStatus.ERROR for i in self.evaluation.instances),
-            })
-
+            await self._initialize_evaluation()
+            await self._run_main_loop()
+            await self._finalize_evaluation()
+            
         except Exception as exc:
-            logger.exception("Error running evaluation.")
-            self.evaluation.status = EvaluationStatus.ERROR
-            self.evaluation.error = str(exc)
-            await self._save_evaluation()
-            await self._emit_event("evaluation_error", {"error": str(exc)})
+            logger.exception("Critical error running evaluation")
+            await self._handle_evaluation_error(exc)
             raise
+            
         finally:
-            # Cleanup
-            if self.remove_repo_after_evaluation:
-                self._cleanup_repositories()
-                
-            # Wait for any scheduled tasks to finish
-            await self.scheduler.shutdown()
+            await self._cleanup()
 
-            # Stop and show final statistics
-            await self.blocking_detector.stop()
-            stats = self.blocking_detector.get_blocking_statistics()
-            if stats:
-                logger.info("Final blocking statistics:")
-                for location, count in stats.items():
-                    logger.info(f"  {location}: blocked {count} times")
-            else:
-                logger.info("No blocking detected during run")
+    async def _initialize_evaluation(self):
+        """Initialize evaluation state and monitoring."""
+        await self.blocking_detector.start()
+        current_project_id.set(self.evaluation.evaluation_name)
+        
+        self.evaluation.status = EvaluationStatus.RUNNING
+        self.evaluation.started_at = datetime.now(timezone.utc)
+        await self._save_evaluation()
+        await self._emit_event("evaluation_started")
+
+    async def _run_main_loop(self):
+        """Main scheduling loop with enhanced error handling."""
+        while not self._all_instances_finished():
+            try:
+                await self._process_instances()
+                
+                # Create tasks for each scheduler's wait operation
+                scheduler_tasks = [
+                    asyncio.create_task(
+                        self.setup_scheduler.wait_for_task_completion(timeout=5.0),
+                        name="setup_scheduler_wait"
+                    ),
+                    asyncio.create_task(
+                        self.run_scheduler.wait_for_task_completion(timeout=5.0),
+                        name="run_scheduler_wait"
+                    ),
+                    asyncio.create_task(
+                        self.eval_scheduler.wait_for_task_completion(timeout=5.0),
+                        name="eval_scheduler_wait"
+                    )
+                ]
+                
+                try:
+                    # Wait for any scheduler to complete a task
+                    done, pending = await asyncio.wait(
+                        scheduler_tasks,
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # Process completed tasks
+                    for task in done:
+                        try:
+                            await task
+                        except Exception as e:
+                            logger.error(f"Error in scheduler task {task.get_name()}: {e}")
+                    
+                    # Cancel pending tasks
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.error(f"Error cancelling task {task.get_name()}: {e}")
+                            
+                except Exception as e:
+                    logger.error(f"Error waiting for scheduler tasks: {e}")
+                    # Ensure all tasks are cancelled
+                    for task in scheduler_tasks:
+                        if not task.done():
+                            task.cancel()
+                            try:
+                                await task
+                            except (asyncio.CancelledError, Exception):
+                                pass
+                        
+            except asyncio.CancelledError:
+                logger.info("Main loop received cancellation request")
+                raise
+            except Exception as e:
+                logger.error(f"Error in main loop: {e}")
+                # Add a small delay to prevent tight error loops
+                await asyncio.sleep(1)
 
     async def _process_instances(self) -> None:
         """
-        Checks concurrency constraints, schedules tasks for each phase: setup, run, evaluate.
+        Enhanced instance processing with better concurrency management.
         """
-        # Count how many are in "RUNNING" vs. capacity
-        counts = self._get_instance_counts()
-
-        # (1) Setup or Start running pending instances, if there's capacity
-        running = counts.get(InstanceStatus.RUNNING.value, 0)
-        capacity_left = self.num_concurrent_instances - running
-
-        if capacity_left > 0:
-            # Grab pending instances
-            pending = [i for i in self.evaluation.instances if i.status == InstanceStatus.PENDING]
-            for instance in pending[:capacity_left]:
-                await self._schedule_setup_or_run(instance)
-
-        # (2) Evaluate completed instances, if there's capacity
-        eval_running = counts.get(InstanceStatus.EVALUATING.value, 0)
-        eval_capacity_left = self.num_concurrent_instances - eval_running
-
-        if eval_capacity_left > 0:
-            # Grab completed (but not yet EVALUATING/EVALUATED) instances
-            ready_for_eval = [
+        # Process setup tasks
+        setup_capacity = self.num_concurrent_instances - self.setup_scheduler.get_active_count()
+        if setup_capacity > 0:
+            pending_setup = [
                 i for i in self.evaluation.instances 
+                if i.status == InstanceStatus.PENDING
+            ]
+            for instance in pending_setup[:setup_capacity]:
+                async with self.instance_lock(instance.instance_id):
+                    await self._try_schedule_setup(instance)
+
+        # Process run tasks
+        run_capacity = self.num_concurrent_instances - self.run_scheduler.get_active_count()
+        if run_capacity > 0:
+            ready_to_run = [
+                i for i in self.evaluation.instances
+                if i.status == InstanceStatus.RUNNING
+            ]
+            for instance in ready_to_run[:run_capacity]:
+                async with self.instance_lock(instance.instance_id):
+                    await self._try_schedule_run(instance)
+
+        # Process evaluation tasks
+        eval_capacity = self.num_concurrent_instances - self.eval_scheduler.get_active_count()
+        if eval_capacity > 0:
+            ready_for_eval = [
+                i for i in self.evaluation.instances
                 if i.status == InstanceStatus.COMPLETED
             ]
-            for instance in ready_for_eval[:eval_capacity_left]:
-                await self._update_instance_state(
-                    instance,
-                    InstanceStatus.EVALUATING,
-                    "instance_evaluating"
-                )
-                self.scheduler.schedule(self._evaluate_instance(instance.instance_id), f"evaluate_{instance.instance_id}")
+            for instance in ready_for_eval[:eval_capacity]:
+                async with self.instance_lock(instance.instance_id):
+                    await self._try_schedule_evaluation(instance)
 
-    async def _schedule_setup_or_run(self, instance: EvaluationInstance) -> None:
-        """
-        Decide if the instance needs a repo setup or can immediately go RUNNING.
-        """
-        # Check if repo is already available
+        self._print_status_with_counts()
+
+    async def _try_schedule_setup(self, instance: EvaluationInstance) -> None:
+        """Attempt to schedule setup with proper error handling."""
+        self._stats["setup_attempts"] += 1
         try:
             moatless_instance = get_moatless_instance(instance_id=instance.instance_id)
             exists = await self.state_manager.check_repository_exists(moatless_instance, self.repo_base_dir)
 
             if not exists:
-                # Need to set up the repository
                 can_setup = await self.state_manager.can_setup_repo(instance.instance_id)
                 if can_setup:
                     await self.state_manager.register_repo_setup(instance.instance_id)
-                    self.scheduler.schedule(
-                        self._setup_instance(instance.instance_id), 
-                        f"setup_{instance.instance_id}"
+                    self.setup_scheduler.schedule(
+                        self._setup_instance(instance.instance_id),
+                        f"setup_{instance.instance_id}",
+                        group="setup"
                     )
                 else:
                     logger.info(f"Repo setup already in progress for {instance.instance_id}")
                 return
 
-            # If repo exists, go straight to RUNNING
+            # If repo exists, transition to RUNNING
             await self._update_instance_state(
                 instance,
                 InstanceStatus.RUNNING,
                 "instance_started"
             )
-            self.scheduler.schedule(
-                self._run_instance(instance.instance_id),
-                f"run_{instance.instance_id}"
-            )
 
         except Exception as exc:
-            logger.error(f"Failed to schedule setup/run for {instance.instance_id}: {exc}")
+            self._stats["setup_failures"] += 1
+            logger.error(f"Failed to schedule setup for {instance.instance_id}: {exc}")
             await self._update_instance_state(
                 instance,
                 InstanceStatus.ERROR,
@@ -219,14 +275,105 @@ class EvaluationRunner:
                 error=str(exc)
             )
 
-    #
-    # Separate Steps
-    #
+    async def _try_schedule_run(self, instance: EvaluationInstance) -> None:
+        """Attempt to schedule run with proper error handling."""
+        self._stats["run_attempts"] += 1
+        try:
+            self.run_scheduler.schedule(
+                self._run_instance(instance.instance_id),
+                f"run_{instance.instance_id}",
+                group="run"
+            )
+        except Exception as exc:
+            self._stats["run_failures"] += 1
+            logger.error(f"Failed to schedule run for {instance.instance_id}: {exc}")
+            await self._update_instance_state(
+                instance,
+                InstanceStatus.ERROR,
+                "instance_error",
+                error=str(exc)
+            )
 
+    async def _try_schedule_evaluation(self, instance: EvaluationInstance) -> None:
+        """Attempt to schedule evaluation with proper error handling."""
+        self._stats["eval_attempts"] += 1
+        try:
+            await self._update_instance_state(
+                instance,
+                InstanceStatus.EVALUATING,
+                "instance_evaluating"
+            )
+            self.eval_scheduler.schedule(
+                self._evaluate_instance(instance.instance_id),
+                f"evaluate_{instance.instance_id}",
+                group="evaluate"
+            )
+        except Exception as exc:
+            self._stats["eval_failures"] += 1
+            logger.error(f"Failed to schedule evaluation for {instance.instance_id}: {exc}")
+            await self._update_instance_state(
+                instance,
+                InstanceStatus.ERROR,
+                "instance_error",
+                error=str(exc)
+            )
+
+    async def _finalize_evaluation(self):
+        """Finalize evaluation state and emit completion event."""
+        self.evaluation.status = EvaluationStatus.COMPLETED
+        self.evaluation.completed_at = datetime.now(timezone.utc)
+        await self._save_evaluation()
+        
+        completed = sum(i.status == InstanceStatus.EVALUATED for i in self.evaluation.instances)
+        errors = sum(i.status == InstanceStatus.ERROR for i in self.evaluation.instances)
+        
+        await self._emit_event("evaluation_completed", {
+            "completed": completed,
+            "errors": errors,
+            "statistics": self._stats
+        })
+
+    async def _cleanup(self):
+        """Comprehensive cleanup of resources."""
+        try:
+            if self.remove_repo_after_evaluation:
+                self._cleanup_repositories()
+                
+            # Shutdown all schedulers
+            await asyncio.gather(
+                self.setup_scheduler.shutdown(),
+                self.run_scheduler.shutdown(),
+                self.eval_scheduler.shutdown()
+            )
+            
+            # Stop monitoring
+            await self.blocking_detector.stop()
+            stats = self.blocking_detector.get_blocking_statistics()
+            if stats:
+                logger.info("Final blocking statistics:")
+                for location, count in stats.items():
+                    logger.info(f"  {location}: blocked {count} times")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+
+    async def _handle_evaluation_error(self, exc: Exception):
+        """Handle critical evaluation errors."""
+        self.evaluation.status = EvaluationStatus.ERROR
+        self.evaluation.error = str(exc)
+        await self._save_evaluation()
+        await self._emit_event("evaluation_error", {
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+            "statistics": self._stats
+        })
+
+    @instrument()
     async def _setup_instance(self, instance_id: str) -> None:
         """
-        Step (1): Setup the repository (clone, install deps, etc.).
+        Step (1): Setup the repository 
         """
+        set_attribute("instance_id", instance_id)
         instance = self.evaluation.get_instance(instance_id)
         if not instance:
             return
@@ -257,10 +404,12 @@ class EvaluationRunner:
                 error=str(exc)
             )
 
+    @instrument()
     async def _run_instance(self, instance_id: str) -> None:
         """
         Step (2): Run the "agentic flow" or whatever your main "execution" is.
         """
+        set_attribute("instance_id", instance_id)
         instance = self.evaluation.get_instance(instance_id)
         if not instance:
             return
@@ -299,10 +448,12 @@ class EvaluationRunner:
                 error=str(exc)
             )
 
+    @instrument()
     async def _evaluate_instance(self, instance_id: str) -> None:
         """
         Step (3): Evaluate the completed instance (e.g., test the patch).
         """
+        set_attribute("instance_id", instance_id)
         instance = self.evaluation.get_instance(instance_id)
         if not instance:
             return
@@ -347,7 +498,10 @@ class EvaluationRunner:
                 error=str(exc)
             )
 
+    @instrument()
     async def _evaluate_nodes(self, instance: EvaluationInstance, root_node: Node) -> None:
+        set_attribute("instance_id", instance.instance_id)
+
         try:
             leaf_nodes = root_node.get_leaf_nodes()
             eval_result_path = os.path.join(

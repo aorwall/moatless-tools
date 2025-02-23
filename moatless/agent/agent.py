@@ -4,6 +4,7 @@ import logging
 import traceback
 from typing import List, Type, Dict, Any
 
+from moatless.telemetry import instrument, set_attribute
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action
@@ -159,7 +160,10 @@ class ActionAgent(MoatlessComponent):
         """Emit a pure agent event"""
         await event_bus.publish(event)
 
+    @instrument()
     async def run(self, node: Node):
+        set_attribute("agent_id", self.agent_id)
+        set_attribute("node_id", node.node_id)
         """Run the agent on a node to generate and execute an action."""
         if not self._completion_model:
             raise RuntimeError("Completion model not set")
@@ -237,6 +241,7 @@ class ActionAgent(MoatlessComponent):
         for action_step in node.action_steps:
             await self._execute(node, action_step)
 
+    @instrument()
     async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:
         action = self.action_map.get(type(action_step.action))
         if not action:
@@ -250,7 +255,10 @@ class ActionAgent(MoatlessComponent):
 
         return await action.execute(action_step.action, file_context=node.file_context)
 
+    @instrument()
     async def _execute(self, node: Node, action_step: ActionStep):
+        set_attribute("action_name", action_step.action.name)
+
         try:
             action_step.observation = await self._execute_action_step(node, action_step)
 
