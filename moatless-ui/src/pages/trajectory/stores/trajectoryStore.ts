@@ -1,24 +1,22 @@
-import { useTrajectoryContext } from "@/lib/contexts/TrajectoryContext";
-import { TrajectoryEvent, Trajectory } from "@/lib/types/trajectory";
+import { TrajectoryEvent } from "@/lib/types/trajectory";
 import { create } from "zustand";
 
 interface TrajectoryState {
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
   events: TrajectoryEvent[];
-  selectedItem: {
-    instanceId: string;
+  selectedItems: Record<string, {
     nodeId: number;
     itemId: string;
     type: string;
     content: any;
-  } | null;
+  }>;
 
   // Actions
   toggleNode: (instanceId: string, nodeId: number) => void;
   toggleItem: (instanceId: string, nodeId: number, itemId: string) => void;
   resetInstance: (instanceId: string) => void;
-  setSelectedItem: (item: TrajectoryState["selectedItem"]) => void;
+  setSelectedItem: (instanceId: string, item: Omit<NonNullable<TrajectoryState["selectedItems"][string]>, "instanceId"> | null) => void;
   setEvents: (events: TrajectoryEvent[]) => void;
   addEvent: (event: TrajectoryEvent) => void;
 
@@ -29,12 +27,13 @@ interface TrajectoryState {
     nodeId: number,
     itemId: string,
   ) => boolean;
+  getSelectedItem: (instanceId: string) => TrajectoryState["selectedItems"][string] | null;
 }
 
 export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
   expandedNodes: {},
   expandedItems: {},
-  selectedItem: null,
+  selectedItems: {},
   events: [],
 
   toggleNode: (instanceId, nodeId) =>
@@ -90,7 +89,20 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
       },
     })),
 
-  setSelectedItem: (item) => set({ selectedItem: item }),
+  setSelectedItem: (instanceId, item) => set((state) => {
+    const newSelectedItems = { ...state.selectedItems };
+    if (item === null) {
+      delete newSelectedItems[instanceId];
+    } else {
+      newSelectedItems[instanceId] = item;
+    }
+    return { selectedItems: newSelectedItems };
+  }),
+
+  getSelectedItem: (instanceId) => {
+    const state = get();
+    return state.selectedItems[instanceId] || null;
+  },
 
   isNodeExpanded: (instanceId, nodeId) => {
     const state = get();
@@ -106,22 +118,3 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
 
   addEvent: (event: TrajectoryEvent) => set((state) => ({ events: [...state.events, event] })),
 }));
-
-// Custom hook to combine store with context
-export function useTrajectoryActions() {
-  const { trajectory } = useTrajectoryContext();
-  const store = useTrajectoryStore();
-
-  return {
-    toggleNode: (nodeId: number) => store.toggleNode(trajectory.id, nodeId),
-    toggleItem: (nodeId: number, itemId: string) => store.toggleItem(trajectory.id, nodeId, itemId),
-    resetInstance: () => store.resetInstance(trajectory.id),
-    isNodeExpanded: (nodeId: number) => store.isNodeExpanded(trajectory.id, nodeId),
-    isItemExpanded: (nodeId: number, itemId: string) => store.isItemExpanded(trajectory.id, nodeId, itemId),
-    setSelectedItem: store.setSelectedItem,
-    selectedItem: store.selectedItem,
-    events: store.events,
-    setEvents: store.setEvents,
-    addEvent: store.addEvent,
-  };
-}

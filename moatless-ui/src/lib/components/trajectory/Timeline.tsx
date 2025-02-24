@@ -1,11 +1,9 @@
 import { Node, Trajectory } from "@/lib/types/trajectory";
 import { TimelineItem } from "@/lib/components/trajectory/TimelineItem";
 import { TrajectoryNode } from "@/lib/components/trajectory/TrajectoryNode";
-import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { NodeCircle } from '@/lib/components/trajectory/NodeCircle';
 import { cn } from "@/lib/utils";
-import { useTrajectoryActions } from "@/pages/trajectory/stores/trajectoryStore";
-import { ChevronDown } from "lucide-react";
+import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 
 export const TIMELINE_CONFIG = {
   // Horizontal spacing
@@ -152,6 +150,7 @@ function renderNodes(
                 />
 
                 <NodeCircle
+                  trajectory={trajectory}
                   node={node}
                   isLastNode={isLastNode && !hasChildren}
                   isRunning={isRunning}
@@ -226,14 +225,14 @@ function renderNodes(
 
 
 export function Timeline({ trajectory, isRunning = false }: TimelineProps) {
-  const { isNodeExpanded, toggleNode } = useTrajectoryActions();
+  const { isNodeExpanded, toggleNode } = useTrajectoryStore();
   
   const lastNode = trajectory.nodes[trajectory.nodes.length - 1];
   const isTerminal = lastNode?.terminal;
 
-  const isExpanded = (nodeId: number) => isNodeExpanded(nodeId);
+  const isExpanded = (nodeId: number) => isNodeExpanded(trajectory.id, nodeId);
   const handleNodeClick = (nodeId: number) => {
-    toggleNode(nodeId);
+    toggleNode(trajectory.id, nodeId);
   };
 
   return (

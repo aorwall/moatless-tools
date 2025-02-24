@@ -21,7 +21,9 @@ import {
 } from "@/lib/components/ui/select";
 import { ModelConfigSchema, type ModelConfig } from "@/lib/types/model";
 import { useState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, PlayCircle, CheckCircle2, XCircle } from "lucide-react";
+import { useTestModel } from "@/lib/hooks/useModels";
+import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 
 interface ModelDetailProps {
   model: ModelConfig;
@@ -36,6 +38,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
 
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const testModelMutation = useTestModel();
 
   // Reset form when model changes
   useEffect(() => {
@@ -52,10 +55,22 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
         ? e.message 
         : (e as any)?.response?.data?.detail || "An unexpected error occurred";
       
+      console.error(errorMessage);
       setError(errorMessage);
       throw e;
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleTestModel = async () => {
+    try {
+      await testModelMutation.mutateAsync(model.id);
+    } catch (e) {
+      const errorMessage = e instanceof Error 
+        ? e.message 
+        : (e as any)?.response?.data?.detail || "Failed to test model";
+      console.error(errorMessage);
     }
   };
 
@@ -71,6 +86,56 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
+        {/* Test Results Alert - Show if test was run */}
+        {testModelMutation.data && (
+          <Alert
+            variant={testModelMutation.data.success ? "default" : "destructive"}
+            className="mb-6"
+          >
+            <div className="flex items-center gap-2">
+              {testModelMutation.data.success ? (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              ) : (
+                <XCircle className="h-4 w-4 text-red-500" />
+              )}
+              <AlertTitle>
+                {testModelMutation.data.success ? "Test Passed" : "Test Failed"}
+              </AlertTitle>
+            </div>
+            <AlertDescription className="mt-2 space-y-2">
+              <p>{testModelMutation.data.message}</p>
+              {testModelMutation.data.response_time_ms && (
+                <p className="text-sm text-muted-foreground">
+                  Response time: {(testModelMutation.data.response_time_ms / 1000).toFixed(2)}s
+                </p>
+              )}
+              {testModelMutation.data.error_details && (
+                <p className="text-sm text-red-500">
+                  Error: {testModelMutation.data.error_details}
+                </p>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">Model Configuration</h1>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleTestModel}
+            disabled={testModelMutation.isPending}
+            className="gap-2"
+          >
+            {testModelMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <PlayCircle className="h-4 w-4" />
+            )}
+            {testModelMutation.isPending ? "Testing..." : "Test Model"}
+          </Button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Left Column - Basic Settings */}
           <div className="space-y-4">
@@ -377,7 +442,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={isSaving}>
+          <Button type="submit" disabled={isSaving || testModelMutation.isPending}>
             {isSaving ? "Saving..." : "Save Changes"}
           </Button>
         </div>

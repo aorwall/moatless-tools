@@ -28,18 +28,18 @@ interface TimelineBarProps {
 }
 
 function TimelineBar({ instance, isFirstSegment, left, width, children }: TimelineBarProps) {
-  const baseStyles = "absolute inset-y-0 transition-all group-hover:scale-y-110";
+  const baseStyles = "absolute inset-y-0 transition-all group-hover:scale-y-110 timeline-bar";
   
   const getBarStyles = () => {
     if (isFirstSegment && !instance.completed_at) {
       // Running instance (first segment)
-      return `${baseStyles} bg-gradient-to-r from-primary/20 via-primary/40 to-primary/20 bg-[length:200%_100%] animate-shimmer`;
+      return `${baseStyles} status-bg-running animate-shimmer`;
     } else if (isFirstSegment) {
       // Completed first segment
-      return `${baseStyles} bg-primary/30`;
+      return `${baseStyles} status-bg-completed`;
     } else {
       // Evaluation segment
-      return `${baseStyles} bg-primary/60`;
+      return `${baseStyles} status-bg-evaluating`;
     }
   };
 
@@ -160,12 +160,9 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
               >
                 {!instance.completed_at && (
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[2px]">
-                    <Badge 
-                      variant={getStatusColor(instance.status)} 
-                      className="text-[10px] px-1.5 py-0"
-                    >
+                    <div className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}>
                       {instance.status}
-                    </Badge>
+                    </div>
                   </div>
                 )}
               </TimelineBar>
@@ -179,12 +176,9 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
                 width={getPositionPercentage(instance.evaluated_at) - getPositionPercentage(instance.completed_at)}
               >
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[2px]">
-                  <Badge 
-                    variant={instance.resolved ? "default" : "destructive"} 
-                    className="text-[10px] px-1.5 py-0"
-                  >
+                  <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
                     {instance.resolved ? "✓" : "✗"}
-                  </Badge>
+                  </div>
                 </div>
               </TimelineBar>
             )}
@@ -198,11 +192,11 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
         <div className="flex-1">
           <div className="flex text-xs text-muted-foreground mt-2 gap-4">
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-primary/30 rounded" />
+              <div className={`status-dot status-bg-running`} />
               <span>Running</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 bg-primary/60 rounded" />
+              <div className={`status-dot status-bg-evaluating`} />
               <span>Evaluating</span>
             </div>
           </div>

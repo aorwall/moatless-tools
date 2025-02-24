@@ -1,76 +1,104 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/lib/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/lib/components/ui/table";
 import { Badge } from "@/lib/components/ui/badge";
-import { useEvaluationStatus } from "../hooks/useEvaluationStatus";
+import { Card } from "@/lib/components/ui/card";
+import { format } from "date-fns";
+import { type Evaluation } from "../api/evaluation";
 
 interface EvaluationStatusProps {
-  evaluationName: string;
+  evaluation: Evaluation;
+  getStatusColor: (status: string) => "default" | "secondary" | "destructive" | "outline";
+  formatDate: (date: string) => string;
 }
 
-export default function EvaluationStatus({ evaluationName }: EvaluationStatusProps) {
-  const { data: evaluation, error, isLoading } = useEvaluationStatus(evaluationName);
-
-  if (error) {
-    return <div className="text-red-500">Error: {error instanceof Error ? error.message : 'Failed to fetch status'}</div>;
-  }
-
-  if (isLoading || !evaluation) {
-    return <div>Loading...</div>;
-  }
-
-  const getStatusColor = (status: string): string => {
-    switch (status.toLowerCase()) {
-      case "running": return "blue";
-      case "completed": return "green";
-      case "error": return "destructive";
-      default: return "secondary";
+export function EvaluationStatus({ evaluation, getStatusColor, formatDate }: EvaluationStatusProps) {
+  // Calculate status counts
+  const statusCounts = evaluation.instances.reduce((acc, instance) => {
+    // Special handling for resolved/completed instances
+    if (instance.status.toLowerCase() === 'completed') {
+      if (instance.resolved === true) {
+        acc['resolved'] = (acc['resolved'] || 0) + 1;
+      } else if (instance.resolved === false) {
+        acc['failed'] = (acc['failed'] || 0) + 1;
+      } else {
+        acc['completed'] = (acc['completed'] || 0) + 1;
+      }
+    } else {
+      const status = instance.status.toLowerCase();
+      acc[status] = (acc[status] || 0) + 1;
     }
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Calculate total instances
+  const totalInstances = evaluation.instances.length;
+
+  // Calculate segment widths for the progress bar
+  const getSegmentWidth = (count: number) => {
+    return `${(count / totalInstances) * 100}%`;
   };
 
+  // Get status segments in order of priority
+  const statusSegments = [
+    { status: 'error', count: statusCounts['error'] || 0 },
+    { status: 'running', count: statusCounts['running'] || 0 },
+    { status: 'evaluating', count: statusCounts['evaluating'] || 0 },
+    { status: 'resolved', count: statusCounts['resolved'] || 0 },
+    { status: 'failed', count: statusCounts['failed'] || 0 },
+    { status: 'completed', count: statusCounts['completed'] || 0 },
+    { status: 'pending', count: statusCounts['pending'] || 0 },
+  ].filter(segment => segment.count > 0);
+
+  const overallStatus = evaluation.status.toLowerCase();
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Evaluation Details</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-2">
-          <div><strong>Dataset:</strong> {evaluation.dataset_name}</div>
-          <div>
-            <strong>Status:</strong>{" "}
-            <Badge variant={getStatusColor(evaluation.status)}>{evaluation.status}</Badge>
-          </div>
-          <div><strong>Started:</strong> {new Date(evaluation.started_at).toLocaleString()}</div>
+    <Card className="p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <h3 className="font-medium">Evaluation Status</h3>
+        </div>
+        <div className={`px-2 py-1 rounded-md text-xs font-medium status-bg-${overallStatus} status-text-${overallStatus}`}>
+          {evaluation.status}
+        </div>
+      </div>
+
+      {/* Segmented Progress Bar */}
+      <div className="space-y-2">
+        <div className="flex justify-between text-xs">
+          {evaluation.started_at && (
+            <span className="text-muted-foreground">
+              Started: {format(new Date(evaluation.started_at), 'MMM d, HH:mm:ss')}
+            </span>
+          )}
           {evaluation.completed_at && (
-            <div><strong>Finished:</strong> {new Date(evaluation.completed_at).toLocaleString()}</div>
+            <span className="text-muted-foreground">
+              Completed: {format(new Date(evaluation.completed_at), 'MMM d, HH:mm:ss')}
+            </span>
           )}
         </div>
-
-        <div>
-          <h3 className="text-lg font-semibold mb-4">Instances</h3>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Instance ID</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Finished</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {evaluation.instances.map((instance) => (
-                <TableRow key={instance.instance_id}>
-                  <TableCell>{instance.instance_id}</TableCell>
-                  <TableCell>
-                    <Badge variant={getStatusColor(instance.status)}>{instance.status}</Badge>
-                  </TableCell>
-                  <TableCell>{instance.started_at ? new Date(instance.started_at).toLocaleString() : "-"}</TableCell>
-                  <TableCell>{instance.completed_at ? new Date(instance.completed_at).toLocaleString() : "-"}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        
+        <div className="h-3 rounded-full bg-gray-100 flex overflow-hidden">
+          {statusSegments.map(({ status, count }) => (
+            count > 0 && (
+              <div
+                key={status}
+                className={`status-bg-${status} transition-all`}
+                style={{ width: getSegmentWidth(count) }}
+                title={`${status}: ${count}`}
+              />
+            )
+          ))}
         </div>
-      </CardContent>
+        
+        {/* Status Legend */}
+        <div className="flex flex-wrap gap-3 text-xs">
+          {statusSegments.map(({ status, count }) => (
+            <div key={status} className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full status-bg-${status}`} />
+              <span className={`font-medium status-text-${status}`}>{status}</span>
+              <span className="text-muted-foreground">({count})</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </Card>
   );
 } 

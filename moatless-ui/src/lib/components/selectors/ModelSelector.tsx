@@ -12,8 +12,9 @@ export function ModelSelector({
   selectedModelId,
   onModelSelect,
 }: ModelSelectorProps) {
-  const { data: models, isLoading } = useModels();
+  const { data: modelResponse, isLoading } = useModels();
   const { setLastUsedModel } = useLastUsedStore();
+  const models = modelResponse?.models || [];
 
   const handleSelect = (id: string) => {
     setLastUsedModel(id);

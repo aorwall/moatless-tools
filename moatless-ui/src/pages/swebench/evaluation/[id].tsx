@@ -66,44 +66,24 @@ export function EvaluationDetailsPage() {
 
   const calculateProgress = () => {
     if (!evaluation) return 0;
+    const terminalStates = ["resolved", "failed", "evaluated", "error"];
     const completed = evaluation.instances.filter((i: EvaluationInstance) => 
-      i.status === "completed" || i.status === "error"
+      terminalStates.includes(i.status.toLowerCase())
     ).length;
     return (completed / evaluation.instances.length) * 100;
   };
 
-  const getInstanceDisplay = (instance: EvaluationInstance) => ({
-    title: instance.instance_id,
-    subtitle: (
-      <div className="flex items-center gap-2">
-        <Badge variant={getStatusColor(instance.status)}>
-          {instance.status}
-        </Badge>
-        {instance.error && (
-          <span className="text-destructive">{instance.error}</span>
-        )}
-      </div>
-    ),
-  });
-
-  const handleInstanceSelect = (instance: EvaluationInstance) => {
-    setSelectedInstance(instance);
-    navigate(`/swebench/evaluation/${evaluationId}/${instance.instance_id}`);
+  const getResolutionStats = () => {
+    if (!evaluation) return { resolved: 0, total: 0, percentage: 0 };
+    const resolved = evaluation.instances.filter(i => i.status.toLowerCase() === "resolved").length;
+    const terminalStates = ["resolved", "failed", "evaluated", "error"];
+    const total = evaluation.instances.filter(i => terminalStates.includes(i.status.toLowerCase())).length;
+    return {
+      resolved,
+      total,
+      percentage: total > 0 ? (resolved / total) * 100 : 0
+    };
   };
-
-  if (isLoading) {
-    return (
-      <div className="h-full">
-        <div className="flex h-14 items-center border-b px-4">
-          <Skeleton className="h-8 w-64" />
-        </div>
-        <SplitLayout
-          left={<Skeleton className="h-full" />}
-          right={<Skeleton className="h-full" />}
-        />
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -143,6 +123,7 @@ export function EvaluationDetailsPage() {
           getStatusColor={getStatusColor}
           formatDate={formatDate}
           calculateProgress={calculateProgress}
+          getResolutionStats={getResolutionStats}
         />
       </div>
     </div>

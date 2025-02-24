@@ -38,8 +38,7 @@ export function Artifacts({ trajectoryId }: ArtifactsProps) {
       actor: "user" as const,
     };
 
-    setSelectedItem({
-      instanceId: trajectoryId,
+    setSelectedItem(trajectoryId, {
       nodeId: -1,
       itemId: `artifact-${artifact.id}`,
       type: "artifact",

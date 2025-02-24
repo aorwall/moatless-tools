@@ -1,9 +1,13 @@
 import { useNavigate } from "react-router-dom";
 import { useRetryNode } from "./useRetryNode";
-import { useTrajectory, useTrajectoryId } from "@/lib/contexts/TrajectoryContext";
+import { Trajectory } from "@/lib/types/trajectory";
 
-export function useNodeActions(nodeId: number) {
-  const { trajectory } = useTrajectory();
+interface UseNodeActionsProps {
+  nodeId: number;
+  trajectory: Trajectory;
+}
+
+export function useNodeActions({ nodeId, trajectory }: UseNodeActionsProps) {
   const retryNode = useRetryNode();
   const navigate = useNavigate();
 

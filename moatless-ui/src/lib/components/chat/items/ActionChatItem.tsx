@@ -10,7 +10,7 @@ export interface ActionChatItemProps {
 
 export const ActionChatItem = ({ message }: ActionChatItemProps) => {
   const setSelectedItem = useTrajectoryStore((state) => state.setSelectedItem);
-  const selectedItem = useTrajectoryStore((state) => state.selectedItem);
+  const selectedItem = useTrajectoryStore((state) => state.getSelectedItem(message.trajectoryId));
 
   const content = message.content as {
     properties: Record<string, any>;
@@ -21,8 +21,7 @@ export const ActionChatItem = ({ message }: ActionChatItemProps) => {
   const isSelected = selectedItem?.itemId === message.id;
 
   const handleClick = () => {
-    setSelectedItem({
-      instanceId: message.trajectoryId,
+    setSelectedItem(message.trajectoryId, {
       nodeId: message.nodeId,
       itemId: message.id,
       type: message.type,

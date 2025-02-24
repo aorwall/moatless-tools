@@ -1,20 +1,17 @@
-import { Circle, Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle } from 'lucide-react';
+import { Loader2, GitBranch, RotateCcw, Split, GitFork, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Node, Trajectory } from '@/lib/types/trajectory';
-import { useRetryNode } from "@/lib/hooks/useRetryNode";
-import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
-import { useNavigate } from "react-router-dom";
+import type { Node, Trajectory, Reward } from '@/lib/types/trajectory';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/lib/components/ui/tooltip";
 import { useState } from "react";
 import { RunLoop } from "@/lib/components/loop/RunLoop";
 import { useNodeActions } from "@/lib/hooks/useNodeActions";
-import { useTrajectoryContext, useTrajectoryId, useTrajectory } from "@/lib/contexts/TrajectoryContext";
 
 interface NodeCircleProps {
   node: Node;
   isLastNode: boolean;
   isRunning: boolean;
   onClick: () => void;
+  trajectory: Trajectory;
 }
 
 const COLOR_MAPPINGS = {
@@ -67,9 +64,9 @@ const NODE_LAYOUT = {
   }
 } as const;
 
-function getRewardColor(reward: number): string {
+function getRewardColor(reward: Reward): string {
   // Clamp the reward value between -100 and 100
-  const clampedReward = Math.max(-100, Math.min(100, reward));
+  const clampedReward = Math.max(-100, Math.min(100, reward.value));
   
   if (clampedReward === 0) return "yellow";
   
@@ -87,7 +84,7 @@ function getNodeColor(node: Node, isRunning: boolean): string {
     if (node.error) return "red";
     if (node.allNodeErrors.length > 0) return "red";
     if (node.allNodeWarnings.length > 0) return "yellow";
-    if (node.reward !== undefined) return getRewardColor(node.reward);
+    if (node.reward) return getRewardColor(node.reward);
     if (node.executed) return "green";
     return "gray";
 }
@@ -96,15 +93,14 @@ function formatReward(reward: number): string {
   return Math.round(reward).toString();
 }
 
-export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleProps) {
+export function NodeCircle({ node, isLastNode, isRunning, onClick, trajectory }: NodeCircleProps) {
   const nodeColor = getNodeColor(node, isRunning);
   const colors = COLOR_MAPPINGS[nodeColor as keyof typeof COLOR_MAPPINGS] || COLOR_MAPPINGS.default;
   const showSpinner = node.nodeId !== 0 && isRunning && isLastNode;
   const isBranched = node.children && node.children.length > 1;
   
   const [showRunLoop, setShowRunLoop] = useState(false);
-  const { handleRetry, handleFork, isRetryPending, canPerformActions } = useNodeActions(node.nodeId);
-  const { trajectoryId } = useTrajectoryId();
+  const { handleRetry, handleFork, isRetryPending, canPerformActions } = useNodeActions({ nodeId: node.nodeId, trajectory });
 
   const handleRetryClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -318,7 +314,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick }: NodeCircleP
         onOpenChange={setShowRunLoop}
         defaultMessage={node.userMessage || ""}
         mode="expand"
-        trajectoryId={trajectoryId}
+        trajectoryId={trajectory.id}
         nodeId={node.nodeId}
       />
     </div>

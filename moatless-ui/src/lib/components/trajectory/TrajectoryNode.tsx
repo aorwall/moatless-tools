@@ -1,17 +1,11 @@
 import {
-  MessageSquare,
-  Bot,
   Terminal,
   Folder,
   AlertTriangle,
-  Split,
-  RotateCcw,
-  GitFork,
   ChevronDown,
 } from "lucide-react";
 import type { Node, ActionStep } from "@/lib/types/trajectory";
 import { truncateMessage } from "@/lib/utils/text";
-import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { cn } from "@/lib/utils";
 import { useMemo, Fragment } from "react";
 
@@ -28,50 +22,12 @@ interface ActionGroup {
 }
 
 // File Updates Section
-const FileUpdatesSection = ({ fileContext }: { fileContext: NonNullable<Node['fileContext']> }) => {
-  if (!fileContext.updatedFiles?.length) return null;
-  
-  return (
-    <div className="flex items-start gap-1.5 text-xs text-gray-500">
-      <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <div className="space-y-1">
-        {fileContext.updatedFiles.map((file, index) => (
-          <div key={index} className="flex items-center gap-1.5">
-            <span className="font-mono">{file.file_path}</span>
-            <span className={cn("text-[10px]", {
-              "text-blue-600": file.status === "modified",
-              "text-green-600": file.status === "added_to_context",
-              "text-purple-600": file.status === "updated_context",
-            })}>
-              {file.status.replace(/_/g, " ")}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 // Warnings Section
-const WarningsSection = ({ fileContext }: { fileContext: NonNullable<Node['fileContext']> }) => {
-  if (!fileContext.warnings?.length) return null;
-  
-  return (
-    <div className="flex flex-wrap gap-1.5 text-xs text-yellow-600">
-      {fileContext.warnings.map((warning, index) => (
-        <div key={index} className="flex items-center gap-1">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          <span>{warning}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
 
 export const TrajectoryNode = ({
   node,
   expanded = false,
-  level = 0,
 }: TrajectoryNodeProps) => {
   const lastAction = node.actionSteps[node.actionSteps.length - 1]?.action.name;
   const showWorkspace = lastAction !== "Finish" && node.fileContext;

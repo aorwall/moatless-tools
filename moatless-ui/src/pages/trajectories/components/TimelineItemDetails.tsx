@@ -7,14 +7,15 @@ import { MessageDetails } from "@/lib/components/trajectory/details/MessageDetai
 import { ObservationDetails } from "@/lib/components/trajectory/details/ObservationDetails";
 import { WorkspaceDetails } from "@/lib/components/trajectory/details/WorkspaceDetails";
 import { ArtifactDetails } from "@/lib/components/trajectory/details/ArtifactDetails";
-
+import { Trajectory } from "@/lib/types/trajectory";
 
 interface TimelineItemDetailsProps {
   trajectoryId: string;
+  trajectory: Trajectory;
 }
 
-export const TimelineItemDetails = ({ trajectoryId }: TimelineItemDetailsProps) => {
-  const selectedItem = useTrajectoryStore((state) => state.selectedItem);
+export const TimelineItemDetails = ({ trajectoryId, trajectory }: TimelineItemDetailsProps) => {
+  const selectedItem = useTrajectoryStore((state) => state.getSelectedItem(trajectoryId));
 
   if (!selectedItem) {
     return (
@@ -29,7 +30,7 @@ export const TimelineItemDetails = ({ trajectoryId }: TimelineItemDetailsProps) 
       case "completion":
         return <CompletionDetails content={selectedItem.content} />;
       case "action":
-        return <ActionDetails content={selectedItem.content} />;
+        return <ActionDetails content={selectedItem.content} nodeId={selectedItem.nodeId} trajectory={trajectory} />;
       case "error":
         return <ErrorDetails content={selectedItem.content} />;
       case "user_message":

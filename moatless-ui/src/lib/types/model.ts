@@ -22,3 +22,26 @@ export type ModelConfig = z.infer<typeof ModelConfigSchema>;
 export type ModelsResponse = {
   models: ModelConfig[];
 };
+
+export type BaseModelsResponse = {
+  models: ModelConfig[];
+};
+
+export type AddModelFromBaseRequest = {
+  base_model_id: string;
+  new_model_id: string;
+  updates?: Partial<ModelConfig>;
+};
+
+export const ModelTestResultSchema = z.object({
+  success: z.boolean(),
+  message: z.string(),
+  model_id: z.string(),
+  model_response: z.string().optional(),
+  error_type: z.string().optional(),
+  error_details: z.string().optional(),
+  response_time_ms: z.number().optional(),
+  test_timestamp: z.string(),
+});
+
+export type ModelTestResult = z.infer<typeof ModelTestResultSchema>;

@@ -3,16 +3,19 @@ import { cn } from "@/lib/utils";
 
 interface WorkspaceDetailsProps {
   content: {
+    max_tokens?: number;
     updatedFiles?: Array<{
       file_path: string;
       is_new?: boolean;
       has_patch?: boolean;
       tokens?: number;
     }>;
-    testResults?: Array<{
-      name?: string;
-      status: string;
-      message?: string;
+    test_files?: Array<{
+      file_path: string;
+      test_results: Array<{
+        status: string;
+        message?: string;
+      }>;
     }>;
     files?: Array<{
       file_path: string;
@@ -27,16 +30,18 @@ interface WorkspaceDetailsProps {
         tokens?: number;
         pinned?: boolean;
       }>;
+      show_all_spans?: boolean;
     }>;
     warnings?: string[];
   };
 }
 
 export const WorkspaceDetails = ({ content }: WorkspaceDetailsProps) => {
+  console.log(content);
   return (
     <div className="space-y-6">
       {/* Files Section */}
-      {content.updatedFiles?.length > 0 && (
+      {content.updatedFiles && content.updatedFiles.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900">Updated Files</h3>
           <div className="space-y-4">
@@ -68,33 +73,35 @@ export const WorkspaceDetails = ({ content }: WorkspaceDetailsProps) => {
       )}
 
       {/* Test Results Section */}
-      {content.testResults?.length > 0 && (
+      {content.test_files && content.test_files.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-sm font-medium text-gray-900">Test Results</h3>
           <div className="space-y-4">
-            {content.testResults.map((test, idx) => (
+            {content.test_files.map((testFile, idx) => (
               <div key={idx} className="rounded-lg border border-gray-200 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium">
-                    {test.name || "Unnamed Test"}
-                  </span>
-                  <Badge
-                    variant={
-                      test.status === "PASSED"
-                        ? "default"
-                        : test.status === "FAILED"
-                          ? "destructive"
-                          : "secondary"
-                    }
-                  >
-                    {test.status}
-                  </Badge>
-                </div>
-                {test.message && (
-                  <pre className="mt-2 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-sm">
-                    {test.message}
-                  </pre>
-                )}
+                <div className="font-medium mb-3">{testFile.file_path}</div>
+                {testFile.test_results.map((test, testIdx) => (
+                  <div key={testIdx} className="mt-2">
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant={
+                          test.status === "PASSED"
+                            ? "default"
+                            : test.status === "FAILED"
+                              ? "destructive"
+                              : "secondary"
+                        }
+                      >
+                        {test.status}
+                      </Badge>
+                    </div>
+                    {test.message && (
+                      <pre className="mt-2 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-sm">
+                        {test.message}
+                      </pre>
+                    )}
+                  </div>
+                ))}
               </div>
             ))}
           </div>

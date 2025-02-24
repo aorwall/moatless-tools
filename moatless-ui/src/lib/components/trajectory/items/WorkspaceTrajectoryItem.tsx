@@ -17,19 +17,23 @@ interface File {
   tokens?: number;
   patch?: string;
   spans?: Span[];
+  show_all_spans?: boolean;
 }
 
 export interface WorkspaceTimelineContent {
+  max_tokens?: number;
   updatedFiles?: Array<{
     file_path: string;
     is_new?: boolean;
     has_patch?: boolean;
     tokens?: number;
   }>;
-  testResults?: Array<{
-    name?: string;
-    status: string;
-    message?: string;
+  test_files?: Array<{
+    file_path: string;
+    test_results: Array<{
+      status: string;
+      message?: string;
+    }>;
   }>;
   files?: File[];
   warnings?: string[];
@@ -46,7 +50,7 @@ export const WorkspaceTrajectoryItem: FC<WorkspaceTrajectoryItemProps> = ({
 }) => {
   const isExpandable = !!(
     content.updatedFiles?.length ||
-    content.testResults?.length ||
+    content.test_files?.length ||
     content.files?.length
   );
 
@@ -55,8 +59,8 @@ export const WorkspaceTrajectoryItem: FC<WorkspaceTrajectoryItemProps> = ({
       <div className="text-xs text-gray-600">
         {content.updatedFiles?.length ? (
           <span>{content.updatedFiles.length} files updated</span>
-        ) : content.testResults?.length ? (
-          <span>{content.testResults.length} test results</span>
+        ) : content.test_files?.length ? (
+          <span>{content.test_files.length} test files</span>
         ) : content.files?.length ? (
           <span>{content.files.length} files in context</span>
         ) : (
@@ -66,10 +70,20 @@ export const WorkspaceTrajectoryItem: FC<WorkspaceTrajectoryItemProps> = ({
     );
   }
 
+  // Calculate total test results across all test files
+  const allTestResults = content.test_files?.flatMap(f => f.test_results) ?? [];
+  const testStatusCounts = {
+    total: allTestResults.length,
+    passed: allTestResults.filter(t => t.status === "PASSED").length,
+    failed: allTestResults.filter(t => t.status === "FAILED").length,
+    error: allTestResults.filter(t => t.status === "ERROR").length,
+    skipped: allTestResults.filter(t => t.status === "SKIPPED").length,
+  };
+
   return (
     <div className="space-y-4">
       {/* Updated Files Section */}
-      {content.updatedFiles?.length > 0 && (
+      {content.updatedFiles && content.updatedFiles.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-xs font-medium text-gray-700">
@@ -88,7 +102,7 @@ export const WorkspaceTrajectoryItem: FC<WorkspaceTrajectoryItemProps> = ({
                       {file.file_path}
                     </span>
                     {file.is_new && (
-                      <Badge variant="success" className="px-1.5 py-0.5">
+                      <Badge variant="default" className="px-1.5 py-0.5 bg-green-100 text-green-800">
                         new
                       </Badge>
                     )}
@@ -160,81 +174,74 @@ export const WorkspaceTrajectoryItem: FC<WorkspaceTrajectoryItemProps> = ({
       )}
 
       {/* Test Results Section */}
-      {content.testResults?.length > 0 && (
+      {content.test_files && content.test_files.length > 0 && (
         <div className="space-y-2">
           <div className="text-xs font-medium text-gray-700">Test Results</div>
           <div className="flex flex-wrap gap-1.5">
             <Badge variant="outline" className="text-gray-600">
-              {content.testResults.length} total
+              {testStatusCounts.total} total
             </Badge>
             <Badge
-              variant="success"
+              variant="default"
               className={cn(
-                !content.testResults.some((t) => t.status === "PASSED") &&
-                  "bg-gray-50 text-gray-500",
+                "bg-green-100 text-green-800",
+                testStatusCounts.passed === 0 && "bg-gray-50 text-gray-500"
               )}
             >
-              {content.testResults.filter((t) => t.status === "PASSED").length}{" "}
-              passed
-            </Badge>
-            <Badge
-              variant="destructive"
-              className={cn(
-                !content.testResults.some((t) => t.status === "FAILED") &&
-                  "bg-gray-50 text-gray-500",
-              )}
-            >
-              {content.testResults.filter((t) => t.status === "FAILED").length}{" "}
-              failed
+              {testStatusCounts.passed} passed
             </Badge>
             <Badge
               variant="destructive"
               className={cn(
-                !content.testResults.some((t) => t.status === "ERROR") &&
-                  "bg-gray-50 text-gray-500",
+                testStatusCounts.failed === 0 && "bg-gray-50 text-gray-500"
               )}
             >
-              {content.testResults.filter((t) => t.status === "ERROR").length}{" "}
-              errors
+              {testStatusCounts.failed} failed
             </Badge>
             <Badge
-              variant="warning"
+              variant="destructive"
               className={cn(
-                !content.testResults.some((t) => t.status === "SKIPPED") &&
-                  "bg-gray-50 text-gray-500",
+                testStatusCounts.error === 0 && "bg-gray-50 text-gray-500"
               )}
             >
-              {content.testResults.filter((t) => t.status === "SKIPPED").length}{" "}
-              skipped
+              {testStatusCounts.error} errors
+            </Badge>
+            <Badge
+              variant="secondary"
+              className={cn(
+                testStatusCounts.skipped === 0 && "bg-gray-50 text-gray-500"
+              )}
+            >
+              {testStatusCounts.skipped} skipped
             </Badge>
           </div>
 
-          {content.testResults
-            .filter((t) => t.status === "FAILED" || t.status === "ERROR")
-            .map((test, idx) => (
-              <div key={idx} className="space-y-2 rounded-md bg-gray-50 p-3">
-                <div className="flex items-center justify-between text-xs">
-                  <div className="font-medium text-gray-700">
-                    {test.name || "Unnamed Test"}
+          {content.test_files.map((testFile, fileIdx) => (
+            <div key={fileIdx} className="space-y-2">
+              <div className="text-xs font-medium text-gray-700">{testFile.file_path}</div>
+              {testFile.test_results
+                .filter((t) => t.status === "FAILED" || t.status === "ERROR")
+                .map((test, testIdx) => (
+                  <div key={testIdx} className="space-y-2 rounded-md bg-gray-50 p-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <Badge
+                        variant="destructive"
+                        className="bg-red-100"
+                      >
+                        {test.status}
+                      </Badge>
+                    </div>
+                    {test.message && (
+                      <div className="w-full rounded bg-gray-100 p-2">
+                        <pre className="overflow-x-auto whitespace-pre font-mono text-[10px]">
+                          {test.message}
+                        </pre>
+                      </div>
+                    )}
                   </div>
-                  <Badge
-                    variant={
-                      test.status === "FAILED" ? "destructive" : "destructive"
-                    }
-                    className="bg-red-100"
-                  >
-                    {test.status}
-                  </Badge>
-                </div>
-                {test.message && (
-                  <div className="w-full rounded bg-gray-100 p-2">
-                    <pre className="overflow-x-auto whitespace-pre font-mono text-[10px]">
-                      {test.message}
-                    </pre>
-                  </div>
-                )}
-              </div>
-            ))}
+                ))}
+            </div>
+          ))}
         </div>
       )}
     </div>

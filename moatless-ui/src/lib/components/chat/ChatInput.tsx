@@ -88,7 +88,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(function ChatI
             <SelectValue placeholder="Select model" />
           </SelectTrigger>
           <SelectContent>
-            {models?.map((model) => (
+            {models?.models.map((model) => (
               <SelectItem key={model.id} value={model.id}>
                 {model.model}
               </SelectItem>

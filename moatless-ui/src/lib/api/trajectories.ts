@@ -40,4 +40,18 @@ export const trajectoriesApi = {
       body: JSON.stringify({ ...params, node_id: nodeId }),
     });
   },
+
+  executeNode: async (
+    trajectoryId: string, 
+    projectId: string, 
+    nodeId: number,
+  ): Promise<any> => {
+    if (!nodeId) {
+      throw new Error("Node ID is required to execute a node");
+    }
+    return apiRequest(`/trajectories/${projectId}/${trajectoryId}/execute`, {
+      method: 'POST',
+      body: JSON.stringify({ node_id: nodeId }),
+    });
+  },
 };

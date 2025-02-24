@@ -1,9 +1,35 @@
 import { useParams } from "react-router-dom";
-import { useModel } from "@/lib/hooks/useModels";
+import { useModel, useUpdateModel } from "@/lib/hooks/useModels";
+import { ModelDetail } from "./components/ModelDetail";
+import { toast } from "sonner";
+import type { ModelConfig } from "@/lib/types/model";
 
 export function ModelsPage() {
   const { id } = useParams();
+  const updateModelMutation = useUpdateModel();
+
+  // Don't try to load model details for the base models view
+  if (id === "base") {
+    return null;
+  }
+
   const { data: selectedModel } = useModel(id ?? "");
+
+  const handleSubmit = async (formData: ModelConfig) => {
+    try {
+      await updateModelMutation.mutateAsync({
+        ...formData,
+        id: id!,
+      });
+      toast.success("Changes saved successfully");
+    } catch (error) {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as any)?.response?.data?.detail || "Failed to save changes";
+      toast.error(errorMessage);
+      throw error;
+    }
+  };
 
   if (!selectedModel) {
     return (
@@ -15,49 +41,5 @@ export function ModelsPage() {
     );
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <div className="flex-none border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{selectedModel.model}</h1>
-            <div className="mt-1 text-sm text-gray-500">
-              Model Configuration
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="prose max-w-none">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <h3>Basic Information</h3>
-              <dl className="space-y-2">
-                <div>
-                  <dt className="font-medium">Response Format</dt>
-                  <dd className="text-gray-600">
-                    {selectedModel.response_format}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-medium">Model ID</dt>
-                  <dd className="font-mono text-sm text-gray-600">
-                    {selectedModel.id}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-            <div>
-              <h3>Configuration</h3>
-              <pre className="rounded-lg bg-gray-50 p-4">
-                <code className="text-sm">
-                  {JSON.stringify(selectedModel, null, 2)}
-                </code>
-              </pre>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  return <ModelDetail model={selectedModel} onSubmit={handleSubmit} />;
 }

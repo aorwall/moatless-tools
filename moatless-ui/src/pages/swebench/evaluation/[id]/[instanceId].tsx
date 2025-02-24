@@ -16,6 +16,7 @@ import { ChevronLeft } from "lucide-react";
 
 export function EvaluationInstancePage() {
   const { evaluationId, instanceId } = useParams<{ evaluationId: string; instanceId: string }>();
+
   const { data: evaluation, isError: evalError, error: evaluationError } = useEvaluation(evaluationId!);
   const { 
     data: trajectory,
@@ -63,17 +64,40 @@ export function EvaluationInstancePage() {
     );
   }
 
+  if (isLoading) {
+    return (
+      <div className="container mx-auto p-6">
+        <Card>
+          <CardContent className="py-6">
+            <div className="flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Loading trajectory data...</span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (trajectoryError || !trajectory) {
+    return (
+      <div className="container mx-auto p-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
+            {trajectoryErrorData instanceof Error ? trajectoryErrorData.message : "Failed to load trajectory data"}
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
   return (
     <div className="h-[calc(100vh-56px)]">
       <ResizablePanelGroup direction="horizontal" className="h-full border rounded-lg">
         <ResizableHandle className="bg-border hover:bg-ring" />
         <ResizablePanel defaultSize={85}>
-          <TrajectoryViewer 
-            trajectory={trajectory}
-            isLoading={isLoading}
-            isError={trajectoryError}
-            error={trajectoryErrorData instanceof Error ? trajectoryErrorData : undefined}
-          />
+          <TrajectoryViewer trajectory={trajectory} />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

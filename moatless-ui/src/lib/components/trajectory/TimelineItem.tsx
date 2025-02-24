@@ -1,13 +1,5 @@
 import {
-  MessageSquare,
-  Bot,
-  Lightbulb,
-  Terminal,
-  Eye,
-  Folder,
   AlertTriangle,
-  Cpu,
-  LucideIcon,
 } from "lucide-react";
 import {
   ActionTrajectoryItem,
@@ -41,7 +33,6 @@ import {
   ArtifactTimelineContent,
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
 import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
-import { useTrajectoryContext } from "@/lib/contexts/TrajectoryContext";
 import { cn } from "@/lib/utils";
 
 interface TimelineItemProps {
@@ -59,18 +50,16 @@ export const TimelineItem = ({
   type,
   content,
   nodeId,
+  instanceId,
   itemId,
   label,
   isLast,
   hasNextSibling,
 }: TimelineItemProps) => {
   const { setSelectedItem } = useTrajectoryStore();
-  const { trajectoryId } = useTrajectoryContext();
-  const instanceId = trajectoryId || "";
 
   const handleSelect = () => {
-    setSelectedItem({
-      instanceId,
+    setSelectedItem(instanceId, {
       nodeId,
       itemId,
       type,

@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/lib/components/ui/select";
-import { useState } from "react";
+import { useState, ElementType } from "react";
 
 interface InstanceListProps {
   evaluation: Evaluation;
@@ -23,19 +23,6 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
     status: "all",
     instanceId: "",
   });
-
-  const getStatusVariant = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed':
-        return 'secondary';
-      case 'running':
-        return 'warning';
-      case 'error':
-        return 'destructive';
-      default:
-        return 'outline';
-    }
-  };
 
   const filteredInstances = evaluation.instances.filter((instance) => {
     const matchesStatus = filters.status === "all" || instance.status.toLowerCase() === filters.status;
@@ -90,40 +77,35 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filteredInstances.map((instance) => {
           const isPending = !instance.started_at;
-          const Container = isPending ? 'div' : Link;
-          const containerProps = isPending ? {} : {
-            to: `/swebench/evaluation/${evaluation.evaluation_name}/${instance.instance_id}`
+          const Container = isPending ? 'div' as ElementType : Link;
+          const props = {
+            key: instance.instance_id,
+            ...(isPending ? {} : { to: `/swebench/evaluation/${evaluation.evaluation_name}/${instance.instance_id}` }),
+            className: cn(
+              "block border-b px-4 py-3 transition-colors",
+              !isPending && "hover:bg-gray-50",
+              selectedInstanceId === instance.instance_id && "bg-blue-50 hover:bg-blue-50",
+              isPending && "opacity-50 cursor-not-allowed"
+            )
           };
 
           return (
-            <Container
-              key={instance.instance_id}
-              {...containerProps}
-              className={cn(
-                "block border-b px-4 py-3 transition-colors",
-                !isPending && "hover:bg-gray-50",
-                selectedInstanceId === instance.instance_id && "bg-blue-50 hover:bg-blue-50",
-                isPending && "opacity-50 cursor-not-allowed"
-              )}
-            >
+            <Container {...props}>
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium text-sm">{instance.instance_id}</div>
                   <div className="mt-1 flex items-center gap-2">
-                    <Badge variant={getStatusVariant(instance.status)} className="text-[10px] px-1.5 py-0">
+                    <div className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}>
                       {instance.status}
-                    </Badge>
+                    </div>
                     {instance.status === "completed" && (
-                      <Badge 
-                        variant={instance.resolved ? "default" : "destructive"} 
-                        className="text-[10px] px-1.5 py-0"
-                      >
+                      <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
                         {instance.resolved ? "✓" : "✗"}
-                      </Badge>
+                      </div>
                     )}
                     <span className="text-[10px] text-muted-foreground">
                       {getRelevantTimestamp(instance) && 
-                        format(new Date(getRelevantTimestamp(instance)), 'MMM d, HH:mm')}
+                        format(new Date(getRelevantTimestamp(instance)!), 'MMM d, HH:mm')}
                     </span>
                   </div>
                 </div>

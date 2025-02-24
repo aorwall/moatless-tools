@@ -10,7 +10,7 @@ export interface ArtifactChatItemProps {
 
 export const ArtifactChatItem = ({ message }: ArtifactChatItemProps) => {
   const setSelectedItem = useTrajectoryStore((state) => state.setSelectedItem);
-  const selectedItem = useTrajectoryStore((state) => state.selectedItem);
+  const selectedItem = useTrajectoryStore((state) => state.getSelectedItem(message.trajectoryId));
 
   const content = message.content as {
     artifact_id: string;
@@ -24,8 +24,7 @@ export const ArtifactChatItem = ({ message }: ArtifactChatItemProps) => {
   const isUser = content.actor === "user";
 
   const handleClick = () => {
-    setSelectedItem({
-      instanceId: message.trajectoryId,
+    setSelectedItem(message.trajectoryId, {
       nodeId: message.nodeId,
       itemId: message.id,
       type: message.type,

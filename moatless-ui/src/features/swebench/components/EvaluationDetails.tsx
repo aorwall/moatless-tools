@@ -12,11 +12,14 @@ import { format, formatDuration, intervalToDuration } from "date-fns";
 import { EvaluationTimeline } from "./EvaluationTimeline";
 import { Input } from "@/lib/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/lib/components/ui/tooltip";
+import { EvaluationStatus } from "./EvaluationStatus";
 
 interface EvaluationDetailsProps {
   evaluation: Evaluation;
   formatDate: (date: string) => string;
   calculateProgress: () => number;
+  getResolutionStats: () => { resolved: number; total: number; percentage: number };
+  getStatusColor: (status: string) => BadgeVariant;
 }
 
 type BadgeVariant = "default" | "destructive" | "outline" | "secondary";
@@ -54,7 +57,9 @@ function getDuration(start?: string, end?: string, isRunning?: boolean): string 
 export function EvaluationDetails({ 
   evaluation, 
   formatDate,
-  calculateProgress 
+  calculateProgress,
+  getResolutionStats,
+  getStatusColor
 }: EvaluationDetailsProps) {
   const [concurrentInstances, setConcurrentInstances] = useState(1);
   const { mutate: startEvaluation, isPending } = useStartEvaluation();
@@ -138,9 +143,6 @@ export function EvaluationDetails({
                 </Button>
               </div>
             )}
-            <Badge variant={getStatusColor(evaluation.status)}>
-              {evaluation.status}
-            </Badge>
           </div>
         </div>
       </div>
@@ -184,50 +186,12 @@ export function EvaluationDetails({
         </div>
       </div>
 
-      {/* Progress Section */}
-      <div>
-        <p className="font-medium mb-2">Progress</p>
-        <div className="space-y-2">
-          <Progress value={calculateProgress()} />
-          <div className="flex justify-between text-sm text-muted-foreground">
-            <span>Total Instances: {evaluation.instances.length}</span>
-            <span>{Math.round(calculateProgress())}% Complete</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        {evaluation.started_at && (
-          <div>
-            <p className="font-medium">Started At</p>
-            <p className="text-sm text-muted-foreground">
-              {formatDate(evaluation.started_at)}
-            </p>
-          </div>
-        )}
-        {evaluation.completed_at && (
-          <div>
-            <p className="font-medium">Completed At</p>
-            <p className="text-sm text-muted-foreground">
-              {formatDate(evaluation.completed_at)}
-            </p>
-          </div>
-        )}
-      </div>
-
-      <div>
-        <p className="font-medium mb-2">Instance Status Summary</p>
-        <div className="grid grid-cols-2 gap-2">
-          {Object.entries(getStatusCounts(evaluation.instances)).map(([status, count]) => (
-            <div key={status} className="flex items-center justify-between p-2 rounded-md border">
-              <Badge variant={getStatusColor(status)}>
-                {status}
-              </Badge>
-              <span className="text-sm font-medium">{count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Status Section */}
+      <EvaluationStatus
+        evaluation={evaluation}
+        getStatusColor={getStatusColor}
+        formatDate={formatDate}
+      />
 
       <div>
         <p className="font-medium mb-2">Evaluation Timeline</p>

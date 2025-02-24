@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Input } from "@/lib/components/ui/input";
 import {
   Select,
@@ -7,58 +7,55 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/lib/components/ui/select";
+import { Button } from "@/lib/components/ui/button";
+import { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface FilterField {
   name: string;
   type: "text" | "select";
-  options?: any[];
+  options?: string[];
+}
+
+interface ItemAction<T> {
+  label: string;
+  icon: LucideIcon;
+  onClick: (item: T) => void;
 }
 
 interface ItemDisplay {
   title: string;
-  subtitle: string;
+  subtitle?: string;
 }
 
-interface DataExplorerProps {
-  items: any[];
+interface DataExplorerProps<T> {
+  items: T[];
   filterFields: FilterField[];
-  itemDisplay: (item: any) => ItemDisplay;
-  onSelect: (item: any) => void;
-  selectedItem?: any;
-  compareItems?: (a: any, b: any) => boolean;
+  itemDisplay: (item: T) => ItemDisplay;
+  onSelect: (item: T) => void;
+  selectedItem?: T;
+  itemActions?: ItemAction<T>[];
 }
 
-export function DataExplorer({
+export function DataExplorer<T>({
   items,
   filterFields,
   itemDisplay,
   onSelect,
   selectedItem,
-  compareItems = (a, b) => a === b,
-}: DataExplorerProps) {
-  const [filters, setFilters] = useState<Record<string, any>>({});
+  itemActions,
+}: DataExplorerProps<T>) {
+  const [filters, setFilters] = useState<Record<string, string>>({});
 
-  const filteredItems = items.filter((item) => {
-    return filterFields.every((field) => {
-      const filterValue = filters[field.name];
-      if (!filterValue || filterValue === "all") return true;
-
-      if (field.type === "select") {
-        return item[field.name] === filterValue;
-      } else {
-        const itemValue = item[field.name]?.toString().toLowerCase() || "";
-        return itemValue.includes(filterValue.toLowerCase());
-      }
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      return Object.entries(filters).every(([field, value]) => {
+        if (!value) return true;
+        const itemValue = (item as any)[field]?.toString().toLowerCase();
+        return itemValue?.includes(value.toLowerCase());
+      });
     });
-  });
-
-  const handleFilterChange = (fieldName: string, value: any) => {
-    setFilters((prev) => ({
-      ...prev,
-      [fieldName]: value,
-    }));
-  };
+  }, [items, filters]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -73,7 +70,10 @@ export function DataExplorer({
                   placeholder={`Search ${field.name}...`}
                   value={filters[field.name] || ""}
                   onChange={(e) =>
-                    handleFilterChange(field.name, e.target.value)
+                    setFilters((prev) => ({
+                      ...prev,
+                      [field.name]: e.target.value,
+                    }))
                   }
                   className="w-full"
                 />
@@ -81,7 +81,10 @@ export function DataExplorer({
                 <Select
                   value={filters[field.name] || "all"}
                   onValueChange={(value) =>
-                    handleFilterChange(field.name, value)
+                    setFilters((prev) => ({
+                      ...prev,
+                      [field.name]: value,
+                    }))
                   }
                 >
                   <SelectTrigger className="w-full">
@@ -105,28 +108,50 @@ export function DataExplorer({
       {/* Item List */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         {filteredItems.length > 0 ? (
-          filteredItems.map((item) => {
+          filteredItems.map((item, index) => {
             const display = itemDisplay(item);
+            const isSelected = selectedItem === item;
+
             return (
-              <button
-                key={display.title}
-                className={cn(
-                  "w-full border-b px-4 py-3 text-left transition-colors hover:bg-gray-50 focus:bg-gray-50 focus:outline-none",
-                  selectedItem &&
-                    compareItems(selectedItem, item) &&
-                    "bg-blue-50 hover:bg-blue-50",
-                )}
+              <div
+                key={index}
+                className={`p-4 border-b cursor-pointer hover:bg-gray-50 ${
+                  isSelected ? "bg-gray-50" : ""
+                }`}
                 onClick={() => onSelect(item)}
               >
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{display.title}</div>
-                    <div className="mt-0.5 text-sm text-gray-500">
-                      {display.subtitle}
-                    </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-medium">{display.title}</div>
+                    {display.subtitle && (
+                      <div className="text-sm text-gray-500">
+                        {display.subtitle}
+                      </div>
+                    )}
                   </div>
+                  {itemActions && (
+                    <div className="flex gap-2">
+                      {itemActions.map((action, actionIndex) => {
+                        const Icon = action.icon;
+                        return (
+                          <Button
+                            key={actionIndex}
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              action.onClick(item);
+                            }}
+                          >
+                            <Icon className="h-4 w-4 mr-2" />
+                            {action.label}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </button>
+              </div>
             );
           })
         ) : (

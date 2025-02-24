@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { modelsApi } from "@/lib/api/models";
-import type { ModelConfig } from '@/lib/types/model';
+import type { ModelConfig, AddModelFromBaseRequest, ModelTestResult } from "@/lib/types/model";
 
 export const modelKeys = {
   all: ["models"] as const,
@@ -14,27 +14,67 @@ export const modelKeys = {
 // Hooks
 export function useModels() {
   return useQuery({
-    queryKey: modelKeys.lists(),
-    queryFn: () => modelsApi.getModels().then((res) => res.models),
+    queryKey: ["models"],
+    queryFn: modelsApi.getModels,
+  });
+}
+
+export function useBaseModels() {
+  return useQuery({
+    queryKey: ["baseModels"],
+    queryFn: modelsApi.getBaseModels,
   });
 }
 
 export function useModel(id: string) {
   return useQuery({
-    queryKey: ['model', id],
+    queryKey: ["models", id],
     queryFn: () => modelsApi.getModel(id),
     enabled: !!id,
   });
 }
 
+export function useBaseModel(id: string) {
+  return useQuery({
+    queryKey: ["baseModels", id],
+    queryFn: () => modelsApi.getBaseModel(id),
+    enabled: !!id,
+  });
+}
+
+export function useAddFromBase() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: AddModelFromBaseRequest) => modelsApi.addFromBase(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+    },
+  });
+}
+
 export function useUpdateModel() {
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: modelsApi.updateModel,
-    onSuccess: (updatedModel) => {
-      queryClient.setQueryData(['model', updatedModel.id], updatedModel);
-      queryClient.invalidateQueries({ queryKey: ['models'] });
+    mutationFn: (model: ModelConfig) => modelsApi.updateModel(model),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+      queryClient.invalidateQueries({ queryKey: ["models", data.id] });
     },
+  });
+}
+
+export function useDeleteModel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => modelsApi.deleteModel(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["models"] });
+    },
+  });
+}
+
+export function useTestModel() {
+  return useMutation({
+    mutationFn: (id: string) => modelsApi.testModel(id),
   });
 }

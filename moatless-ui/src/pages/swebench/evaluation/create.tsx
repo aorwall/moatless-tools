@@ -5,13 +5,12 @@ import { PageLayout } from "@/lib/components/layouts/PageLayout";
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
 import { useNavigate } from "react-router-dom";
 import EvaluationForm from "@/features/swebench/components/EvaluationForm";
-import EvaluationStatus from "@/features/swebench/components/EvaluationStatus";
 import { useEvaluationCreate } from "@/features/swebench/hooks/useEvaluationCreate";
 import type { EvaluationRequest } from "@/features/swebench/api/evaluation";
 
 export function CreateEvaluationPage() {
   const navigate = useNavigate();
-  const { mutate: createEvaluation, data: evaluation, isPending } = useEvaluationCreate();
+  const { mutate: createEvaluation, isPending } = useEvaluationCreate();
 
   const handleSubmit = (formData: EvaluationRequest) => {
     createEvaluation(formData, {
@@ -37,9 +36,6 @@ export function CreateEvaluationPage() {
       <ScrollArea className="h-[calc(100vh-56px-8rem)]">
         <div className="space-y-8 pr-4">
           <EvaluationForm onSubmit={handleSubmit} isLoading={isPending} />
-          {evaluation?.evaluation_name && (
-            <EvaluationStatus evaluationName={evaluation.evaluation_name} />
-          )}
         </div>
       </ScrollArea>
     </PageLayout>

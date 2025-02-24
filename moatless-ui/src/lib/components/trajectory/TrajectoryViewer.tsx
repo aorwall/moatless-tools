@@ -1,7 +1,5 @@
-import { Card, CardContent } from "@/lib/components/ui/card";
-import { Loader2, AlertCircle, MessageSquare, Clock, Package } from "lucide-react";
+import { MessageSquare, Clock, Package, AlertCircle } from "lucide-react";
 import { Timeline } from "@/lib/components/trajectory";
-import { Alert, AlertDescription } from "@/lib/components/ui/alert";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -20,70 +18,25 @@ import { Artifacts } from "@/pages/trajectories/components/Artifacts";
 import { cn } from "@/lib/utils";
 import { TrajectoryError } from "@/pages/trajectories/components/TrajectoryError";
 import { Trajectory } from "@/lib/types/trajectory";
-import { TrajectoryProvider } from "@/lib/contexts/TrajectoryContext";
 
 interface TrajectoryViewerProps {
-  trajectory?: Trajectory;
-  isLoading?: boolean;
-  isError?: boolean;
-  error?: Error;
+  trajectory: Trajectory;
 }
 
-export function TrajectoryViewer({ 
-  trajectory,
-  isLoading,
-  isError,
-  error
-}: TrajectoryViewerProps) {
+export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
 
+  // Handle websocket subscription
   useEffect(() => {
-    if (!trajectory) return;
-    
-    const unsubscribe = subscribe(`trajectory.${trajectory.id}`, () => {
-      queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
+    const unsubscribe = subscribe(`trajectory.${trajectory.id}`, (message) => {
+      if (message.type === 'event') {
+        queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
+      }
     });
 
     return () => unsubscribe();
-  }, [trajectory?.id, subscribe, queryClient]);
-
-  if (!trajectory) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>No trajectory id found</AlertDescription>
-      </Alert>
-    );
-  }
-
-  if (isError) {
-    return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>
-            {error instanceof Error ? error.message : "Failed to load run data"}
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto p-6">
-        <Card>
-          <CardContent className="py-6">
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Loading run data...</span>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  }, [trajectory.id, subscribe, queryClient]);
 
   interface TabItem {
     id: string
@@ -92,7 +45,7 @@ export function TrajectoryViewer({
   }
   
   const tabs: TabItem[] = [
-    ...(trajectory?.system_status.error ? [{
+    ...(trajectory.system_status.error ? [{
       id: "error",
       label: "Error",
       icon: <AlertCircle className="h-4 w-4" />,
@@ -115,126 +68,124 @@ export function TrajectoryViewer({
   ];
 
   return (
-    <TrajectoryProvider trajectory={trajectory}>
-      <div className="h-[calc(100vh-56px)]">
-        <ResizablePanelGroup
-          direction="horizontal"
-          className="h-full border rounded-lg"
-        >
-          <ResizablePanel defaultSize={25} minSize={20} className="border-r">
-            <ResizablePanelGroup direction="vertical">
-              {/* Status Panel */}
-              <ResizablePanel 
-                defaultSize={60} 
-                minSize={35}
-                className="border-b"
-              >
-                <div className="flex h-full flex-col">
-                  <div className="border-b h-12 flex items-center px-4">
-                    <h2 className="font-semibold">Status</h2>
-                  </div>
-                  <ScrollArea className="flex-1">
-                    <TrajectoryStatus trajectory={trajectory} />
-                  </ScrollArea>
-                </div>
-              </ResizablePanel>
-
-              <ResizableHandle className="bg-border hover:bg-ring" />
-
-              {/* Events Panel */}
-              <ResizablePanel 
-                defaultSize={40}
-                minSize={20}
-              >
-                <div className="flex h-full flex-col">
-                  <div className="border-b h-12 flex items-center px-4">
-                    <h2 className="font-semibold">Events</h2>
-                  </div>
-                  <ScrollArea className="flex-1">
-                    <TrajectoryEvents events={trajectory.events} />
-                  </ScrollArea>
-                </div>
-              </ResizablePanel>
-            </ResizablePanelGroup>
-          </ResizablePanel>
-
-          <ResizableHandle className="bg-border hover:bg-ring" />
-
-          {/* Middle Panel */}
-          <ResizablePanel defaultSize={50} className="border-x">
-            <Tabs 
-              defaultValue={trajectory?.system_status.error ? "error" : "timeline"} 
-              className="flex h-full flex-col"
+    <div className="h-[calc(100vh-56px)]">
+      <ResizablePanelGroup
+        direction="horizontal"
+        className="h-full border rounded-lg"
+      >
+        <ResizablePanel defaultSize={25} minSize={20} className="border-r">
+          <ResizablePanelGroup direction="vertical">
+            {/* Status Panel */}
+            <ResizablePanel 
+              defaultSize={60} 
+              minSize={35}
+              className="border-b"
             >
-              <TabsList 
-                className={cn(
-                  "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
-                  trajectory?.system_status.error ? "grid-cols-4" : "grid-cols-3"
-                )}
-              >
-                {tabs.map((tab) => (
-                  <TabsTrigger
-                    key={tab.id}
-                    value={tab.id}
-                    className={cn(
-                      "rounded-none border-b-2 border-transparent px-4",
-                      "data-[state=active]:border-primary data-[state=active]:bg-background",
-                      "hover:bg-muted/50 [&:not([data-state=active])]:hover:border-muted",
-                      "flex items-center gap-2",
-                      tab.id === "error" && "text-destructive",
-                    )}
-                  >
-                    {tab.icon}
-                    {tab.label}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-
-              {trajectory?.system_status.error && (
-                <TabsContent 
-                  value="error" 
-                  className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-                >
-                  <TrajectoryError trajectory={trajectory} />
-                </TabsContent>
-              )}
-
-              <TabsContent 
-                value="timeline" 
-                className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-              >
-                <ScrollArea className="flex-1 w-full">
-                  <div className="p-6 min-w-[600px]">
-                    {trajectory.nodes && (
-                      <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
-                    )}
-                  </div>
+              <div className="flex h-full flex-col">
+                <div className="border-b h-12 flex items-center px-4">
+                  <h2 className="font-semibold">Status</h2>
+                </div>
+                <ScrollArea className="flex-1">
+                  <TrajectoryStatus trajectory={trajectory} />
                 </ScrollArea>
-              </TabsContent>
+              </div>
+            </ResizablePanel>
 
+            <ResizableHandle className="bg-border hover:bg-ring" />
+
+            {/* Events Panel */}
+            <ResizablePanel 
+              defaultSize={40}
+              minSize={20}
+            >
+              <div className="flex h-full flex-col">
+                <div className="border-b h-12 flex items-center px-4">
+                  <h2 className="font-semibold">Events</h2>
+                </div>
+                <ScrollArea className="flex-1">
+                  <TrajectoryEvents events={trajectory.events} />
+                </ScrollArea>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </ResizablePanel>
+
+        <ResizableHandle className="bg-border hover:bg-ring" />
+
+        {/* Middle Panel */}
+        <ResizablePanel defaultSize={50} className="border-x">
+          <Tabs 
+            defaultValue={trajectory.system_status.error ? "error" : "timeline"} 
+            className="flex h-full flex-col"
+          >
+            <TabsList 
+              className={cn(
+                "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
+                trajectory.system_status.error ? "grid-cols-4" : "grid-cols-3"
+              )}
+            >
+              {tabs.map((tab) => (
+                <TabsTrigger
+                  key={tab.id}
+                  value={tab.id}
+                  className={cn(
+                    "rounded-none border-b-2 border-transparent px-4",
+                    "data-[state=active]:border-primary data-[state=active]:bg-background",
+                    "hover:bg-muted/50 [&:not([data-state=active])]:hover:border-muted",
+                    "flex items-center gap-2",
+                    tab.id === "error" && "text-destructive",
+                  )}
+                >
+                  {tab.icon}
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            {trajectory.system_status.error && (
               <TabsContent 
-                value="chat" 
+                value="error" 
                 className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
               >
-                <Chat trajectory={trajectory} />
+                <TrajectoryError trajectory={trajectory} />
               </TabsContent>
+            )}
 
-              <TabsContent 
-                value="artifacts" 
-                className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-              >
-                <Artifacts trajectoryId={trajectory.id} />
-              </TabsContent>
-            </Tabs>
-          </ResizablePanel>
+            <TabsContent 
+              value="timeline" 
+              className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
+            >
+              <ScrollArea className="flex-1 w-full">
+                <div className="p-6 min-w-[600px]">
+                  {trajectory.nodes && (
+                    <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
 
-          <ResizableHandle className="bg-border hover:bg-ring" />
+            <TabsContent 
+              value="chat" 
+              className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
+            >
+              <Chat trajectory={trajectory} />
+            </TabsContent>
 
-          <ResizablePanel defaultSize={25}>
-            <TimelineItemDetails trajectoryId={trajectory.id} />
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-    </TrajectoryProvider>
+            <TabsContent 
+              value="artifacts" 
+              className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
+            >
+              <Artifacts trajectoryId={trajectory.id} />
+            </TabsContent>
+          </Tabs>
+        </ResizablePanel>
+
+        <ResizableHandle className="bg-border hover:bg-ring" />
+
+        <ResizablePanel defaultSize={25}>
+          <TimelineItemDetails trajectoryId={trajectory.id} trajectory={trajectory} />
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
   );
 }
