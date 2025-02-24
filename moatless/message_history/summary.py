@@ -53,7 +53,7 @@ class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
 
         if self.include_file_context:
             content += "\n\nThe following code has already been viewed:\n"
-            content += await node.file_context.create_prompt_async(
+            content += node.file_context.create_prompt(
                 show_span_ids=False,
                 show_line_numbers=True,
                 exclude_comments=False,

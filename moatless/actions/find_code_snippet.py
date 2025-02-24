@@ -109,6 +109,7 @@ class FindCodeSnippet(SearchBaseAction):
         for file_path, start_line in matches[: self.max_hits]:
             num_lines = len(args.code_snippet.splitlines())
             end_line = start_line + num_lines - 1
-            await search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
+
+            search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
 
         return search_result_context, False

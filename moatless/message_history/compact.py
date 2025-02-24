@@ -94,7 +94,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
             return []
 
         # Calculate initial token count
-        total_tokens = await node.file_context.context_size()
+        total_tokens = node.file_context.context_size()
         total_tokens += count_tokens(node.get_root().message)
 
         # Pre-calculate test output tokens if there's a patch
@@ -144,10 +144,10 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         file_path = action_step.action.files[0].file_path
 
                         if file_path not in shown_files:
-                            context_file = await previous_node.file_context.get_context_file(file_path)
+                            context_file = previous_node.file_context.get_context_file(file_path)
                             if context_file and (context_file.span_ids or context_file.show_all_spans):
                                 shown_files.add(context_file.file_path)
-                                observation = await context_file.to_prompt_async(
+                                observation = context_file.to_prompt(
                                     show_span_ids=False,
                                     show_line_numbers=True,
                                     exclude_comments=False,
@@ -186,7 +186,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                 if self.include_file_context and previous_node.action.name != "ViewCode":
                     files_to_show = set()
                     has_edits = False
-                    context_files = await previous_node.file_context.get_context_files()
+                    context_files = previous_node.file_context.get_context_files()
                     for context_file in context_files:
                         if (
                             context_file.was_edited or context_file.was_viewed
@@ -203,7 +203,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         observations = []
 
                         for file_path in files_to_show:
-                            context_file = await previous_node.file_context.get_context_file(file_path)
+                            context_file = previous_node.file_context.get_context_file(file_path)
                             if context_file.show_all_spans:
                                 code_spans.append(CodeSpan(file_path=file_path))
                             elif context_file.span_ids:
@@ -216,7 +216,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                             else:
                                 continue
 
-                            prompt = await context_file.to_prompt_async(
+                            prompt = context_file.to_prompt(
                                 show_span_ids=False,
                                 show_line_numbers=True,
                                 exclude_comments=False,

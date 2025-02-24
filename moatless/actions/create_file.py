@@ -103,8 +103,8 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
                 properties={"fail_reason": "file_exists"},
             )
 
-        context_file = await file_context.add_file(str(path), show_all_spans=True)
-        await context_file.apply_changes(args.file_text)
+        context_file = file_context.add_file(str(path), show_all_spans=True)
+        context_file.apply_changes(args.file_text)
 
         diff = do_diff(str(path), "", args.file_text)
 

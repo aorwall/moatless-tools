@@ -321,8 +321,6 @@ class ResponseSchema(BaseModel):
             if isinstance(message, str):
                 message = message.replace("\r\n", "\n").replace("\r", "\n")
 
-            logger.info(f"Final message to validate: {repr(message)}")
-
             return super().model_validate_json(message if isinstance(message, str) else json.dumps(message), **kwarg)
 
     def format_args_for_llm(self) -> str:

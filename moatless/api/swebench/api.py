@@ -14,9 +14,8 @@ from moatless.api.trajectories.api import load_trajectory_events, load_trajector
 from moatless.api.trajectories.schema import TrajectoryResponseDTO
 from moatless.api.trajectory.trajectory_utils import load_trajectory_from_file
 from moatless.evaluation.manager import EvaluationManager
-from moatless.evaluation.runner import EvaluationRunner
-from moatless.evaluation.schema import Evaluation, EvaluationStatus
-from moatless.evaluation.utils import get_moatless_dataset_split, get_moatless_dataset_splits, get_moatless_instances
+from moatless.evaluation.schema import Evaluation
+from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instances
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.validation.code_flow_validation import CodeFlowValidation
 from .schema import (

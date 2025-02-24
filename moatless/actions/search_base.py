@@ -114,14 +114,14 @@ class SearchBaseAction(Action, CompletionModelMixin):
                 for identified_code in structured_outputs:
                     if identified_code.identified_spans:
                         for identified_spans in identified_code.identified_spans:
-                            await view_context.add_line_span_to_context(
+                            view_context.add_line_span_to_context(
                                 identified_spans.file_path,
                                 identified_spans.start_line,
                                 identified_spans.end_line,
                                 add_extra=True,
                             )
 
-                tokens = await view_context.context_size()
+                tokens = view_context.context_size()
                 if tokens > self.max_identify_tokens:
                     raise CompletionRetryError(
                         f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. "
@@ -147,7 +147,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
             properties["fail_reason"] = "no_search_hits"
             return Observation(message="No search results found", properties=properties)
 
-        context_size = await search_result_context.context_size()
+        context_size = search_result_context.context_size()
         properties["search_tokens"] = context_size
         properties["search_hits"] = search_result_context.model_dump(exclude_none=True)
 
@@ -179,10 +179,10 @@ class SearchBaseAction(Action, CompletionModelMixin):
         # TODO: Refactor
         for file in file_context.files:
             if view_context.has_file(file.file_path) and file.patch:
-                context_file = await view_context.get_file(file.file_path)
+                context_file = view_context.get_file(file.file_path)
                 context_file.set_patch(file.patch)
 
-        new_span_ids = await file_context.add_file_context(view_context)
+        new_span_ids = file_context.add_file_context(view_context)
 
         if view_context.is_empty():
             search_result_str += "\n\nNone of the search results was relevant to the task."
@@ -191,14 +191,14 @@ class SearchBaseAction(Action, CompletionModelMixin):
         else:
             viewed_str = "that has already been viewed" if not new_span_ids else ""
 
-            context_summary = await view_context.create_summary()
+            context_summary = view_context.create_summary()
             if alternative_suggestion:
                 summary = f"Did not find an exact match but found the following alternative suggestions {viewed_str}:\n{context_summary}"
             else:
                 summary = f"Found the following relevant code spans {viewed_str}:\n{context_summary}"
 
             message = "Found the following relevant code:\n"
-            message += await view_context.create_prompt_async(
+            message += view_context.create_prompt(
                 show_span_ids=False,
                 show_line_numbers=True,
                 exclude_comments=False,
@@ -233,7 +233,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
         for hit in search_result.hits:
             span_count += len(hit.spans)
             for span in hit.spans:
-                await  search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=False)
+                search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=True)
 
         return search_result_context, alternative_suggestion
 
@@ -252,7 +252,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
     async def _identify_code(
         self, args: SearchBaseArgs, search_result_ctx: FileContext
     ) -> Tuple[FileContext, Completion]:
-        search_result_str =  await search_result_ctx.create_prompt_async(
+        search_result_str =  search_result_ctx.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
             exclude_comments=False,
@@ -276,7 +276,7 @@ class SearchBaseAction(Action, CompletionModelMixin):
             for identified_code in completion_response.structured_outputs:
                 if identified_code.identified_spans:
                     for identified_spans in identified_code.identified_spans:
-                        await view_context.add_line_span_to_context(
+                        view_context.add_line_span_to_context(
                             identified_spans.file_path,
                             identified_spans.start_line,
                             identified_spans.end_line,

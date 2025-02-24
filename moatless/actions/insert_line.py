@@ -112,14 +112,14 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
                 properties={"fail_reason": "file_not_found"},
             )
 
-        context_file = await file_context.get_context_file(str(path))
+        context_file = file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
 
-        if not await context_file.lines_is_in_context(args.insert_line - 1, args.insert_line):
+        if not context_file.lines_is_in_context(args.insert_line - 1, args.insert_line):
             return Observation(
                 message=f"Line {args.insert_line} is not in the visible portion of file {path}. Please provide a line number within the visible code, use ViewCode to see the code.",
                 properties={"fail_reason": "lines_not_in_context"},
@@ -150,7 +150,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         snippet = "\n".join(snippet_lines)
 
         diff = do_diff(str(path), file_text, new_file_text)
-        await context_file.apply_changes(new_file_text)
+        context_file.apply_changes(new_file_text)
 
         # Format the snippet with line numbers
         snippet_with_lines = "\n".join(

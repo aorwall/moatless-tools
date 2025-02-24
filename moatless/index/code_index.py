@@ -218,7 +218,7 @@ class CodeIndex:
     async def get_module(self, file_path: str, content: str) -> Module | None:
         parser = get_parser_by_path(file_path)
         if parser:
-            module = await parser.parse_async(content)
+            module = parser.pars(content)
             return module
         return None
 
@@ -285,9 +285,7 @@ class CodeIndex:
                     f"semantic_search(query={query}, file_pattern={file_pattern}) Could not find search hit file {search_hit.file_path}."
                 )
                 continue
-
-            module = await self.get_module(file.file_path, file.content)
-            if not module:
+            elif not file.module:
                 logger.warning(
                     f"semantic_search(query={query}, file_pattern={file_pattern}) Could not parse module for search hit file {search_hit.file_path}."
                 )
@@ -299,14 +297,14 @@ class CodeIndex:
 
             spans = []
             for span_id in search_hit.span_ids:
-                span = module.find_span_by_id(span_id)
+                span = file.module.find_span_by_id(span_id)
 
                 if span:
                     spans.append(span)
                 else:
                     logger.debug(f"semantic_search() Could not find span with id {span_id} in file {file.file_path}")
 
-                    spans_by_line_number = module.find_spans_by_line_numbers(
+                    spans_by_line_number = file.module.find_spans_by_line_numbers(
                         search_hit.start_line, search_hit.end_line
                     )
 
@@ -471,15 +469,13 @@ class CodeIndex:
                     f"find_by_name(function_name: {function_name}, class_name: {class_name}, file_pattern: {file_pattern}) Could not find file {file_path}."
                 )
                 continue
-
-            module = await self.get_module(file.file_path, file.content)
-            if not module:
+            elif not file.module:
                 logger.warning(
                     f"find_by_name(funtion_name: {function_name}, class_name: {class_name}, file_pattern: {file_pattern}) Could not parse module for file {file_path}."
                 )
                 continue
 
-            found_block = module.find_by_path(block_path)
+            found_block = file.module.find_by_path(block_path)
 
             if not found_block:
                 invalid_blocks += 1
@@ -540,13 +536,15 @@ class CodeIndex:
         file_paths = [file.file_path for file in files_with_spans.values()]
         if file_pattern:
             file_paths = await self.matching_files(file_pattern)
+            file_paths = _rerank_files(file_paths, file_pattern)
 
         search_hits = []
         for rank, file_path in enumerate(file_paths):
-            file = files_with_spans[file_path]
-            for span in file.spans:
-                span.rank = rank
-            search_hits.append(file)
+            file = files_with_spans.get(file_path)
+            if file:
+                for span in file.spans:
+                    span.rank = rank
+                search_hits.append(file)
 
         set_attribute("hits", len(search_hits))
         set_attribute("files", len(files_with_spans))
@@ -599,16 +597,11 @@ class CodeIndex:
                 logger.warning(f"run_tests() File not found {result.file_path}")
                 continue
 
-            module = await self.get_module(file.file_path, file.content)
-            if not module:
-                logger.warning(f"run_tests() Could not parse module for file {file.file_path}")
-                continue
-
             # expect to find methods with the name test in the span id if there are any
-            has_test_names = any(span_id for span_id in module.span_ids if "test" in span_id.lower())
+            has_test_names = any(span_id for span_id in file.module.span_ids if "test" in span_id.lower())
 
             for span_id in result.span_ids:
-                span = module.find_span_by_id(span_id)
+                span = file.module.find_span_by_id(span_id)
                 if (
                     span
                     and span.initiating_block.type in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
@@ -886,13 +879,11 @@ class CodeIndex:
 
         return len(embedded_nodes), embedded_tokens
 
-    async def persist(self, persist_dir: str):
-        await asyncio.gather(
-            self._vector_store.persist(persist_dir),
-            self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME)),
-            self._settings.persist(persist_dir),
-            self._code_block_index.persist(persist_dir)
-        )
+    def persist(self, persist_dir: str):
+        self._vector_store.persist(persist_dir)
+        self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
+        self._settings.persist(persist_dir)
+        self._code_block_index.persist(persist_dir)
 
 
 def _rerank_files(file_paths: list[str], file_pattern: str):

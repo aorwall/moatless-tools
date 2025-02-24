@@ -178,7 +178,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             )
 
         if args.command == "view":
-            return await self._view(file_context, path, args)
+            return self._view(file_context, path, args)
         elif args.command == "create":
             return await  self._create_file.execute(
                 CreateFileArgs(
@@ -268,7 +268,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
 
     async def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
-        context_file = await file_context.get_context_file(str(path))
+        context_file = file_context.get_context_file(str(path))
         if not context_file:
             return Observation(
                 message=f"Could not get context for file: {path}",
@@ -305,7 +305,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         snippet = "\n".join(snippet_lines)
 
         diff = do_diff(str(path), file_text, new_file_text)
-        await context_file.apply_changes(new_file_text)
+        context_file.apply_changes(new_file_text)
 
         success_msg = f"The file {path} has been edited. "
         success_msg += self._make_output(

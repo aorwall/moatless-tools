@@ -3,17 +3,12 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict
-import asyncio
 import uuid
 import aiofiles
 import aiofiles.os
-import tempfile
-import threading
 
-import filelock
-
-from moatless.evaluation.runner import EvaluationRunner, Evaluation, EvaluationInstance
-from moatless.evaluation.schema import EvaluationEvent, EvaluationStatus, InstanceStatus
+import moatless.evaluation.runner as evaluation_runner
+from moatless.evaluation.schema import EvaluationEvent, EvaluationStatus, InstanceStatus, Evaluation, EvaluationInstance
 from moatless.events import event_bus
 from moatless.telemetry import instrument, set_attribute
 from moatless.utils.moatless import get_moatless_dir
@@ -40,7 +35,6 @@ class EvaluationManager:
         event_bus.subscribe(self._handle_evaluation_event)
         self.locks_dir = self.evals_dir / ".locks"
         self.locks_dir.mkdir(exist_ok=True)
-        self._active_runners: Dict[str, EvaluationRunner] = {}
         self._initialized = True
 
     def get_evaluation_dir(self, evaluation_name: str) -> Path:
@@ -105,20 +99,11 @@ class EvaluationManager:
             return
 
         # Get evaluation from active runner if exists, otherwise load from file
-        evaluation = None
-        if event.evaluation_name in self._active_runners:
-            evaluation = self._active_runners[event.evaluation_name].evaluation
-        else:
-            evaluation = await self._load_evaluation(event.evaluation_name)
+        evaluation = await self._load_evaluation(event.evaluation_name)
 
         if not evaluation:
             logger.warning(f"Received event for unknown evaluation: {event.evaluation_name}")
             return
-
-        # If the event is evaluation_completed or evaluation_error, remove the runner
-        if event.event_type in ["evaluation_completed", "evaluation_error"]:
-            if event.evaluation_name in self._active_runners:
-                del self._active_runners[event.evaluation_name]
 
         await self._save_evaluation(evaluation)
 
@@ -177,43 +162,11 @@ class EvaluationManager:
         logger.info(completion_model)
 
         evaluation.status = EvaluationStatus.RUNNING
+        logger.info(f"Starting evaluation {evaluation.evaluation_name}")
+
+        evaluation_runner.start_evaluation(evaluation)
         await self._save_evaluation(evaluation)
         
-        # Create runner instance
-        runner = EvaluationRunner(
-            evaluation=evaluation,
-            num_concurrent_instances=num_concurrent_instances,
-            evaluations_dir=str(self.evals_dir)
-        )
-        
-        # Get current trace context before spawning thread
-        from opentelemetry import trace, context
-        current_context = context.get_current()
-        current_span = trace.get_current_span()
-        
-        # Start runner in a separate thread with its own event loop
-        def run_evaluation_in_thread():
-            try:
-                # Create new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # Attach the parent trace context
-                token = context.attach(current_context)
-                try:
-                    # Run the evaluation
-                    loop.run_until_complete(runner.run_evaluation())
-                finally:
-                    context.detach(token)
-                    loop.close()
-            except Exception as e:
-                logger.exception("Error in evaluation thread setup")
-
-        # Start the thread
-        thread = threading.Thread(target=run_evaluation_in_thread, daemon=True)
-        thread.start()
-        
-        self._active_runners[evaluation.evaluation_name] = runner
         return evaluation
 
     async def save_evaluation(self, evaluation: Evaluation):
@@ -244,41 +197,9 @@ class EvaluationManager:
         except:
             pass
 
-    def _should_be_paused(self, evaluation: Evaluation, runner: Optional[EvaluationRunner] = None) -> bool:
-        """
-        Determine if an evaluation should be marked as PAUSED.
-        
-        An evaluation should be PAUSED if:
-        1. It was previously RUNNING
-        2. Either has no runner, or has a runner with no active tasks
-        3. Hasn't reached a terminal state (COMPLETED/ERROR)
-        """
-        if evaluation.status != EvaluationStatus.RUNNING:
-            return False
-        
-        if evaluation.status in [EvaluationStatus.COMPLETED, EvaluationStatus.ERROR]:
-            return False
-        
-        if runner:
-            # TODO: Check something here?
-            return False
-
-        # If no runner provided, then it should be paused
-        return True
-
     async def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from evaluation.json or active runner if exists."""
         # First check if there's an active runner for this evaluation
-        logger.info(f"Loading evaluation: {evaluation_name}, active runners: {list(self._active_runners.keys())}")
-        if evaluation_name in self._active_runners:
-            runner = self._active_runners[evaluation_name]
-            evaluation = runner.evaluation
-            
-            if self._should_be_paused(evaluation, runner):
-                evaluation.status = EvaluationStatus.PAUSED
-                
-            return evaluation
-
         # Otherwise load from file
         eval_path = self.get_evaluation_dir(evaluation_name) / "evaluation.json"
         if not eval_path.exists():
@@ -287,9 +208,6 @@ class EvaluationManager:
         with open(eval_path) as f:
             data = json.load(f)
             evaluation = Evaluation.model_validate(data)
-            if self._should_be_paused(evaluation):
-                evaluation.status = EvaluationStatus.PAUSED
-                await self._save_evaluation(evaluation)
             return evaluation
 
     async def list_evaluations(self) -> List[Evaluation]:
@@ -297,27 +215,12 @@ class EvaluationManager:
         evaluations = []
         for eval_dir in self.evals_dir.glob("eval_*"):
             try:
-                evaluation_name = eval_dir.name
-                # First try to get from active runners
-                if evaluation_name in self._active_runners:
-                    runner = self._active_runners[evaluation_name]
-                    evaluation = runner.evaluation
-                    
-                    if self._should_be_paused(evaluation, runner):
-                        evaluation.status = EvaluationStatus.PAUSED
-                        
-                    evaluations.append(evaluation)
-                    continue
-
-                # Otherwise load from file
                 eval_file = eval_dir / "evaluation.json"
                 if eval_file.exists():
                     with open(eval_file, "r") as f:
                         data = json.load(f)
                         evaluation = Evaluation.model_validate(data)
-                        if self._should_be_paused(evaluation):
-                            evaluation.status = EvaluationStatus.PAUSED
-                            await self._save_evaluation(evaluation)
+                        
                         evaluations.append(evaluation)
             except Exception as e:
                 logger.error(f"Failed to load evaluation {eval_dir.name}: {e}")

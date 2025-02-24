@@ -3,12 +3,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from importlib import resources
-from typing import Optional, Type
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import os
-from contextlib import AsyncExitStack
-from types import TracebackType
+from typing import Optional
 
 import networkx as nx
 from tree_sitter import Language, Node, Parser
@@ -32,27 +27,6 @@ child_block_types = ["ERROR", "block"]
 module_types = ["program", "module"]
 
 logger = logging.getLogger(__name__)
-
-
-class AsyncThreadPoolExecutor:
-    """A context manager for ThreadPoolExecutor that can be used with async/await."""
-    
-    def __init__(self, max_workers: Optional[int] = None):
-        self.max_workers = max_workers
-        self._executor: Optional[ThreadPoolExecutor] = None
-        
-    async def __aenter__(self) -> ThreadPoolExecutor:
-        self._executor = ThreadPoolExecutor(max_workers=self.max_workers)
-        return self._executor
-        
-    async def __aexit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
-    ) -> None:
-        if self._executor:
-            self._executor.shutdown(wait=True)
 
 
 @dataclass
@@ -108,7 +82,6 @@ class CodeParser:
         tokenizer: Callable[[str], list] | None = None,
         apply_gpt_tweaks: bool = False,
         debug: bool = False,
-        max_workers: Optional[int] = 12,  # Maximum number of worker threads for parallel parsing
     ):
         try:
             self.tree_parser = Parser()
@@ -123,12 +96,8 @@ class CodeParser:
         self.encoding = encoding
         self.gpt_queries = []
         self.queries = []
-        
-        # Initialize shared thread pool
-        self._max_workers = max_workers or min(32, (os.cpu_count() or 1) + 4)
-        self._executor = ThreadPoolExecutor(max_workers=self._max_workers)
 
-        # Instance state
+        # TODO: How to handle these in a thread safe way?
         self.spans_by_id = {}
         self.comments_with_no_span = []
         self._span_counter = {}
@@ -176,7 +145,7 @@ class CodeParser:
                     raise e
             return parsed_queries
 
-    async def parse_code(
+    def parse_code(
         self,
         content_bytes: bytes,
         node: Node,
@@ -186,7 +155,7 @@ class CodeParser:
         parent_block: CodeBlock | None = None,
         current_span: BlockSpan | None = None,
     ) -> tuple[CodeBlock, Node, BlockSpan]:
-        node_match = await self.find_in_tree(node)
+        node_match = self.find_in_tree(node)
 
         if not parent_block and node.children:
             node_match.first_child = node.children[0]
@@ -207,7 +176,7 @@ class CodeParser:
             node_match.first_child = None
 
         if node_match.first_child:
-            end_byte = await self.get_previous(node_match.first_child, node)
+            end_byte = self.get_previous(node_match.first_child, node)
         else:
             end_byte = node.end_byte
 
@@ -221,8 +190,8 @@ class CodeParser:
             identifier = None
 
         if self._enable_code_graph:
-            relationships = await self.create_references(code, content_bytes, identifier, node_match)
-            parameters = await self.create_parameters(content_bytes, node_match, relationships)
+            relationships = self.create_references(code, content_bytes, identifier, node_match)
+            parameters = self.create_parameters(content_bytes, node_match, relationships)
         else:
             relationships = []
             parameters = []
@@ -251,7 +220,7 @@ class CodeParser:
             self._previous_block.next = code_block
             self._previous_block = code_block
 
-            await self.pre_process(code_block, node_match)
+            self.pre_process(code_block, node_match)
 
             if code_block.identifier:
                 identifier = code_block.identifier
@@ -281,7 +250,7 @@ class CodeParser:
                 # TODO: Find a more robust way to connect comments to the right span
                 self.comments_with_no_span.append(code_block)
             else:
-                new_span = await self._create_new_span(current_span=current_span, block=code_block)
+                new_span = self._create_new_span(current_span=current_span, block=code_block)
                 if new_span:
                     current_span = new_span
                     self.spans_by_id[current_span.span_id] = current_span
@@ -353,7 +322,7 @@ class CodeParser:
 
             self.debug_log(f"next  [{level}]: -> {next_node.type} - {next_node.start_byte}")
 
-            child_block, child_last_node, child_span = await self.parse_code(
+            child_block, child_last_node, child_span = self.parse_code(
                 content_bytes,
                 next_node,
                 start_byte=end_byte,
@@ -388,7 +357,7 @@ class CodeParser:
             elif next_node.next_sibling:
                 next_node = next_node.next_sibling
             else:
-                next_parent_node = await self.get_parent_next(next_node, node_match.check_child or node)
+                next_parent_node = self.get_parent_next(next_node, node_match.check_child or node)
                 next_node = None if next_parent_node == next_node else next_parent_node
 
         self.debug_log(f"end   [{level}]: {code_block.content}")
@@ -401,9 +370,9 @@ class CodeParser:
 
         self.comments_with_no_span = []
 
-        await self.post_process(code_block)
+        self.post_process(code_block)
 
-        await self.add_to_index(code_block)
+        self.add_to_index(code_block)
 
         # TODO: Find a way to remove the Space end block
         if level == 0 and not node.parent and node.end_byte > end_byte:
@@ -426,9 +395,9 @@ class CodeParser:
             keyword in comment.lower() for keyword in commented_out_keywords
         )
 
-    async def find_in_tree(self, node: Node) -> NodeMatch | None:
+    def find_in_tree(self, node: Node) -> NodeMatch | None:
         if self.apply_gpt_tweaks:
-            match = await self.find_match_with_gpt_tweaks(node)
+            match = self.find_match_with_gpt_tweaks(node)
             if match:
                 self.debug_log(f"find_in_tree() GPT match: {match.block_type} on {node}")
                 return match
@@ -436,7 +405,7 @@ class CodeParser:
         if not node.parent and node.children:
             return NodeMatch(block_type=CodeBlockType.MODULE, first_child=node.children[0])
 
-        match = await self.find_match(node)
+        match = self.find_match(node)
         if match:
             self.debug_log(f"find_in_tree() Found match on node type {node.type} with block type {match.block_type}")
             return match
@@ -446,11 +415,11 @@ class CodeParser:
             )
             return NodeMatch(block_type=CodeBlockType.CODE)
 
-    async def find_match_with_gpt_tweaks(self, node: Node) -> NodeMatch | None:
+    def find_match_with_gpt_tweaks(self, node: Node) -> NodeMatch | None:
         for label, node_type, query in self.gpt_queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
-            match = await self._find_match(node, query, label, capture_from_parent=True)
+            match = self._find_match(node, query, label, capture_from_parent=True)
             if match:
                 self.debug_log(f"find_match_with_gpt_tweaks() Found match on node {node.type} with query {label}")
                 if not match.query:
@@ -459,14 +428,14 @@ class CodeParser:
 
         return None
 
-    async def find_match(self, node: Node) -> NodeMatch | None:
+    def find_match(self, node: Node) -> NodeMatch | None:
         self.debug_log(f"find_match() node type {node.type}")
 
         queries = 0
         for label, node_type, query in self.queries:
             if node_type and node.type != node_type and node_type != "_":
                 continue
-            match = await self._find_match(node, query, label)
+            match = self._find_match(node, query, label)
             queries += 1
             if match:
                 self.debug_log(f"find_match() Found match on node {node.type} with query {label}")
@@ -476,7 +445,7 @@ class CodeParser:
 
         return None
 
-    async def _find_root_node(self, node: Node, matches: tuple[int, list[Node]]) -> dict | None:
+    def _find_root_node(self, node: Node, matches: tuple[int, list[Node]]) -> dict | None:
         for idx, match in matches:
             if "root" in match:
                 for root in match["root"]:
@@ -484,7 +453,7 @@ class CodeParser:
                         return match
         return None
 
-    async def _find_match(self, node: Node, query, label: str, capture_from_parent: bool = False) -> NodeMatch | None:
+    def _find_match(self, node: Node, query, label: str, capture_from_parent: bool = False) -> NodeMatch | None:
         if capture_from_parent:
             matches = query.matches(node.parent)
         else:
@@ -495,7 +464,7 @@ class CodeParser:
         if not matches:
             return None
 
-        captures = await self._find_root_node(node, matches)
+        captures = self._find_root_node(node, matches)
         if not captures:
             return None
 
@@ -513,7 +482,7 @@ class CodeParser:
 
             if tag == "check_child":
                 self.debug_log(f"[{label}] Check child {found_node}")
-                node_match = await self.find_match(found_node)
+                node_match = self.find_match(found_node)
                 if node_match:
                     node_match.check_child = found_node
                 return node_match
@@ -521,7 +490,7 @@ class CodeParser:
             if tag == "parse_child":
                 self.debug_log(f"[{label}] Parse child {found_node}")
 
-                child_match = await self.find_match(found_node)
+                child_match = self.find_match(found_node)
                 if child_match:
                     if child_match.relationships:
                         self.debug_log(
@@ -564,7 +533,7 @@ class CodeParser:
 
         return None
 
-    async def create_references(self, code, content_bytes, identifier, node_match):
+    def create_references(self, code, content_bytes, identifier, node_match):
         references = []
         if node_match.block_type == CodeBlockType.IMPORT and node_match.relationships:
             module_nodes = [ref for ref in node_match.relationships if ref[1] == "reference.module"]
@@ -646,7 +615,7 @@ class CodeParser:
                 )
         return references
 
-    async def create_parameters(self, content_bytes, node_match, references):
+    def create_parameters(self, content_bytes, node_match, references):
         parameters = []
         for parameter in node_match.parameters:
             parameter_type = self.get_content(parameter[1], content_bytes) if parameter[1] else None
@@ -663,60 +632,44 @@ class CodeParser:
                 references.append(reference)
         return parameters
 
-    async def add_to_index(self, codeblock: CodeBlock):
+    def add_to_index(self, codeblock: CodeBlock):
         if self.index_callback:
-            await self.index_callback(codeblock)
+            self.index_callback(codeblock)
 
-    async def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
+    def pre_process(self, codeblock: CodeBlock, node_match: NodeMatch):
         pass
 
-    async def post_process(self, codeblock: CodeBlock):
+    def post_process(self, codeblock: CodeBlock):
         pass
 
-    async def get_previous(self, node: Node, origin_node: Node):
+    def get_previous(self, node: Node, origin_node: Node):
         if node == origin_node:
             return node.start_byte
         if node.prev_sibling:
             return node.prev_sibling.end_byte
         elif node.parent:
-            return await self.get_previous(node.parent, origin_node)
+            return self.get_previous(node.parent, origin_node)
         else:
             return node.start_byte
 
-    async def get_parent_next(self, node: Node, orig_node: Node):
+    def get_parent_next(self, node: Node, orig_node: Node):
         self.debug_log(f"get_parent_next: {node.type} - {orig_node.type}")
         if node != orig_node:
             if node.next_sibling:
                 self.debug_log(f"get_parent_next: node.next_sibling -> {node.next_sibling}")
                 return node.next_sibling
             else:
-                return await self.get_parent_next(node.parent, orig_node)
+                return self.get_parent_next(node.parent, orig_node)
         return None
 
-    async def has_error(self, node: Node):
+    def has_error(self, node: Node):
         if node.type == "ERROR":
             return True
         if node.children:
-            return any(await self.has_error(child) for child in node.children)
+            return any(self.has_error(child) for child in node.children)
         return False
 
     def parse(self, content, file_path: Optional[str] = None) -> Module:
-        """
-        This method is deprecated. Please use parse_async instead.
-        """
-        raise DeprecationWarning("This method is deprecated. Please use parse_async instead.")
-
-    async def parse_async(self, content, file_path: Optional[str] = None) -> Module:
-        """
-        Parse code content asynchronously.
-        
-        Args:
-            content: The code content to parse (string or bytes)
-            file_path: Optional path to the file being parsed
-            
-        Returns:
-            Module: The parsed code module
-        """
         if isinstance(content, str):
             content_in_bytes = bytes(content, self.encoding)
         elif isinstance(content, bytes):
@@ -724,50 +677,28 @@ class CodeParser:
         else:
             raise ValueError("Content must be either a string or bytes")
 
-        # Reset state for this parse operation
+        # TODO: make thread safe?
         self.spans_by_id = {}
         self._span_counter = {}
-        self._previous_block = None
-        self.comments_with_no_span = []
 
-        # Initialize code graph if enabled
+        # TODO: Should me moved to a central CodeGraph
         if self._enable_code_graph:
             self._graph = nx.DiGraph()
 
-        # Get current event loop
-        loop = asyncio.get_running_loop()
-
-        # Parse the tree in a thread
-        tree = await loop.run_in_executor(
-            self._executor,
-            self.tree_parser.parse,
-            content_in_bytes
-        )
+        tree = self.tree_parser.parse(content_in_bytes)
         root_node = tree.walk().node
 
-        # Parse the code
-        module, _, _ = await self.parse_code(
-            content_in_bytes,
-            root_node,
-            0,  # start_byte
-            0,  # level
-            file_path,
-            None,  # parent_block
-            None,  # current_span
-        )
-
-        # Set module properties
+        module, _, _ = self.parse_code(content_in_bytes, root_node, file_path=file_path)
         module.spans_by_id = self.spans_by_id
         module.file_path = file_path
         module.language = self.language
         module._graph = self._graph
-
         return module
 
     def get_content(self, node: Node, content_bytes: bytes) -> str:
         return content_bytes[node.start_byte : node.end_byte].decode(self.encoding)
 
-    async def _create_new_span(self, current_span: BlockSpan | None, block: CodeBlock) -> BlockSpan | None:
+    def _create_new_span(self, current_span: BlockSpan | None, block: CodeBlock) -> BlockSpan | None:
         # Set documentation phase on comments in the start of structure blocks if more than min_tokens_for_docs_span
         # TODO: This is isn't valid in other languages, try to set block type to docstring?
         block_types_with_document_span = [CodeBlockType.MODULE]  # TODO: Make this configurable
@@ -779,7 +710,7 @@ class CodeParser:
             or block.parent.type == CodeBlockType.MODULE
         ):
             span_type = SpanType.INITATION
-            span_id = await self._create_span_id(block, label="imports")
+            span_id = self._create_span_id(block, label="imports")
 
         elif block.type == CodeBlockType.COMMENT and (
             not current_span
@@ -787,7 +718,7 @@ class CodeParser:
             and (current_span.span_type != SpanType.IMPLEMENTATION or current_span.index == 0)
         ):
             span_type = SpanType.DOCUMENTATION
-            span_id = await self._create_span_id(block, label="docstring")
+            span_id = self._create_span_id(block, label="docstring")
 
         # Set initation phase when block is a class or constructor, and until first function:
         elif block.type in [CodeBlockType.CLASS, CodeBlockType.CONSTRUCTOR] or (
@@ -798,11 +729,11 @@ class CodeParser:
             and block.type not in [CodeBlockType.FUNCTION]
         ):
             span_type = SpanType.INITATION
-            span_id = await self._create_span_id(block)
+            span_id = self._create_span_id(block)
 
         else:
             span_type = SpanType.IMPLEMENTATION
-            span_id = await self._create_span_id(block)
+            span_id = self._create_span_id(block)
 
         # if no curent_span exists, expected to be on Module level
         if not current_span:
@@ -872,6 +803,17 @@ class CodeParser:
                 parent_block_path=parent_block_path,
             )
 
+        # Create new span if span type has changed
+        # if span_type != current_span.span_type:
+        #    return BlockSpan(
+        #        span_id=span_id,
+        #        span_type=span_type,
+        #        start_line=block.start_line,
+        #        end_line=block.start_line,
+        #        initiating_block=current_span.initiating_block,
+        #        parent_block_path=current_span.parent_block_path,
+        #    )
+
         # Create new span if the current is too large and the parent block is a structure block
         split_on_block_type = [CodeBlockType.MODULE]  # Only split on Module level
         if (
@@ -893,7 +835,7 @@ class CodeParser:
 
         return None
 
-    async def _create_span_id(self, block: CodeBlock, label: Optional[str] = None):
+    def _create_span_id(self, block: CodeBlock, label: Optional[str] = None):
         if block.type.group == CodeBlockTypeGroup.STRUCTURE:
             structure_block = block
         else:
@@ -926,8 +868,3 @@ class CodeParser:
     def debug_log(self, message: str):
         if self.debug:
             logger.debug(message)
-
-    def __del__(self):
-        """Cleanup thread pool on deletion."""
-        if hasattr(self, '_executor'):
-            self._executor.shutdown(wait=True)

@@ -91,24 +91,19 @@ class FindFunction(SearchBaseAction):
 
     async def _search_for_alternative_suggestion(self, args: FindFunctionArgs) -> SearchCodeResponse:
         """Return methods in the same class or other methods in same file with the method name the method in class is not found."""
-        module = None
+
         if args.class_name and args.file_pattern:
             file = self._repository.get_file(args.file_pattern)
-            if file:
-                parser = get_parser_by_path(file.file_path)
-                if parser:
-                    module = await parser.parse_async(file.content)
-
 
             span_ids = []
-            if module:
-                class_block = module.find_by_identifier(args.class_name)
+            if file and file.module:
+                class_block = file.module.find_by_identifier(args.class_name)
                 if class_block and class_block.type == CodeBlockType.CLASS:
                     function_blocks = class_block.find_blocks_with_type(CodeBlockType.FUNCTION)
                     for function_block in function_blocks:
                         span_ids.append(function_block.belongs_to_span.span_id)
 
-                function_blocks = module.find_blocks_with_identifier(args.function_name)
+                function_blocks = file.module.find_blocks_with_identifier(args.function_name)
                 for function_block in function_blocks:
                     span_ids.append(function_block.belongs_to_span.span_id)
 

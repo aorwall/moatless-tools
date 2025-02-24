@@ -124,6 +124,7 @@ class EvaluationInstance(BaseModel):
     )
     started_at: Optional[datetime] = Field(default=None, description="When the instance started")
     completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
+    start_evaluating_at: Optional[datetime] = Field(default=None, description="When the instance started evaluating")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
     error_at: Optional[datetime] = Field(default=None, description="When instance encountered an error")
     submission: Optional[str] = Field(default=None, description="The submitted patch")

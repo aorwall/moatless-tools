@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Set
+from dotenv import load_dotenv
 from collections import defaultdict
 
 from fastapi import (
@@ -32,7 +33,7 @@ from moatless.api.trajectory.trajectory_utils import (
     load_trajectory_from_file,
     create_trajectory_dto,
 )
-from moatless.api.logging_config import setup_logging, get_logger
+from moatless.logging_config import setup_logging, get_logger
 from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
 from moatless.telemetry import setup_telemetry
@@ -84,7 +85,7 @@ class ConnectionManager:
     async def broadcast_message(self, message: dict):
         """Broadcast message to all connected clients"""
         if not self.active_connections:
-            logger.info("No active connections, skipping broadcast")
+            logger.debug("No active connections, skipping broadcast")
             return
             
         logger.debug(f"Broadcasting message to {len(self.active_connections)} clients")
@@ -209,30 +210,9 @@ class MemoryMonitor:
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    # Initialize OpenTelemetry
-    otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
-    app_insights_conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
-    
-    # Choose telemetry provider based on environment variables
-    if app_insights_conn_string:
-        setup_telemetry(
-            service_name="moatless-api",
-            provider="azure",
-            logger_name=__name__,
-            resource_attributes={
-                "deployment.environment": os.getenv("DEPLOYMENT_ENV", "development")
-            }
-        )
-    else:
-        setup_telemetry(
-            service_name="moatless-api",
-            endpoint=otlp_endpoint,
-            resource_attributes={
-                "deployment.environment": os.getenv("DEPLOYMENT_ENV", "development")
-            }
-        )
+    load_dotenv()
+    setup_telemetry()
 
     api = FastAPI(title="Moatless API")
     

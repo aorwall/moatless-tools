@@ -16,7 +16,6 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
-from functools import partial
 import threading
 import traceback
 
@@ -160,13 +159,5 @@ def get_logger(
         Logger instance with extra fields adapter if specified
     """
     logger = logging.getLogger(name)
-    
-    if extra_fields:
-        # Convert any non-string values to strings to avoid OpenTelemetry warnings
-        sanitized_fields = {
-            k: str(v) if not isinstance(v, (bool, str, bytes, int, float)) else v
-            for k, v in extra_fields.items()
-        }
-        return logging.LoggerAdapter(logger, {'extra_fields': sanitized_fields})
-    
-    return logger 
+
+    return logger

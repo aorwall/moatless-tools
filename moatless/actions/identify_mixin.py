@@ -1,6 +1,7 @@
 import logging
 from typing import Optional, Tuple, List
 
+from moatless.actions.schema import ActionArguments
 from pydantic import BaseModel, Field
 
 from moatless.actions.action import CompletionModelMixin
@@ -17,28 +18,30 @@ from moatless.file_context import FileContext
 logger = logging.getLogger(__name__)
 
 
-IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with identifying relevant code in a codebase. Your goal is to select key code sections from the search results that are most relevant to the search request.
+IDENTIFY_SYSTEM_PROMPT = """You are an autonomous AI assistant tasked with intelligently reducing and identifying the most relevant code sections from an oversized codebase response. Your primary goal is to select only the essential code sections that directly relate to the original search request, helping to reduce the context size while maintaining relevance.
 
 The previous messages will contain:
-1. A search request from an AI assistant
-2. Search results containing various code sections with their line numbers
+1. A search request from an AI assistant that resulted in too much code being returned
+2. Search results containing various code sections with their line numbers that need to be filtered
 
 # Your Task:
 
-1. Understand the Search Request:
+1. Understand the Original Search Request:
    * Analyze the previous search request to understand what code elements are being looked for
-   * Identify key elements such as functions, variables, classes, or patterns that are relevant
+   * Identify the core requirements and key elements that are absolutely necessary
+   * Keep in mind that the goal is to reduce the amount of code while maintaining relevance
 
-2. Evaluate Search Results:
-   * Examine each code section in the search results for alignment with the search request
-   * Assess the relevance and importance of each code section
-   * Consider the complete context of code sections
+2. Evaluate and Filter Search Results:
+   * Carefully examine each code section and prioritize based on direct relevance
+   * Select only the most important and directly relevant code sections
+   * Avoid including peripheral or contextually similar but non-essential code
+   * Focus on reducing the overall size while maintaining the critical functionality
 
-3. Respond with the Identify Action:
-   * Select and respond with the code sections that best match the search request
-   * Provide your analysis in the thoughts field
+3. Respond with Minimal but Complete Selection:
+   * Choose only the most relevant code sections that directly answer the search request
+   * Provide your analysis in the thoughts field, explaining why certain sections were chosen and others excluded
    * List the relevant file paths with start and end line numbers in the identified_spans field
-"""
+   * Ensure your selection stays within token limits while capturing the essential code"""
 
 
 class IdentifiedSpans(BaseModel):
@@ -88,15 +91,16 @@ class IdentifyMixin(CompletionModelMixin):
             for identified_code in structured_outputs:
                 if identified_code.identified_spans:
                     for identified_spans in identified_code.identified_spans:
-                        await identified_context.add_line_span_to_context(
+                        identified_context.add_line_span_to_context(
                             identified_spans.file_path,
                             identified_spans.start_line,
                             identified_spans.end_line,
                             add_extra=True,
                         )
 
-            tokens = await identified_context.context_size()
+            tokens = identified_context.context_size()
             if tokens > self.max_identify_tokens:
+                logger.warning(f"Identified code is too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. ")
                 raise CompletionRetryError(
                     f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. "
                     f"Please identify a smaller subset of the most relevant code sections."
@@ -106,7 +110,7 @@ class IdentifyMixin(CompletionModelMixin):
 
         self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
 
-    async def _identify_code(self, args, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
+    async def _identify_code(self, args: ActionArguments, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:
@@ -117,7 +121,8 @@ class IdentifyMixin(CompletionModelMixin):
         Returns:
             A tuple of (identified_context, completion)
         """
-        code_str = await view_context.create_prompt_async(
+
+        code_str = view_context.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
             exclude_comments=False,
@@ -126,10 +131,11 @@ class IdentifyMixin(CompletionModelMixin):
             max_tokens=self.max_identify_prompt_tokens,
         )
 
-        content = "Code request:"
-        content += f"\n{args.to_prompt()}"
+        content = "A previous request for the following query resulted in too much code:\n"
+        content += f"\nOriginal Request:\n{args.to_prompt()}\n"
+        content += "\nThis search returned more code than can be processed efficiently. Your task is to analyze the results below and select only the most essential code sections that directly address the original request. The goal is to reduce the context size while preserving the most relevant code."
 
-        content += "\n\nIdentify the relevant code sections to view. "
+        content += "\n\nBelow are all the code sections that were found. Please identify and select only the most critical parts that directly answer the original request:"
         content += f"\n\n<code>\n{code_str}\n</code>\n"
         identify_message = ChatCompletionUserMessage(role="user", content=content)
 
@@ -141,7 +147,7 @@ class IdentifyMixin(CompletionModelMixin):
             for identified_code in completion_response.structured_outputs:
                 if identified_code.identified_spans:
                     for identified_spans in identified_code.identified_spans:
-                        await identified_context.add_line_span_to_context(
+                        identified_context.add_line_span_to_context(
                             identified_spans.file_path,
                             identified_spans.start_line,
                             identified_spans.end_line,

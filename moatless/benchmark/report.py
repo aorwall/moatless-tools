@@ -367,7 +367,7 @@ def to_result(
     instance = get_moatless_instance(instance_id)
 
     if not eval_report:
-        logger.info(f"No eval report for {instance_id}")
+        logger.info(f"No eval report found for instance {instance_id}")
         eval_report = {}
 
     try:
@@ -375,7 +375,6 @@ def to_result(
         best_stats = None
         best_node = None
         actions_counter: Dict[str, int] = {}
-
 
         if hasattr(node, "get_best_trajectory"):
             best_node = node.get_best_trajectory()
@@ -399,7 +398,7 @@ def to_result(
             if best_node:
                 resolved = eval_report.get("node_results", {}).get(str(best_node.node_id), {}).get("resolved", None)
             else:
-                logger.warning(f"No best node found for {instance_id}")
+                logger.warning(f"No best node found for instance {instance_id}")
 
         total_usage = node.total_usage()
 
@@ -495,7 +494,7 @@ def to_result(
             result.flags.append("has_retries")
 
     except Exception as e:
-        logger.exception(f"Failed to generate report for {instance_id}")
+        logger.exception(f"Failed to generate report for instance {instance_id}")
 
     return result
 

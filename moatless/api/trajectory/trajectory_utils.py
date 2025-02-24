@@ -284,7 +284,7 @@ async def get_updated_files(old_context: FileContext, new_context: FileContext) 
     # Check files in current context
     for file_path, current_file in new_context._files.items():
         old_file = old_context._files.get(file_path)
-        context_size = await current_file.context_size()
+        context_size = current_file.context_size()
 
         if old_file is None:
             # New file added

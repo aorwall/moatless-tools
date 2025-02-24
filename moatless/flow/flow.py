@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Type, Union
 
+from moatless.telemetry import instrument
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
@@ -192,6 +193,7 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
+    @instrument()
     async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:

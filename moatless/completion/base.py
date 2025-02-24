@@ -15,6 +15,7 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 
 from moatless.completion.model import Completion, Usage
 from moatless.completion.schema import (
+    ChatCompletionUserMessage,
     ResponseSchema,
     AllMessageValues,
     ChatCompletionCachedContent,
@@ -113,7 +114,7 @@ class BaseCompletionModel(BaseModel, ABC):
     metadata: Optional[dict] = Field(default=None, description="Additional metadata for the completion model")
     message_cache: bool = Field(
         default=True,
-        description="Cache the message history in the prompt cache if the LLM supports it",
+        description="Use prompt caching to cache the message history if the LLM supports it",
     )
     thoughts_in_action: bool = Field(
         default=False,
@@ -170,7 +171,6 @@ class BaseCompletionModel(BaseModel, ABC):
             raise CompletionRuntimeError("At least one response schema must be provided")
 
         if self.response_format == LLMResponseFormat.REACT and self.message_cache:
-            logger.info("Disabling message cache for ReAct model")
             self.message_cache = False
 
         # Validate all schemas are subclasses of ResponseSchema
@@ -313,14 +313,13 @@ class BaseCompletionModel(BaseModel, ABC):
         retry_count = 0
         accumulated_usage = Usage()
         completion_response = None
-
         @tenacity.retry(
             retry=tenacity.retry_if_exception_type((CompletionRetryError)),
             stop=tenacity.stop_after_attempt(3),
             wait=tenacity.wait_fixed(0),
-            reraise=True
+            reraise=True,
+            before_sleep=lambda retry_state: logger.info(f"Retrying completion with {len(messages)} messages")
         )
-        
         async def _do_completion_with_validation():
             nonlocal retry_count, accumulated_usage, completion_response
             retry_count += 1
@@ -353,29 +352,25 @@ class BaseCompletionModel(BaseModel, ABC):
                 )
 
             try:
-                # Validate the response - may raise CompletionRejectError
+                # Validate the response - may raise CompletionRetryError
                 structured_outputs, text_response, flags = await self._validate_completion(
                     completion_response=completion_response,
                 )
-            except CompletionRetryError as e:
-                await self._send_retry_event(retry_count, str(e))
-                messages.append(completion_response.choices[0].message.model_dump())
-                if e.retry_messages:
-                    messages.extend(e.retry_messages)
-                raise e
 
-            # Run post validation if provided
-            if self._post_validation_fn:
-                try:
+                # Run post validation if provided and raise CompletionRetryError if it fails
+                if self._post_validation_fn:
                     structured_outputs, text_response, flags = await self._post_validation_fn(
                         structured_outputs, text_response, flags
                     )
-                except CompletionRetryError as e:
-                    await self._send_retry_event(retry_count, str(e))
-                    messages.append(completion_response.choices[0].message.model_dump())
-                    if e.retry_messages:
-                        messages.extend(e.retry_messages)
-                    raise e
+            except CompletionRetryError as e:
+                await self._send_retry_event(retry_count, str(e))
+                messages.append(completion_response.choices[0].message.model_dump())
+                logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
+                if e.retry_messages:
+                    messages.extend(e.retry_messages)
+                else:
+                    messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
+                raise e
 
             response_dict = completion_response.model_dump()
 
