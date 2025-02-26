@@ -1,4 +1,6 @@
 import logging
+
+from pydantic import Field
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -6,8 +8,11 @@ from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
 from moatless.telemetry import instrument
 from moatless.utils.file import is_test
-
+from opentelemetry import trace
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer(__name__)
+
 
 
 class CodeModificationMixin:
@@ -15,6 +20,8 @@ class CodeModificationMixin:
     A mixin that provides common functionality for actions that modify code files.
     This includes path normalization, file validation, test running, and observation handling.
     """
+
+    auto_run_tests: bool = Field(True, description="Whether to automatically run tests after modifying code")
 
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path by removing /repo and leading /"""
@@ -52,12 +59,15 @@ class CodeModificationMixin:
 
         return path, None
 
-    @instrument()
+    @tracer.start_as_current_span("run_tests")
     async def run_tests(
         self,
         file_path: str,
         file_context: FileContext,
     ) -> str:
+        if not self.auto_run_tests:
+            return ""
+
         if not file_context.has_runtime:
             logger.warning(f"No runtime, cannot run tests for {file_path}")
             return ""

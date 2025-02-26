@@ -1271,7 +1271,7 @@ class FileContext(BaseModel):
         Returns:
             List[str]: List of newly added span IDs
         """
-        new_span_ids = []
+        added_new_spans = False
 
         for other_file in other_context.files:
             file_path = other_file.file_path
@@ -1282,15 +1282,16 @@ class FileContext(BaseModel):
             else:
                 context_file = self.get_context_file(file_path)
 
-            # Add spans that don't already exist
-            for span in other_file.spans:
-                if context_file.add_span(span.span_id):
-                    new_span_ids.append(span.span_id)
-
             # Copy show_all_spans flag if either context has it enabled
-            context_file.show_all_spans = context_file.show_all_spans or other_file.show_all_spans
+            if not context_file.show_all_spans and other_file.show_all_spans:
+                added_new_spans = True
+                context_file.show_all_spans = other_file.show_all_spans
+            else: 
+                for span in other_file.spans:
+                    if context_file.add_span(span.span_id):
+                        added_new_spans = True
 
-        return new_span_ids
+        return added_new_spans
 
     def span_count(self) -> int:
         """
@@ -1424,42 +1425,89 @@ class FileContext(BaseModel):
 
         return updated_files
 
-    def get_test_summary(self) -> str:
+    def get_test_summary(self, test_files: Optional[List[str]] = None) -> str:
         """
-        Returns a summary of all test results in the format "X passed. Y failed. Z errors."
+        Returns a summary of test results, optionally filtered by specified test files.
+        If test_files is provided, only shows results for those files.
+        Lists each file with its own results followed by an overall summary.
+
+        Args:
+            test_files (Optional[List[str]]): Optional list of test files to include in the summary
 
         Returns:
             str: Summary string of test results
         """
         from testbeds.schema import TestStatus
 
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
+        # Filter test files if specified
+        included_test_files = {}
+        if test_files:
+            for file_path in test_files:
+                if file_path in self._test_files:
+                    included_test_files[file_path] = self._test_files[file_path]
+        else:
+            included_test_files = self._test_files
 
+        if not included_test_files:
+            return "No test results available."
+
+        # Collect results and generate per-file summaries
+        all_results = []
+        per_file_summary = []
+
+        for file_path, test_file in included_test_files.items():
+            file_results = test_file.test_results
+            all_results.extend(file_results)
+            
+            # Calculate stats for this file
+            file_failure_count = sum(1 for r in file_results if r.status == TestStatus.FAILED)
+            file_error_count = sum(1 for r in file_results if r.status == TestStatus.ERROR)
+            file_passed_count = len(file_results) - file_failure_count - file_error_count
+            
+            # Add to per-file summary
+            per_file_summary.append(
+                f"* {file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors"
+            )
+
+        # Calculate overall stats
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
+        
+        # Combine per-file summary with overall summary
+        summary = "\n".join(per_file_summary)
+        summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors."
+        
+        return summary
 
-        return f"{passed_count} passed. {failure_count} failed. {error_count} errors."
-
-    def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
+    def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[List[str]] = None) -> str:
         """
         Returns detailed output for each failed or errored test result.
         For long messages, shows the first and last portions with middle truncated.
+        If test_files is provided, only shows details for those files.
 
         Args:
             max_tokens (int): Maximum total tokens for all test details
             max_chars_per_test (int): Maximum characters per test message before truncating
+            test_files (Optional[List[str]]): Optional list of test files to include in the details
 
         Returns:
             str: Formatted string containing details of failed tests
         """
         from testbeds.schema import TestStatus
 
+        # Filter test files if specified
+        included_test_files = {}
+        if test_files:
+            for file_path in test_files:
+                if file_path in self._test_files:
+                    included_test_files[file_path] = self._test_files[file_path]
+        else:
+            included_test_files = self._test_files
+
         sum_tokens = 0
         test_result_strings = []
-        for test_file in self._test_files.values():
+        for file_path, test_file in included_test_files.items():
             for result in test_file.test_results:
                 if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.message:
                     attributes = ""

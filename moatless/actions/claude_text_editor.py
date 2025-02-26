@@ -11,7 +11,8 @@ from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan
+from moatless.actions.view_code import ViewCodeArgs, CodeSpan, ViewCode
+from moatless.completion import BaseCompletionModel
 from moatless.completion.schema import (
     ChatCompletionToolParam,
     ChatCompletionToolParamFunctionChunk,
@@ -52,7 +53,7 @@ class EditActionArguments(ActionArguments):
     @classmethod
     def tool_schema(cls, thoughts_in_action: bool = False) -> ChatCompletionToolParam:
         return ChatCompletionToolParam(
-            type="text_editor_20241022",
+            type="text_editor_20250124",
             function=ChatCompletionToolParamFunctionChunk(name="str_replace_editor"),
         )
 
@@ -149,7 +150,18 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
     _str_replace: StringReplace = PrivateAttr()
     _create_file: CreateFile = PrivateAttr()
+    _view_code: ViewCode = PrivateAttr()
+
     _repository: Repository | None = PrivateAttr(None)
+
+    def __init__(
+        self,
+        **data,
+    ):
+        super().__init__(**data)
+        self._str_replace = StringReplace(auto_run_tests=False)
+        self._create_file = CreateFile(auto_run_tests=False)
+        self._view_code = ViewCode()
 
     async def execute(
         self,
@@ -178,9 +190,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             )
 
         if args.command == "view":
-            return self._view(file_context, path, args)
+            return await self._view(file_context, path, args)
         elif args.command == "create":
-            return await  self._create_file.execute(
+            return await self._create_file.execute(
                 CreateFileArgs(
                     path=args.path,
                     file_text=args.file_text,
@@ -231,6 +243,31 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         return observation
 
+    @property
+    def workspace(self) -> Workspace:
+        if not self._workspace:
+            raise ValueError("Workspace is not set")
+        return self._workspace
+
+    @workspace.setter
+    def workspace(self, value: Workspace):
+        self._workspace = value
+        self._view_code.workspace = value
+        self._str_replace.workspace = value
+        self._create_file.workspace = value
+
+    @property
+    def completion_model(self):
+        return self._view_code._completion_model
+
+    @completion_model.setter
+    def completion_model(self, value: Optional[BaseCompletionModel]):
+        if value is None:
+            self._view_code._completion_model = None
+        else:
+            self._view_code._completion_model = value.clone()
+            self._view_code._initialize_completion_model()
+
     def validate_path(self, file_context: FileContext, command: str, path: Path) -> str | None:
         """
         Check that the path/command combination is valid.
@@ -256,7 +293,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         return None
 
-    def _view(self, file_context: FileContext, path: Path, args: EditActionArguments) -> Observation:
+    async def _view(self, file_context: FileContext, path: Path, args: EditActionArguments) -> Observation:
         codespan = CodeSpan(file_path=str(path))
 
         view_range = args.view_range
@@ -264,7 +301,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             codespan.start_line, codespan.end_line = view_range
 
         view_code_args = ViewCodeArgs(thoughts=args.thoughts, files=[codespan])
-        return self._view_code.execute(view_code_args, file_context=file_context)
+        return await self._view_code.execute(view_code_args, file_context=file_context)
 
 
     async def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
@@ -339,6 +376,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         for span_id in span_ids:
             list_str += f" * {span_id}\n"
         return list_str
+
 
 
 TRUNCATED_MESSAGE: str = "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"

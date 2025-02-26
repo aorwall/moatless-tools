@@ -1,5 +1,5 @@
+from abc import ABC
 import logging
-from abc import ABC, abstractmethod
 from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
 
 from moatless.telemetry import instrument
@@ -45,7 +45,7 @@ class CompletionModelMixin:
         pass
 
 
-class Action(MoatlessComponent):
+class Action(MoatlessComponent, ABC):
     """Base class for all actions."""
     args_schema: ClassVar[Type[ActionArguments]]
     model_config = ConfigDict(arbitrary_types_allowed=True)

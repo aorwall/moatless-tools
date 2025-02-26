@@ -408,6 +408,8 @@ class CodeIndex:
             paths = await self._code_block_index.get_blocks_by_function(function_name)
         else:
             raise ValueError("At least one of class_name or function_name must be provided.")
+        
+        logger.info(f"find_by_name() Found {len(paths)} paths.")
 
         if file_pattern:
             include_files = await self.matching_files(file_pattern)

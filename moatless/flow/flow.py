@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Type, Union
 
-from moatless.telemetry import instrument
+from moatless.telemetry import instrument, instrument_span
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
@@ -17,7 +17,7 @@ from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
 from moatless.completion.manager import create_completion_model
 from moatless.context_data import current_trajectory_id
-from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent
+from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent, FlowErrorEvent
 from moatless.events import event_bus
 from moatless.file_context import FileContext
 from moatless.flow.events import FlowErrorEvent
@@ -27,8 +27,10 @@ from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("moatless.flow")
 
 class RunAttempt(BaseModel):
     """Information about a single run attempt"""
@@ -80,7 +82,7 @@ class SystemStatus(BaseModel):
 
     @classmethod
     def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None) -> "SystemStatus":
-        status_path = get_moatless_trajectory_dir(trajectory_id, project_id) / 'status.json'
+        status_path = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id) / 'status.json'
         if not status_path.exists():
             raise FileNotFoundError(f"Status file not found for trajectory {trajectory_id}")
         return SystemStatus.model_validate_json(status_path.read_text())
@@ -89,7 +91,9 @@ class SystemStatus(BaseModel):
 class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    run_id: str = Field(..., description="The run ID of the system.")
+    project_id: str | None = Field(None, description="The project ID")
+    trajectory_id: str = Field(..., description="The trajectory ID.")
+
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
 
     root: Optional[Node] = Field(None, description="The root node of the system.")
@@ -115,12 +119,14 @@ class AgenticFlow(MoatlessComponent):
     @classmethod
     def _get_base_class(cls) -> Type:
         return AgenticFlow
-
+    
+    
     @classmethod
     def create(
         cls,
         message: str | None = None,
-        run_id: str | None = None,
+        trajectory_id: str | None = None,
+        project_id: str | None = None,
         agent: ActionAgent | None = None,
         agent_id: str | None = None,
         root: Node | None = None,
@@ -144,19 +150,22 @@ class AgenticFlow(MoatlessComponent):
         if not agent and not agent_id:
             raise ValueError("Either an agent or an agent ID must be provided.")
 
-        if not run_id:
-            run_id = str(uuid.uuid4())
+        if not trajectory_id:
+            trajectory_id = str(uuid.uuid4())
 
         if not agent:
             agent = get_agent(agent_id, completion_model, repository, code_index, runtime)
 
         if not agent.workspace:
-            if not workspace:
+            if not workspace and repository:
                 workspace = Workspace(repository=repository, runtime=runtime, code_index=code_index)
             agent.workspace = workspace
         
         if not file_context:
-            file_context = FileContext(repo=agent.workspace.repository, runtime=agent.workspace.runtime)
+            file_context = FileContext(
+                repo=agent.workspace.repository if agent.workspace else None, 
+                runtime=agent.workspace.runtime if agent.workspace else None
+            )
 
         if not root:
             root = Node(
@@ -170,10 +179,11 @@ class AgenticFlow(MoatlessComponent):
             persist_dir = Path(persist_dir)
 
         if not persist_dir:
-            persist_dir = get_moatless_trajectory_dir(run_id)
+            persist_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
 
         return cls(
-            run_id=run_id,
+            trajectory_id=trajectory_id,
+            project_id=project_id,
             root=root,
             agent=agent,
             metadata=metadata or {},
@@ -193,41 +203,41 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
-    @instrument()
     async def run(self, message: str | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:
             raise ValueError("Root node is not set")
 
-        try:
-            current_trajectory_id.set(self.run_id)
-            self._initialize_run_state()
-            await event_bus.publish(FlowStartedEvent())
-            node, finish_reason = await self._run(message)
-            
-            # Complete attempt successfully
-            self._status.complete_current_attempt("completed")
-            self._status.status = "completed"
-            self._status.finished_at = datetime.now(timezone.utc)
-            await event_bus.publish(FlowCompletedEvent(finish_reason=finish_reason))
-            return node
-        except Exception as e:
-            # Complete attempt with error
-            logger.exception(f"Error running flow {self.run_id}")
-            error_trace = traceback.format_exc()
-            self._status.complete_current_attempt("error", str(e), error_trace)
-            self._status.status = "error"
-            self._status.error = str(e)
-            self._status.error_trace = error_trace
-            self._status.finished_at = datetime.now(timezone.utc)
-            await event_bus.publish(FlowErrorEvent(error=str(e)))
-            raise
-        finally:
-            self.maybe_persist()
-            self._save_status()
-            if self._events_file:
-                self._events_file.close()
-                self._events_file = None
+        with tracer.start_as_current_span(f"flow_{self.trajectory_id}") as span:
+            try:
+                current_trajectory_id.set(self.trajectory_id)
+                self._initialize_run_state()
+                await event_bus.publish(FlowStartedEvent())
+                node, finish_reason = await self._run(message)
+                
+                # Complete attempt successfully
+                self._status.complete_current_attempt("completed")
+                self._status.status = "completed"
+                self._status.finished_at = datetime.now(timezone.utc)
+                await event_bus.publish(FlowCompletedEvent(finish_reason=finish_reason))
+                return node
+            except Exception as e:
+                # Complete attempt with error
+                logger.exception(f"Error running flow {self.trajectory_id}")
+                error_trace = traceback.format_exc()
+                self._status.complete_current_attempt("error", str(e), error_trace)
+                self._status.status = "error" 
+                self._status.error = str(e)
+                self._status.error_trace = error_trace
+                self._status.finished_at = datetime.now(timezone.utc)
+                await event_bus.publish(FlowErrorEvent(error=str(e)))
+                raise
+            finally:
+                self.maybe_persist()
+                self._save_status()
+                if self._events_file:
+                    self._events_file.close()
+                    self._events_file = None
 
     @abstractmethod
     async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
@@ -253,7 +263,6 @@ class AgenticFlow(MoatlessComponent):
             node.reset()
         else:
             node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
-
 
     async def emit_event(self, event: BaseEvent):
         """Emit an event."""
@@ -309,11 +318,10 @@ class AgenticFlow(MoatlessComponent):
 
         # TODO: Log restart/resume event
         #if self._status.restart_count > 0:
-        #    event_bus.publish(self.run_id, BaseEvent(event_type="flow_restarted"))
+        #    event_bus.publish(self.trajectory_id, BaseEvent(event_type="flow_restarted"))
 
         self._save_status()
 
-    
 
     def _save_status(self):
         """Save current status to status.json"""
@@ -447,7 +455,7 @@ class AgenticFlow(MoatlessComponent):
             settings = json.load(f)
         
         flow = cls.model_validate(settings)
-        flow.root = Node.from_file(trajectory_path, repo=workspace.repository, runtime=workspace.runtime)
+        flow.root = Node.from_file(trajectory_path, repo=workspace.repository if workspace else None, runtime=workspace.runtime if workspace else None)
         flow.workspace = workspace
         flow.persist_dir = trajectory_dir
 
@@ -456,7 +464,7 @@ class AgenticFlow(MoatlessComponent):
 
     @classmethod
     def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None, workspace: Workspace | None = None) -> "AgenticFlow":
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id, project_id)
+        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
         if not workspace:
             workspace = Workspace(trajectory_dir=trajectory_dir)
 

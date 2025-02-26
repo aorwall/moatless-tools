@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 
 from pydantic import BaseModel, Field, ConfigDict
 
@@ -14,6 +14,7 @@ from moatless.schema import MessageHistoryType
 from moatless.selector import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
+from moatless.runner.runner import JobStatus
 
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -84,6 +85,7 @@ class TreeSearchSettings(BaseModel):
 
 
 class InstanceStatus(str, Enum):
+    CREATED = "created"
     PENDING = "pending"
     SETTING_UP = "setting_up"
     RUNNING = "running"
@@ -103,8 +105,7 @@ class EvaluationStatus(str, Enum):
 
 class EvaluationEvent(BaseEvent):
     """Event emitted by the evaluation process"""
-
-    evaluation_name: str
+    scope: str = "evaluation"
     data: Any
 
 
@@ -117,7 +118,7 @@ class EvaluationInstance(BaseModel):
     )
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    status: InstanceStatus = Field(default=InstanceStatus.PENDING, description="Current status of the instance")
+    status: InstanceStatus = Field(default=InstanceStatus.CREATED, description="Current status of the instance")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the instance was created",
@@ -126,11 +127,13 @@ class EvaluationInstance(BaseModel):
     completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
     start_evaluating_at: Optional[datetime] = Field(default=None, description="When the instance started evaluating")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
+    job_status: Optional[JobStatus] = Field(default=None, description="Status of the instance's job", exclude=True)
     error_at: Optional[datetime] = Field(default=None, description="When instance encountered an error")
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if instance failed")
     resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
+    reward: Optional[int] = Field(default=None, description="Reward of the instance")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
     benchmark_result: Optional[BenchmarkResult] = Field(default=None, description="Benchmark result")
 
@@ -237,3 +240,4 @@ class EvaluationDatasetSplit(BaseModel):
     name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
     description: str = Field(description="Description of what this split represents")
     instance_ids: list[str] = Field(description="List of instance IDs that belong to this split")
+

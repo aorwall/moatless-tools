@@ -39,6 +39,13 @@ class ChatCompletionTextObject(TypedDict):
     cache_control: ChatCompletionCachedContent
 
 
+class ChatCompletionThinkingObject(TypedDict):
+    type: Literal["thinking"]
+    thinking: Optional[str]
+    signature: Optional[str]
+    data: Optional[str]
+
+
 class ChatCompletionImageUrlObject(TypedDict, total=False):
     url: Required[str]
     detail: str

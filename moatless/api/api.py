@@ -19,6 +19,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from moatless.api.swebench.schema import RunnerResponseDTO
+from moatless.runner.rq import RQRunner
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from moatless.api.agents.api import router as agent_router
@@ -49,7 +51,7 @@ from collections import Counter
 
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
-    log_dir=Path("logs"),
+    log_dir=Path(os.getcwd()) / "logs",
     service_name="moatless-api",
     environment=os.getenv("DEPLOYMENT_ENV", "development"),
     use_json=os.getenv("LOG_FORMAT", "").lower() == "json",
@@ -105,127 +107,33 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+runner = RQRunner()
 
-async def handle_system_event(trajectory_id: str, project_id: str, event: BaseEvent):
+
+async def handle_event(event: BaseEvent):
     """Handle system events and broadcast them via WebSocket"""
-    message = {
-        'trajectory_id': trajectory_id,
-        'project_id': project_id,
-        'event_type': event.event_type,
-        'data': event.model_dump(exclude_none=True, exclude={'event_type'})
-    }
-    logger.debug(f"Broadcasting event: {message}")
-    await manager.broadcast_message(message)
-
-class MemoryMonitor:
-    def __init__(self, interval: int = 300):  # Changed to 5 minutes default
-        self.interval = interval
-        self._memory_log_dir = Path("profiles/memory")
-        self._memory_log_dir.mkdir(parents=True, exist_ok=True)
-        self._task = None
-        self._running = False
-        self._snapshot = None
-        self._sample_count = 0
-        tracemalloc.start(10)  # Reduced from 25 to 10 frames to lower overhead
-
-    def _should_take_detailed_snapshot(self) -> bool:
-        """Only take detailed snapshots periodically to reduce overhead."""
-        self._sample_count += 1
-        return self._sample_count % 5 == 0  # Detailed snapshot every 5th time
-
-    async def start(self):
-        if self._running:
-            return
-        
-        self._running = True
-        self._snapshot = tracemalloc.take_snapshot()
-        self._task = asyncio.create_task(self._monitor())
-        logger.info("Memory monitoring started with tracemalloc")
-
-    async def stop(self):
-        if not self._running:
-            return
-        
-        self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        tracemalloc.stop()
-        logger.info("Memory monitoring stopped")
-
-    async def _monitor(self):
-        while self._running:
-            try:
-                process = psutil.Process(os.getpid())
-                memory_info = process.memory_info()
-                timestamp = datetime.now().isoformat()
-                
-                # Basic metrics always collected
-                log_entry = {
-                    "timestamp": timestamp,
-                    "rss": memory_info.rss,
-                    "vms": memory_info.vms,
-                    "connections": len(manager.active_connections) if hasattr(manager, 'active_connections') else 0
-                }
-
-                # Detailed metrics only collected periodically
-                if self._should_take_detailed_snapshot():
-                    gc.collect()  # Force garbage collection
-                    snapshot = tracemalloc.take_snapshot()
-                    
-                    if self._snapshot:
-                        stats = snapshot.compare_to(self._snapshot, 'lineno')
-                        significant_changes = [
-                            (stat.traceback[0].filename, stat.size_diff)
-                            for stat in stats[:3]  # Only track top 3 changes
-                            if abs(stat.size_diff) > 100000  # Only track significant changes (>100KB)
-                        ]
-                        
-                        if significant_changes:
-                            log_entry["memory_growth"] = {
-                                str(filename): size_diff
-                                for filename, size_diff in significant_changes
-                            }
-                    
-                    self._snapshot = snapshot
-                    
-                    # Basic object counting without expensive type checks
-                    log_entry["gc_stats"] = {
-                        "collections": gc.get_count(),
-                        "objects": len(gc.get_objects()),
-                        "garbage": len(gc.garbage)
-                    }
-                
-                log_file = self._memory_log_dir / f"api_memory_{datetime.now().strftime('%Y%m%d')}.json"
-                with open(log_file, "a") as f:
-                    f.write(json.dumps(log_entry) + "\n")
-                
-                await asyncio.sleep(self.interval)
-            except Exception as e:
-                logger.error(f"Error logging memory usage: {e}")
-                await asyncio.sleep(self.interval)
+    logger.debug(f"Broadcasting event: {event.scope}:{event.event_type}")
+    await manager.broadcast_message(event.to_dict())
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
 
     load_dotenv()
-    setup_telemetry()
 
     api = FastAPI(title="Moatless API")
     
-    # Initialize memory monitor with 5 minute interval
-    memory_monitor = MemoryMonitor(interval=300)  # Changed from 60 to 300 seconds
-
     @api.on_event("startup")
     async def startup_event():
-        await memory_monitor.start()
+        logger.info("Subscribing to system events")
+        setup_telemetry()
+
+        await event_bus.initialize()
+        await event_bus.subscribe(handle_event)
 
     @api.on_event("shutdown")
     async def shutdown_event():
-        await memory_monitor.stop()
+        logger.info("Unsubscribing from system events")
+        await event_bus.unsubscribe(handle_event)
 
     # Initialize FastAPI instrumentation
     FastAPIInstrumentor.instrument_app(api)
@@ -320,6 +228,14 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             return create_trajectory_dto(trajectory_data, trajectory_id=file.filename)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
+        
+    @router.get("/runner", response_model=RunnerResponseDTO)
+    async def get_runner() -> RunnerResponseDTO:
+        """Get the runner"""
+        return RunnerResponseDTO(
+            info=await runner.get_runner_info(),
+            jobs=await runner.get_jobs()
+        )
 
     # Include model, agent, and loop configuration routers
     router.include_router(settings_router, prefix="/settings", tags=["settings"])
@@ -374,7 +290,5 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 logger.info("No UI files found")
     except ImportError:
         logger.info("API extras not installed, UI will not be served")
-
-    event_bus.subscribe(handle_system_event)
 
     return api

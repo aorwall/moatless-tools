@@ -53,7 +53,7 @@ class MoatlessComponent(BaseModel, ABC):
                         component_class = cls.get_component_by_name(class_name)
                         
                         if not component_class:
-                            available = cls._get_components().keys()
+                            available = list(cls._get_components().keys())
                             logger.warning(f"Invalid {cls.get_component_type()} class: {class_name}. Available: {available}")
                             raise ValueError(f"Invalid {cls.get_component_type()} class: {class_name}")
                         return component_class.model_validate(obj)
@@ -139,9 +139,9 @@ class MoatlessComponent(BaseModel, ABC):
                         try:
                             if (isinstance(obj, type) and 
                                 issubclass(obj, base_class) and 
-                                
                                 not getattr(obj, '__abstractmethods__', False) and
-                                not name.endswith('Mixin')):  # Skip mixin classes
+                                not name.endswith('Mixin') and
+                                ABC not in obj.__bases__):
 
                                 qualified_name = f"{obj.__module__}.{name}"
                                 if qualified_name in registered_classes:
@@ -161,6 +161,8 @@ class MoatlessComponent(BaseModel, ABC):
                                     logger.debug(f"Skipping class {name} from {modname} because it has abstract methods: {obj}: {getattr(obj, '__abstractmethods__', False)}")
                                 elif name.endswith('Mixin'):
                                     logger.debug(f"Skipping class {name} from {modname} because it is a mixin: {obj}")
+                                elif ABC in obj.__bases__:
+                                    logger.debug(f"Skipping class {name} from {modname} because it directly inherits from ABC: {obj}")
                                     
                         except TypeError as e:
                             logger.debug(f"Skipping class {name} from {modname} because of TypeError: {e}, issubclass: {issubclass(obj, base_class)}, obj != base_class: {obj != base_class}, not getattr(obj, '__abstractmethods__', False): {not getattr(obj, '__abstractmethods__', False)}, not name.endswith('Mixin'): {not name.endswith('Mixin')}")
@@ -186,7 +188,8 @@ class MoatlessComponent(BaseModel, ABC):
                                 if (isinstance(obj, type) and 
                                     issubclass(obj, base_class) and 
                                     obj != base_class and 
-                                    not getattr(obj, '__abstractmethods__', False)):
+                                    not getattr(obj, '__abstractmethods__', False) and
+                                    ABC not in obj.__bases__):  # Skip classes directly inheriting from ABC
                                     qualified_name = f"{obj.__module__}.{name}"
                                     if qualified_name in registered_classes:
                                         logger.debug(f"Duplicate class: {qualified_name} from {modname}")
@@ -194,13 +197,13 @@ class MoatlessComponent(BaseModel, ABC):
                                         logger.debug(f"Loaded custom {base_class.__name__}: {qualified_name} from {modname}")
                                         registered_classes[qualified_name] = obj
                         except Exception as e:
-                            logger.debug(f"Failed to load from custom module {modname}: {e}")
+                            logger.exception(f"Failed to load from custom module {modname}: {e}")
                 finally:
                     sys.path.pop(0)
             else:
                 logger.debug(f"No custom components path found for {cls.get_component_type()}")
         except Exception as e:
-            logger.debug(f"Failed to scan package {package}: {e}")
+            logger.exception(f"Failed to scan package {package}: {e}")
 
         if not registered_classes:
             logger.warning(f"No {cls.get_component_type()} classes found")

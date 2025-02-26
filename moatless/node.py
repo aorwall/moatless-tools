@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Optional, List, Dict, Any, Union
+from typing import Literal, Optional, List, Dict, Any, Union
 
 from pydantic import BaseModel, Field
 
@@ -65,6 +65,11 @@ class Reward(BaseModel):
         le=100,
     )
 
+class ThoughtBlock(BaseModel):
+    type: Literal["thinking", "redacted_thinking"] = Field(..., description="The type of the thought block")
+    text: str = Field(..., description="The text of the thought block")
+    signature: Optional[str] = Field(None, description="The signature of the thought block")
+    data: Optional[str] = Field(None, description="The data of the thought block")
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
@@ -79,6 +84,8 @@ class Node(BaseModel):
 
     user_message: Optional[str] = Field(None, description="The user message for this node")
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
+
+    thoughts: Optional[List[dict]] = Field(default=None, description="The thoughts associated with the node")
 
     action_steps: List[ActionStep] = Field(
         default_factory=list,

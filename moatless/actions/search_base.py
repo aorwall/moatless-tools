@@ -78,7 +78,7 @@ class Identify(ResponseSchema):
     )
 
 
-class SearchBaseAction(Action, CompletionModelMixin):
+class SearchBaseAction(Action, CompletionModelMixin, ABC):
     args_schema: ClassVar[Type[ActionArguments]] = SearchBaseArgs
 
     max_search_tokens: int = Field(

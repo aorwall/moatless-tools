@@ -70,11 +70,11 @@ class RunTests(Action):
         test_files = []
 
         for test_file in args.test_files:
-            if not self._repository.file_exists(test_file):
+            if not self._repository.file_exists(test_file) and not file_context.file_exists(test_file):
                 logger.warning(f"File {test_file} does not exist in repository")
                 non_existent_files.append(test_file)
             elif self._repository.is_directory(test_file):
-                logger.warning(f"Directory {test_file} provided instead of file")
+                logger.warning(f"Directory {test_file} provided instead of file, please use ListFiles to get the list of files in the directory and specify which files to run tests on")
                 directories.append(test_file)
             else:
                 test_files.append(test_file)
@@ -93,15 +93,13 @@ class RunTests(Action):
 
         test_files = await file_context.run_tests(test_files)
 
-        response_msg = f"Running tests for the following files:\n"
-        for test_file in test_files:
-            response_msg += f"* {test_file.file_path}\n"
+        response_msg = ""
 
-        failure_details = file_context.get_test_failure_details()
+        failure_details = file_context.get_test_failure_details(test_files=args.test_files)
         if failure_details:
             response_msg += f"\n{failure_details}"
 
-        summary = f"\n{file_context.get_test_summary()}"
+        summary = f"\n{file_context.get_test_summary(args.test_files)}"
         response_msg += summary
 
         return Observation(

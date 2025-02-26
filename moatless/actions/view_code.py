@@ -104,8 +104,6 @@ class ViewCodeArgs(ActionArguments):
 class ViewCode(Action, IdentifyMixin):
     args_schema = ViewCodeArgs
 
-    _repository: Repository = PrivateAttr()
-
     max_tokens: int = Field(
         3000,
         description="The maximum number of tokens in the requested code.",
@@ -201,16 +199,11 @@ class ViewCode(Action, IdentifyMixin):
                 if view_file:
                     view_file.set_patch(file.patch)
 
-            if view_context.context_size() > self.max_tokens:
-                view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
+        if view_context.context_size() > self.max_tokens:
+            view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
 
-            new_span_ids = file_context.add_file_context(view_context)
-            properties["files"][file_path] = {
-                "new_span_ids": list(new_span_ids),
-            }
-
-        added_new_spans = any(len(file["new_span_ids"]) > 0 for file in properties["files"].values())
-
+        added_new_spans = file_context.add_file_context(view_context)
+        
         if view_context.is_empty():
             message = f"\nThe specified code spans wasn't found."
             properties["fail_reason"] = "no_spans_found"

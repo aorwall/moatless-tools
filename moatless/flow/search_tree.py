@@ -7,20 +7,22 @@ from pydantic import Field, model_validator, ConfigDict
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
-from moatless.events import FailureEvent
 from moatless.exceptions import RuntimeError, RejectError
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow
-from moatless.flow.events import NodeExpandedEvent, FeedbackGeneratedEvent, NodeRewardEvent, NodeRewardFailureEvent, NodeSelectedEvent
+from moatless.flow.events import NodeExpandedEvent, FeedbackGeneratedEvent, NodeRewardEvent, NodeRewardFailureEvent, \
+    NodeSelectedEvent, FlowErrorEvent
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
 from moatless.telemetry import instrument, add_span_event, set_span_status
 from moatless.value_function.base import BaseValueFunction
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("moatless.search_tree")
 
 class SearchTree(AgenticFlow):
     selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
@@ -86,7 +88,7 @@ class SearchTree(AgenticFlow):
             **kwargs,
         )
 
-    @instrument()
+    @tracer.start_as_current_span("SearchTree._run")
     async def _run(self, message: str | None = None) -> tuple[Node, str]:
         """Run the search tree algorithm with the given node."""
         if not self.root:
@@ -121,9 +123,8 @@ class SearchTree(AgenticFlow):
                     self.maybe_persist()
                 else:
                     self.log(logger.warning, f"No node expanded from Node{node.node_id}")
-                    self.emit_event(
-                        FailureEvent(
-                            scope="search_tree",
+                    await self.emit_event(
+                        FlowErrorEvent(
                             node_id=node.node_id,
                             error="No node expanded",
                         )
@@ -149,7 +150,7 @@ class SearchTree(AgenticFlow):
 
         return self.get_best_trajectory(), finish_reason
 
-    @instrument()
+    @tracer.start_as_current_span("SearchTree._select")
     async def _select(self, node: Node) -> Optional[Node]:
         """Select a node for expansion using the UCT algorithm."""
         root = node.get_root()
@@ -165,14 +166,14 @@ class SearchTree(AgenticFlow):
 
         await self.emit_event(
             NodeSelectedEvent(
+                node_id=node.node_id,
                 previous_node_id=previous_node_id,
-                selected_node_id=node.node_id,
             )
         )
 
         return node
 
-    @instrument()
+    @tracer.start_as_current_span("SearchTree._expand")
     async def _expand(self, node: Node) -> Node | None:
         """Expand the node and return a child node."""
         # Check if any action step was not executed, if so return the node
@@ -180,7 +181,6 @@ class SearchTree(AgenticFlow):
             self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
             return node
 
-        parent_node_id = node.node_id
         child_node = await self.expander.expand(node)
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
@@ -188,12 +188,12 @@ class SearchTree(AgenticFlow):
 
         await self.emit_event(
             NodeExpandedEvent(
-                parent_node_id=parent_node_id,
+                node_id=node.node_id,
                 child_node_id=child_node.node_id,
             )
         )
         # Only add feedback if this is the second expansion from this node
-        if self.feedback_generator and len(node.children) >= 2:
+        if self.feedback_generator:
             feedback_data = await self.feedback_generator.generate_feedback(
                 child_node
             )
@@ -211,7 +211,7 @@ class SearchTree(AgenticFlow):
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
-    @instrument()
+    @tracer.start_as_current_span("SearchTree._simulate")
     async def _simulate(self, node: Node):
         """Simulate a playout by executing the action and evaluating the result."""
         if node.observation:
@@ -268,6 +268,7 @@ class SearchTree(AgenticFlow):
                 )
                 raise  # Re-raise to abort the entire search
 
+    @tracer.start_as_current_span("SearchTree._backpropagate")
     def _backpropagate(self, node: Node):
         """Backpropagate the reward up the tree."""
 

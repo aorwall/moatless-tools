@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Optional, List, Union, Any, Dict, Type, Callable, Tuple, Awaitable
 
-from moatless.telemetry import instrument, set_attribute
+from moatless.telemetry import set_attribute
 import tenacity
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
@@ -15,6 +15,8 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 
 from moatless.completion.model import Completion, Usage
 from moatless.completion.schema import (
+    ChatCompletionTextObject,
+    ChatCompletionToolMessage,
     ChatCompletionUserMessage,
     ResponseSchema,
     AllMessageValues,
@@ -25,17 +27,20 @@ from moatless.events import event_bus
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
 
-logger = logging.getLogger(__name__)
+from opentelemetry import trace
 
+logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 class CompletionEvent(BaseEvent):
-    event_type: str
+    scope: str = "completion"
     model: str
 
 class CompletionRetryEvent(CompletionEvent):
-    event_type: str = "completion_retry"
+    event_type: str = "retry"
     retry_count: int
     message: str
+
 
 class CompletionRetryError(Exception):
     """Exception raised when a completion should be retried"""
@@ -68,6 +73,7 @@ class CompletionResponse(BaseModel):
     structured_outputs: List[ResponseSchema] = Field(default_factory=list)
     text_response: Optional[str] = Field(default=None)
     completion: Optional[Completion] = Field(default=None)
+    thoughts: Optional[List[dict]] = Field(default=None)
     flags: List[str] = Field(default_factory=list)
 
     @classmethod
@@ -129,7 +135,8 @@ class BaseCompletionModel(BaseModel, ABC):
         default=MessageHistoryType.MESSAGES,
         description="The type of message history to use",
     )
-
+    headers: Dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
     merge_same_role_messages: bool = Field(
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
@@ -201,7 +208,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def initialized(self) -> bool:
         return self._initialized
 
-    @instrument()
+    @tracer.start_as_current_span("BaseCompletionModel.create_completion")
     async def create_completion(
         self,
         messages: List[dict],
@@ -304,7 +311,7 @@ class BaseCompletionModel(BaseModel, ABC):
         """
         return {}
 
-    @instrument()
+    @tracer.start_as_current_span("BaseCompletionModel._create_completion_with_retries")
     async def _create_completion_with_retries(
         self,
         messages: List[dict],
@@ -313,6 +320,7 @@ class BaseCompletionModel(BaseModel, ABC):
         retry_count = 0
         accumulated_usage = Usage()
         completion_response = None
+
         @tenacity.retry(
             retry=tenacity.retry_if_exception_type((CompletionRetryError)),
             stop=tenacity.stop_after_attempt(3),
@@ -344,7 +352,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 and not completion_response.choices[0].message.tool_calls
             ):
                 logger.error(f"Completion response is empty: {completion_response.model_dump_json(indent=2)}")
-                raise CompletionRuntimeError(
+                raise CompletionRejectError(
                     "Completion response is empty",
                     messages=messages,
                     last_completion=completion_response,
@@ -353,7 +361,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
             try:
                 # Validate the response - may raise CompletionRetryError
-                structured_outputs, text_response, flags = await self._validate_completion(
+                structured_outputs, text_response, flags, thoughts = await self._validate_completion(
                     completion_response=completion_response,
                 )
 
@@ -364,12 +372,33 @@ class BaseCompletionModel(BaseModel, ABC):
                     )
             except CompletionRetryError as e:
                 await self._send_retry_event(retry_count, str(e))
-                messages.append(completion_response.choices[0].message.model_dump())
+
+                tool_call_id = None
+                if hasattr(completion_response.choices[0].message, "thinking") and completion_response.choices[0].message.thinking:
+                    content = []
+                    content.extend(completion_response.choices[0].message.thinking)
+                    if completion_response.choices[0].message.content:
+                        content.append(ChatCompletionTextObject(type="text", text=completion_response.choices[0].message.content))
+
+                    message_dump = completion_response.choices[0].message.model_dump()
+                    message_dump["content"] = content
+                    messages.append(message_dump)
+                else:
+                    
+                    if completion_response.choices[0].message.tool_calls:
+                        # TODO: Support multiple tool calls
+                        tool_call_id = completion_response.choices[0].message.tool_calls[0].id
+
+                    messages.append(completion_response.choices[0].message.model_dump())
+                
                 logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
                 if e.retry_messages:
                     messages.extend(e.retry_messages)
                 else:
-                    messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
+                    if tool_call_id:
+                        messages.append(ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id))
+                    else:
+                        messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
                 raise e
 
             response_dict = completion_response.model_dump()
@@ -380,7 +409,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 model=self.model,
                 retries=retry_count,
                 usage=accumulated_usage,  # Use accumulated usage here
-                flags=flags,
+                flags=flags
             )
 
             return CompletionResponse(
@@ -388,6 +417,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 text_response=text_response,
                 completion=completion,
                 flags=flags or [],
+                thoughts=thoughts,
             )
 
         try:
@@ -402,6 +432,8 @@ class BaseCompletionModel(BaseModel, ABC):
                 last_completion=completion_response.model_dump() if completion_response else None,
                 accumulated_usage=accumulated_usage,
             ) from e
+        except CompletionRejectError as e:
+            raise e
         except CompletionRuntimeError as e:
             raise e
         except Exception as e:
@@ -413,7 +445,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 accumulated_usage=accumulated_usage,
             ) from e
 
-    @instrument()
+    @tracer.start_as_current_span("BaseCompletionModel._execute_completion")
     async def _execute_completion(
         self,
         messages: List[Dict[str, str]],
@@ -434,6 +466,8 @@ class BaseCompletionModel(BaseModel, ABC):
             CompletionRuntimeError: For provider errors
         """
         params = self._completion_params.copy()
+        if self.params:
+            params.update(self.params)
 
         if self.merge_same_role_messages:
             messages = self._merge_same_role_messages(messages)
@@ -449,13 +483,17 @@ class BaseCompletionModel(BaseModel, ABC):
         )
         async def _do_completion_with_rate_limit_retry():
             try:
-                if "claude-3-5" in self.model:
+                if "claude-3-" in self.model:
                     self._inject_prompt_caching(messages)
 
                 if self.model_base_url:
                     params["api_base"] = self.model_base_url
                 if self.model_api_key:
                     params["api_key"] = self.model_api_key
+                
+                if self.headers:
+                    params["headers"] = self.headers
+
                 
                 return await litellm.acompletion(
                     model=self.model,
@@ -512,22 +550,25 @@ class BaseCompletionModel(BaseModel, ABC):
 
         breakpoints_remaining = 3
         for message in reversed(messages):
-            if breakpoints_remaining:
+            try:
                 if isinstance(message.get("content"), list):
-                    if breakpoints_remaining:
-                        message["content"][-1]["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
+                    content = next((m for m in message["content"] if m.get("type") == "text"), None)
                 else:
-                    message["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
+                    content = message
+        
+                if content:
+                    if breakpoints_remaining:
+                        content["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
+                        breakpoints_remaining -= 1
+                    elif "cache_control" in content:
+                        del content["cache_control"]
 
-                breakpoints_remaining -= 1
-            else:
-                if isinstance(message.get("content"), list) and "cache_control" in message["content"][-1]:
-                    del message["content"][-1]["cache_control"]
-                elif "cache_control" in message:
-                    del message["cache_control"]
+                content = None
+            except Exception as e:
+                logger.exception(f"Error injecting prompt caching on message: {message}")
 
     @abstractmethod
-    async def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    async def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:
@@ -544,7 +585,7 @@ class BaseCompletionModel(BaseModel, ABC):
             - List of validated ResponseSchema instances
             - Optional text response string
             - List of flags indicating any special conditions
-
+            - List of ThoughtBlock instances
         Raises:
             CompletionRejectError: If the response fails validation and should be retried
             CompletionRuntimeError: If the response indicates a fundamental problem
@@ -554,7 +595,6 @@ class BaseCompletionModel(BaseModel, ABC):
     async def _send_retry_event(self, retry_count: int, message: str):
         logger.info(f"Retrying completion for model: {self.model}, retry count: {retry_count}, message: {message}")
         event = CompletionRetryEvent(
-            event_type="completion_retry",
             model=self.model,
             retry_count=retry_count,
             message=message,

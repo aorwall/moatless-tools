@@ -15,9 +15,10 @@ from moatless.actions.schema import (
 )
 from moatless.agent.events import (
     AgentEvent,
-    AgentStarted,
-    AgentActionCreated,
-    AgentActionExecuted,
+    RunAgentEvent,
+    ActionCreatedEvent,
+    ActionExecutedEvent,
+    AgentErrorEvent
 )
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactHandler
@@ -38,9 +39,10 @@ from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
 from moatless.completion.manager import create_completion_model
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
-
+tracer = trace.get_tracer("moatless.agent")
 
 class ActionAgent(MoatlessComponent):
     agent_id: str = Field(..., description="Agent ID")
@@ -160,7 +162,7 @@ class ActionAgent(MoatlessComponent):
         """Emit a pure agent event"""
         await event_bus.publish(event)
 
-    @instrument()
+    @tracer.start_as_current_span("ActionAgent._run")
     async def run(self, node: Node):
         set_attribute("agent_id", self.agent_id)
         set_attribute("node_id", node.node_id)
@@ -174,7 +176,7 @@ class ActionAgent(MoatlessComponent):
         node.possible_actions = [action.name for action in self.actions]
 
         try:
-            await self._emit_event(AgentStarted(agent_id=self.agent_id, node_id=node.node_id))
+            await self._emit_event(RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id))
             messages = await self._message_generator.generate_messages(node)
             logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
@@ -186,13 +188,17 @@ class ActionAgent(MoatlessComponent):
             node.assistant_message = completion_response.text_response
             if not completion_response.structured_outputs:
                 raise RejectError("No action found")
+            
+            if completion_response.thoughts:
+                node.thoughts = completion_response.thoughts
+            logger.info(f"Node{node.node_id}: Thoughts: {node.thoughts}")
 
             if completion_response.structured_outputs:
                 node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
                 # Emit action created events
                 for step in node.action_steps:
                     await self._emit_event(
-                        AgentActionCreated(
+                        ActionCreatedEvent(
                             agent_id=self.agent_id,
                             node_id=node.node_id,
                             action_name=step.action.name,
@@ -216,14 +222,17 @@ class ActionAgent(MoatlessComponent):
 
             if isinstance(e, CompletionRejectError):
                 node.error = f"Completion validation error: {e.message}"
+                await self._emit_event(AgentErrorEvent(agent_id=self.agent_id, node_id=node.node_id, error=f"Completion validation error: {e.message}"))
                 return
             else:
                 node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                await self._emit_event(AgentErrorEvent(agent_id=self.agent_id, node_id=node.node_id, error=f"{e.__class__.__name__}: {str(e)}"))
                 raise e
         except Exception as e:
             node.terminal = True
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             logger.error(f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}")
+            await self._emit_event(AgentErrorEvent(agent_id=self.agent_id, node_id=node.node_id, error=f"{e.__class__.__name__}: {str(e)}"))
 
             raise e
 
@@ -241,7 +250,7 @@ class ActionAgent(MoatlessComponent):
         for action_step in node.action_steps:
             await self._execute(node, action_step)
 
-    @instrument()
+    @tracer.start_as_current_span("ActionAgent._execute_action_step")
     async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:
         action = self.action_map.get(type(action_step.action))
         if not action:
@@ -255,7 +264,7 @@ class ActionAgent(MoatlessComponent):
 
         return await action.execute(action_step.action, file_context=node.file_context)
 
-    @instrument()
+    @tracer.start_as_current_span("ActionAgent._execute")
     async def _execute(self, node: Node, action_step: ActionStep):
         set_attribute("action_name", action_step.action.name)
 
@@ -263,7 +272,7 @@ class ActionAgent(MoatlessComponent):
             action_step.observation = await self._execute_action_step(node, action_step)
 
             await self._emit_event(
-                AgentActionExecuted(
+                ActionExecutedEvent(
                     agent_id=self.agent_id,
                     node_id=node.node_id,
                     action_name=action_step.action.name,
@@ -278,11 +287,11 @@ class ActionAgent(MoatlessComponent):
                     action_step.completion = action_step.observation.execution_completion
 
             logger.info(
-                f"Executed action: {action_step.action.name}. "
+                f"Node{node.node_id}: Executed action: {action_step.action.name}. "
                 f"Terminal: {action_step.observation.terminal if node.observation else False}. ")
             
             logger.debug(
-                f"Observation: {action_step.observation.message if node.observation else None}"
+                f"Node{node.node_id}: Observation: {action_step.observation.message if node.observation else None}"
             )
 
         except CompletionError as e:
@@ -344,18 +353,3 @@ class ActionAgent(MoatlessComponent):
             if not hasattr(action, "args_schema"):
                 raise ValueError(f"Action {action.__class__.__name__} is missing args_schema attribute")
         return self
-
-    def execute_action(self, action: Action) -> Dict:
-        """Execute an action and return the observation."""
-        observation = super().execute_action(action)
-
-        self._emit_event(
-            AgentActionExecuted(
-                agent_id=self.agent_id,
-                node_id=self.current_node.node_id,
-                action_name=action.name,
-                observation=observation,
-            )
-        )
-
-        return observation

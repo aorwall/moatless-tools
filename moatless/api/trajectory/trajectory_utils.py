@@ -45,12 +45,13 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
         )
 
         # Check for duplicate actions using the hash map
-        current_action_dump = step.action.model_dump(exclude={"thoughts"})
-        dump_str = str(current_action_dump)
-        if dump_str in action_history:
-            errors.append(f"Same action as in step {action_history[dump_str]}")
-        else:
-            action_history[dump_str] = node.node_id
+        if step.action.name not in ["RunTests"]:
+            current_action_dump = step.action.model_dump(exclude={"thoughts"})
+            dump_str = str(current_action_dump)
+            if dump_str in action_history:
+                errors.append(f"Same action as in step {action_history[dump_str]}")
+            else:
+                action_history[dump_str] = node.node_id
 
         # Convert observation
         observation = None

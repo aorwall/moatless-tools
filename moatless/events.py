@@ -7,7 +7,7 @@ from typing import List, Any, Callable, Optional
 import os
 
 import aiofiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from . import context_data
@@ -19,73 +19,60 @@ REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
 REDIS_DB = int(os.getenv('REDIS_DB', 0))
 
-
 class BaseEvent(BaseModel):
     """Base class for all events"""
-
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    scope: Optional[str] = None
+    trajectory_id: Optional[str] = None
+    project_id: Optional[str] = None
     event_type: str
+    data: Optional[dict] = Field(default_factory=dict)
+
+    model_config = {
+        "json_encoders": {
+            datetime: lambda dt: dt.isoformat()
+        }
+    }
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def parse_datetime(cls, value):
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        return value
+
+    def to_dict(self) -> dict:
+        extra_data = super().model_dump(exclude_none=True, exclude={'timestamp', 'event_type', 'scope', 'trajectory_id', 'project_id', 'data'})
+        event_data = {
+            "timestamp": self.timestamp.isoformat(),
+            "project_id": self.project_id,
+            "trajectory_id": self.trajectory_id,
+            "scope": self.scope,
+            "event_type": self.event_type,
+            "data": self.data
+        }
+        if extra_data:
+            event_data['data'] = extra_data
+        return event_data
 
 
-class SystemEvent(BaseModel):
-    """System event combining context with domain event"""
 
-    run_id: str
-    event_type: str
-    event: dict[str, Any]
+class FlowEvent(BaseEvent):
+    scope: str = "flow"
 
 
-class EventData(BaseModel):
-    """Base class for specific event data"""
-
-    pass
-
-
-class LoopStartData(BaseModel):
-    """Loop-specific event"""
-
-    event_type: str = "loop_started"
-    initial_node_id: int
-
-
-class FailureEvent(BaseModel):
-    """Failure-specific event"""
-
-    event_type: str = "failure"
-    scope: str
-    node_id: int
-    error: str
-
-class LoopCompletedData(BaseModel):
-    """Loop-specific event"""
-
-    event_type: str = "loop_completed"
-    total_iterations: int
-    total_cost: float
-    final_node_id: int
-
-
-class FlowStartedEvent(BaseEvent):
+class FlowStartedEvent(FlowEvent):
     """Flow-specific event"""
 
-    event_type: str = "flow_started"
+    event_type: str = "started"
 
-class FlowCompletedEvent(BaseEvent):
+class FlowCompletedEvent(FlowEvent):
     """Flow-specific event"""
 
-    event_type: str = "flow_completed"
+    event_type: str = "completed"
 
-
-class SystemEventType(Enum):
-    LOOP_STARTED = "loop_started"
-    LOOP_COMPLETED = "loop_completed"
-    LOOP_ERROR = "loop_error"
-    LOOP_ITERATION = "loop_iteration"
-    AGENT_STARTED = "agent_started"
-    AGENT_COMPLETED = "agent_completed"
-    AGENT_ERROR = "agent_error"
-    AGENT_ACTION_CREATED = "agent_action_created"
-    AGENT_ACTION_EXECUTED = "agent_action_executed"
-
+class FlowErrorEvent(FlowEvent):
+    event_type: str = "error"
 
 
 class EventBus:
@@ -98,6 +85,7 @@ class EventBus:
         self._lock = asyncio.Lock()
         self._pubsub = None
         self._subscriber_tasks = set()
+        self._redis_listener_task = None
         self._check_redis_available()
 
     def _check_redis_available(self):
@@ -136,13 +124,6 @@ class EventBus:
             )
             self._pubsub = self._redis.pubsub()
             
-            # Create a single task for handling Redis messages
-            if self._redis_available and not self._subscriber_tasks:
-                loop = asyncio.get_event_loop()
-                task = loop.create_task(self._handle_redis_messages())
-                self._subscriber_tasks.add(task)
-                task.add_done_callback(self._subscriber_tasks.discard)
-                
             logger.info("Successfully initialized Redis connection")
         except Exception as e:
             logger.warning(f"Failed to initialize Redis connection: {str(e)}")
@@ -152,6 +133,7 @@ class EventBus:
         """Handle all Redis messages in a single task"""
         if not self._redis_available:
             return
+        logger.info("Starting Redis listener")
 
         try:
             await self._pubsub.subscribe("events")
@@ -159,15 +141,15 @@ class EventBus:
                 if message["type"] == "message":
                     event_data = json.loads(message["data"])
                     event = BaseEvent(**event_data)
-                    trajectory_id = event_data.get("trajectory_id")
-                    project_id = event_data.get("project_id")
+                    logger.info(f"Received event {event.scope} {event.event_type} for trajectory {event.trajectory_id} and project {event.project_id}")
                     
                     # Notify all subscribers
                     for callback in self._subscribers:
+                        logger.info(f"Notifying subscriber {callback.__name__} for event {event.event_type}")
                         if asyncio.iscoroutinefunction(callback):
-                            await callback(trajectory_id, project_id, event)
+                            await callback(event)
                         else:
-                            callback(trajectory_id, project_id, event)
+                            callback(event)
         except asyncio.CancelledError:
             if self._pubsub:
                 await self._pubsub.unsubscribe("events")
@@ -175,79 +157,98 @@ class EventBus:
         except Exception as e:
             logger.exception(f"Error in Redis message handler: {str(e)}")
 
-    def subscribe(self, callback: Callable):
-        """Subscribe to events"""
-        logger.info(f"Subscribing to event: {callback.__name__}")
-        self._subscribers.append(callback)
-        logger.info(f"Subscribed to {len(self._subscribers)} events")
+    async def _start_redis_listener(self):
+        """Start the Redis listener if not already running"""
+        if not self._redis_available or not self._subscribers:
+            return
+            
+        if self._redis_listener_task is None or self._redis_listener_task.done():
+            loop = asyncio.get_event_loop()
+            self._redis_listener_task = loop.create_task(self._handle_redis_messages())
+            self._subscriber_tasks.add(self._redis_listener_task)
+            self._redis_listener_task.add_done_callback(self._subscriber_tasks.discard)
 
-    def unsubscribe(self, callback: Callable):
+    async def _stop_redis_listener(self):
+        """Stop the Redis listener if running and no subscribers"""
+        if self._redis_listener_task and not self._subscribers:
+            self._redis_listener_task.cancel()
+            try:
+                await self._redis_listener_task
+            except asyncio.CancelledError:
+                pass
+            self._redis_listener_task = None
+
+    async def subscribe(self, callback: Callable):
+        """Subscribe to events"""
+        self._subscribers.append(callback)
+        logger.info(f"Added subscriber {callback.__name__}")
+        # Start Redis listener if this is the first subscriber
+        if len(self._subscribers) == 1:
+            await self._start_redis_listener()
+
+    async def unsubscribe(self, callback: Callable):
         """Unsubscribe from events"""
-        logger.info(f"Unsubscribing from event: {callback.__name__}")
+        logger.info(f"Removing subscriber {callback.__name__}")
         self._subscribers.remove(callback)
         logger.info(f"Unsubscribed from {len(self._subscribers)} events")
+        # Stop Redis listener if no more subscribers
+        if not self._subscribers:
+            await self._stop_redis_listener()
 
     async def publish(self, event: BaseEvent):
         """Publish event to Redis (if available) and save to jsonl"""
         if self._redis_available and self._redis is None:
             await self.initialize()
             
-        trajectory_id = context_data.current_trajectory_id.get()
-        current_project_id = context_data.current_project_id.get()
+        event.trajectory_id = context_data.current_trajectory_id.get()
+        event.project_id = context_data.current_project_id.get()
+
+        logger.info(f"Publishing event [{event.scope}:{event.event_type}] for trajectory {event.trajectory_id} and project {event.project_id}")
         
-        logger.info(f"Publishing event: {event.event_type} for trajectory {trajectory_id} and project {current_project_id}")
+        await self._save_event(event)
         
-        # Save to file
-        await self._save_event(trajectory_id, current_project_id, event)
-        
-        # Prepare event data
-        event_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "trajectory_id": trajectory_id,
-            "project_id": current_project_id,
-            "event_type": event.event_type,
-            "data": event.model_dump(exclude_none=True, exclude={'event_type'})
-        }
-        
-        # Publish to Redis if available
         if self._redis_available and self._redis:
             try:
-                await self._redis.publish("events", json.dumps(event_data))
+                await self._redis.publish("events", json.dumps(event.to_dict()))
             except Exception as e:
                 logger.warning(f"Failed to publish to Redis: {str(e)}")
         
         # Handle local subscribers
         await asyncio.gather(*[
-            self._run_async_callback(callback, trajectory_id, current_project_id, event) 
+            self._run_async_callback(callback, event) 
             for callback in self._subscribers
         ])
 
-    async def _save_event(self, trajectory_id: str, project_id: str, event: BaseEvent):
+    async def _save_event(self, event: BaseEvent):
         """Thread-safe event saving to trajectory-specific events.jsonl"""
         try:
-            traj_dir = get_moatless_trajectory_dir(trajectory_id)
+            traj_dir = get_moatless_trajectory_dir(project_id=event.project_id, trajectory_id=event.trajectory_id)
             events_path = traj_dir / 'events.jsonl'
-
-            event_dict = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "trajectory_id": trajectory_id,
-                "project_id": project_id,
-                "event_type": event.event_type,
-                "data": event.model_dump(exclude_none=True, exclude={'event_type'})
-            }
 
             async with self._lock:
                 async with aiofiles.open(events_path, mode='a', encoding='utf-8') as f:
-                    await f.write(json.dumps(event_dict) + '\n')
+                    await f.write(json.dumps(event.to_dict()) + '\n')
                     await f.flush()
         except Exception as e:
             logger.exception(f"Error saving event: {str(e)}")
             raise
 
-    async def _run_async_callback(self, callback: Callable, trajectory_id: str | None, project_id: str | None, event: BaseEvent):
+    async def _run_async_callback(self, callback: Callable, event: BaseEvent):
         """Helper method to run a single async callback"""
-        await callback(trajectory_id, project_id, event)
+        await callback(event)
 
+    async def read_events(self, project_id: str, trajectory_id: str) -> List[BaseEvent]:
+        """Read events from trajectory-specific events.jsonl"""
+        traj_dir = get_moatless_trajectory_dir(project_id=project_id, trajectory_id=trajectory_id)
+        events_path = traj_dir / 'events.jsonl'
+        if not events_path.exists():
+            return []
+        async with aiofiles.open(events_path, mode='r', encoding='utf-8') as f:
+            events = []
+            async for line in f:
+                event_data = json.loads(line)
+                events.append(BaseEvent(**event_data))
+        return events
 
 # Initialize the singleton instance
 event_bus = EventBus.get_instance()

@@ -74,6 +74,26 @@ def create_thought_item(thoughts: str) -> TimelineItemDTO | None:
         )
     return None
 
+def create_thought_block_item(thoughts: List[dict]) -> TimelineItemDTO | None:
+    """Create timeline item for thought blocks."""
+    if not thoughts:
+        return None
+
+    thoughts_str = ""
+    for thought in thoughts:
+        if thought["type"] == "thinking" and "thinking" in thought:
+            thoughts_str += thought['thinking']
+        elif thought["type"] == "redacted_thinking":
+            thoughts_str += f"Redacted Thought\n"
+    if thoughts_str:
+        return TimelineItemDTO(
+            label="Thought",
+            type=TimelineItemType.THOUGHT,
+            content={"message": thoughts_str}
+        )
+    return None
+
+
 def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
     """Create timeline item for an action."""
     if step.action:
@@ -108,13 +128,82 @@ def create_error_item(node: Node) -> TimelineItemDTO | None:
         )
     return None
 
-def create_workspace_item(node: Node) -> TimelineItemDTO | None:
-    """Create timeline item for workspace."""
+def create_workspace_files_item(node: Node) -> TimelineItemDTO | None:
+    """Create timeline item for updated files in workspace."""
     if node.file_context and node.file_context.files:
+        # Get files that were edited or created
+        updated_files = []
+        for file in node.file_context.files:
+            if file.patch:
+                updated_files.append({
+                    "file_path": file.file_path,
+                    "is_new": file.is_new,
+                    "has_patch": bool(file.patch),
+                    "patch": file.patch,
+                    "tokens": file.context_size() if hasattr(file, "context_size") else None
+                })
+        
+        if updated_files:
+            return TimelineItemDTO(
+                label="Updated Files",
+                type=TimelineItemType.WORKSPACE_FILES,
+                content={
+                    "updatedFiles": updated_files,
+                    "files": [f.model_dump() for f in node.file_context.files if f.was_edited or f.is_new]
+                }
+            )
+    return None
+
+def create_workspace_context_item(node: Node) -> TimelineItemDTO | None:
+    """Create timeline item for files in context."""
+    if node.file_context and node.file_context.files:
+        # Get all files in context that weren't edited
+        context_files = []
+        for file in node.file_context.files:
+            if not file.was_edited and not file.is_new:
+                context_files.append({
+                    "file_path": file.file_path,
+                    "tokens": file.context_size() if hasattr(file, "context_size") else None,
+                    "spans": [span.model_dump() for span in file.spans] if hasattr(file, "spans") else []
+                })
+        
+        if context_files:
+            return TimelineItemDTO(
+                label="Files in Context",
+                type=TimelineItemType.WORKSPACE_CONTEXT,
+                content={
+                    "files": context_files,
+                    "max_tokens": node.file_context._max_tokens if hasattr(node.file_context, "_max_tokens") else None
+                }
+            )
+    return None
+
+def create_workspace_tests_item(node: Node) -> TimelineItemDTO | None:
+    """Create timeline item for test results."""
+    if node.file_context and hasattr(node.file_context, "_test_files") and node.file_context._test_files:
+        test_files = []
+        for file_path, test_file in node.file_context._test_files.items():
+            if test_file.test_results:
+                test_files.append({
+                    "file_path": file_path,
+                    "test_results": [result.model_dump() for result in test_file.test_results]
+                })
+        
+        if test_files:
+            return TimelineItemDTO(
+                label="Test Results",
+                type=TimelineItemType.WORKSPACE_TESTS,
+                content={"test_files": test_files}
+            )
+    return None
+
+def create_reward_item(node: Node) -> TimelineItemDTO | None:
+    """Create timeline item for a reward."""
+    if node.reward:
         return TimelineItemDTO(
-            label="Workspace",
-            type=TimelineItemType.WORKSPACE,
-            content=node.file_context.model_dump()
+            label="Reward",
+            type=TimelineItemType.REWARD,
+            content=node.reward.model_dump()
         )
     return None
 
@@ -122,22 +211,22 @@ def generate_timeline_items(node: Node) -> List[TimelineItemDTO]:
     """Generate timeline items for a node."""
     items: List[TimelineItemDTO] = []
     
-    # Add user message if present
     if user_item := create_user_message_item(node):
         items.append(user_item)
 
     if user_artifact_items := create_user_artifact_items(node):
         items.extend(user_artifact_items)
     
-    # Add assistant message if present
-    if assistant_item := create_assistant_message_item(node):
-        items.append(assistant_item)
-    
-    # Add action completion if present
     if "build_action" in node.completions:
         if completion_item := create_completion_item(node.completions["build_action"]):
             items.append(completion_item)
     
+    if thought_item := create_thought_block_item(node.thoughts):
+        items.append(thought_item)
+    
+    if assistant_item := create_assistant_message_item(node):
+        items.append(assistant_item)
+
     for step in node.action_steps:
         if thoughts := getattr(step.action, "thoughts", None):
             if thought_item := create_thought_item(thoughts):
@@ -158,7 +247,16 @@ def generate_timeline_items(node: Node) -> List[TimelineItemDTO]:
     if error_item := create_error_item(node):
         items.append(error_item)
 
-    if workspace_item := create_workspace_item(node):
-        items.append(workspace_item)
+    if workspace_files_item := create_workspace_files_item(node):
+        items.append(workspace_files_item)
+        
+    if workspace_context_item := create_workspace_context_item(node):
+        items.append(workspace_context_item)
+        
+    if workspace_tests_item := create_workspace_tests_item(node):
+        items.append(workspace_tests_item)
+    
+    if reward_item := create_reward_item(node):
+        items.append(reward_item)
 
     return items

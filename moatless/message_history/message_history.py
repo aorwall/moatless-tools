@@ -3,7 +3,7 @@ from typing import List
 
 from pydantic import BaseModel, Field, PrivateAttr, model_serializer
 
-from moatless.completion.schema import ChatCompletionTextObject, ChatCompletionUserMessage, AllMessageValues
+from moatless.completion.schema import ChatCompletionTextObject, ChatCompletionThinkingObject, ChatCompletionUserMessage, AllMessageValues
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
@@ -121,9 +121,17 @@ class MessageHistoryGenerator(BaseModel):
             if tool_calls:
                 assistant_message["tool_calls"] = tool_calls
 
+            assistant_content = []
+
+            if previous_node.thoughts:
+                assistant_content.extend(previous_node.thoughts)
+
             if previous_node.assistant_message:
-                assistant_message["content"] = previous_node.assistant_message
+                assistant_content.append(ChatCompletionTextObject(type="text", text=previous_node.assistant_message))
                 tokens += count_tokens(previous_node.assistant_message)
+
+            if assistant_content:
+                assistant_message["content"] = assistant_content
 
             messages.append(assistant_message)
             messages.extend(tool_responses)

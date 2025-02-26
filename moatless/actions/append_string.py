@@ -113,12 +113,16 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
         observation = Observation(
             message=message,
+            summary=message,
             properties={"diff": diff, "success": True},
         )
 
-        await self.run_tests(
+        test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
+
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation

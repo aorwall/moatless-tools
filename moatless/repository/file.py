@@ -4,7 +4,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 import anyio
 
 from moatless.telemetry import instrument
@@ -399,6 +399,112 @@ class FileRepository(Repository):
                 directories.append(relative_path)
 
         return {"files": sorted(files), "directories": sorted(directories)}
+
+    async def find_regex_matches(self, regex_pattern: str, include_pattern: Optional[str] = None, max_results: int = 100) -> List[Dict[str, Any]]:
+        """
+        Uses grep to search for regex pattern matches in files asynchronously.
+        Returns files sorted by modification time (most recent first).
+        
+        Parameters:
+            regex_pattern (str): The regex pattern to search for
+            include_pattern (str, optional): Glob pattern for files to include (e.g. '*.js', '*.{ts,tsx}')
+            max_results (int, optional): Maximum number of results to return
+            
+        Returns:
+            List[Dict[str, Any]]: A list of dictionaries containing file path, line number, 
+                                 line content, and modification time
+        """
+        matches = []
+        search_path = "."
+        include_arg = []
+
+        try:
+            # Apply include pattern if provided
+            if include_pattern:
+                include_arg = ["--include", include_pattern]
+            
+            # Build the grep command with proper regex support
+            cmd = ["grep", "-n", "-r", "--color=never"] + include_arg + ["-E", regex_pattern, search_path]
+            logger.info(f"Executing grep command: {' '.join(cmd)}")
+            logger.info(f"Search directory: {self.repo_path}")
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=self.repo_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                universal_newlines=False
+            )
+            stdout, stderr = await process.communicate()
+
+            # Decode the bytes to strings
+            stdout_str = stdout.decode('utf-8') if stdout else ""
+            stderr_str = stderr.decode('utf-8') if stderr else ""
+
+            if process.returncode not in (0, 1):  # grep returns 1 if no matches found
+                logger.info(f"Grep returned non-standard exit code: {process.returncode}")
+                if stderr_str:
+                    logger.warning(f"Grep error output: {stderr_str}")
+                return []
+
+            logger.info(f"Found {len(stdout_str.splitlines())} potential matches")
+            
+            # Process and organize the results
+            file_matches = {}
+            for line in stdout_str.splitlines():
+                try:
+                    # Parse line format: "path/to/file:line_num:line_content"
+                    parts = line.split(":", 2)
+                    if len(parts) < 3:
+                        logger.info(f"Skipping malformed line: {line}")
+                        continue
+                    
+                    file_path = parts[0]
+                    if file_path.startswith("./"):
+                        file_path = file_path[2:]
+                    line_num = int(parts[1])
+                    content = parts[2]
+                    
+                    # Get file modification time
+                    full_file_path = os.path.join(self.repo_path, file_path)
+                    mod_time = os.path.getmtime(full_file_path)
+                    
+                    if file_path not in file_matches:
+                        file_matches[file_path] = {
+                            "file_path": file_path,
+                            "mod_time": mod_time,
+                            "matches": []
+                        }
+                    
+                    file_matches[file_path]["matches"].append({
+                        "line_num": line_num,
+                        "content": content
+                    })
+                    
+                except (ValueError, IndexError) as e:
+                    logger.info(f"Error parsing line '{line}': {e}")
+                    continue
+            
+            # Sort files by modification time (newest first) and create results list
+            sorted_matches = sorted(file_matches.values(), key=lambda x: x["mod_time"], reverse=True)
+            
+            # Format the final results
+            for file_match in sorted_matches[:max_results]:
+                file_path = file_match["file_path"]
+                for match in file_match["matches"]:
+                    matches.append({
+                        "file_path": file_path,
+                        "line_num": match["line_num"],
+                        "content": match["content"],
+                        "mod_time": file_match["mod_time"]
+                    })
+                
+        except Exception as e:
+            logger.info(f"Grep command failed: {e}")
+            return []
+
+        logger.info(f"Returning {len(matches)} matches")
+        return matches
 
 
 def remove_duplicate_lines(replacement_lines, original_lines):

@@ -34,6 +34,8 @@ class ModelConfig(BaseModel):
     few_shot_examples: bool = Field(..., description="Whether to use few-shot examples")
     response_format: LLMResponseFormat = Field(..., description="Format for model responses")
     message_history_type: MessageHistoryType = Field(..., description="Type of message history to use")
+    headers: Dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
+    params: Dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
 
     @classmethod
     def model_validate(cls, data: Any) -> "ModelConfig":
@@ -337,8 +339,8 @@ class ModelConfigManager:
             
             response = await model.create_completion(messages=messages)
             
-            if response and isinstance(response, TestResponseSchema):
-                test_response = response
+            if response and isinstance(response.structured_output, TestResponseSchema):
+                test_response = response.structured_output
                 result["model_response"] = test_response.message
                 
                 if test_response.success:

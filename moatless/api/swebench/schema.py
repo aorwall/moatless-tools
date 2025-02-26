@@ -1,11 +1,13 @@
 from datetime import datetime
 from typing import List, Optional
 
+from moatless.runner.runner import JobsCollection, RunnerInfo, RunnerStatus
 from pydantic import BaseModel, Field
 
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
 from moatless.flow.schema import FlowConfig
 from moatless.completion.manager import ModelConfig
+from moatless.runner.runner import JobInfo
 
 class SWEBenchInstanceDTO(BaseModel):
     """Schema for a SWEBench instance"""
@@ -129,10 +131,12 @@ class EvaluationListItemDTO(BaseModel):
 
 def get_instance_status(instance: EvaluationInstance) -> str:
     """Get the status of an instance, including resolved/failed states."""
-    if instance.status == InstanceStatus.EVALUATED and instance.resolved:
+    if instance.evaluated_at and instance.resolved:
         return "resolved"
-    elif instance.status == InstanceStatus.EVALUATED and instance.resolved is False:
+    elif instance.evaluated_at and instance.resolved is False:
         return "failed"
+    elif instance.job_status:
+        return instance.job_status.value
     else:
         return instance.status.value
 
@@ -144,6 +148,7 @@ class EvaluationInstanceDTO(BaseModel):
     """DTO for evaluation instance details"""
     instance_id: str
     status: str
+    job_status: Optional[str] = None
     resolved: Optional[bool] = None
     error: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -151,6 +156,8 @@ class EvaluationInstanceDTO(BaseModel):
     completed_at: Optional[datetime] = None
     evaluated_at: Optional[datetime] = None
     error_at: Optional[datetime] = None
+    resolved_by: Optional[int] = None
+    reward: Optional[int] = None
 
 class EvaluationResponseDTO(BaseModel):
     """Response containing evaluation details"""
@@ -163,9 +170,6 @@ class EvaluationResponseDTO(BaseModel):
     flow: FlowConfig
     model: ModelConfig
     instances: List[EvaluationInstanceDTO]
-
-class StartEvaluationRequestDTO(BaseModel):
-    num_concurrent_instances: int = 1
 
 class EvaluationRequestDTO(BaseModel):
     """Request for creating an evaluation"""
@@ -186,3 +190,9 @@ class DatasetDTO(BaseModel):
 class DatasetsResponseDTO(BaseModel):
     """Response containing list of datasets"""
     datasets: List[DatasetDTO]
+
+
+class RunnerResponseDTO(BaseModel):
+    """Response containing runner status"""
+    info: RunnerInfo
+    jobs: List[JobInfo]

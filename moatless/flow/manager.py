@@ -35,7 +35,7 @@ class FlowManager:
                     id: str, 
                     model_id: str,
                     message: str | None = None,
-                    run_id: str | None = None, 
+                    trajectory_id: str | None = None,
                     persist_dir: str | None = None,
                     metadata: Dict[str, Any] | None = None,
                     **kwargs) -> AgenticFlow:
@@ -60,7 +60,7 @@ class FlowManager:
         if config.flow_type == "loop":
             return AgenticLoop.create(
                 message=message,
-                run_id=run_id,
+                trajectory_id=trajectory_id,
                 agent=agent,
                 max_iterations=config.max_iterations,
                 max_cost=config.max_cost,
@@ -85,7 +85,7 @@ class FlowManager:
 
             tree = SearchTree.create(
                 message=message,
-                run_id=run_id,
+                trajectory_id=trajectory_id,
                 agent=agent,
                 selector=config.selector,
                 expander=expander,

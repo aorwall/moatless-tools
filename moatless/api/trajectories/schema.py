@@ -32,6 +32,7 @@ class ExecuteNodeRequest(BaseModel):
 class TrajectoryEventDTO(BaseModel):
     """Single event in a trajectory."""
     timestamp: int  # Changed from datetime to int (milliseconds)
+    scope: Optional[str] = None
     event_type: str
     trajectory_id: str
     data: Optional[Dict[str, Any]] = None

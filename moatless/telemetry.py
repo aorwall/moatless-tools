@@ -4,8 +4,8 @@ import contextvars
 import logging
 import os
 import asyncio
-from contextlib import contextmanager
-from typing import Optional, Dict, Any, Iterator, Callable, TypeVar, ParamSpec, Literal, Union
+from contextlib import contextmanager, asynccontextmanager
+from typing import Optional, Dict, Any, Iterator, Callable, TypeVar, ParamSpec, Literal, Union, AsyncIterator
 from functools import wraps
 from rq import Queue
 from opentelemetry import trace, context
@@ -53,9 +53,12 @@ def setup_azure_monitor() -> None:
             "Please set it with your Azure Application Insights connection string."
         )
     logger.info(f"Setting up Azure Monitor OpenTelemetry tracing")
+    
+    # Configure with shorter timeout for batch span processor
     configure_azure_monitor(
         connection_string=os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"),
-        service_name="moatless-tools"
+        service_name="moatless-tools",
+        export_timeout_millis=5000
     )
 
     global _tracer
@@ -73,10 +76,8 @@ def setup_telemetry() -> None:
     
     # Choose telemetry provider based on environment variables
     if app_insights_conn_string:
-        logger.info(f"Setting up Azure Monitor OpenTelemetry tracing")
         setup_azure_monitor()
     else:
-    
         attributes = {"service.name": "moatless"}
         resource = Resource.create(attributes)
 
@@ -105,21 +106,12 @@ def get_tracer():
     return _tracer
 
 @contextmanager
-def instrument_span(
+def _sync_instrument_span(
     name: str,
     attributes: Optional[Dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ) -> Iterator[Span]:
-    """Context manager for creating trace spans.
-    
-    Args:
-        name: Name of the span
-        attributes: Optional span attributes
-        kind: Optional span kind
-        
-    Yields:
-        The created span
-    """
+    """Synchronous context manager for creating trace spans."""
     tracer = get_tracer()
     with tracer.start_as_current_span(name, attributes=attributes, kind=kind) as span:
         try:
@@ -128,6 +120,45 @@ def instrument_span(
             span.set_status(Status(StatusCode.ERROR))
             span.record_exception(e)
             raise
+
+@asynccontextmanager
+async def _async_instrument_span(
+    name: str,
+    attributes: Optional[Dict[str, Any]] = None,
+    kind: Optional[trace.SpanKind] = None,
+):
+    """Asynchronous context manager for creating trace spans."""
+    tracer = get_tracer()
+    with tracer.start_as_current_span(
+        name,
+        attributes=attributes,
+        kind=kind,
+    ) as span:
+        try:
+            yield span
+        except Exception as e:
+            span.set_status(Status(StatusCode.ERROR))
+            span.record_exception(e)
+            raise
+
+def instrument_span(
+    name: str,
+    attributes: Optional[Dict[str, Any]] = None,
+    kind: Optional[trace.SpanKind] = None,
+) -> Union[Iterator[Span], AsyncIterator[Span]]:
+    """Context manager for creating trace spans. Works with both sync and async code.
+    
+    Args:
+        name: Name of the span
+        attributes: Optional span attributes
+        kind: Optional span kind
+        
+    Returns:
+        Context manager that yields the created span
+    """
+    if asyncio.get_event_loop().is_running():
+        return _async_instrument_span(name, attributes, kind)
+    return _sync_instrument_span(name, attributes, kind)
 
 def instrument(
     name: Optional[Union[str, Callable[..., str]]] = None,
@@ -164,7 +195,7 @@ def instrument(
                 span_name = get_span_name(*args, **kwargs)
             else:
                 span_name = name
-            with instrument_span(span_name, attributes=attributes, kind=kind) as span:
+            async with _async_instrument_span(span_name, attributes=attributes, kind=kind) as span:
                 try:
                     result = await func(*args, **kwargs)
                     return result
@@ -179,7 +210,7 @@ def instrument(
                 span_name = get_span_name(*args, **kwargs)
             else:
                 span_name = name
-            with instrument_span(span_name, attributes=attributes, kind=kind) as span:
+            with _sync_instrument_span(span_name, attributes=attributes, kind=kind) as span:
                 try:
                     result = func(*args, **kwargs)
                     return result
@@ -364,36 +395,11 @@ def extract_context_data() -> Dict[str, Any]:
 
 
 
-class MoatlessQueue(Queue):
-
-    def enqueue(self, f, *args, **kwargs):
-        """Enqueue a job with OpenTelemetry context propagation."""
-        # Extract current trace context and context data
-        carrier = extract_trace_context()
-        context_data = extract_context_data()
-
-        # Add trace context and context data to job metadata
-        if "meta" not in kwargs:
-            kwargs["meta"] = {}
-        kwargs["meta"]["otel_context"] = carrier
-        kwargs["meta"]["context_data"] = context_data
-
-        # Set job attributes in current span
-        set_attribute("job.func_name", f.__name__)
-        
-        # Enqueue the job
-        job = super().enqueue(f, *args, **kwargs)
-        
-        # Set job ID in current span
-        set_attribute("job.id", job.id)
-        
-        return job
-
 def run_async(coro, span_name: Optional[str] = None):
     """Helper to run coroutines in synchronous context while preserving trace context.
     
-    This function ensures that the OpenTelemetry trace context is properly propagated
-    to the event loop and coroutine execution.
+    This function ensures that the OpenTelemetry trace context and Moatless context data
+    is properly propagated to the event loop and coroutine execution.
     
     Args:
         coro: The coroutine to run
@@ -407,18 +413,41 @@ def run_async(coro, span_name: Optional[str] = None):
     current_span = trace.get_current_span()
     tracer = get_tracer()
     
+    # Capture current context data
+    from moatless.context_data import moatless_dir, current_node_id, current_trajectory_id, current_project_id
+    context_data = {
+        "moatless_dir": moatless_dir.get(),
+        "current_node_id": current_node_id.get(),
+        "current_trajectory_id": current_trajectory_id.get(),
+        "current_project_id": current_project_id.get(),
+    }
+    
     # Create wrapper to run coroutine with trace context
     async def _run_with_context():
         try:
-            # Create a new span if name is provided, otherwise just run with current context
-            if span_name:
-                with tracer.start_as_current_span(
-                    span_name,
-                    context=current_context if current_span else None
-                ) as span:
+            # Restore context data
+            tokens = []
+            if "current_trajectory_id" in context_data:
+                current_trajectory_id.set(context_data["current_trajectory_id"])
+            if "current_project_id" in context_data:
+                current_project_id.set(context_data["current_project_id"])
+                    
+            try:
+                # Create a new span if name is provided, otherwise just run with current context
+                if span_name:
+                    tracer = get_tracer()
+                    with tracer.start_as_current_span(
+                        span_name,
+                        context=current_context if current_span else None
+                    ) as span:
+                        return await coro
+                else:
                     return await coro
-            else:
-                return await coro
+            finally:
+                # Reset context vars
+                for var, token in tokens:
+                    var.reset(token)
+                    
         except Exception as e:
             if current_span:
                 current_span.record_exception(e)

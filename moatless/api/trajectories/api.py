@@ -66,10 +66,9 @@ def load_trajectory_status(trajectory_dir: Path) -> SystemStatus:
                         status_data[dt_field] = datetime.fromisoformat(status_data[dt_field])
                 return SystemStatus(**status_data)
         except Exception as e:
-            logger.exception(f"Error loading trajectory status: {status_path}")
-            return None
+            raise HTTPException(status_code=500, detail=str(e))
     
-    return None
+    return SystemStatus()
 
 @router.get("/", response_model=List[TrajectoryListItem])
 async def get_trajectories():

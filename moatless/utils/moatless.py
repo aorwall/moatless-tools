@@ -35,9 +35,9 @@ def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     return trajectories_dir
 
 
-def get_moatless_trajectory_dir(trajectory_id: str | None = None, evaluation_name: str | None = None) -> Path:
+def get_moatless_trajectory_dir(trajectory_id: str | None = None, project_id: str | None = None) -> Path:
     """Get the moatless trajectory directory."""
-    trajectory_base_dir = get_moatless_trajectories_dir(evaluation_name)
+    trajectory_base_dir = get_moatless_trajectories_dir(project_id)
     if not trajectory_id:
         return trajectory_base_dir
     trajectory_dir = trajectory_base_dir / trajectory_id

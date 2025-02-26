@@ -1,48 +1,42 @@
-from moatless.events import BaseEvent, FailureEvent
+from typing import Optional
 
+from moatless.events import BaseEvent
 
-class FlowStartedEvent(BaseEvent):
-    event_type: str = "flow_started"
+class FlowEvent(BaseEvent):
+    scope: str = "flow"
 
-class FlowCompletedEvent(BaseEvent):
-    event_type: str = "flow_completed"
-    finish_reason: str | None = None
+class FlowStartedEvent(FlowEvent):
+    event_type: str = "started"
 
-class FlowErrorEvent(BaseEvent):
-    event_type: str = "flow_error"
+class FlowCompletedEvent(FlowEvent):
+    event_type: str = "completed"
+    finish_reason: Optional[int] = None
+
+class FlowErrorEvent(FlowEvent):
+    event_type: str = "error"
+    node_id: Optional[int] = None
     error: str
 
-class NodeExpandedEvent(BaseEvent):
-    event_type: str = "node_expanded"
-    parent_node_id: int
+class NodeEvent(BaseEvent):
+    scope: str = "node"
+    node_id: int
+
+class NodeExpandedEvent(NodeEvent):
+    event_type: str = "expanded"
     child_node_id: int
 
-class NodeSelectedEvent(BaseEvent):
-    """Node-specific event"""
-
-    event_type: str = "node_selected"
+class NodeSelectedEvent(NodeEvent):
+    event_type: str = "selected"
     previous_node_id: int
-    selected_node_id: int
 
-
-class FeedbackGeneratedEvent(BaseEvent):
-    """Node-specific event"""
-
+class FeedbackGeneratedEvent(NodeEvent):
     event_type: str = "feedback_generated"
-    node_id: int
 
-class NodeRewardEvent(BaseEvent):
-    """Node-specific event"""
-
-    event_type: str = "node_reward"
-    node_id: int
+class NodeRewardEvent(NodeEvent):
+    event_type: str = "reward_generated"
     reward: float
 
-
-class NodeRewardFailureEvent(FailureEvent):
-    """Node-specific event"""
-
-    scope: str = "reward"
-    node_id: int
+class NodeRewardFailureEvent(NodeEvent):
+    event_type: str = "reward_failure"
     error: str
 

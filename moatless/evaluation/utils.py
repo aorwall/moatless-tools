@@ -45,6 +45,9 @@ def get_moatless_instances(split: str | None = None):
 
 
 def get_moatless_instance(instance_id: str, split: str | None = None):
+    return get_swebench_instance(instance_id, split)
+
+def get_swebench_instance(instance_id: str, split: str | None = None):
     global _moatless_instances
     if not _moatless_instances:
         load_moatless_datasets(split)
@@ -282,6 +285,18 @@ def has_identified_spans(
     return False
 
 
+def find_identified_spans(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> dict[str, list[str]] | None:
+    for expected_file_with_spans in expected_solutions:
+        missing_spans = get_missing_spans(expected_file_with_spans, actual_files_with_spans)
+        if not missing_spans or missing_spans == ["docstring"]:
+            return expected_file_with_spans
+    return None
+
+
+
 def has_identified_files(
     expected_solutions: list[dict[str, list[str]]],
     actual_files_with_spans: dict[str, list[str]] | list[str],
@@ -296,6 +311,18 @@ def has_identified_files(
             return True
     return False
 
+
+def find_identified_files(
+    expected_solutions: list[dict[str, list[str]]],
+    actual_files_with_spans: dict[str, list[str]],
+) -> dict[str, list[str]] | None:
+    if not actual_files_with_spans:
+        return None
+
+    for expected_file_with_spans in expected_solutions:
+        if not get_missing_files(expected_file_with_spans, actual_files_with_spans):
+            return expected_file_with_spans
+    return None
 
 def calculate_estimated_context_window(instance, results):
     patch = instance.get("patch") or instance.get("golden_patch")

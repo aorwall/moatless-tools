@@ -121,6 +121,10 @@ class TimelineItemType(str, Enum):
     OBSERVATION = "observation"
     ERROR = "error"
     WORKSPACE = "workspace"
+    WORKSPACE_FILES = "workspace_files"
+    WORKSPACE_CONTEXT = "workspace_context"
+    WORKSPACE_TESTS = "workspace_tests"
+    REWARD = "reward"
 
 
 class TimelineItemDTO(BaseModel):

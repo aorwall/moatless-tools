@@ -2,6 +2,7 @@ import json
 import logging
 from typing import List, Dict, Any, Type, Union, Optional
 
+from moatless.node import ThoughtBlock
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel
@@ -52,7 +53,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    ) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
         """Validate tool call completion response.
 
         Args:
@@ -72,7 +73,12 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return [], content, []
+            return [], content, [], []
+
+        if hasattr(message, "thinking") and message.thinking:
+            thoughts = message.thinking
+        else:
+            thoughts = None
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()
@@ -146,7 +152,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 retry_messages=retry_messages,
             )
 
-        return structured_outputs, content, flags
+        return structured_outputs, content, flags, thoughts
 
     def _get_response_model(self, tool_name: str) -> Type[ResponseSchema]:
         """Get the response model for a tool name.
