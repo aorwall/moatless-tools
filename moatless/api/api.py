@@ -113,7 +113,9 @@ runner = RQRunner()
 async def handle_event(event: BaseEvent):
     """Handle system events and broadcast them via WebSocket"""
     logger.debug(f"Broadcasting event: {event.scope}:{event.event_type}")
-    await manager.broadcast_message(event.to_dict())
+
+    if event.scope == "flow" or event.scope == "evaluation":
+        await manager.broadcast_message(event.to_dict())
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""

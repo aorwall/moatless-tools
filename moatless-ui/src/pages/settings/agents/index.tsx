@@ -1,83 +1,45 @@
-import { useNavigate } from "react-router-dom";
-import { DataExplorer } from "@/lib/components/DataExplorer";
-import { useAgents } from "@/lib/hooks/useAgents";
+import { useParams } from "react-router-dom";
+import { useAgent, useUpdateAgent } from "@/lib/hooks/useAgents";
+import { toast } from "sonner";
 import type { AgentConfig } from "@/lib/types/agent";
-import { Button } from "@/lib/components/ui/button";
-import { Plus } from "lucide-react";
+import { AgentDetail } from "./components/AgentDetail";
 
 export function AgentsPage() {
-  const navigate = useNavigate();
-  const { data: agents, isLoading, error } = useAgents();
+  const { id } = useParams();
+  const updateAgentMutation = useUpdateAgent();
 
-  const filterFields = [
-    { name: "model_id", type: "text" as const },
-    {
-      name: "response_format",
-      type: "select" as const,
-      options: Array.from(new Set(agents?.map((a) => a.response_format) ?? [])),
-    },
-  ];
+  // Don't try to load agent details for the new agent view
+  if (id === "new") {
+    return null;
+  }
 
-  const getAgentDisplay = (agent: AgentConfig) => ({
-    title: agent.id,
-    subtitle: agent.model_id,
-  });
+  const { data: selectedAgent } = useAgent(id ?? "");
 
-  const handleAgentSelect = (agent: AgentConfig) => {
-    navigate(`/settings/agents/${encodeURIComponent(agent.id)}`);
+  const handleSubmit = async (formData: AgentConfig) => {
+    try {
+      await updateAgentMutation.mutateAsync({
+        ...formData,
+        id: id!,
+      });
+      toast.success("Changes saved successfully");
+    } catch (error) {
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : (error as any)?.response?.data?.detail || "Failed to save changes";
+      toast.error(errorMessage);
+      throw error;
+    }
   };
 
-  if (isLoading) {
+  if (!selectedAgent) {
     return (
       <div className="flex h-full items-center justify-center">
-        Loading agents...
-      </div>
-    );
-  }
-
-  if (error) {
-    return <div className="text-destructive">Failed to load agents</div>;
-  }
-
-  if (!agents?.length) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center space-y-4 p-4">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold">No Agents Available</h2>
-          <p className="text-muted-foreground">
-            Looks like you haven't created any agents yet. Click the button
-            below to create your first agent.
-          </p>
+        <div className="text-center text-gray-500">
+          Select an agent to view details
         </div>
-        <Button
-          onClick={() => navigate("/settings/agents/new")}
-          className="flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Create First Agent
-        </Button>
       </div>
     );
   }
 
-  return (
-    <div className="p-4">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-xl font-bold">Agent Configurations</h2>
-        <Button
-          onClick={() => navigate("/settings/agents/new")}
-          className="flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          New Agent
-        </Button>
-      </div>
-      <DataExplorer
-        items={agents}
-        filterFields={filterFields}
-        itemDisplay={getAgentDisplay}
-        onSelect={handleAgentSelect}
-      />
-    </div>
-  );
+  return <AgentDetail agent={selectedAgent} onSubmit={handleSubmit} />;
 }

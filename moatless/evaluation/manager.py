@@ -7,6 +7,7 @@ import uuid
 import aiofiles
 import aiofiles.os
 import traceback
+import random
 
 from moatless.benchmark.report import BenchmarkResult, to_result
 from moatless.evaluation.run_instance import run_instance
@@ -56,132 +57,6 @@ class EvaluationManager:
     async def initialize(self):
         await event_bus.subscribe(self._handle_event)
     
-    async def _handle_event(self, event: BaseEvent):
-        """Handle events from evaluation runners."""
-        logger.info(f"Received event: {event.scope}:{event.event_type}")
-        if not event.scope in ["flow", "evaluation"]:
-            return
-        
-        if not event.project_id:
-            logger.error(f"Received event with no project id: {event}")
-            return
-        
-        evaluation = await self._load_evaluation(event.project_id)
-        if not evaluation:
-            logger.info(f"Received event with a project id not found in evaluations: {event.project_id}")
-            return
-        
-        instance = evaluation.get_instance(event.trajectory_id)
-        if not instance:
-            logger.warning(f"Received event for unknown instance: {event.trajectory_id}")
-            return
-        
-        if event.scope == "flow" and event.event_type == "started":
-            instance.status = InstanceStatus.RUNNING
-            instance.started_at = event.timestamp
-        elif event.scope == "flow" and event.event_type == "completed":
-            instance = await self._process_trajectory_results(evaluation, instance)
-            instance.status = InstanceStatus.COMPLETED
-            instance.completed_at = event.timestamp
-        elif event.scope == "evaluation" and event.event_type == "started":
-            instance.status = InstanceStatus.EVALUATING
-            instance.start_evaluating_at = event.timestamp
-        elif event.scope == "evaluation" and event.event_type == "completed":
-            instance = await self._process_trajectory_results(evaluation, instance)
-            instance.status = InstanceStatus.EVALUATED
-            instance.evaluated_at = event.timestamp
-        elif event.event_type == "error":
-            instance.status = InstanceStatus.ERROR
-            instance.error = event.data.get("error")
-            instance.error_at = event.timestamp
-
-        await self._save_evaluation(evaluation)
-
-    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance) -> EvaluationInstance:
-        if instance.status == InstanceStatus.EVALUATED:
-            return instance
-        
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name)
-        if not trajectory_dir.exists():
-            logger.warning(f"Trajectory directory not found for instance: {instance.instance_id}")
-            return
-        
-        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
-        events = await event_bus.read_events(project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id)
-
-        if not instance.completed_at and not instance.evaluated_at:
-            # TODO: Handle trajectories with multiple leaf nodes
-
-            if not instance.started_at:
-                event = next((e for e in events if e.scope == "flow" and e.event_type == "started"), None)
-                if event:
-                    instance.started_at = event.timestamp
-                else:
-                    instance.started_at = datetime.now(timezone.utc)
-        
-            event = next((e for e in events if e.scope == "flow" and e.event_type == "completed"), None)
-            if event:
-                instance.completed_at = event.timestamp
-            else:
-                instance.completed_at = datetime.now(timezone.utc)
-
-            leaf_nodes = flow.root.get_leaf_nodes()            
-            node = leaf_nodes[0]
-            if node.terminal:
-                if node.reward:
-                    instance.reward = node.reward.value
-
-                if node.error:
-                    instance.error = node.error
-                    instance.status = InstanceStatus.ERROR
-                    instance.error_at = datetime.now(timezone.utc)
-                else:
-                    instance.status = InstanceStatus.COMPLETED
-            
-            instance.iterations = len(flow.root.get_all_nodes())
-
-        if not instance.evaluated_at:
-            eval_result_path = trajectory_dir / "eval_result.json"
-
-            event = next((e for e in events if e.scope == "evaluation" and e.event_type == "started"), None)
-            if event:
-                instance.start_evaluating_at = event.timestamp
-            else:
-                instance.start_evaluating_at = datetime.now(timezone.utc)
-
-            event = next((e for e in events if e.scope == "evaluation" and e.event_type == "completed"), None)
-            if event:
-                instance.evaluated_at = event.timestamp
-            else:
-                instance.evaluated_at = datetime.now(timezone.utc)
-
-            if not eval_result_path.exists():
-                logger.info(f"Evaluation result not found for instance: {instance.instance_id}")
-                return
-            
-            with open(eval_result_path, "r") as f:
-                eval_result = json.load(f)
-                
-            benchmark_result = to_result(
-                node=flow.root,
-                eval_report=eval_result,
-                instance_id=instance.instance_id
-            )
-            
-            instance.benchmark_result = benchmark_result
-            instance.resolved = benchmark_result.resolved
-            instance.status = InstanceStatus.EVALUATED
-
-        return instance
-
-    def get_evaluation_dir(self, evaluation_name: str) -> Path:
-        """Get the directory for a specific evaluation."""
-        return self.evals_dir / evaluation_name
-
-    def get_instance_dir(self, evaluation_name: str, instance_id: str) -> Path:
-        """Get the directory for a specific instance within an evaluation."""
-        return self.get_evaluation_dir(evaluation_name) / instance_id
-
     async def create_evaluation(
         self,
         flow_id: str,
@@ -238,7 +113,6 @@ class EvaluationManager:
             flow.persist()
 
         eval_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Evaluation directory created: {eval_dir}")
 
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
@@ -270,8 +144,16 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
         
+        evaluation = await self.process_evaluation_results(evaluation_name)
+        if evaluation.status == EvaluationStatus.COMPLETED:
+            return evaluation
+
+        # Randomize the order of instances
+        instances = list(evaluation.instances)
+        random.shuffle(instances)
+        
         started_instances = 0
-        for instance in evaluation.instances:
+        for instance in instances:
             if instance.status == InstanceStatus.EVALUATED:
                 continue
 
@@ -306,28 +188,145 @@ class EvaluationManager:
         if evaluation.status == EvaluationStatus.COMPLETED:
             return evaluation
         
-        if evaluation.status == EvaluationStatus.RUNNING:
-            evaluation_is_running = False
-            evaluation_is_completed = True
-            for instance in evaluation.instances:
-                if instance.status not in [InstanceStatus.EVALUATED, InstanceStatus.ERROR]:
-                    
-                    evaluation_is_completed = False
+        evaluation_is_running = False
+        evaluation_is_completed = True
+        for instance in evaluation.instances:
+            if instance.status not in [InstanceStatus.EVALUATED, InstanceStatus.ERROR]:
+                
+                evaluation_is_completed = False
 
-                    job_status = await self.get_job_status(evaluation_name, instance.instance_id)
+                job_status = await self.runner.get_job_status(project_id=evaluation_name, trajectory_id=instance.instance_id)
 
-                    if job_status in [JobStatus.RUNNING, JobStatus.QUEUED]:
-                        logger.info(f"Evaluation {evaluation_name} is running, instance {instance.instance_id} is {instance.job_status}")
-                        evaluation_is_running = True
+                if job_status in [JobStatus.RUNNING, JobStatus.QUEUED]:
+                    evaluation_is_running = True
 
-            if evaluation_is_completed:
-                evaluation.status = EvaluationStatus.COMPLETED
-            elif not evaluation_is_running:
-                evaluation.status = EvaluationStatus.PAUSED
-
-            await self._save_evaluation(evaluation)
+        if evaluation_is_completed:
+            evaluation.status = EvaluationStatus.COMPLETED
+        elif not evaluation_is_running:
+            evaluation.status = EvaluationStatus.PAUSED
+        else:
+            evaluation.status = EvaluationStatus.RUNNING
 
         return evaluation
+
+    async def _handle_event(self, event: BaseEvent):
+        """Handle events from evaluation runners."""
+        if not event.scope in ["flow", "evaluation"]:
+            return
+        
+        if not event.project_id:
+            logger.error(f"Received event with no project id: {event}")
+            return
+        
+        evaluation = await self._load_evaluation(event.project_id)
+        if not evaluation:
+            logger.info(f"Received event with a project id not found in evaluations: {event.project_id}, skipping")
+            return
+        
+        instance = evaluation.get_instance(event.trajectory_id)
+        if not instance:
+            logger.warning(f"Received event for unknown instance: {event.trajectory_id}, skipping")
+            return
+        
+        if event.scope == "flow" and event.event_type == "started":
+            instance.status = InstanceStatus.RUNNING
+            instance.started_at = event.timestamp
+        elif event.scope == "flow" and event.event_type == "completed":
+            await self._process_trajectory_results(evaluation, instance)
+            instance.status = InstanceStatus.COMPLETED
+            instance.completed_at = event.timestamp
+        elif event.scope == "evaluation" and event.event_type == "started":
+            instance.status = InstanceStatus.EVALUATING
+            instance.start_evaluating_at = event.timestamp
+        elif event.scope == "evaluation" and event.event_type == "completed":
+            await self._process_trajectory_results(evaluation, instance)
+            instance.status = InstanceStatus.EVALUATED
+            instance.evaluated_at = event.timestamp
+        elif event.event_type == "error":
+            instance.status = InstanceStatus.ERROR
+            instance.error = event.data.get("error")
+            instance.error_at = event.timestamp
+
+        await self._save_evaluation(evaluation)
+
+    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance):
+        if instance.status == InstanceStatus.EVALUATED:
+            return instance
+        
+        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name)
+        if not trajectory_dir.exists():
+            logger.warning(f"Trajectory directory not found for instance: {instance.instance_id}")
+            return
+        
+        try:
+            flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
+            events = await event_bus.read_events(project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id)
+            instance.usage = flow.total_usage()
+
+            if not instance.completed_at and not instance.evaluated_at:
+
+                if not instance.started_at:
+                    event = next((e for e in events if e.scope == "flow" and e.event_type == "started"), None)
+                    if event:
+                        instance.started_at = event.timestamp
+                    
+            
+                event = next((e for e in events if e.scope == "flow" and e.event_type == "completed"), None)
+                if event:
+                    instance.completed_at = event.timestamp
+                
+                # TODO: Handle trajectories with multiple leaf nodes
+                leaf_nodes = flow.root.get_leaf_nodes()            
+                node = leaf_nodes[0]
+                if node.terminal:
+                    if node.reward:
+                        instance.reward = node.reward.value
+
+                    if node.error:
+                        instance.error = node.error
+                        instance.status = InstanceStatus.ERROR
+                        instance.error_at = datetime.now(timezone.utc)
+                    else:
+                        instance.status = InstanceStatus.COMPLETED
+                    
+                instance.iterations = len(flow.root.get_all_nodes())
+
+            if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
+                eval_result_path = trajectory_dir / "eval_result.json"
+
+                event = next((e for e in events if e.scope == "evaluation" and e.event_type == "started"), None)
+                if event:
+                    instance.start_evaluating_at = event.timestamp
+
+                event = next((e for e in events if e.scope == "evaluation" and e.event_type == "completed"), None)
+                if event:
+                    instance.evaluated_at = event.timestamp
+
+                if not eval_result_path.exists():
+                    logger.info(f"Evaluation result not found for instance: {instance.instance_id}")
+                    return
+                
+                with open(eval_result_path, "r") as f:
+                    eval_result = json.load(f)
+                    
+                benchmark_result = to_result(
+                    node=flow.root,
+                    eval_report=eval_result,
+                    instance_id=instance.instance_id
+                )
+                
+                instance.benchmark_result = benchmark_result
+                instance.resolved = benchmark_result.resolved
+                instance.status = InstanceStatus.EVALUATED
+
+                # Check if all instances have been evaluated, and update evaluation status
+                all_evaluated = self._is_evaluation_completed(evaluation)
+                if all_evaluated and evaluation.status != EvaluationStatus.COMPLETED:
+                    self._set_evaluation_completed(evaluation)
+                
+        except Exception as e:
+            logger.error(f"Failed to process trajectory results for instance {instance.instance_id}: {e}")
+            
 
     async def get_evaluation_status(self, evaluation_name: str) -> EvaluationJobStatus:
         """Get the status of all jobs for an evaluation."""
@@ -336,18 +335,6 @@ class EvaluationManager:
             raise ValueError(f"Evaluation {evaluation_name} not found")
         
         return await self.runner.get_evaluation_status(evaluation)
-    
-    async def get_job_status(self, evaluation_name: str, instance_id: str) -> JobStatus:
-        """Get the status of jobs for a specific instance."""
-        try:
-            job_status = await self.runner.get_job(project_id=evaluation_name, trajectory_id=instance_id)
-            if job_status:
-                return job_status.status
-            else:
-                return JobStatus.PENDING
-        except Exception as e:
-            logger.exception(f"Failed to get job status for evaluation {evaluation_name} and instance {instance_id}: {e}")
-            return JobStatus.FAILED
     
     async def is_runner_up(self) -> bool:
         """Check if any RQ workers are currently running.
@@ -401,24 +388,29 @@ class EvaluationManager:
         await self.runner.start_job(evaluation_name, instance_id, run_instance)
         await self._save_evaluation(evaluation)
 
+    def _is_evaluation_completed(self, evaluation: Evaluation) -> bool:
+        """Check if all instances in an evaluation have been evaluated."""
+        return all(instance.status == InstanceStatus.EVALUATED for instance in evaluation.instances)
+    
+    def _set_evaluation_completed(self, evaluation: Evaluation):
+        """Set the evaluation status to COMPLETED."""
+        if evaluation.status != EvaluationStatus.COMPLETED:
+            evaluation.status = EvaluationStatus.COMPLETED
+            evaluation.completed_at = datetime.now(timezone.utc)    
+
     async def process_evaluation_results(self, evaluation_name: str) -> Evaluation:
         """Process all instances in an evaluation to ensure results are in sync."""
         evaluation = await self._load_evaluation(evaluation_name)
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
-        
+
         for instance in evaluation.instances:
-            if instance.status != InstanceStatus.EVALUATED:
-                instance = await self._process_trajectory_results(evaluation, instance)
-        
-        # Check if all instances have been evaluated, and update evaluation status
-        all_evaluated = all(instance.status == InstanceStatus.EVALUATED for instance in evaluation.instances)
-        
+            await self._process_trajectory_results(evaluation, instance)
+
+        all_evaluated = self._is_evaluation_completed(evaluation)
         if all_evaluated and evaluation.status != EvaluationStatus.COMPLETED:
-            evaluation.status = EvaluationStatus.COMPLETED
-            evaluation.completed_at = datetime.now(timezone.utc)
-            logger.info(f"All instances evaluated, setting evaluation {evaluation_name} status to COMPLETED")
-        
+            self._set_evaluation_completed(evaluation)
+
         await self._save_evaluation(evaluation)
         return evaluation
 
@@ -504,3 +496,11 @@ class EvaluationManager:
         with open(dataset_path, 'r') as f:
             dataset = json.load(f)
             return dataset["instance_ids"]
+
+    def get_evaluation_dir(self, evaluation_name: str) -> Path:
+        """Get the directory for a specific evaluation."""
+        return self.evals_dir / evaluation_name
+
+    def get_instance_dir(self, evaluation_name: str, instance_id: str) -> Path:
+        """Get the directory for a specific instance within an evaluation."""
+        return self.get_evaluation_dir(evaluation_name) / instance_id

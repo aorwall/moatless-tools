@@ -2,6 +2,9 @@ import { useModels } from "@/lib/hooks/useModels";
 import { GenericSelector, OptionType } from "@/lib/components/GenericSelector";
 import { useLastUsedStore } from "@/lib/stores/lastUsedStore";
 import { Skeleton } from "@/lib/components/ui/skeleton";
+import { Link } from "react-router-dom";
+import { Button } from "@/lib/components/ui/button";
+import { PlusCircle } from "lucide-react";
 
 interface ModelSelectorProps {
   selectedModelId: string;
@@ -26,7 +29,17 @@ export function ModelSelector({
   }
 
   if (!models?.length) {
-    return <div className="text-sm text-muted-foreground">No models available</div>;
+    return (
+      <div className="flex items-center gap-2">
+        <div className="text-sm text-muted-foreground flex-1">No models available</div>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/settings/models" className="flex items-center gap-2">
+            <PlusCircle className="h-4 w-4" />
+            Add Model
+          </Link>
+        </Button>
+      </div>
+    );
   }
 
   const options: OptionType[] = models.map((model) => ({
@@ -56,7 +69,6 @@ export function ModelSelector({
 
   return (
     <GenericSelector
-      title="Select Model"
       value={selectedModelId}
       onValueChange={handleSelect}
       placeholder="Select a model"

@@ -66,17 +66,6 @@ export function ModelDetailPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-none border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{model.model}</h1>
-            <div className="mt-1 text-sm text-gray-500">
-              Model Configuration
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
         <ModelDetail model={model} onSubmit={handleSubmit} />
       </div>

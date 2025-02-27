@@ -18,8 +18,8 @@ export function EvaluationLayout() {
 
   if (!evaluationId) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
+      <div className="h-full flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>Missing evaluation ID</AlertDescription>
         </Alert>
@@ -29,8 +29,8 @@ export function EvaluationLayout() {
 
   if (isError) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
+      <div className="h-full flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             {error instanceof Error ? error.message : "Failed to load evaluation data"}
@@ -42,8 +42,8 @@ export function EvaluationLayout() {
 
   if (!evaluation) {
     return (
-      <div className="container mx-auto p-6">
-        <Card>
+      <div className="h-full flex items-center justify-center p-4">
+        <Card className="max-w-md">
           <CardContent className="py-6">
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -56,8 +56,8 @@ export function EvaluationLayout() {
   }
 
   return (
-    <div className="h-[calc(100vh-56px)]">
-      <ResizablePanelGroup direction="horizontal" className="h-full border rounded-lg">
+    <div className="h-[calc(100vh-56px)] w-full">
+      <ResizablePanelGroup direction="horizontal" className="h-full">
         <ResizablePanel defaultSize={15} minSize={0}>
           {instanceId && (
             <div className="p-4 border-b">

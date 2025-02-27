@@ -624,11 +624,13 @@ export function EvaluationInstancesTable({ evaluation }: EvaluationInstancesTabl
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Badge 
-                              className="text-[10px] px-1.5 py-0 border bg-red-100 text-red-800 border-red-200"
-                            >
-                              Error
-                            </Badge>
+                            <span>
+                              <Badge 
+                                className="text-[10px] px-1.5 py-0 border bg-red-100 text-red-800 border-red-200"
+                              >
+                                Error
+                              </Badge>
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-xs">
                             <p className="text-xs whitespace-normal break-words">{instance.error}</p>

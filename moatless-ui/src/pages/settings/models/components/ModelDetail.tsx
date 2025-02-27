@@ -118,22 +118,30 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
           </Alert>
         )}
 
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">Model Configuration</h1>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleTestModel}
-            disabled={testModelMutation.isPending}
-            className="gap-2"
-          >
-            {testModelMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <PlayCircle className="h-4 w-4" />
-            )}
-            {testModelMutation.isPending ? "Testing..." : "Test Model"}
-          </Button>
+        {/* Header with model name and action buttons */}
+        <div className="flex items-center justify-between mb-6 border-b pb-6">
+          <div>
+            <h1 className="text-2xl font-bold">{model.model}</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTestModel}
+              disabled={testModelMutation.isPending}
+              className="gap-2"
+            >
+              {testModelMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <PlayCircle className="h-4 w-4" />
+              )}
+              {testModelMutation.isPending ? "Testing..." : "Test Model"}
+            </Button>
+            <Button type="submit" disabled={isSaving || testModelMutation.isPending}>
+              {isSaving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -442,9 +450,6 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               {error}
             </p>
           )}
-          <Button type="submit" disabled={isSaving || testModelMutation.isPending}>
-            {isSaving ? "Saving..." : "Save Changes"}
-          </Button>
         </div>
       </form>
     </Form>

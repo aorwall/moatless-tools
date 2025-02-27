@@ -30,7 +30,7 @@ interface ItemDisplay {
 
 interface DataExplorerProps<T> {
   items: T[];
-  filterFields: FilterField[];
+  filterFields?: FilterField[];
   itemDisplay: (item: T) => ItemDisplay;
   onSelect: (item: T) => void;
   selectedItem?: T;
@@ -60,50 +60,52 @@ export function DataExplorer<T>({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Filters */}
-      <div className="flex-none border-b bg-gray-50/50 px-3 py-3">
-        <div className="space-y-2">
-          {filterFields.map((field) => (
-            <div key={field.name}>
-              {field.type === "text" ? (
-                <Input
-                  type="text"
-                  placeholder={`Search ${field.name}...`}
-                  value={filters[field.name] || ""}
-                  onChange={(e) =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      [field.name]: e.target.value,
-                    }))
-                  }
-                  className="w-full"
-                />
-              ) : field.type === "select" && field.options ? (
-                <Select
-                  value={filters[field.name] || "all"}
-                  onValueChange={(value) =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      [field.name]: value,
-                    }))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder={`Filter by ${field.name}`} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All {field.name}s</SelectItem>
-                    {field.options.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-            </div>
-          ))}
+      {filterFields && (
+        <div className="flex-none border-b bg-gray-50/50 px-3 py-3">
+          <div className="space-y-2">
+            {filterFields?.map((field) => (
+              <div key={field.name}>
+                {field.type === "text" ? (
+                  <Input
+                    type="text"
+                    placeholder={`Search ${field.name}...`}
+                    value={filters[field.name] || ""}
+                    onChange={(e) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        [field.name]: e.target.value,
+                      }))
+                    }
+                    className="w-full"
+                  />
+                ) : field.type === "select" && field.options ? (
+                  <Select
+                    value={filters[field.name] || "all"}
+                    onValueChange={(value) =>
+                      setFilters((prev) => ({
+                        ...prev,
+                        [field.name]: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={`Filter by ${field.name}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All {field.name}s</SelectItem>
+                      {field.options.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Item List */}
       <div className="min-h-0 flex-1 overflow-y-auto">

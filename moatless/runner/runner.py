@@ -89,10 +89,6 @@ class Runner(ABC):
         pass
     
     @abstractmethod
-    async def get_job(self, project_id: str, trajectory_id: str) -> JobInfo:
-        pass
-    
-    @abstractmethod
     async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
         pass
     
@@ -106,6 +102,10 @@ class Runner(ABC):
     
     @abstractmethod
     async def retry_job(self, project_id: str, trajectory_id: str) -> None:
+        pass
+    
+    @abstractmethod
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         pass
     
     @abstractmethod

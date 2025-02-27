@@ -7,35 +7,44 @@ export function RootLayout() {
     return location.pathname.startsWith(path);
   };
 
+  // Check if the current route is an evaluation instance page
+  const isEvaluationInstancePage = /^\/swebench\/evaluation\/[^/]+\/[^/]+$/.test(location.pathname);
+
+  const showBetaFeatures = false;
+
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
-      <header className="flex-none border-b bg-background">
+    <div className="min-h-screen flex flex-col">
+      <header className="sticky top-0 z-10 border-b bg-background">
         <div className="px-4">
           <nav className="flex h-14 items-center space-x-8">
             <Link to="/" className="text-lg font-semibold">
               Moatless Tools
             </Link>
             <div className="flex items-center space-x-4">
-              <Link
-                to="/trajectories"
-                className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath("/trajectories")
-                    ? "text-primary"
-                    : "text-muted-foreground"
-                }`}
-              >
-                Trajectories
-              </Link>
-              <Link
-                to="/loop"
-                className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                  isActivePath("/loop")
-                    ? "text-primary"
-                    : "text-muted-foreground"
-                }`}
-              >
-                Loop
-              </Link>
+              {showBetaFeatures && (
+                <>
+                  <Link
+                    to="/trajectories"
+                    className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/trajectories")
+                      ? "text-primary"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  Trajectories
+                </Link>
+                <Link
+                  to="/loop"
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/loop")
+                      ? "text-primary"
+                      : "text-muted-foreground"
+                  }`}
+                  >
+                    Loop
+                  </Link>
+                </>
+              )}
               <Link
                 to="/swebench/evaluation"
                 className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
@@ -81,7 +90,7 @@ export function RootLayout() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0">
+      <main className={`flex-1 ${isEvaluationInstancePage ? '' : 'container mx-auto pt-0 px-6 pb-6'}`}>
         <Outlet />
       </main>
     </div>

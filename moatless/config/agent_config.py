@@ -31,28 +31,42 @@ class AgentConfigManager:
 
     def _load_configs(self):
         """Load configurations from JSON file."""
-
-        if not os.path.exists(self._get_config_path()):
-            with open(self._get_global_config_path()) as f:
-                global_config = json.load(f)
-                for agent_id, agent_config in global_config.items():
-                    agent_config["agent_id"] = agent_id
-                    self._configs[agent_id] = agent_config
-        else:
+        config_path = self._get_config_path()
+        
+        # Copy global config to local path if it doesn't exist
+        if not config_path.exists():
             try:
-                with open(self._get_config_path()) as f:
+                global_path = self._get_global_config_path()
+                if global_path.exists():
+                    # Copy global config to local path
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(global_path) as f:
+                        global_config = json.load(f)
+                        with open(config_path, 'w') as local_f:
+                            json.dump(global_config, local_f, indent=2)
+                    logger.info("Copied global config to local path")
+                else:
+                    logger.info("No global agent configs found")
+            except Exception as e:
+                logger.error(f"Failed to copy global agent configs: {e}")
+
+        # Load configs from local path
+        try:
+            if config_path.exists():
+                with open(config_path) as f:
                     configs = json.load(f)
                 logger.info(f"Loaded {len(configs)} agent configs")
                 for config in configs:
-                    try: 
+                    try:
                         self._configs[config["agent_id"]] = config
                         logger.info(f"Loaded agent config {config['agent_id']}")
                     except Exception as e:
                         logger.error(f"Failed to load agent config {config['agent_id']}: {e}")
-
-            except Exception as e:
-                logger.error(f"Failed to load agent configs: {e}")
-                raise e
+            else:
+                logger.info("No local agent configs found")
+        except Exception as e:
+            logger.error(f"Failed to load agent configs: {e}")
+            raise e
 
     def _save_configs(self):
         """Save configurations to JSON file."""

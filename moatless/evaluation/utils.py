@@ -324,6 +324,16 @@ def find_identified_files(
             return expected_file_with_spans
     return None
 
+def missing_expected_test_files(expected_test_files: list[str], actual_files_with_spans: dict[str, list[str]]) -> list[str]:
+    if not actual_files_with_spans:
+        return []
+
+    missing_files = []
+    for expected_file in expected_test_files:
+        if expected_file not in actual_files_with_spans:
+            missing_files.append(expected_file)
+    return missing_files
+
 def calculate_estimated_context_window(instance, results):
     patch = instance.get("patch") or instance.get("golden_patch")
     patch_diffs = get_diff_lines(patch)

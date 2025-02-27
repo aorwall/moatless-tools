@@ -11,7 +11,7 @@ import {
 import { Badge } from "@/lib/components/ui/badge";
 import { Skeleton } from "@/lib/components/ui/skeleton";
 import { Progress } from "@/lib/components/ui/progress";
-import { Coins, Cpu, MessageSquare, Zap } from "lucide-react";
+import { Coins, Cpu, MessageSquare, Zap, ClipboardList } from "lucide-react";
 import { formatNumber } from "@/lib/utils/format";
 import { EvaluationListItem } from "@/features/swebench/api/evaluation";
 
@@ -61,6 +61,18 @@ export function EvaluationTable({ evaluations, isLoading }: EvaluationTableProps
         {Array.from({ length: 3 }).map((_, i) => (
           <Skeleton key={i} className="h-16 w-full" />
         ))}
+      </div>
+    );
+  }
+
+  if (!evaluations?.length) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center">
+        <ClipboardList className="h-12 w-12 text-muted-foreground mb-4" />
+        <h3 className="text-lg font-semibold">No evaluations yet</h3>
+        <p className="text-sm text-muted-foreground mt-2">
+          Start a new evaluation to see your results here
+        </p>
       </div>
     );
   }

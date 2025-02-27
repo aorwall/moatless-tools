@@ -290,7 +290,8 @@ def map_to_evaluation_response(evaluation: Evaluation) -> EvaluationResponseDTO:
                 error_at=instance.error_at,
                 resolved=instance.resolved,
                 resolved_by=get_resolved_by(instance),
-                reward=instance.reward
+                reward=instance.reward,
+                usage=instance.usage
             )
             for instance in evaluation.instances
         ]

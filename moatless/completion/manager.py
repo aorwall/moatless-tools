@@ -100,7 +100,7 @@ class ModelConfigManager:
             base_path = Path(base_dir)
         else:
             base_path = Path.cwd()
-        return base_path / "config" / "models.json"
+        return base_path / "models.json"
 
     def _load_base_configs(self) -> Dict[str, ModelConfig]:
         """Load base model configurations from JSON file."""
@@ -193,6 +193,9 @@ class ModelConfigManager:
         Returns:
             List of all base model configurations.
         """
+
+        
+
         return list(self._base_configs.values())
 
     def get_all_configs(self) -> List[ModelConfig]:
@@ -345,9 +348,9 @@ class ModelConfigManager:
                 
                 if test_response.success:
                     result["success"] = True
-                    result["message"] = f"Model setup test passed. Message: {test_response.message}"
+                    result["message"] = f"Model setup test passed."
                 else:
-                    result["message"] = f"Model indicated failure. Message: {test_response.message}"
+                    result["message"] = f"Model indicated failure. Message from LLM: {test_response.message}"
             else:
                 result["message"] = str(response)
                 result["error_type"] = "ValidationError"
@@ -370,6 +373,24 @@ class ModelConfigManager:
             
         return result
 
+    def create_model(self, model_config: ModelConfig) -> ModelConfig:
+        """Create a new model configuration from scratch.
+
+        Args:
+            model_config: The complete model configuration.
+
+        Returns:
+            The new model configuration.
+
+        Raises:
+            ValueError: If a model with the same ID already exists.
+        """
+        if model_config.id in self._user_configs:
+            raise ValueError(f"Model {model_config.id} already exists")
+        self._user_configs[model_config.id] = model_config
+        self._save_user_configs()
+        return model_config
+
 # Create singleton instance
 _manager = ModelConfigManager()
 
@@ -382,3 +403,17 @@ add_model_from_base = _manager.add_model_from_base
 update_model_config = _manager.update_model_config
 delete_model_config = _manager.delete_model_config
 create_completion_model = _manager.create_completion_model
+
+def create_model(model_config: ModelConfig) -> ModelConfig:
+    """Create a new model configuration from scratch.
+
+    Args:
+        model_config: The complete model configuration.
+
+    Returns:
+        The new model configuration.
+
+    Raises:
+        ValueError: If a model with the same ID already exists.
+    """
+    return _manager.create_model(model_config)

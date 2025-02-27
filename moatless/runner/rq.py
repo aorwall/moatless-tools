@@ -86,33 +86,37 @@ class RQRunner:
         except Exception as exc:
             self.logger.exception(f"Error starting job {project_id}_{trajectory_id}")
             raise exc
-    
-    async def get_job(self, project_id: str, trajectory_id: str) -> JobInfo:
+        
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         """Get the status of a job.
         
         Args:
-            job_id: ID of the job
-            
-        Returns:
-            JobInfo object with job status information
+            project_id: The project ID
+            trajectory_id: The trajectory ID
         """
-        if not await self.job_exists(project_id, trajectory_id):
-            return None
-        
         job_id = self._job_id(project_id, trajectory_id)
-        run_job = Job.fetch(job_id, connection=self.redis_conn)
+        logger.info(f"Job {job_id} status: {self.queue.get_job_ids()} and {self.queue.started_job_registry.get_job_ids()}")
+
+        if self._is_queued(job_id):
+            return JobStatus.QUEUED
+        elif self._is_running(job_id):
+            return JobStatus.RUNNING
+        else:
+            return JobStatus.PENDING
         
-        if not run_job:
-            return None
-        
-        return JobInfo(
-            id=run_job.id,
-            status=self._map_job_status(run_job),
-            enqueued_at=run_job.enqueued_at,
-            started_at=run_job.started_at,
-            ended_at=run_job.ended_at,
-            exc_info=run_job.exc_info
-        )
+    def _is_queued(self, job_id: str) -> bool:
+        # if get_job_ids has an item that contains job_id, return True
+        for item in self.queue.get_job_ids():
+            if job_id in item:
+                return True 
+        return False
+    
+    def _is_running(self, job_id: str) -> bool:
+        # if started_job_registry has an item that contains job_id, return True
+        for item in self.queue.started_job_registry.get_job_ids():
+            if job_id in item:
+                return True
+        return False
     
     async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
         """Get all jobs for a project.

@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useBaseModels } from "@/lib/hooks/useModels";
 import type { ModelConfig } from "@/lib/types/model";
-import { Loader2, Plus, Search } from "lucide-react";
+import { Loader2, Plus, Search, Settings } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 import { Button } from "@/lib/components/ui/button";
 import { Input } from "@/lib/components/ui/input";
 import { AddModelDialog } from "./AddModelDialog";
+import { useNavigate } from "react-router-dom";
 import {
   Select,
   SelectContent,
@@ -15,6 +16,7 @@ import {
 } from "@/lib/components/ui/select";
 
 export function BaseModelsList() {
+  const navigate = useNavigate();
   const { data: baseModels, isLoading, error } = useBaseModels();
   const [searchQuery, setSearchQuery] = useState("");
   const [formatFilter, setFormatFilter] = useState<string>("all");
@@ -48,32 +50,54 @@ export function BaseModelsList() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-none border-b px-6 py-4">
-        <h1 className="text-2xl font-bold">Base Models</h1>
+        <h1 className="text-2xl font-bold">Add Model</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Choose a base model to create your own custom configuration
+          Create a new model configuration
         </p>
       </div>
 
-      <div className="flex items-center gap-4 p-4 border-b bg-gray-50/50">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
-          <Input
-            placeholder="Search models..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9"
-          />
+      <div className="flex flex-col gap-6 p-6 border-b bg-gray-50/50">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold">Create from scratch</h2>
+          <p className="text-sm text-gray-500">
+            Configure a new model with custom settings
+          </p>
+          <Button 
+            className="mt-2 w-full sm:w-auto"
+            onClick={() => navigate("/settings/models/create")}
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Create Custom Model
+          </Button>
         </div>
-        <Select value={formatFilter} onValueChange={setFormatFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Response format" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All formats</SelectItem>
-            <SelectItem value="tool_call">Tool Call</SelectItem>
-            <SelectItem value="react">React</SelectItem>
-          </SelectContent>
-        </Select>
+        
+        <div className="flex flex-col gap-2">
+          <h2 className="text-lg font-semibold">Start from a base model</h2>
+          <p className="text-sm text-gray-500">
+            Choose a pre-configured base model as a starting point
+          </p>
+          <div className="flex items-center gap-4 mt-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+              <Input
+                placeholder="Search models..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Select value={formatFilter} onValueChange={setFormatFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Response format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All formats</SelectItem>
+                <SelectItem value="tool_call">Tool Call</SelectItem>
+                <SelectItem value="react">React</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -111,7 +135,7 @@ export function BaseModelsList() {
                   onClick={() => setSelectedModel(model)}
                 >
                   <Plus className="h-4 w-4 mr-2" />
-                  Add to My Models
+                  Add to Models
                 </Button>
               </div>
             </div>

@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
+from moatless.api.trajectory.schema import UsageDTO
+from moatless.completion.model import Usage
 from moatless.runner.runner import JobsCollection, RunnerInfo, RunnerStatus
 from pydantic import BaseModel, Field
 
@@ -158,6 +160,7 @@ class EvaluationInstanceDTO(BaseModel):
     error_at: Optional[datetime] = None
     resolved_by: Optional[int] = None
     reward: Optional[int] = None
+    usage: Optional[Usage] = None
 
 class EvaluationResponseDTO(BaseModel):
     """Response containing evaluation details"""

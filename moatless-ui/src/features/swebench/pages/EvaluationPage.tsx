@@ -69,7 +69,7 @@ export function EvaluationPage({
     cloneEvaluation(evaluation.evaluation_name, {
       onSuccess: (data) => {
         toast.success('Evaluation cloned successfully');
-        navigate(`/swebench/evaluations/${data.evaluation_name}`);
+        navigate(`/swebench/evaluation/${data.evaluation_name}`);
       },
       onError: (error) => {
         toast.error(`Failed to clone evaluation: ${error.message}`);

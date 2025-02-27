@@ -145,7 +145,7 @@ class EventBus:
                     
                     # Notify all subscribers
                     for callback in self._subscribers:
-                        logger.info(f"Notifying subscriber {callback.__name__} for event {event.event_type}")
+                        logger.debug(f"Notifying subscriber {callback.__name__} for event {event.event_type}")
                         if asyncio.iscoroutinefunction(callback):
                             await callback(event)
                         else:
@@ -200,8 +200,10 @@ class EventBus:
         if self._redis_available and self._redis is None:
             await self.initialize()
             
-        event.trajectory_id = context_data.current_trajectory_id.get()
-        event.project_id = context_data.current_project_id.get()
+        if not event.trajectory_id:
+            event.trajectory_id = context_data.current_trajectory_id.get()
+        if not event.project_id:
+            event.project_id = context_data.current_project_id.get()
 
         logger.info(f"Publishing event [{event.scope}:{event.event_type}] for trajectory {event.trajectory_id} and project {event.project_id}")
         

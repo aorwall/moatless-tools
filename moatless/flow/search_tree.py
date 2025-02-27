@@ -148,6 +148,9 @@ class SearchTree(AgenticFlow):
                 f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
             )
 
+        if finish_reason:
+            node.terminal = True
+        
         return self.get_best_trajectory(), finish_reason
 
     @tracer.start_as_current_span("SearchTree._select")
@@ -422,7 +425,6 @@ class SearchTree(AgenticFlow):
 
             if "selector" in obj and isinstance(obj["selector"], dict):
                 obj["selector"] = BaseSelector.model_validate(obj["selector"])
-            logger.info(f"Validated selector: {obj.get('selector')}")
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.model_validate(obj["agent"])

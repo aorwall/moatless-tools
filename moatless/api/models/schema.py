@@ -64,3 +64,20 @@ class AddModelFromBaseDTO(BaseModel):
     base_model_id: str = Field(..., description="ID of the base model to copy from")
     new_model_id: str = Field(..., description="ID for the new model")
     updates: Optional[ModelConfigUpdateDTO] = Field(None, description="Optional configuration updates to apply")
+
+class CreateModelDTO(BaseModel):
+    """Request model for creating a new model from scratch"""
+    id: str = Field(..., description="ID for the new model")
+    model: str = Field(..., description="LiteLLM model identifier (e.g. deepseek-chat)")
+    model_base_url: Optional[str] = Field(None, description="Base URL for the model API (optional)")
+    model_api_key: Optional[str] = Field(None, description="API key for the model (optional)")
+    temperature: float = Field(0.7, description="Temperature for model sampling")
+    max_tokens: int = Field(4096, description="Maximum number of tokens to generate")
+    timeout: float = Field(120.0, description="Timeout in seconds for model requests")
+    thoughts_in_action: bool = Field(False, description="Include thoughts in action steps")
+    disable_thoughts: bool = Field(False, description="Disable thought generation completely")
+    merge_same_role_messages: bool = Field(False, description="Merge consecutive messages with same role")
+    message_cache: bool = Field(True, description="Enable caching of message responses")
+    few_shot_examples: bool = Field(True, description="Include few-shot examples in prompts")
+    response_format: str = Field(..., description="Format for model responses")
+    message_history_type: str = Field(..., description="Type of message history to use")

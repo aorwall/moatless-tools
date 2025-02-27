@@ -235,7 +235,7 @@ Basic setup using the `AgenticLoop` to solve a SWE-Bench instance.
 ## Example 1: Using Claude 3.5 Sonnet
 ```python
 from moatless.benchmark.swebench import create_repository
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.agent.code_agent import CodingAgent
 from moatless.index import CodeIndex
 from moatless.loop import AgenticLoop
@@ -288,7 +288,7 @@ if final_node:
 ## Example 2: Using Deepseek V3
 ```python
 from moatless.benchmark.swebench import create_repository
-from moatless.benchmark.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.agent.code_agent import CodingAgent
 from moatless.index import CodeIndex
 from moatless.loop import AgenticLoop

@@ -70,6 +70,7 @@ class RunTests(Action):
         test_files = []
 
         for test_file in args.test_files:
+            test_file = test_file.split("::")[0]
             if not self._repository.file_exists(test_file) and not file_context.file_exists(test_file):
                 logger.warning(f"File {test_file} does not exist in repository")
                 non_existent_files.append(test_file)

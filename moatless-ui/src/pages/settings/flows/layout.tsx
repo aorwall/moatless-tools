@@ -1,21 +1,16 @@
-import { Outlet, useNavigate, useParams, useLocation } from "react-router-dom";
+import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { DataExplorer } from "@/lib/components/DataExplorer";
-import { useFlows, useCreateFlow } from "@/lib/hooks/useFlows";
+import { useFlows } from "@/lib/hooks/useFlows";
 import type { FlowConfig } from "@/lib/types/flow";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 import { Button } from "@/lib/components/ui/button";
-import { PlusCircle } from "lucide-react";
-import { toast } from "sonner";
 
 export function FlowsLayout() {
   const navigate = useNavigate();
   const { id } = useParams();
-  const location = useLocation();
-  const isNewPage = location.pathname.endsWith('/new');
-  const { data: flows, isLoading, error } = useFlows();
-  const createFlowMutation = useCreateFlow();
+  const { data: flows = [], isLoading, error } = useFlows();
 
   const filterFields = [
     { name: "id", type: "text" as const },
@@ -29,10 +24,6 @@ export function FlowsLayout() {
 
   const handleFlowSelect = (flow: FlowConfig) => {
     navigate(`/settings/flows/${encodeURIComponent(flow.id)}`);
-  };
-
-  const handleCreateFlow = () => {
-    navigate("/settings/flows/new");
   };
 
   if (isLoading) {
@@ -57,32 +48,50 @@ export function FlowsLayout() {
   }
 
   const flowList = (
-    <div className="flex h-full flex-col">
-      <div className="flex-none p-4 border-b">
-        <Button onClick={handleCreateFlow}>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Create Flow
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between p-4 border-b">
+        <h2 className="font-semibold">Flows</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate("/settings/flows/new")}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          Add Flow
         </Button>
       </div>
-      <div className="flex-1 min-h-0">
-        {flows?.length ? (
-          <DataExplorer
-            items={flows}
-            filterFields={filterFields}
-            itemDisplay={getFlowDisplay}
-            onSelect={handleFlowSelect}
-            selectedItem={flows.find((f) => f.id === id)}
-          />
-        ) : !isNewPage && (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center text-gray-500">
-              No flows configured yet
-            </div>
-          </div>
-        )}
-      </div>
+
+      {flows.length > 0 ? (
+        <DataExplorer
+          items={flows}
+          filterFields={filterFields}
+          itemDisplay={getFlowDisplay}
+          onSelect={handleFlowSelect}
+          selectedItem={flows.find((f) => f.id === id)}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+          <p className="text-sm text-gray-500 mb-4">No flows configured</p>
+          <Button
+            variant="outline"
+            onClick={() => navigate("/settings/flows/new")}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Flow
+          </Button>
+        </div>
+      )}
     </div>
   );
 
-  return <SplitLayout left={flowList} right={<Outlet />} />;
+  return (
+    <SplitLayout
+      left={flowList}
+      right={
+        <div className="h-full min-h-0 overflow-hidden">
+          <Outlet />
+        </div>
+      }
+    />
+  );
 } 

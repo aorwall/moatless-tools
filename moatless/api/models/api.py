@@ -4,6 +4,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
+from moatless.completion.base import LLMResponseFormat
 from moatless.completion.manager import (
     ModelTestResult,
     get_model_config,
@@ -14,13 +15,16 @@ from moatless.completion.manager import (
     update_model_config,
     delete_model_config,
     ModelConfig,
-    _manager
+    _manager,
+    create_model
 )
+from moatless.schema import MessageHistoryType
 from .schema import (
     ModelConfigUpdateDTO,
     ModelsResponseDTO,
     BaseModelsResponseDTO,
-    AddModelFromBaseDTO
+    AddModelFromBaseDTO,
+    CreateModelDTO
 )
 
 logger = logging.getLogger(__name__)
@@ -58,12 +62,31 @@ async def read_base_model_config(model_id: str) -> ModelConfig:
         raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("", response_model=ModelConfig)
+async def add_model(request: CreateModelDTO) -> ModelConfig:
+    """Add a new model configuration
+    """
+    try:
+
+        logger.info(f"Creating new model {request.id} from scratch")
+        # Convert string enums to proper enum types
+        request_dict = request.model_dump()
+        request_dict["response_format"] = LLMResponseFormat(request_dict["response_format"])
+        request_dict["message_history_type"] = MessageHistoryType(request_dict["message_history_type"])
+        model_config = ModelConfig(**request_dict)
+        return create_model(model_config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/base", response_model=ModelConfig)
 async def add_model(request: AddModelFromBaseDTO) -> ModelConfig:
-    """Add a new model configuration based on a base model"""
+    """
+    Creating from a base model (when base_model_id is provided)
+    """
     try:
         logger.info(f"Adding new model {request.new_model_id} from base {request.base_model_id}")
         updates = request.updates.model_dump() if request.updates else None
         return add_model_from_base(request.base_model_id, request.new_model_id, updates)
+        
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

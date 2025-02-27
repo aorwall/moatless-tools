@@ -33,6 +33,7 @@ interface EvaluationFormProps {
 export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormProps) {
   const { data: datasetsResponse, isError } = useDatasetsList();
   const { lastUsedModel } = useLastUsedStore();
+  const [isNameManuallyEdited, setIsNameManuallyEdited] = React.useState(false);
   
   const generateDefaultName = (values: Partial<EvaluationFormData>) => {
     const date = format(new Date(), 'yyyyMMdd');
@@ -52,13 +53,15 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
   // Watch for changes in relevant fields to update the name
   const watchedFields = form.watch(['flow_id', 'model_id', 'dataset']);
   React.useEffect(() => {
-    const newName = generateDefaultName({
-      flow_id: watchedFields[0],
-      model_id: watchedFields[1],
-      dataset: watchedFields[2],
-    });
-    form.setValue('name', newName);
-  }, [watchedFields]);
+    if (!isNameManuallyEdited) {
+      const newName = generateDefaultName({
+        flow_id: watchedFields[0],
+        model_id: watchedFields[1],
+        dataset: watchedFields[2],
+      });
+      form.setValue('name', newName);
+    }
+  }, [watchedFields, isNameManuallyEdited]);
 
   if (isError) {
     toast.error("Failed to load datasets");
@@ -71,7 +74,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
   };
 
   return (
-    <Card>
+    <Card className="mb-8">
       <CardHeader>
         <CardTitle>Start New Evaluation</CardTitle>
       </CardHeader>
@@ -95,9 +98,6 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                           onFlowSelect={field.onChange}
                         />
                       </FormControl>
-                      <FormDescription>
-                        The flow that will process the instances
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -115,9 +115,6 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                           onModelSelect={field.onChange}
                         />
                       </FormControl>
-                      <FormDescription>
-                        The language model to use for evaluation
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -172,7 +169,13 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                   <FormItem>
                     <FormLabel>Name</FormLabel>
                     <FormControl>
-                      <Input {...field} />
+                      <Input 
+                        {...field} 
+                        onChange={(e) => {
+                          setIsNameManuallyEdited(true);
+                          field.onChange(e);
+                        }}
+                      />
                     </FormControl>
                     <FormDescription>
                       A unique identifier for this evaluation

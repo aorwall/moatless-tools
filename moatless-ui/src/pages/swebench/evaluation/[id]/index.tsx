@@ -1,17 +1,10 @@
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
 import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationInstance";
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/lib/components/ui/resizable";
 import { Alert, AlertDescription } from "@/lib/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/lib/components/ui/card";
-import { Button } from "@/lib/components/ui/button";
-import { ChevronLeft } from "lucide-react";
 
 export function EvaluationInstancePage() {
   const { evaluationId, instanceId } = useParams<{ evaluationId: string; instanceId: string }>();
@@ -26,8 +19,8 @@ export function EvaluationInstancePage() {
 
   if (!evaluationId || !instanceId) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
+      <div className="h-full flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>Missing evaluation or instance ID</AlertDescription>
         </Alert>
@@ -37,8 +30,8 @@ export function EvaluationInstancePage() {
 
   if (evalError) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
+      <div className="h-full flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             {evaluationError instanceof Error ? evaluationError.message : "Failed to load evaluation data"}
@@ -50,8 +43,8 @@ export function EvaluationInstancePage() {
 
   if (!evaluation) {
     return (
-      <div className="container mx-auto p-6">
-        <Card>
+      <div className="h-full flex items-center justify-center p-4">
+        <Card className="max-w-md">
           <CardContent className="py-6">
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -65,8 +58,8 @@ export function EvaluationInstancePage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto p-6">
-        <Card>
+      <div className="h-full flex items-center justify-center p-4">
+        <Card className="max-w-md">
           <CardContent className="py-6">
             <div className="flex items-center justify-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -80,8 +73,8 @@ export function EvaluationInstancePage() {
 
   if (trajectoryError || !trajectory) {
     return (
-      <div className="container mx-auto p-6">
-        <Alert variant="destructive">
+      <div className="h-full flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
             {trajectoryErrorData instanceof Error ? trajectoryErrorData.message : "Failed to load trajectory data"}
@@ -92,13 +85,8 @@ export function EvaluationInstancePage() {
   }
 
   return (
-    <div className="h-[calc(100vh-56px)]">
-      <ResizablePanelGroup direction="horizontal" className="h-full border rounded-lg">
-        <ResizableHandle className="bg-border hover:bg-ring" />
-        <ResizablePanel defaultSize={85}>
-          <TrajectoryViewer trajectory={trajectory} />
-        </ResizablePanel>
-      </ResizablePanelGroup>
+    <div className="h-full w-full">
+      <TrajectoryViewer trajectory={trajectory} />
     </div>
   );
 } 

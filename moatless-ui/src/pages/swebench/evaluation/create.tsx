@@ -2,7 +2,6 @@
 
 import { toast } from "sonner";
 import { PageLayout } from "@/lib/components/layouts/PageLayout";
-import { ScrollArea } from "@/lib/components/ui/scroll-area";
 import { useNavigate } from "react-router-dom";
 import EvaluationForm from "@/features/swebench/components/EvaluationForm";
 import { useEvaluationCreate } from "@/features/swebench/hooks/useEvaluationCreate";
@@ -33,11 +32,9 @@ export function CreateEvaluationPage() {
         <h1 className="text-2xl font-bold">New Evaluation</h1>
       </div>
 
-      <ScrollArea className="h-[calc(100vh-56px-8rem)]">
-        <div className="space-y-8 pr-4">
-          <EvaluationForm onSubmit={handleSubmit} isLoading={isPending} />
-        </div>
-      </ScrollArea>
+      <div className="space-y-8">
+        <EvaluationForm onSubmit={handleSubmit} isLoading={isPending} />
+      </div>
     </PageLayout>
   );
 } 

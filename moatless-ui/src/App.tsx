@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { RootLayout } from "@/layouts/RootLayout";
 import { SettingsLayout } from "@/layouts/SettingsLayout";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -30,6 +30,8 @@ import { CreateEvaluationPage } from "@/pages/swebench/evaluation/create";
 import { EvaluationDetailsPage } from "@/pages/swebench/evaluation/[id]";
 import { EvaluationInstancePage } from "@/pages/swebench/evaluation/[id]/index";
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
+import { BaseModelsPage } from "./pages/settings/models/base";
+import { CreateModelPage } from "./pages/settings/models/create";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,7 +50,7 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<RootLayout />}>
-                <Route index element={<Home />} />
+                <Route index element={<Navigate to="/swebench/evaluation" replace />} />
                 <Route path="trajectory" element={<Trajectory />} />
                 <Route path="validate" element={<ValidatePage />} />
                 <Route path="loop" element={<LoopPage />} />
@@ -62,6 +64,8 @@ function App() {
                   </Route>
                   <Route path="models" element={<ModelsLayout />}>
                     <Route index element={<ModelsPage />} />
+                    <Route path="base" element={<BaseModelsPage />} />
+                    <Route path="create" element={<CreateModelPage />} />
                     <Route path=":id" element={<ModelDetailPage />} />
                   </Route>
                   <Route path="flows" element={<FlowsLayout />}>

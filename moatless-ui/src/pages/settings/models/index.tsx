@@ -8,8 +8,8 @@ export function ModelsPage() {
   const { id } = useParams();
   const updateModelMutation = useUpdateModel();
 
-  // Don't try to load model details for the base models view
-  if (id === "base") {
+  // Don't try to load model details for the base models view or create view
+  if (id === "base" || id === "create") {
     return null;
   }
 

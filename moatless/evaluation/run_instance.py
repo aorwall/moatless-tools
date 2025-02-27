@@ -55,6 +55,8 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
     print(f"Setting up job logging for run in {trajectory_dir}")
     original_handlers = _setup_job_logging("run", trajectory_dir)
     
+    logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
+    
     try:
         swebench_instance = get_moatless_instance(instance_id=trajectory_id)
         repository = create_repository(swebench_instance, repo_base_dir="/tmp/moatless_repos")
@@ -87,6 +89,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
         _emit_event(
             evaluation_name=project_id,
             instance_id=trajectory_id,
+            scope="evaluation",
             event_type="error",
             data={
                 "error": str(e)
@@ -99,7 +102,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
 async def _run_instance(evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict) -> None:
     current_project_id.set(evaluation_name)
     current_trajectory_id.set(instance_id)
-    
+    logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
     with tracer.start_as_current_span(f"run_instance_{instance_id}") as span:    
         
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
@@ -208,6 +211,7 @@ def _emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: 
         event_type=event_type,
         data=data
     )
+
 
     try:
         run_async(event_bus.publish(event))

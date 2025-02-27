@@ -116,18 +116,29 @@ class FlowManager:
 
     def _load_configs(self):
         """Load configurations from JSON file."""
-        if not self._get_config_path().exists():
+        config_path = self._get_config_path()
+        
+        # Copy global config to local path if it doesn't exist
+        if not config_path.exists():
             try:
-                with open(self._get_global_config_path()) as f:
-                    global_config = json.load(f)
-                    for id, tree_config in global_config.items():
-                        tree_config["id"] = id
-                        self._configs[id] = tree_config
-            except FileNotFoundError:
-                logger.info("No global tree configs found")
-        else:
-            try:
-                with open(self._get_config_path()) as f:
+                global_path = self._get_global_config_path()
+                if global_path.exists():
+                    # Copy global config to local path
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(global_path) as f:
+                        global_config = json.load(f)
+                        with open(config_path, 'w') as local_f:
+                            json.dump(global_config, local_f, indent=2)
+                    logger.info("Copied global config to local path")
+                else:
+                    logger.info("No global tree configs found")
+            except Exception as e:
+                logger.error(f"Failed to copy global tree configs: {e}")
+
+        # Load configs from local path
+        try:
+            if config_path.exists():
+                with open(config_path) as f:
                     configs = json.load(f)
                 logger.info(f"Loaded {len(configs)} tree configs")
                 for config in configs:
@@ -136,9 +147,11 @@ class FlowManager:
                         logger.info(f"Loaded tree config {config['id']}")
                     except Exception as e:
                         logger.error(f"Failed to load tree config {config['id']}: {e}")
-            except Exception as e:
-                logger.error(f"Failed to load tree configs: {e}")
-                raise e
+            else:
+                logger.info("No local tree configs found")
+        except Exception as e:
+            logger.error(f"Failed to load tree configs: {e}")
+            raise e
 
     def _save_configs(self):
         """Save configurations to JSON file."""

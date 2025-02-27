@@ -7,6 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 import { Button } from "@/lib/components/ui/button";
 import { BaseModelsList } from "./components/BaseModelsList";
+import { CreateModelForm } from "./components/CreateModelForm";
 
 export function ModelsLayout() {
   const navigate = useNavigate();
@@ -55,7 +56,7 @@ export function ModelsLayout() {
   const modelList = (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between p-4 border-b">
-        <h2 className="font-semibold">My Models</h2>
+        <h2 className="font-semibold">Models</h2>
         <Button
           variant="outline"
           size="sm"
@@ -82,23 +83,21 @@ export function ModelsLayout() {
             onClick={() => navigate("/settings/models/base")}
           >
             <Plus className="h-4 w-4 mr-2" />
-            Add from Base Models
+            Add Model
           </Button>
         </div>
       )}
     </div>
   );
 
+  const getRightContent = () => {
+    return <Outlet />;
+  };
+
   return (
     <SplitLayout
       left={modelList}
-      right={
-        id === "base" ? (
-          <BaseModelsList />
-        ) : (
-          <Outlet />
-        )
-      }
+      right={getRightContent()}
     />
   );
 }

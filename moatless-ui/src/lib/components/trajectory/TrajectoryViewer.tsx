@@ -44,6 +44,8 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
     icon: React.ReactNode
   }
   
+  const enableTabs = false;
+
   const tabs: TabItem[] = [
     ...(trajectory.system_status.error ? [{
       id: "error",
@@ -73,7 +75,7 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
         direction="horizontal"
         className="h-full border rounded-lg"
       >
-        <ResizablePanel defaultSize={25} minSize={20} className="border-r">
+        <ResizablePanel defaultSize={25} minSize={0} className="border-r">
           <ResizablePanelGroup direction="vertical">
             {/* Status Panel */}
             <ResizablePanel 
@@ -114,7 +116,8 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
 
         {/* Middle Panel */}
         <ResizablePanel defaultSize={50} className="border-x">
-          <Tabs 
+          {enableTabs ? (
+            <Tabs 
             defaultValue={trajectory.system_status.error ? "error" : "timeline"} 
             className="flex h-full flex-col"
           >
@@ -177,7 +180,12 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
             >
               <Artifacts trajectoryId={trajectory.id} />
             </TabsContent>
-          </Tabs>
+          </Tabs> 
+          ) : (
+            <div className="flex-1 p-6 min-w-[600px]">
+              <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+            </div>
+          )}
         </ResizablePanel>
 
         <ResizableHandle className="bg-border hover:bg-ring" />

@@ -556,8 +556,9 @@ class Node(BaseModel):
         if not root_nodes:
             raise ValueError("No root node found in data")
 
-        tree = generate_ascii_tree(root_nodes[0])
-        logger.info(f"Reconstructed tree:\n{tree}")
+        if logger.isEnabledFor(logging.DEBUG):  
+            tree = generate_ascii_tree(root_nodes[0])
+            logger.debug(f"Reconstructed tree:\n{tree}")
         return root_nodes[0]
 
     def dump_as_list(self, **kwargs) -> List[Dict[str, Any]]:
