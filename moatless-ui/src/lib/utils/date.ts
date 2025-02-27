@@ -1,4 +1,4 @@
-export const formatDate = (timestamp: number) => {
+export const formatDate = (timestamp: number | string) => {
   const date = new Date(timestamp);
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',

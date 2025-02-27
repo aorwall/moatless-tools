@@ -54,10 +54,16 @@ export const TrajectoryNode = ({
     switch (action.name) {
       case 'ViewCode':
       case 'StringReplace':
+      case 'str_replace_editor':
         return (
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-sm text-gray-700">{action.name}</span>
+              {action.properties?.command && (
+                <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
+                  {action.properties.command}
+                </span>
+              )}
               {path && (
                 <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
                   {path}

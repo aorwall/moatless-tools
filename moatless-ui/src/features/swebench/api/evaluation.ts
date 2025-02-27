@@ -19,6 +19,7 @@ export interface EvaluationRequest {
 export interface EvaluationInstance {
   instance_id: string;
   status: string;
+  job_status: string;
   error?: string;
   created_at: string;
   started_at?: string;
@@ -26,6 +27,14 @@ export interface EvaluationInstance {
   evaluated_at?: string;
   error_at?: string;
   resolved?: boolean;
+  resolved_by?: number;
+  reward?: number;
+  usage?: {
+    completion_cost?: number;
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    cache_read_tokens?: number;
+  };
 }
 
 export interface Evaluation {
@@ -87,6 +96,14 @@ export const evaluationApi = {
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/start`, {
       method: 'POST',
       body: JSON.stringify({ num_concurrent_instances: numConcurrentInstances }),
+    }),
+
+  cloneEvaluation: (evaluationId: string) =>
+    apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/clone`),
+
+  processEvaluationResults: (evaluationId: string) =>
+    apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/process`, {
+      method: 'POST',
     }),
 
   getEvaluation: (evaluationId: string) =>

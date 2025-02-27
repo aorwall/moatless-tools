@@ -7,4 +7,3 @@ export * from "./items/CompletionTrajectoryItem";
 export * from "./items/ErrorTrajectoryItem";
 export * from "./items/MessageTrajectoryItem";
 export * from "./items/ObservationTrajectoryItem";
-export * from "./items/WorkspaceTrajectoryItem";

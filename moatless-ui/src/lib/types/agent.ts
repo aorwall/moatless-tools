@@ -12,6 +12,7 @@ export interface ActionSchema {
   description: string;
   type: string;
   properties: Record<string, ActionProperty>;
+  action_class?: string;
 }
 
 export const ActionConfigSchema = z.object({

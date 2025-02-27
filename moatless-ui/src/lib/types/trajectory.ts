@@ -1,4 +1,3 @@
-
 export interface ResumeTrajectoryRequest {
   agent_id: string;
   model_id: string;
@@ -21,7 +20,11 @@ export type TimelineItemType =
   | "observation"
   | "error"
   | "workspace"
-  | "artifact";
+  | "workspace_files"
+  | "workspace_context"
+  | "workspace_tests"
+  | "artifact"
+  | "reward";
 
 export type TimelineContent = 
   | UserMessageContent
@@ -198,6 +201,7 @@ export interface ArtifactChangeContent {
 
 export interface TrajectoryEvent {
   timestamp: number;
+  scope?: string;
   event_type: string;
   node_id?: number;
   agent_id?: string;

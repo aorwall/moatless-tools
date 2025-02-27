@@ -1,15 +1,12 @@
-import { Badge } from "@/lib/components/ui/badge";
 import { Card } from "@/lib/components/ui/card";
 import { format } from "date-fns";
 import { type Evaluation } from "../api/evaluation";
 
 interface EvaluationStatusProps {
   evaluation: Evaluation;
-  getStatusColor: (status: string) => "default" | "secondary" | "destructive" | "outline";
-  formatDate: (date: string) => string;
 }
 
-export function EvaluationStatus({ evaluation, getStatusColor, formatDate }: EvaluationStatusProps) {
+export function EvaluationStatus({ evaluation }: EvaluationStatusProps) {
   // Calculate status counts
   const statusCounts = evaluation.instances.reduce((acc, instance) => {
     // Special handling for resolved/completed instances
@@ -37,15 +34,9 @@ export function EvaluationStatus({ evaluation, getStatusColor, formatDate }: Eva
   };
 
   // Get status segments in order of priority
-  const statusSegments = [
-    { status: 'error', count: statusCounts['error'] || 0 },
-    { status: 'running', count: statusCounts['running'] || 0 },
-    { status: 'evaluating', count: statusCounts['evaluating'] || 0 },
-    { status: 'resolved', count: statusCounts['resolved'] || 0 },
-    { status: 'failed', count: statusCounts['failed'] || 0 },
-    { status: 'completed', count: statusCounts['completed'] || 0 },
-    { status: 'pending', count: statusCounts['pending'] || 0 },
-  ].filter(segment => segment.count > 0);
+  const statusSegments = Object.entries(statusCounts)
+    .map(([status, count]) => ({ status, count }))
+    .filter(segment => segment.count > 0);
 
   const overallStatus = evaluation.status.toLowerCase();
 

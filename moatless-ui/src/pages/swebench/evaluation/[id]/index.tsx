@@ -2,7 +2,6 @@ import { useParams, useNavigate } from "react-router-dom";
 import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
 import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationInstance";
-import { InstanceList } from "../components/InstanceList";
 import {
   ResizableHandle,
   ResizablePanel,

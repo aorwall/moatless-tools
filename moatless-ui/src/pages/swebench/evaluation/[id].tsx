@@ -7,12 +7,10 @@ import { EvaluationInstance } from "@/features/swebench/api/evaluation";
 import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 import { DataExplorer } from "@/lib/components/DataExplorer";
 import { useState, useRef, useEffect } from "react";
-import { EvaluationOverview } from "@/features/swebench/components/EvaluationOverview";
-import { InstanceDetails } from "@/features/swebench/components/InstanceDetails";
-import { EvaluationDetails } from "@/features/swebench/components/EvaluationDetails";
 import { useWebSocketStore } from "@/lib/stores/websocketStore";
 import { useQueryClient } from "@tanstack/react-query";
 import debounce from "lodash/debounce";
+import { EvaluationPage } from "@/features/swebench/pages/EvaluationPage";
 
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
@@ -23,7 +21,6 @@ export function EvaluationDetailsPage() {
   const { subscribe } = useWebSocketStore();
   const lastUpdateTime = useRef<number>(0);
   const { data: evaluation, isLoading, error } = useEvaluation(evaluationId!);
-  const [selectedInstance, setSelectedInstance] = useState<EvaluationInstance | null>(null);
 
   // Create debounced refresh function
   const debouncedRefresh = debounce(() => {
@@ -49,41 +46,6 @@ export function EvaluationDetailsPage() {
       debouncedRefresh.cancel();
     };
   }, [evaluationId, subscribe, queryClient]);
-
-  const getStatusColor = (status: string): BadgeVariant => {
-    switch (status.toLowerCase()) {
-      case "running": return "default";
-      case "completed": return "secondary";
-      case "error": return "destructive";
-      case "pending": return "outline";
-      default: return "secondary";
-    }
-  };
-
-  const formatDate = (date: string) => {
-    return new Date(date).toLocaleString();
-  };
-
-  const calculateProgress = () => {
-    if (!evaluation) return 0;
-    const terminalStates = ["resolved", "failed", "evaluated", "error"];
-    const completed = evaluation.instances.filter((i: EvaluationInstance) => 
-      terminalStates.includes(i.status.toLowerCase())
-    ).length;
-    return (completed / evaluation.instances.length) * 100;
-  };
-
-  const getResolutionStats = () => {
-    if (!evaluation) return { resolved: 0, total: 0, percentage: 0 };
-    const resolved = evaluation.instances.filter(i => i.status.toLowerCase() === "resolved").length;
-    const terminalStates = ["resolved", "failed", "evaluated", "error"];
-    const total = evaluation.instances.filter(i => terminalStates.includes(i.status.toLowerCase())).length;
-    return {
-      resolved,
-      total,
-      percentage: total > 0 ? (resolved / total) * 100 : 0
-    };
-  };
 
   if (error) {
     return (
@@ -118,12 +80,8 @@ export function EvaluationDetailsPage() {
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 min-h-0 overflow-auto">
-        <EvaluationDetails
+        <EvaluationPage
           evaluation={evaluation}
-          getStatusColor={getStatusColor}
-          formatDate={formatDate}
-          calculateProgress={calculateProgress}
-          getResolutionStats={getResolutionStats}
         />
       </div>
     </div>

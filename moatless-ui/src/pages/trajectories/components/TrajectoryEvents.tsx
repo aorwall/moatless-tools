@@ -21,20 +21,14 @@ export function TrajectoryEvents({ events, className }: TrajectoryEventsProps) {
   // just sort in reverse order
   const reversedEvents = [...events].reverse();
 
-  const getEventIcon = (type: string) => {
-    if (type.includes("error")) {
+  const getEventIcon = (event: TrajectoryEvent) => {
+    if (event.event_type.includes("error")) {
       return <AlertCircle className="h-4 w-4 text-destructive" />;
-    } else if (type.includes("agent")) {
+    } else if (event.scope === "agent" || event.scope === "action") {
       return <Bot className="h-4 w-4 text-primary" />;
-    } else if (type === "flow") {
+    } else if (event.scope === "flow") {
       return <GitBranch className="h-4 w-4 text-blue-500" />;
-    }
-    switch (type) {
-      case "system_message":
-        return <Terminal className="h-4 w-4 text-muted-foreground" />;
-      case "user_message":
-        return <MessageSquare className="h-4 w-4 text-blue-500" />;
-      default:
+    } else {
         return <Info className="h-4 w-4 text-muted-foreground" />;
     }
   };
@@ -66,7 +60,7 @@ export function TrajectoryEvents({ events, className }: TrajectoryEventsProps) {
         >
           <div className="flex items-center justify-between mb-1">
             <div className="flex items-center gap-2">
-              {getEventIcon(event.event_type)}
+              {getEventIcon(event)}
               <span className="font-medium">
                 {formatEventType(event.event_type)}
               </span>

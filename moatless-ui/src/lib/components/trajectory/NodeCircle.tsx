@@ -14,42 +14,13 @@ interface NodeCircleProps {
   trajectory: Trajectory;
 }
 
-const COLOR_MAPPINGS = {
-  blue: {
-    border: 'border-blue-500',
-    hover: 'hover:border-blue-600 hover:bg-blue-50',
-    text: 'text-blue-500',
-    hoverText: 'group-hover:text-blue-600',
-    bgLight: 'bg-blue-50',
-  },
-  red: {
-    border: 'border-red-500',
-    hover: 'hover:border-red-600 hover:bg-red-50',
-    text: 'text-red-500',
-    hoverText: 'group-hover:text-red-600',
-    bgLight: 'bg-red-50',
-  },
-  yellow: {
-    border: 'border-yellow-500',
-    hover: 'hover:border-yellow-600 hover:bg-yellow-50',
-    text: 'text-yellow-500',
-    hoverText: 'group-hover:text-yellow-600',
-    bgLight: 'bg-yellow-50',
-  },
-  green: {
-    border: 'border-green-500',
-    hover: 'hover:border-green-600 hover:bg-green-50',
-    text: 'text-green-500',
-    hoverText: 'group-hover:text-green-600',
-    bgLight: 'bg-green-50',
-  },
-  default: {
-    border: 'border-gray-300',
-    hover: 'hover:border-gray-400 hover:bg-gray-50',
-    text: 'text-gray-400',
-    hoverText: 'group-hover:text-gray-500',
-    bgLight: 'bg-gray-50',
-  },
+// Single color theme for all nodes
+const NODE_COLOR = {
+  border: 'border-slate-400',
+  hover: 'hover:border-slate-500 hover:bg-slate-50',
+  text: 'text-slate-600',
+  hoverText: 'group-hover:text-slate-700',
+  bgLight: 'bg-slate-50',
 } as const;
 
 const NODE_LAYOUT = {
@@ -64,29 +35,20 @@ const NODE_LAYOUT = {
   }
 } as const;
 
-function getRewardColor(reward: Reward): string {
+// Function to determine reward badge color
+function getRewardColor(reward: Reward) {
   // Clamp the reward value between -100 and 100
   const clampedReward = Math.max(-100, Math.min(100, reward.value));
   
-  if (clampedReward === 0) return "yellow";
-  
-  if (clampedReward < 0) {
-    // For negative values, interpolate between red (-100) and yellow (0)
-    return clampedReward <= -50 ? "red" : "yellow";
+  if (clampedReward < -50) {
+    return "bg-red-50 border-red-200 text-red-700";
+  } else if (clampedReward < 0) {
+    return "bg-yellow-50 border-yellow-200 text-yellow-700";
+  } else if (clampedReward > 50) {
+    return "bg-green-50 border-green-200 text-green-700";
+  } else {
+    return "bg-yellow-50 border-yellow-200 text-yellow-700";
   }
-  
-  // For positive values, interpolate between yellow (0) and green (100)
-  return clampedReward >= 50 ? "green" : "yellow";
-}
-
-function getNodeColor(node: Node, isRunning: boolean): string {
-    if (node.nodeId === 0) return "blue";
-    if (node.error) return "red";
-    if (node.allNodeErrors.length > 0) return "red";
-    if (node.allNodeWarnings.length > 0) return "yellow";
-    if (node.reward) return getRewardColor(node.reward);
-    if (node.executed) return "green";
-    return "gray";
 }
 
 function formatReward(reward: number): string {
@@ -94,8 +56,7 @@ function formatReward(reward: number): string {
 }
 
 export function NodeCircle({ node, isLastNode, isRunning, onClick, trajectory }: NodeCircleProps) {
-  const nodeColor = getNodeColor(node, isRunning);
-  const colors = COLOR_MAPPINGS[nodeColor as keyof typeof COLOR_MAPPINGS] || COLOR_MAPPINGS.default;
+  const colors = NODE_COLOR;
   const showSpinner = node.nodeId !== 0 && isRunning && isLastNode;
   const isBranched = node.children && node.children.length > 1;
   
@@ -203,11 +164,7 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick, trajectory }:
                   "flex items-center justify-center rounded-full shadow-sm px-1.5 py-0.5",
                   "text-[10px] font-medium",
                   "border",
-                  {
-                    "bg-red-50 border-red-200 text-red-700": node.reward.value < -50,
-                    "bg-yellow-50 border-yellow-200 text-yellow-700": node.reward.value >= -50 && node.reward.value <= 50,
-                    "bg-green-50 border-green-200 text-green-700": node.reward.value > 50,
-                  }
+                  getRewardColor(node.reward)
                 )}>
                   {formatReward(node.reward.value)}
                 </span>
@@ -263,13 +220,13 @@ export function NodeCircle({ node, isLastNode, isRunning, onClick, trajectory }:
         onClick={onClick}
       >
         {showSpinner ? (
-          <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+          <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
         ) : (
           <div className="flex flex-col items-center justify-center">
             {node.nodeId === 0 ? (
               <span className={cn(
                 "text-xs font-semibold",
-                "text-blue-700"
+                "text-slate-700"
               )}>
                 Start
               </span>

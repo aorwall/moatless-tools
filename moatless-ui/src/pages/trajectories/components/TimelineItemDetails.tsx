@@ -5,8 +5,11 @@ import { ActionDetails } from "@/lib/components/trajectory/details/ActionDetails
 import { ErrorDetails } from "@/lib/components/trajectory/details/ErrorDetails";
 import { MessageDetails } from "@/lib/components/trajectory/details/MessageDetails";
 import { ObservationDetails } from "@/lib/components/trajectory/details/ObservationDetails";
-import { WorkspaceDetails } from "@/lib/components/trajectory/details/WorkspaceDetails";
+import { WorkspaceFilesDetails } from "@/lib/components/trajectory/details/WorkspaceFilesDetails";
+import { WorkspaceContextDetails } from "@/lib/components/trajectory/details/WorkspaceContextDetails";
+import { WorkspaceTestsDetails } from "@/lib/components/trajectory/details/WorkspaceTestsDetails";
 import { ArtifactDetails } from "@/lib/components/trajectory/details/ArtifactDetails";
+import { RewardDetails } from "@/lib/components/trajectory/details/RewardDetails";
 import { Trajectory } from "@/lib/types/trajectory";
 
 interface TimelineItemDetailsProps {
@@ -44,10 +47,16 @@ export const TimelineItemDetails = ({ trajectoryId, trajectory }: TimelineItemDe
         );
       case "observation":
         return <ObservationDetails content={selectedItem.content} />;
-      case "workspace":
-        return <WorkspaceDetails content={selectedItem.content} />;
+      case "workspace_files":
+        return <WorkspaceFilesDetails content={selectedItem.content} />;
+      case "workspace_context":
+        return <WorkspaceContextDetails content={selectedItem.content} />;
+      case "workspace_tests":
+        return <WorkspaceTestsDetails content={selectedItem.content} />;
       case "artifact":
         return <ArtifactDetails content={selectedItem.content} trajectoryId={trajectoryId} />;
+      case "reward":
+        return <RewardDetails content={selectedItem.content} />;
       default:
         return <div>Unsupported item type</div>;
     }

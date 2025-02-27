@@ -10,11 +10,11 @@ type BadgeVariant = "default" | "secondary" | "destructive" | "outline";
 
 interface EvaluationOverviewProps {
   evaluation: Evaluation;
-  getStatusColor: (status: string) => BadgeVariant;
   calculateProgress: () => number;
+  getStatusColor: (status: string) => BadgeVariant;
 }
 
-export function EvaluationOverview({ evaluation, getStatusColor, calculateProgress }: EvaluationOverviewProps) {
+export function EvaluationOverview({ evaluation, calculateProgress, getStatusColor }: EvaluationOverviewProps) {
 
   return (
     <div className="border-b bg-muted/40 p-4">

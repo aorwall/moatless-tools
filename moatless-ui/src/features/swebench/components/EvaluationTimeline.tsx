@@ -1,11 +1,9 @@
-import { Badge } from "@/lib/components/ui/badge";
 import { format } from "date-fns";
 import { type Evaluation } from "../api/evaluation";
 import { Link } from "react-router-dom";
 
 interface EvaluationTimelineProps {
   evaluation: Evaluation;
-  getStatusColor: (status: string) => "default" | "secondary" | "destructive" | "outline";
 }
 
 const progressAnimation = `
@@ -56,7 +54,7 @@ function TimelineBar({ instance, isFirstSegment, left, width, children }: Timeli
   );
 }
 
-export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTimelineProps) {
+export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
   const now = new Date();
   const instances = evaluation.instances;
   
@@ -176,9 +174,11 @@ export function EvaluationTimeline({ evaluation, getStatusColor }: EvaluationTim
                 width={getPositionPercentage(instance.evaluated_at) - getPositionPercentage(instance.completed_at)}
               >
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[2px]">
-                  <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
-                    {instance.resolved ? "✓" : "✗"}
-                  </div>
+                  {instance.resolved != null && (
+                    <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
+                      {instance.resolved ? "✓" : "✗"}
+                    </div>
+                  )}
                 </div>
               </TimelineBar>
             )}

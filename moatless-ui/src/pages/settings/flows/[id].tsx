@@ -1,13 +1,17 @@
 import { useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { FlowDetail } from "@/pages/settings/flows/components/FlowDetail";
 import type { FlowConfig } from "@/lib/types/flow";
 import { toast } from "sonner";
 import { useFlow, useUpdateFlow } from "@/lib/hooks/useFlows";
-import { Loader2 } from "lucide-react";
+import { Loader2, Copy } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
+import { Button } from "@/lib/components/ui/button";
+import { generateResourceId } from "@/lib/utils/resourceDefaults";
 
 export function FlowDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { data: flow, isLoading, error } = useFlow(id!);
   const updateFlowMutation = useUpdateFlow();
 
@@ -19,6 +23,22 @@ export function FlowDetailPage() {
       toast.error("Failed to save changes");
       throw error;
     }
+  };
+
+  const handleDuplicate = () => {
+    if (!flow) return;
+    
+    // Create a duplicate flow with a new ID
+    const duplicatedFlow: FlowConfig = {
+      ...flow,
+      id: `${flow.id}-copy`,
+      description: flow.description ? `${flow.description} (Copy)` : "Copy of flow"
+    };
+    
+    // Navigate to the new flow page with the duplicated flow data
+    navigate("/settings/flows/new", { 
+      state: { duplicatedFlow }
+    });
   };
 
   if (isLoading) {
@@ -65,6 +85,14 @@ export function FlowDetailPage() {
               Flow Configuration
             </div>
           </div>
+          <Button 
+            variant="outline" 
+            onClick={handleDuplicate}
+            className="flex items-center gap-2"
+          >
+            <Copy className="h-4 w-4" />
+            Duplicate Flow
+          </Button>
         </div>
       </div>
 

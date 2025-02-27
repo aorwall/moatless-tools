@@ -28,8 +28,8 @@ import { NewFlowPage } from "@/pages/settings/flows/new";
 import { EvaluationsPage } from "@/pages/swebench/evaluation";
 import { CreateEvaluationPage } from "@/pages/swebench/evaluation/create";
 import { EvaluationDetailsPage } from "@/pages/swebench/evaluation/[id]";
-import { EvaluationInstancePage } from "@/pages/swebench/evaluation/[id]/[instanceId]";
-import { EvaluationLayout } from "@/pages/swebench/evaluation/components/EvaluationLayout";
+import { EvaluationInstancePage } from "@/pages/swebench/evaluation/[id]/index";
+import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -77,8 +77,8 @@ function App() {
                   <Route path="evaluation">
                     <Route index element={<EvaluationsPage />} />
                     <Route path="create" element={<CreateEvaluationPage />} />
+                    <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
                     <Route element={<EvaluationLayout />}>
-                      <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
                       <Route path=":evaluationId/:instanceId" element={<EvaluationInstancePage />} />
                     </Route>
                   </Route>

@@ -9,6 +9,8 @@ export function createActionConfigFromSchema(
     defaultProperties[key] = prop.default;
   });
 
+  defaultProperties["action_class"] = actionSchema.action_class;
+
   return {
     title: actionSchema.title,
     properties: defaultProperties,

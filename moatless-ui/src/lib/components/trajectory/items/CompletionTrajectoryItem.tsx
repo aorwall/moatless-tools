@@ -3,9 +3,9 @@ import { JsonView } from "@/lib/components/ui/json-view";
 
 export interface CompletionTimelineContent {
   usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    cachedTokens: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    cache_read_tokens: number;
   };
   input?: string | any;
   response?: string | any;
@@ -43,19 +43,19 @@ export const CompletionTrajectoryItem = ({
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Prompt</span>
             <span className="font-mono text-gray-900">
-              {content.usage.promptTokens}
+              {content.usage.prompt_tokens}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Completion</span>
             <span className="font-mono text-gray-900">
-              {content.usage.completionTokens}
+              {content.usage.completion_tokens}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Cached</span>
             <span className="font-mono text-gray-900">
-              {content.usage.cachedTokens}
+              {content.usage.cache_read_tokens}
             </span>
           </div>
         </div>

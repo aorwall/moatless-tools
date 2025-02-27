@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { FlowDetail } from "@/pages/settings/flows/components/FlowDetail";
 import type { FlowConfig } from "@/lib/types/flow";
 import { toast } from "sonner";
@@ -7,9 +7,13 @@ import { createDefaultFlow, generateResourceId } from "@/lib/utils/resourceDefau
 
 export function NewFlowPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const createFlowMutation = useCreateFlow();
 
-  const defaultFlow: FlowConfig = {
+  // Check if we have a duplicated flow from the location state
+  const duplicatedFlow = location.state?.duplicatedFlow as FlowConfig | undefined;
+
+  const defaultFlow: FlowConfig = duplicatedFlow || {
     id: "",
     ...createDefaultFlow(),
   };
@@ -30,9 +34,13 @@ export function NewFlowPage() {
       <div className="flex-none border-b px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">New Flow</h1>
+            <h1 className="text-2xl font-bold">
+              New Flow
+            </h1>
             <div className="mt-1 text-sm text-gray-500">
-              Create a new flow configuration
+              {duplicatedFlow 
+                ? "Create a new flow based on an existing configuration" 
+                : "Create a new flow configuration"}
             </div>
           </div>
         </div>

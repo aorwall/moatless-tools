@@ -17,14 +17,15 @@ import {
   ObservationTrajectoryItem,
   ObservationTimelineContent,
 } from "@/lib/components/trajectory/items/ObservationTrajectoryItem";
-import {
-  WorkspaceTrajectoryItem,
-  WorkspaceTimelineContent,
-} from "@/lib/components/trajectory/items/WorkspaceTrajectoryItem";
+
 import {
   ErrorTrajectoryItem,
   ErrorTimelineContent,
 } from "@/lib/components/trajectory/items/ErrorTrajectoryItem";
+import {
+  RewardTrajectoryItem,
+  RewardTimelineContent,
+} from "@/lib/components/trajectory/items/RewardTrajectoryItem";
 import { ExpandableItem } from "@/lib/components/trajectory/ExpandableItem";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
 import { Icons } from "@/lib/utils/icon-mappings";
@@ -34,6 +35,18 @@ import {
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
 import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
 import { cn } from "@/lib/utils";
+import {
+  WorkspaceFilesTrajectoryItem,
+  WorkspaceFilesTimelineContent,
+} from "@/lib/components/trajectory/items/WorkspaceFilesTrajectoryItem";
+import {
+  WorkspaceContextTrajectoryItem,
+  WorkspaceContextTimelineContent,
+} from "@/lib/components/trajectory/items/WorkspaceContextTrajectoryItem";
+import {
+  WorkspaceTestsTrajectoryItem,
+  WorkspaceTestsTimelineContent,
+} from "@/lib/components/trajectory/items/WorkspaceTestsTrajectoryItem";
 
 interface TimelineItemProps {
   type: string;
@@ -89,12 +102,14 @@ export const TimelineItem = ({
           : false;
       case "error":
         return content.error.split("\n").length > 1;
-      case "workspace":
-        return !!(
-          content.updatedFiles?.length ||
-          content.testResults?.length ||
-          content.files?.length
-        );
+      case "reward":
+        return !!content.explanation;
+      case "workspace_files":
+        return !!(content.updatedFiles?.length);
+      case "workspace_context":
+        return !!(content.files?.length);
+      case "workspace_tests":
+        return !!(content.test_files?.length);
       default:
         return false;
     }
@@ -133,10 +148,24 @@ export const TimelineItem = ({
             expandedState={false}
           />
         );
-      case "workspace":
+      case "workspace_files":
         return (
-          <WorkspaceTrajectoryItem
-            content={content as WorkspaceTimelineContent}
+          <WorkspaceFilesTrajectoryItem
+            content={content as WorkspaceFilesTimelineContent}
+            expandedState={false}
+          />
+        );
+      case "workspace_context":
+        return (
+          <WorkspaceContextTrajectoryItem
+            content={content as WorkspaceContextTimelineContent}
+            expandedState={false}
+          />
+        );
+      case "workspace_tests":
+        return (
+          <WorkspaceTestsTrajectoryItem
+            content={content as WorkspaceTestsTimelineContent}
             expandedState={false}
           />
         );
@@ -151,6 +180,13 @@ export const TimelineItem = ({
         return (
           <ArtifactTrajectoryItem
             content={content as ArtifactTimelineContent}
+            expandedState={false}
+          />
+        );
+      case "reward":
+        return (
+          <RewardTrajectoryItem
+            content={content as RewardTimelineContent}
             expandedState={false}
           />
         );
