@@ -12,12 +12,10 @@ export interface ArtifactTimelineContent {
 
 export interface ArtifactTrajectoryItemProps {
   content: ArtifactTimelineContent;
-  expandedState: boolean;
 }
 
 export const ArtifactTrajectoryItem: FC<ArtifactTrajectoryItemProps> = ({
   content,
-  expandedState,
 }) => {
   const getChangeTypeBadge = (type: string) => {
     switch (type) {
@@ -31,16 +29,6 @@ export const ArtifactTrajectoryItem: FC<ArtifactTrajectoryItemProps> = ({
         return null;
     }
   };
-
-  if (!expandedState) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-gray-600">
-        <span className="font-medium">{content.artifact_type}</span>
-        {getChangeTypeBadge(content.change_type)}
-        <span className="text-gray-400">by {content.actor}</span>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-2">

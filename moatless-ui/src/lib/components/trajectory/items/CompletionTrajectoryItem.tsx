@@ -14,26 +14,12 @@ export interface CompletionTimelineContent {
 export interface CompletionTrajectoryItemProps {
   content: CompletionTimelineContent;
   header?: string;
-  expandedState: boolean;
-  isExpandable?: boolean;
 }
-
-const parseJsonSafely = (str: string | any): any => {
-  if (typeof str !== "string") return str;
-  try {
-    return JSON.parse(str);
-  } catch (e) {
-    console.error(`Error parsing JSON: ${str}, ${e}`);
-    return str;
-  }
-};
 
 export const CompletionTrajectoryItem = ({
   content,
   header,
-  expandedState,
 }: CompletionTrajectoryItemProps) => {
-  const isExpandable = !!(content.input || content.response);
 
   return (
     <div className="space-y-4">
@@ -58,44 +44,6 @@ export const CompletionTrajectoryItem = ({
               {content.usage.cache_read_tokens}
             </span>
           </div>
-        </div>
-      )}
-
-      {expandedState && (
-        <div className="space-y-3">
-          {header && (
-            <div className="text-sm font-medium text-gray-900">{header}</div>
-          )}
-
-          {content.input && (
-            <div>
-              <div className="mb-2 text-xs font-medium text-gray-700">
-                Input
-              </div>
-              <div className="overflow-hidden rounded-md bg-gray-50">
-                <JsonView
-                  data={parseJsonSafely(content.input)}
-                  defaultExpanded={false}
-                  expanded={expandedState}
-                />
-              </div>
-            </div>
-          )}
-
-          {content.response && (
-            <div>
-              <div className="mb-2 text-xs font-medium text-gray-700">
-                Response
-              </div>
-              <div className="overflow-hidden rounded-md bg-gray-50">
-                <JsonView
-                  data={parseJsonSafely(content.response)}
-                  defaultExpanded={false}
-                  expanded={expandedState}
-                />
-              </div>
-            </div>
-          )}
         </div>
       )}
     </div>

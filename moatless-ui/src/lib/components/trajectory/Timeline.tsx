@@ -2,40 +2,22 @@ import { Node, Trajectory } from "@/lib/types/trajectory";
 import { TimelineItem } from "@/lib/components/trajectory/TimelineItem";
 import { TrajectoryNode } from "@/lib/components/trajectory/TrajectoryNode";
 import { NodeCircle } from '@/lib/components/trajectory/NodeCircle';
+import { UserMessageItem } from '@/lib/components/trajectory/UserMessageItem';
 import { cn } from "@/lib/utils";
 import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
+import './timeline.css';
 
+// Feature flags configuration - kept in JS since it's used for logic
 export const TIMELINE_CONFIG = {
-  // Horizontal spacing
-  nodePadding: {
-    sm: '12px',  // For wider screens
-    default: '12px' // For mobile
-  },
-  // Vertical spacing between nodes
-  nodeSpacing: {
-    sm: '32px', // 8rem
-    default: '16px' // 4rem
-  },
-  // Left offset for the main timeline
-  timelineOffset: {
-    sm: '150px',
-    default: '80px'
-  },
-  // New configuration for lines
-  lines: {
-    circleSize: '40px',
-    verticalOffset: '16px',
-    horizontalConnector: '24px',
-    verticalLine: {
-      offset: '20px',  // Change from 50% to fixed pixel value
-      parentOffset: '48px',
-    },
-    item: {
-      offset: '20px', // Aligns with the circle's center
-      verticalOffset: '24px'
-    }
+  features: {
+    enableConnectionLines: false, // Feature flag for connection lines
   }
 } as const;
+
+// Helper function to get CSS variable values
+const getTimelineVar = (name: string): string => {
+  return `var(--timeline-${name})`;
+};
 
 interface TimelineProps {
   trajectory: Trajectory;
@@ -54,6 +36,11 @@ interface ConnectionLinesProps {
 }
 
 const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: ConnectionLinesProps) => {
+  // If connection lines are disabled, return null
+  if (!TIMELINE_CONFIG.features.enableConnectionLines) {
+    return null;
+  }
+  
   return (
     <>
       {/* Main vertical line for current node */}
@@ -61,7 +48,7 @@ const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: Con
         <div 
           className="absolute w-px bg-gray-200"
           style={{
-            left: level === 0 ? '20px' : `calc(${TIMELINE_CONFIG.timelineOffset.default} + 20px)`,
+            left: level === 0 ? getTimelineVar('item-offset') : `calc(${getTimelineVar('offset-default')} + ${getTimelineVar('item-offset')})`,
             top: '0',
             height: '100%'
           }}
@@ -74,7 +61,7 @@ const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: Con
           key={index}
           className="absolute w-px bg-gray-200"
           style={{
-            right: `calc(${TIMELINE_CONFIG.lines.verticalLine.parentOffset} + ${parent.level * 48}px)`,
+            right: `calc(${getTimelineVar('vertical-line-parent-offset')} + ${parent.level * 48}px)`,
             top: '-32px',
             bottom: '0'
           }}
@@ -87,8 +74,8 @@ const ConnectionLines = ({ level, hasChildren, isLastInLevel, parentNodes }: Con
           className="absolute h-px bg-gray-200"
           style={{
             right: '100%',
-            top: TIMELINE_CONFIG.lines.verticalOffset,
-            width: TIMELINE_CONFIG.lines.horizontalConnector
+            top: getTimelineVar('vertical-offset'),
+            width: getTimelineVar('horizontal-connector')
           }}
         />
       )}
@@ -115,33 +102,33 @@ function renderNodes(
       { hasNextSibling: !isLastNode, level: level - 1 } // Adjust level to start from 0
     ] : [];
 
+    // Special handling for the initial user message node
+    const isUserMessageNode = node.nodeId === 0 && node.userMessage;
+
     return (
       <li key={node.nodeId} className={cn(
-        "mb-4 sm:mb-8 relative",
-        { [`ml-[${TIMELINE_CONFIG.nodePadding.default}] sm:ml-[${TIMELINE_CONFIG.nodePadding.sm}]`]: level > 0 }
+        isUserMessageNode ? "mb-8" : "mb-4 sm:mb-8",
+        "relative",
+        { [`ml-[${getTimelineVar('node-padding-default')}] sm:ml-[${getTimelineVar('node-padding-sm')}]`]: level > 0 }
       )}>
-        <div className={cn("group relative", {
-          "ml-[24px] sm:ml-[48px]": level > 0
-        })}>
+        <div className={cn(
+          "group relative", 
+          {
+            "ml-[24px] sm:ml-[48px]": level > 0,
+            "ml-0": isUserMessageNode
+          }
+        )}>
           {/* Node header */}
           <div className="relative rounded-lg">
-            <div className="flex items-start">
-              {/* Step number */}
-              <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
-                <div className="mr-3 flex h-8 flex-col justify-center text-right sm:mr-6">
-                  <button
-                    className={cn("max-w-[60px] cursor-pointer truncate text-xs font-medium sm:max-w-[120px]", {
-                      "text-gray-600 group-hover:text-gray-900": !hasChildren,
-                      "text-primary-600 group-hover:text-primary-900": hasChildren,
-                    })}
-                    onClick={() => handleNodeClick(node.nodeId)}
-                  >
-                  </button>
-                </div>
-              </div>
-
+            <div className={cn(
+              "flex items-start",
+              isUserMessageNode && "ml-0"
+            )}>
               {/* Node circle with connection lines */}
-              <div className="relative">
+              <div className={cn(
+                "relative",
+                isUserMessageNode && "hidden"
+              )}>
                 <ConnectionLines 
                   level={level}
                   hasChildren={hasChildren}
@@ -149,41 +136,51 @@ function renderNodes(
                   parentNodes={currentParentNodes}
                 />
 
-                <NodeCircle
-                  trajectory={trajectory}
-                  node={node}
-                  isLastNode={isLastNode && !hasChildren}
-                  isRunning={isRunning}
-                  onClick={() => handleNodeClick(node.nodeId)}
-                />
+                {!isUserMessageNode && (
+                  <NodeCircle
+                    trajectory={trajectory}
+                    node={node}
+                    isLastNode={isLastNode && !hasChildren}
+                    isRunning={isRunning}
+                    onClick={() => handleNodeClick(node.nodeId)}
+                  />
+                )}
               </div>
 
               {/* Node content */}
-              <div className="min-w-0 flex-1 pl-8">
+              <div className={cn(
+                "min-w-0 flex-1",
+                isUserMessageNode ? "pl-0" : "pl-8"
+              )}>
                 <div className="flex items-start justify-between">
-                  <div className="min-w-0 flex-1">
-                    <TrajectoryNode
-                      node={node}
-                      expanded={isExpanded(node.nodeId)}
-                      level={level}
-                    />
+                  <div className={cn(
+                    "min-w-0 flex-1",
+                    isUserMessageNode && "w-full"
+                  )}>
+                    {isUserMessageNode ? (
+                      <UserMessageItem message={node.userMessage!} />
+                    ) : (
+                      <TrajectoryNode
+                        node={node}
+                        expanded={isExpanded(node.nodeId)}
+                        level={level}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Timeline items */}
-          {isExpanded(node.nodeId) && (
+          {/* Timeline items - only show for non-user-message nodes */}
+          {!isUserMessageNode && isExpanded(node.nodeId) && (
             <div className={cn(
               "mt-8 transition-all duration-200 ease-in-out",
-              "relative pl-6 pr-4 py-4",
-              "ml-[150px] mr-4",
+              "relative pl-1 pr-4 py-4",
+              `ml-[${getTimelineVar('items-margin-left')}] mr-4`,
               "border border-gray-200 bg-gray-50/50 rounded-lg",
               "shadow-sm",
               "animate-in fade-in slide-in-from-left-1",
-              "before:absolute before:-left-[1px] before:top-4 before:h-px before:w-6 before:bg-gray-200",
-              "after:absolute after:-left-2 after:top-[14px] after:h-3 after:w-3 after:rotate-45 after:border-l after:border-t after:border-gray-200 after:bg-gray-50/50"
             )}>
               {node.items.map((item, index) => (
                 <TimelineItem
@@ -227,9 +224,6 @@ function renderNodes(
 export function Timeline({ trajectory, isRunning = false }: TimelineProps) {
   const { isNodeExpanded, toggleNode } = useTrajectoryStore();
   
-  const lastNode = trajectory.nodes[trajectory.nodes.length - 1];
-  const isTerminal = lastNode?.terminal;
-
   const isExpanded = (nodeId: number) => isNodeExpanded(trajectory.id, nodeId);
   const handleNodeClick = (nodeId: number) => {
     toggleNode(trajectory.id, nodeId);
@@ -241,39 +235,6 @@ export function Timeline({ trajectory, isRunning = false }: TimelineProps) {
         <ol className="relative">
           {renderNodes(trajectory, trajectory.nodes, 0, isRunning, isExpanded, handleNodeClick)}
 
-          {/* Terminal node */}
-          {isTerminal && !isRunning && (
-            <li className="mb-4 sm:mb-8">
-              <div className="flex items-start">
-                <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
-                  <div className="mr-3 flex h-8 flex-col justify-center text-right sm:mr-6">
-                    <div>
-                      <span className="text-xs font-medium text-gray-600">
-                        End
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                className={`relative z-10 -ml-4 flex h-8 min-w-[2rem] items-center justify-center rounded-full border-2 bg-white 
-                  ${
-                    lastNode.error
-                      ? "border-red-500 bg-red-500"
-                      : "border-green-500 bg-green-500"
-                  }`}
-              />
-
-              <div className="min-w-0 flex-1 pl-8">
-                <div className="text-xs text-gray-600">
-                  {lastNode.error
-                    ? "Terminated with error"
-                    : "Successfully completed"}
-                </div>
-              </div>
-            </li>
-          )}
         </ol>
       </div>
     </div>

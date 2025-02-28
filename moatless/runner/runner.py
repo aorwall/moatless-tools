@@ -12,6 +12,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELED = "canceled"
 
 
 class RunnerStatus(str, Enum):
@@ -79,6 +80,26 @@ class RestartResult(BaseModel):
     message: str
     error: Optional[str] = None
     traceback: Optional[str] = None
+
+
+class JobsStatusSummary(BaseModel):
+    """Summary of job status counts for a project."""
+    project_id: str
+    total_jobs: int = 0
+    queued_jobs: int = 0
+    running_jobs: int = 0
+    completed_jobs: int = 0
+    failed_jobs: int = 0
+    canceled_jobs: int = 0
+    pending_jobs: int = 0
+    job_ids: Dict[str, List[str]] = Field(default_factory=lambda: {
+        "queued": [],
+        "running": [],
+        "completed": [],
+        "failed": [],
+        "canceled": [],
+        "pending": []
+    })
 
 
 class Runner(ABC):

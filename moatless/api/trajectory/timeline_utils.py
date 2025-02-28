@@ -97,11 +97,31 @@ def create_thought_block_item(thoughts: List[dict]) -> TimelineItemDTO | None:
 def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
     """Create timeline item for an action."""
     if step.action:
+
+        
+        # Remove properties that are empty
+        if step.action.name == "str_replace_editor" and hasattr(step.action, "command"):
+            if step.action.command == "str_replace":
+                action_name = "StringReplace"
+            elif step.action.command == "create":
+                action_name = "CreateFile"
+            elif step.action.command == "view":
+                action_name = "ViewCode"
+            elif step.action.command == "insert":
+                action_name = "InsertLines"
+            else:
+                action_name = "str_replace_editor"
+
+            model_dump = step.action.model_dump(exclude={"thoughts", "command"}, exclude_unset=True, exclude_none=True)
+        else:
+            action_name = step.action.name
+            model_dump = step.action.model_dump(exclude={"thoughts"}, exclude_unset=True, exclude_none=True)
+
         return TimelineItemDTO(
-            label=step.action.name,
+            label=action_name,
             type=TimelineItemType.ACTION,
             content={
-                **step.action.model_dump(exclude={"thoughts"}, exclude_unset=True, exclude_none=True),
+                **model_dump,
                 "errors": step.observation.properties.get("errors", []) if step.observation else [],
                 "warnings": step.observation.properties.get("warnings", []) if step.observation else []
             }

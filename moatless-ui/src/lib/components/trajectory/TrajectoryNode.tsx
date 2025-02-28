@@ -3,11 +3,15 @@ import {
   Folder,
   AlertTriangle,
   ChevronDown,
+  Info,
+  BarChart,
+  Cpu,
 } from "lucide-react";
 import type { Node, ActionStep } from "@/lib/types/trajectory";
 import { truncateMessage } from "@/lib/utils/text";
 import { cn } from "@/lib/utils";
 import { useMemo, Fragment } from "react";
+import React from "react";
 
 interface TrajectoryNodeProps {
   node: Node;
@@ -21,9 +25,20 @@ interface ActionGroup {
   references: { step: number; count: number }[];
 }
 
-// File Updates Section
-
-// Warnings Section
+const formatTokenCount = (prompt: number = 0, completion: number = 0, cached: number = 0) => {
+  return (
+    <div className="flex items-center gap-1 text-[10px] bg-gray-50 px-1.5 py-0.5 rounded">
+      <span className="font-mono text-gray-600">{prompt}p</span>
+      {cached > 0 && (
+        <>
+          <span className="font-mono text-gray-400">({cached})</span>
+        </>
+      )}
+      <span className="text-gray-400">+</span>
+      <span className="font-mono text-gray-600">{completion}c</span>
+    </div>
+  );
+};
 
 export const TrajectoryNode = ({
   node,
@@ -31,6 +46,7 @@ export const TrajectoryNode = ({
 }: TrajectoryNodeProps) => {
   const lastAction = node.actionSteps[node.actionSteps.length - 1]?.action.name;
   const showWorkspace = lastAction !== "Finish" && node.fileContext;
+  const hasNodeUsage = node.usage && node.usage.prompt_tokens;
 
   // Group identical actions by their command
   const groupedActions = useMemo(() => {
@@ -47,74 +63,39 @@ export const TrajectoryNode = ({
   }, [node.actionSteps]);
 
   const formatActionDisplay = (action: ActionStep['action']) => {
-    // Extract the path from properties if it exists
-    const path = action.properties?.path;
+    // Define priority properties that should be displayed first
+    const priorityProps = ['path', 'class_name', 'function_name'];
     
-    // Format based on action type
-    switch (action.name) {
-      case 'ViewCode':
-      case 'StringReplace':
-      case 'str_replace_editor':
-        return (
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-1.5">
-              <span className="font-mono text-sm text-gray-700">{action.name}</span>
-              {action.properties?.command && (
-                <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
-                  {action.properties.command}
-                </span>
-              )}
-              {path && (
-                <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
-                  {path}
-                </span>
-              )}
-            </div>
-            {expanded && action.properties && Object.keys(action.properties).length > 0 && (
-              <div className="text-xs text-gray-500 pl-4 space-y-0.5">
-                {Object.entries(action.properties)
-                  .filter(([key]) => key !== 'path') // Skip path as it's shown above
-                  .map(([key, value]) => (
-                    <div key={key} className="flex items-start gap-1">
-                      <span className="text-gray-400">{key}:</span>
-                      <span className="font-mono truncate max-w-[400px]">
-                        {typeof value === 'string' ? value : JSON.stringify(value)}
-                      </span>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        );
-
-      case 'RunTests':
-        return (
-          <div className="flex items-center gap-1.5">
-            <span className="font-mono text-sm text-gray-700">{action.name}</span>
-            {action.properties?.no_test_files && (
-              <span className="text-[10px] px-1.5 rounded-full bg-yellow-50 text-yellow-700">
-                no_test_files
-              </span>
-            )}
-          </div>
-        );
-
-      default:
-        return (
-          <span className="font-mono text-sm text-gray-700">
-            {action.name}
-          </span>
-        );
-    }
-  };
-
-  if (node.nodeId === 0 && node.userMessage) {
     return (
-      <div className="text-xs text-muted-foreground">
-        {truncateMessage(node.userMessage)}
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono text-sm text-gray-700">{action.name}</span>
+          {priorityProps.map(propKey => 
+            action.properties?.[propKey] ? (
+              <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
+                {action.properties[propKey]}
+              </span>
+            ) : null
+          )}
+        </div>
+        {action.properties && Object.keys(action.properties).length > 0 && (
+          <div className="text-xs text-gray-500 pl-4 space-y-0.5">
+            {Object.entries(action.properties)
+              .filter(([key]) => !priorityProps.includes(key))
+              .filter((value) => value != null)
+              .map(([key, value]) => (
+                <div key={key} className="flex items-start gap-1">
+                  <span className="text-gray-400">{key}:</span>
+                  <span className="font-mono truncate max-w-[400px]">
+                    {typeof value === 'string' ? value : JSON.stringify(value)}
+                  </span>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
     );
-  }
+  };
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -133,7 +114,23 @@ export const TrajectoryNode = ({
           <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" />
           <div className="min-w-0 flex-1">
             {/* Action Content */}
-            {formatActionDisplay(group.action.action)}
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                {formatActionDisplay(group.action.action)}
+              </div>
+              
+              {/* Node total usage - show only on first action */}
+              {index === 0 && hasNodeUsage && (
+                <div className="flex items-center gap-1">
+                  <Cpu className="h-3 w-3 text-gray-400" />
+                  {formatTokenCount(
+                    node.usage?.prompt_tokens || 0,
+                    node.usage?.completion_tokens || 0,
+                    node.usage?.cache_read_tokens || 0
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Metadata Row */}
             <div className="flex items-center gap-2 mt-1">
@@ -142,6 +139,17 @@ export const TrajectoryNode = ({
                 <span className="text-[10px] text-gray-400 tabular-nums">
                   ×{group.count}
                 </span>
+              )}
+
+              {/* Token Usage for this Action Step (if available) */}
+              {group.action.completion?.usage && (
+                <div className="flex items-center gap-1">
+                  {formatTokenCount(
+                    group.action.completion.usage.prompt_tokens || 0,
+                    group.action.completion.usage.completion_tokens || 0,
+                    group.action.completion.usage.cache_read_tokens || 0
+                  )}
+                </div>
               )}
 
               {/* Status Indicators */}

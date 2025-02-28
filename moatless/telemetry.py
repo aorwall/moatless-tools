@@ -42,10 +42,9 @@ def setup_azure_monitor() -> None:
         resource_attributes: Additional resource attributes
     """
     if not HAS_AZURE_MONITOR:
-        raise ImportError(
-            "Azure Monitor OpenTelemetry package not found. "
-            "Install with: pip install azure-monitor-opentelemetry"
-        )
+        logger.warning("Azure Monitor OpenTelemetry package not found. "
+            "Install with: pip install azure-monitor-opentelemetry")
+        return
     
     if not os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         raise ValueError(

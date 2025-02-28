@@ -3,6 +3,7 @@
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
+from moatless.completion.model import Usage
 from pydantic import BaseModel, Field
 
 
@@ -156,6 +157,7 @@ class NodeDTO(BaseModel):
     error: Optional[str] = None
     warnings: List[str] = []
     errors: List[str] = []
+    usage: Optional[Usage] = None
     terminal: bool = Field(default=False, description="Whether this node is in a terminal state")
     allNodeErrors: List[str] = Field(
         default_factory=list,

@@ -83,10 +83,10 @@ export interface WorkspaceContent {
 }
 
 export interface Usage {
-  completionCost?: number;
-  promptTokens?: number;
-  completionTokens?: number;
-  cachedTokens?: number;
+  completion_cost?: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  cache_read_tokens?: number;
 }
 
 export interface Completion {
@@ -182,6 +182,7 @@ export interface Node {
   fileContext?: FileContext;
   warnings: string[];
   errors: string[];
+  usage?: Usage;
   terminal: boolean;
   allNodeErrors: string[];
   allNodeWarnings: string[];

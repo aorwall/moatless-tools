@@ -42,6 +42,7 @@ export interface LoopRequest {
   attachments?: AttachmentData[];
 }
 
+
 export const swebenchApi = {
   getInstances: (
     page: number,
@@ -63,6 +64,11 @@ export const swebenchApi = {
     apiRequest<LoopResponse>('/loop', {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+
+  startInstance: (evaluationName: string, instanceId: string) =>
+    apiRequest<any>(`/swebench/evaluations/${evaluationName}/instances/${instanceId}/start`, {
+      method: 'POST',
     }),
 
   getEvaluationInstance: (evaluationName: string, instanceId: string) =>

@@ -1,6 +1,5 @@
 import { FC } from "react";
 import { Badge } from "@/lib/components/ui/badge";
-import { ScrollArea } from "@/lib/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 export interface RewardTimelineContent {
@@ -10,8 +9,6 @@ export interface RewardTimelineContent {
 
 export interface RewardTrajectoryItemProps {
   content: RewardTimelineContent;
-  expandedState: boolean;
-  isExpandable?: boolean;
 }
 
 // Define reward color type for better type safety
@@ -19,9 +16,7 @@ type RewardColor = "red" | "yellow" | "green" | "gray";
 
 export const RewardTrajectoryItem: FC<RewardTrajectoryItemProps> = ({
   content,
-  expandedState,
 }) => {
-  const isExpandable = !!content.explanation;
   
   // Clamp the reward value between -100 and 100
   const clampedValue = Math.max(-100, Math.min(100, content.value));
@@ -94,7 +89,7 @@ export const RewardTrajectoryItem: FC<RewardTrajectoryItemProps> = ({
           {clampedValue > 0 ? "+" : ""}{clampedValue}
         </Badge>
         
-        {!expandedState && content.explanation && (
+        {content.explanation && (
           <span className="text-sm text-gray-700 truncate max-w-[400px]">
             {content.explanation.split("\n")[0]}
             {content.explanation.includes("\n") && "..."}
@@ -102,24 +97,7 @@ export const RewardTrajectoryItem: FC<RewardTrajectoryItemProps> = ({
         )}
       </div>
 
-      {/* Expanded View with Full Explanation */}
-      {expandedState && content.explanation && (
-        <div className="space-y-3">
-          <ScrollArea className={cn(
-            "max-h-[300px] rounded-md border p-4",
-            {
-              "bg-red-50/50 border-red-200": rewardColor === "red",
-              "bg-yellow-50/50 border-yellow-200": rewardColor === "yellow",
-              "bg-green-50/50 border-green-200": rewardColor === "green",
-              "bg-gray-50/50 border-gray-200": rewardColor === "gray"
-            }
-          )}>
-            <div className="text-sm font-mono text-gray-900">
-              {formatExplanation(content.explanation)}
-            </div>
-          </ScrollArea>
-        </div>
-      )}
+  
     </div>
   );
 }; 

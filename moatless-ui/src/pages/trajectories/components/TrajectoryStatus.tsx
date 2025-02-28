@@ -6,15 +6,18 @@ import {
   Zap,
   Coins,
   Clock,
+  Play,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Trajectory } from "@/lib/types/trajectory";
+import { Button } from "@/lib/components/ui/button";
 
 interface TrajectoryStatusProps {
-  trajectory: Trajectory
+  trajectory: Trajectory;
+  startInstance?: () => void;
 }
 
-export function TrajectoryStatus({ trajectory }: TrajectoryStatusProps) {
+export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatusProps) {
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
       case "error":
@@ -27,6 +30,12 @@ export function TrajectoryStatus({ trajectory }: TrajectoryStatusProps) {
         return null;
     }
   };
+
+  // Check if the trajectory can be started (not running or completed)
+  const canStart = startInstance && 
+    trajectory.status !== "running" && 
+    trajectory.status !== "completed" &&
+    trajectory.status !== "evaluated";
 
   return (
     <div className="space-y-2 p-3">
@@ -54,6 +63,19 @@ export function TrajectoryStatus({ trajectory }: TrajectoryStatusProps) {
           )}
         </div>
       </div>
+
+      {/* Start Button */}
+      {canStart && (
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="w-full mt-2 flex items-center gap-2"
+          onClick={startInstance}
+        >
+          <Play className="h-3 w-3" />
+          Start Instance
+        </Button>
+      )}
 
       {/* Timing Info */}
       <div className="grid grid-cols-2 gap-x-2 text-xs">

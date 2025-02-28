@@ -138,6 +138,7 @@ class FlowManager:
         # Load configs from local path
         try:
             if config_path.exists():
+                logger.info(f"Loading tree configs from {config_path}")
                 with open(config_path) as f:
                     configs = json.load(f)
                 logger.info(f"Loaded {len(configs)} tree configs")
@@ -148,7 +149,7 @@ class FlowManager:
                     except Exception as e:
                         logger.error(f"Failed to load tree config {config['id']}: {e}")
             else:
-                logger.info("No local tree configs found")
+                logger.info(f"No local tree configs found on path {config_path}")
         except Exception as e:
             logger.error(f"Failed to load tree configs: {e}")
             raise e

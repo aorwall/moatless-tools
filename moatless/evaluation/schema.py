@@ -89,6 +89,7 @@ class InstanceStatus(str, Enum):
     PENDING = "pending"
     SETTING_UP = "setting_up"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     EVALUATING = "evaluating"
     EVALUATED = "evaluated"

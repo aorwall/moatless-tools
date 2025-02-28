@@ -6,7 +6,7 @@ import shutil
 
 def main():
     """Build the UI using pnpm."""
-    ui_dir = Path(__file__).parent / "ui"
+    ui_dir = Path(__file__).parent / "moatless-ui"
     moatless_api_dir = Path(__file__).parent / "moatless_api"
     moatless_api_pkg = moatless_api_dir  # Package directory
     dist_dir = moatless_api_pkg / "ui/dist"
@@ -18,9 +18,9 @@ def main():
     print("Building UI...")
     try:
         # Install dependencies
-        subprocess.run(["pnpm", "install"], cwd=ui_dir, check=True)
+        subprocess.run(["bun", "install"], cwd=ui_dir, check=True)
         # Build UI
-        subprocess.run(["pnpm", "run", "build"], cwd=ui_dir, check=True)
+        subprocess.run(["bun", "run", "build"], cwd=ui_dir, check=True)
         
         # Create package directories and __init__.py files
         moatless_api_dir.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,7 @@ setup(
         print(f"Failed to build UI: {e}")
         sys.exit(1)
     except FileNotFoundError:
-        print("pnpm not found. Please install pnpm to build the UI")
+        print("bun not found. Please install bun to build the UI")
         sys.exit(1)
 
 if __name__ == "__main__":

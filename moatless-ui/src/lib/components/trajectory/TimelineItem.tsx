@@ -33,7 +33,7 @@ import {
   ArtifactTrajectoryItem,
   ArtifactTimelineContent,
 } from "@/lib/components/trajectory/items/ArtifactTrajectoryItem";
-import { TIMELINE_CONFIG } from './Timeline';  // You'll need to export it from Timeline
+import './timeline.css';  // Import CSS directly
 import { cn } from "@/lib/utils";
 import {
   WorkspaceFilesTrajectoryItem,
@@ -84,37 +84,6 @@ export const TimelineItem = ({
     return Icons[type] || AlertTriangle;
   };
 
-  // Calculate isExpandable based on content type
-  const isExpandable = (() => {
-    switch (type) {
-      case "user_message":
-      case "assistant_message":
-      case "thought":
-        return content.message.length > 200;
-      case "action":
-        return Object.keys(content.properties || {}).length > 0;
-      case "completion":
-        return !!(content.input || content.response);
-      case "observation":
-        return content.message
-          ? content.message.length > 300 ||
-              content.message.split("\n").length > 5
-          : false;
-      case "error":
-        return content.error.split("\n").length > 1;
-      case "reward":
-        return !!content.explanation;
-      case "workspace_files":
-        return !!(content.updatedFiles?.length);
-      case "workspace_context":
-        return !!(content.files?.length);
-      case "workspace_tests":
-        return !!(content.test_files?.length);
-      default:
-        return false;
-    }
-  })();
-
   const renderedContent = (() => {
     switch (type) {
       case "user_message":
@@ -124,70 +93,63 @@ export const TimelineItem = ({
           <MessageTrajectoryItem
             content={content as MessageTimelineContent}
             type={type}
-            expandedState={false}
           />
         );
       case "action":
+        // Determine the correct action name from the content structure
+        
         return (
           <ActionTrajectoryItem
+            name={label}
             content={content as ActionTimelineContent}
-            expandedState={false}
           />
         );
       case "observation":
         return (
           <ObservationTrajectoryItem
             content={content as ObservationTimelineContent}
-            expandedState={false}
           />
         );
       case "completion":
         return (
           <CompletionTrajectoryItem
             content={content as CompletionTimelineContent}
-            expandedState={false}
-          />
-        );
-      case "workspace_files":
-        return (
-          <WorkspaceFilesTrajectoryItem
-            content={content as WorkspaceFilesTimelineContent}
-            expandedState={false}
           />
         );
       case "workspace_context":
         return (
           <WorkspaceContextTrajectoryItem
             content={content as WorkspaceContextTimelineContent}
-            expandedState={false}
+          />
+        );
+      case "workspace_files":
+        return (
+          <WorkspaceFilesTrajectoryItem
+            content={content as WorkspaceFilesTimelineContent}
           />
         );
       case "workspace_tests":
         return (
           <WorkspaceTestsTrajectoryItem
             content={content as WorkspaceTestsTimelineContent}
-            expandedState={false}
           />
         );
       case "error":
         return (
           <ErrorTrajectoryItem
             content={content as ErrorTimelineContent}
-            expandedState={false}
           />
         );
       case "artifact":
         return (
           <ArtifactTrajectoryItem
             content={content as ArtifactTimelineContent}
-            expandedState={false}
           />
         );
       case "reward":
         return (
           <RewardTrajectoryItem
             content={content as RewardTimelineContent}
-            expandedState={false}
           />
         );
       default:
@@ -198,19 +160,7 @@ export const TimelineItem = ({
   const Icon = getIcon(type);
 
   return (
-    <div onClick={handleSelect} className="cursor-pointer relative group">
-      {/* Vertical line extending down if not last or if parent has more nodes */}
-      {(!isLast || hasNextSibling) && (
-        <div 
-          className="absolute w-px bg-gray-200/70"
-          style={{
-            left: TIMELINE_CONFIG.lines.item.offset,
-            top: TIMELINE_CONFIG.lines.item.verticalOffset,
-            bottom: `-${TIMELINE_CONFIG.nodeSpacing.default}`
-          }}
-        />
-      )}
-      
+    <div onClick={handleSelect} className="cursor-pointer relative group">    
       <div className={cn(
         "relative py-2 transition-colors duration-150",
         "hover:bg-gray-50/50 rounded-md -mx-2 px-2",
@@ -219,8 +169,6 @@ export const TimelineItem = ({
         <ExpandableItem
           label={label}
           icon={Icon}
-          isExpandable={isExpandable}
-          expandedState={false}
           onExpandChange={() => handleSelect()}
         >
           {renderedContent}

@@ -197,8 +197,9 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
         reward=reward,
         actionSteps=action_steps,
         executed=node.is_executed(),
+        usage=node.usage(),
         #assistantMessage=node.assistant_message,
-        #userMessage=node.user_message,
+        userMessage=node.user_message,
         #actionCompletion=action_completion,
         #fileContext=file_context_to_dto(node.file_context, node.parent.file_context if node.parent else None)
         #if node.file_context

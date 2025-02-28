@@ -21,9 +21,10 @@ import { Trajectory } from "@/lib/types/trajectory";
 
 interface TrajectoryViewerProps {
   trajectory: Trajectory;
+  startInstance?: () => void;
 }
 
-export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
+export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
 
@@ -88,7 +89,7 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
                   <h2 className="font-semibold">Status</h2>
                 </div>
                 <ScrollArea className="flex-1">
-                  <TrajectoryStatus trajectory={trajectory} />
+                  <TrajectoryStatus trajectory={trajectory} startInstance={startInstance} />
                 </ScrollArea>
               </div>
             </ResizablePanel>
@@ -182,8 +183,12 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
             </TabsContent>
           </Tabs> 
           ) : (
-            <div className="flex-1 p-6 min-w-[600px]">
-              <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+            <div className="flex h-full flex-col overflow-hidden">
+              <ScrollArea className="flex-1">
+                <div className="p-10 min-w-[600px]">
+                  <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+                </div>
+              </ScrollArea>
             </div>
           )}
         </ResizablePanel>

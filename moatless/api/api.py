@@ -41,7 +41,6 @@ from moatless.events import BaseEvent, event_bus
 from moatless.telemetry import setup_telemetry
 from moatless.workspace import Workspace
 
-import psutil
 import os
 import asyncio
 from datetime import datetime
@@ -248,49 +247,111 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     router.include_router(loop_router, prefix="/loop", tags=["loop"])
     router.include_router(artifact_router, prefix="/artifacts", tags=["artifacts"])
 
-    # Mount the API router with /api prefix
-    api.mount("/api", router)
-
     # Only serve UI files if API extras are installed
     try:
         import fastapi.staticfiles
 
-        # Try to find UI files in the installed package
-        ui_files = pkg_resources.files("moatless_api") / "ui/dist"
-        if ui_files.exists():
-            logger.info(f"Found UI files in package at {ui_files}")
+        # First check moatless_api/ui/dist
+        ui_path = Path("moatless_api/ui/dist")
+        if ui_path.exists():
+            logger.info(f"Found UI files at {ui_path}")
 
-            # Serve static files from _app directory
-            api.mount("/_app", StaticFiles(directory=str(ui_files / "_app")), name="static")
+            # Create static files instances
+            static_files = StaticFiles(directory=str(ui_path))
+            html_app = StaticFiles(directory=str(ui_path), html=True)
 
-            # Create a static files instance for serving index.html
-            html_app = StaticFiles(directory=str(ui_files), html=True)
+            # Mount the API router first
+            api.mount("/api", router)
 
+            # Add explicit root path handler
+            @api.get("/")
+            async def serve_root(request: Request):
+                scope = request.scope
+                scope.update({
+                    "path": "/index.html",
+                    "method": "GET",
+                    "type": "http"
+                })
+                return await html_app.get_response("index.html", scope)
+
+            # Mount static files for assets
+            api.mount("/assets", StaticFiles(directory=str(ui_path / "assets")), name="assets")
+
+            # Add the catch-all route for SPA
             @api.get("/{full_path:path}")
             async def serve_spa(request: Request, full_path: str):
                 if full_path.startswith("api/"):
                     raise HTTPException(status_code=404, detail="Not found")
-                return await html_app.get_response("index.html", request.scope)
-        else:
-            # Fallback to development path
-            ui_path = Path("ui/dist")
-            if ui_path.exists():
-                logger.info(f"Found UI files in development path at {ui_path}")
-
-                # Serve static files from _app directory
-                api.mount("/_app", StaticFiles(directory=str(ui_path / "_app")), name="static")
-
-                # Create a static files instance for serving index.html
-                html_app = StaticFiles(directory=str(ui_path), html=True)
-
-                @api.get("/{full_path:path}")
-                async def serve_spa(request: Request, full_path: str):
-                    if full_path.startswith("api/"):
-                        raise HTTPException(status_code=404, detail="Not found")
+                try:
                     return await html_app.get_response("index.html", request.scope)
-            else:
+                except Exception as e:
+                    logger.error(f"Error serving SPA: {e}")
+                    raise HTTPException(status_code=404, detail="Not found")
+
+        else:
+            # Try to find UI files in the installed package
+            try:
+                ui_files = pkg_resources.files("moatless_api") / "ui/dist"
+                if ui_files.exists():
+                    logger.info(f"Found UI files in package at {ui_files}")
+
+                    # Create static files instances
+                    static_files = StaticFiles(directory=str(ui_files))
+                    html_app = StaticFiles(directory=str(ui_files), html=True)
+
+                    # Mount the API router first
+                    api.mount("/api", router)
+
+                    # Add explicit root path handler
+                    @api.get("/")
+                    async def serve_root(request: Request):
+                        scope = request.scope
+                        scope.update({
+                            "path": "/index.html",
+                            "method": "GET",
+                            "type": "http"
+                        })
+                        return await html_app.get_response("index.html", scope)
+
+                    # Mount static files for assets
+                    api.mount("/assets", StaticFiles(directory=str(ui_files / "assets")), name="assets")
+
+                    # Add the catch-all route for SPA
+                    @api.get("/{full_path:path}")
+                    async def serve_spa(request: Request, full_path: str):
+                        if full_path.startswith("api/"):
+                            raise HTTPException(status_code=404, detail="Not found")
+                        try:
+                            return await html_app.get_response("index.html", request.scope)
+                        except Exception as e:
+                            logger.error(f"Error serving SPA: {e}")
+                            raise HTTPException(status_code=404, detail="Not found")
+                else:
+                    logger.info("No UI files found in package")
+                    # Mount API router even if no UI files
+                    api.mount("/api", router)
+            except Exception as e:
+                logger.error(f"Error accessing package UI files: {e}")
                 logger.info("No UI files found")
+                # Mount API router even if error occurs
+                api.mount("/api", router)
     except ImportError:
         logger.info("API extras not installed, UI will not be served")
+        # Mount API router even if no UI support
+        api.mount("/api", router)
 
     return api
+
+def main():
+    import uvicorn
+    api = create_api()
+    uvicorn.run(
+        api,
+        host="0.0.0.0",
+        port=8000,
+        reload=False,
+        log_level="info"
+    )
+
+if __name__ == "__main__":
+    main()

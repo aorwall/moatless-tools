@@ -1,9 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from moatless.api.trajectory.schema import UsageDTO
 from moatless.completion.model import Usage
-from moatless.runner.runner import JobsCollection, RunnerInfo, RunnerStatus
+from moatless.runner.runner import RunnerInfo
 from pydantic import BaseModel, Field
 
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
@@ -199,3 +198,22 @@ class RunnerResponseDTO(BaseModel):
     """Response containing runner status"""
     info: RunnerInfo
     jobs: List[JobInfo]
+
+class JobStatusSummaryResponseDTO(BaseModel):
+    """Response DTO for job status summary."""
+    project_id: str
+    total_jobs: int
+    queued_jobs: int
+    running_jobs: int
+    completed_jobs: int
+    failed_jobs: int
+    canceled_jobs: int
+    pending_jobs: int
+
+
+class CancelJobsResponseDTO(BaseModel):
+    """Response DTO for canceling jobs."""
+    project_id: str
+    canceled_queued_jobs: int
+    canceled_running_jobs: int
+    message: str

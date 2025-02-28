@@ -115,6 +115,7 @@ class EventBus:
             host = os.getenv('REDIS_HOST', 'localhost')
             port = int(os.getenv('REDIS_PORT', 6379))
             db = int(os.getenv('REDIS_DB', 0))
+            logger.info(f"Initializing Redis connection to {host}:{port}/{db}")
             
             self._redis = Redis(
                 host=host,
@@ -124,7 +125,7 @@ class EventBus:
             )
             self._pubsub = self._redis.pubsub()
             
-            logger.info("Successfully initialized Redis connection")
+            logger.info(f"Successfully initialized Redis connection to {host}:{port}/{db}")
         except Exception as e:
             logger.warning(f"Failed to initialize Redis connection: {str(e)}")
             self._redis_available = False

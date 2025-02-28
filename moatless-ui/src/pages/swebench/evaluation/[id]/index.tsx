@@ -5,6 +5,7 @@ import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationIn
 import { Alert, AlertDescription } from "@/lib/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/lib/components/ui/card";
+import { useStartInstance } from "@/features/swebench/hooks/useStartInstance";
 
 export function EvaluationInstancePage() {
   const { evaluationId, instanceId } = useParams<{ evaluationId: string; instanceId: string }>();
@@ -16,6 +17,17 @@ export function EvaluationInstancePage() {
     error: trajectoryErrorData,
     isLoading
   } = useEvaluationInstance(evaluationId!, instanceId!);
+  
+  const startInstanceMutation = useStartInstance();
+
+  const handleStartInstance = () => {
+    if (evaluationId && instanceId) {
+      startInstanceMutation.mutate({
+        evaluationName: evaluationId,
+        instanceId: instanceId
+      });
+    }
+  };
 
   if (!evaluationId || !instanceId) {
     return (
@@ -86,7 +98,10 @@ export function EvaluationInstancePage() {
 
   return (
     <div className="h-full w-full">
-      <TrajectoryViewer trajectory={trajectory} />
+      <TrajectoryViewer 
+        trajectory={trajectory} 
+        startInstance={handleStartInstance}
+      />
     </div>
   );
 } 

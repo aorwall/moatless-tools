@@ -5,8 +5,6 @@ import { cn } from "@/lib/utils";
 interface ExpandableItemProps {
   label: string;
   icon: LucideIcon;
-  isExpandable: boolean;
-  expandedState: boolean;
   onExpandChange: (value: boolean) => void;
   children: React.ReactNode;
 }
@@ -14,22 +12,17 @@ interface ExpandableItemProps {
 export const ExpandableItem = ({
   label,
   icon: Icon,
-  isExpandable,
-  expandedState,
   onExpandChange,
   children,
 }: ExpandableItemProps) => {
   const handleClick = () => {
-    if (isExpandable) {
-      onExpandChange(!expandedState);
-    }
+    onExpandChange(true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (isExpandable && (e.key === "Enter" || e.key === " ")) {
-      e.preventDefault();
-      onExpandChange(!expandedState);
-    }
+    e.preventDefault();
+    onExpandChange(true);
+  
   };
 
   return (
@@ -37,7 +30,7 @@ export const ExpandableItem = ({
       className={cn(
         "flex items-start gap-2",
         "group/expandable transition-all duration-150",
-        isExpandable && "cursor-pointer"
+        "cursor-pointer"
       )}
     >
       <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
@@ -48,11 +41,9 @@ export const ExpandableItem = ({
                 "text-xs font-medium",
                 "max-w-[60px] truncate sm:max-w-[120px]",
                 "transition-colors duration-150",
-                isExpandable ? (
+              
                   "text-gray-600 group-hover/expandable:text-gray-900"
-                ) : (
-                  "text-gray-500"
-                )
+                
               )}
               onClick={handleClick}
             >
@@ -66,25 +57,18 @@ export const ExpandableItem = ({
         className={cn(
           "relative z-10 -ml-2 flex h-8 min-w-[2rem] items-center justify-center",
           "rounded-full border-2 bg-white transition-all duration-150",
-          isExpandable ? (
-            "border-gray-200 group-hover/expandable:border-gray-300 group-hover/expandable:bg-gray-50 group-hover/expandable:shadow-sm"
-          ) : (
-            "border-gray-100"
-          ),
-          "sm:-ml-4"
+          "border-gray-200 group-hover/expandable:border-gray-300 group-hover/expandable:bg-gray-50 group-hover/expandable:shadow-sm"
+          
         )}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="button"
-        tabIndex={isExpandable ? 0 : -1}
+        tabIndex={0}
       >
         <Icon className={cn(
           "h-4 w-4",
-          isExpandable ? (
-            "text-gray-400 group-hover/expandable:text-gray-500"
-          ) : (
-            "text-gray-300"
-          )
+          "text-gray-400 group-hover/expandable:text-gray-500"
+          
         )} />
       </div>
 
