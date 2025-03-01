@@ -1,5 +1,6 @@
 import json
 import logging
+from pathlib import Path
 from typing import Literal, Optional, List, Dict, Any, Union
 
 from pydantic import BaseModel, Field
@@ -36,7 +37,7 @@ class ActionStep(BaseModel):
         return data
 
     @classmethod
-    def model_validate(cls, obj: Any, **kwargs) -> "ActionArguments":
+    def model_validate(cls, obj: Any, **kwargs) -> "ActionStep":
         if isinstance(obj, dict):
             obj = obj.copy()
             obj["action"] = ActionArguments.model_validate(obj["action"])
@@ -113,33 +114,12 @@ class Node(BaseModel):
             return None
         return self.action_steps[-1].action if self.action_steps else None
 
-    @action.setter
-    def action(self, value: Optional[ActionArguments]):
-        """Backward compatibility: Set action on the current/new action step"""
-
-        if not self.action_steps:
-            self.action_steps = [ActionStep(action=value)]
-        else:
-            self.action_steps[-1].action = value
-
     @property
     def observation(self) -> Optional[Observation]:
         """Backward compatibility: Get observation from the latest action step"""
         if not self.action_steps:
             return None
         return self.action_steps[-1].observation if self.action_steps else None
-
-    @observation.setter
-    def observation(self, value: Optional[Observation]):
-        """Backward compatibility: Set observation on the current/new action step"""
-        if value is None:
-            return
-
-        if not self.action_steps:
-            # Create new action step if setting observation on empty node
-            self.action_steps.append(ActionStep(action=self.action, observation=value))
-        else:
-            self.action_steps[-1].observation = value
 
     @property
     def message(self) -> Optional[str]:
@@ -265,6 +245,9 @@ class Node(BaseModel):
 
         return node._get_all_nodes()
     
+    def get_last_node(self) -> "Node":
+        return self.get_all_nodes()[-1]
+    
     def get_node_by_id(self, node_id: int) -> Optional["Node"]:
         for node in self.get_all_nodes():
             if node.node_id == node_id:
@@ -298,7 +281,8 @@ class Node(BaseModel):
         rewards = []
         node = self
         while node is not None:
-            rewards.append(node.value / node.visits if node.visits > 0 else 0)
+            if node.reward:
+                rewards.append(node.reward.value / node.visits if node.visits > 0 else 0)
             node = node.parent
 
         return sum(rewards) / len(rewards) if rewards else 0
@@ -316,26 +300,27 @@ class Node(BaseModel):
 
         # Sum usage across all action steps
         for step in self.action_steps:
-            if step.completion:
+            if step.completion and step.completion.usage:
                 usage += step.completion.usage
 
         for completion in self.completions.values():
-            if completion:
+            if completion and completion.usage:
                 usage += completion.usage
 
         return usage
 
     def equals(self, other: "Node"):
-        if self.action and not other.action:
+        if self.action_steps and not other.action_steps:
             return False
 
-        if not self.action and other.action:
+        if not self.action_steps and other.action_steps:
             return False
+        
+        for self_step, other_step in zip(self.action_steps, other.action_steps):
+            if self_step.action.name != other_step.action.name:
+                return False
 
-        if self.action.name != other.action.name:
-            return False
-
-        return self.action.equals(other.action)
+        return True
 
     def reset(self):
         """Reset the node state to be able to execute it again."""
@@ -350,34 +335,6 @@ class Node(BaseModel):
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
         self.children = []
-
-    def clone_and_reset(self) -> "Node":
-        """
-        Creates a copy of the node and resets its observation and file context.
-
-        Returns:
-            Node: A new node instance with reset state
-        """
-        # Find highest node ID in the tree to ensure uniqueness
-        root = self.get_root()
-        all_nodes = root.get_all_nodes()
-        highest_id = max(node.node_id for node in all_nodes) + 1
-
-        # Create a new node with same base attributes but new ID
-        new_node = Node(
-            node_id=highest_id,  # Use new unique ID
-            parent=self.parent,
-            visits=self.visits,
-            value=self.value,
-            max_expansions=self.max_expansions,
-            user_message=self.user_message,
-            is_duplicate=self.is_duplicate,
-            action=self.action,
-            possible_actions=self.possible_actions.copy() if self.possible_actions else [],
-        )
-
-        new_node.reset()
-        return new_node
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """
@@ -413,7 +370,7 @@ class Node(BaseModel):
 
         node_dict["action_steps"] = [action_step.model_dump(**kwargs) for action_step in self.action_steps]
 
-        if not kwargs.get("exclude") or "children" not in kwargs.get("exclude"):
+        if not kwargs.get("exclude") or "children" not in kwargs.get("exclude", set()):
             node_dict["children"] = [child.model_dump(**kwargs) for child in self.children]
 
         return node_dict
@@ -485,7 +442,10 @@ class Node(BaseModel):
             return cls.model_validate(node_data)
 
     @classmethod
-    def from_file(cls, file_path: str, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None, **kwargs) -> "Node":
+    def from_file(cls, file_path: Path, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None, **kwargs) -> "Node":
+        if not file_path.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+        
         with open(file_path, "r") as f:
             data = json.load(f)
 
@@ -591,10 +551,10 @@ class Node(BaseModel):
             data = json.load(f)
 
         if isinstance(data, list):
-            return cls.reconstruct_from_list(data, repo=repo)
+            return cls._reconstruct_from_list(data, repo=repo)
         else:
             # Old tree format
-            return cls.reconstruct(data, repo=repo)
+            return cls._reconstruct_node(data, repo=repo)
 
     def persist(self, file_path: str, format: str = "list"):
         """

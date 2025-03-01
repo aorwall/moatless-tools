@@ -10,15 +10,13 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from moatless.api.trajectories.api import load_trajectory_events, load_trajectory_status
-from moatless.api.trajectories.schema import TrajectoryResponseDTO
 from moatless.api.trajectory.trajectory_utils import load_trajectory_from_file
 from moatless.evaluation.manager import EvaluationManager
 from moatless.evaluation.schema import Evaluation, EvaluationInstance
 from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instance, get_moatless_instances
+from moatless.flow.schema import TrajectoryResponseDTO
 from moatless.runner.runner import RunnerInfo, JobsStatusSummary
 from moatless.utils.moatless import get_moatless_trajectory_dir
-from moatless.validation.code_flow_validation import CodeFlowValidation
 from .schema import (
     RunnerResponseDTO,
     SWEBenchInstanceDTO,
@@ -152,9 +150,9 @@ async def get_evaluation_instance(evaluation_name: str, instance_id: str):
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="Trajectory not found")
 
-        system_status = load_trajectory_status(trajectory_dir)
+        system_status = None # load_trajectory_status(trajectory_dir)
 
-        events = load_trajectory_events(trajectory_dir)
+        events = None # load_trajectory_events(trajectory_dir)
 
         return TrajectoryResponseDTO(
             id=instance_id,
@@ -273,36 +271,6 @@ async def list_instances(page: int = 1, limit: int = 20, sort_by: str = 'instanc
         logger.exception(f"Failed to list instances: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/validate", response_model=SWEBenchValidationResponseDTO)
-async def validate_instance(request: SWEBenchValidationRequestDTO):
-    """Start a new validation run."""
-    try:
-        # Generate a unique run ID using timestamp
-        run_id = f"validation_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-        
-        # Initialize the validator
-        validator = CodeFlowValidation()
-        
-        try:
-            await validator.start_code_loop(
-                run_id=run_id,
-                agent_id=request.agent_id,
-                model_id=request.model_id,
-                instance_id=request.instance_id,
-                max_iterations=request.max_iterations
-            )
-        except Exception as e:
-            logger.exception(f"Validation failed: {str(e)}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-        return SWEBenchValidationResponseDTO(
-            run_id=run_id
-        )
-
-    except Exception as e:
-        logger.exception(f"Failed to start validation: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/datasets", response_model=DatasetsResponseDTO)
 async def list_datasets():

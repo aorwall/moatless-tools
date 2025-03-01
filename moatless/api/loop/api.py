@@ -8,6 +8,8 @@ from typing import List, Optional
 
 
 from fastapi import APIRouter, HTTPException
+from moatless.environment.local import LocalBashEnvironment
+from moatless.repository.git import GitRepository
 from pydantic import BaseModel, Field
 
 from moatless.api.loop.schema import LoopResponseDTO
@@ -38,6 +40,7 @@ class LoopRequest(BaseModel):
         default=None,
         description="List of attachments with filename and base64 data"
     )
+    repository_path: str = Field(description="The path to the repository to use for the loop")
 
 @router.post("", response_model=LoopResponseDTO)
 async def start_loop(request: LoopRequest):
@@ -45,14 +48,15 @@ async def start_loop(request: LoopRequest):
         run_id = f"loop_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         trajectory_dir = get_moatless_trajectory_dir(run_id)
         
-        workspace = Workspace(trajectory_dir=trajectory_dir)
+        repository = None
+        environment = None
+        if request.repository_path:
+            repository = GitRepository(repo_path=request.repository_path)
+            environment = LocalBashEnvironment(cwd=request.repository_path)
+
+        workspace = Workspace(repository=repository, environment=environment)
         file_handler = FileArtifactHandler(trajectory_dir=trajectory_dir)
         
-        # TODO: Move out custom handlers!
-        from bookkeeper.receipt.artifact import ReceiptArtifactFileHandler
-        from bookkeeper.verification.artifact import VerificationArtifactFileHandler
-        receipt_handler = ReceiptArtifactFileHandler(trajectory_dir=trajectory_dir)
-        verification_handler = VerificationArtifactFileHandler(trajectory_dir=trajectory_dir)
         artifact_changes = []
 
         if request.attachments:
@@ -68,7 +72,7 @@ async def start_loop(request: LoopRequest):
                     content=file_bytes,
                     mime_type=mime_type
                 )
-                file_handler.create(artifact)
+                await file_handler.create(artifact)
                 artifact_changes.append(
                     ArtifactChange(
                         artifact_id=artifact.id,
@@ -78,8 +82,6 @@ async def start_loop(request: LoopRequest):
                     )
                 )
 
-        workspace = Workspace(artifact_handlers=[file_handler, receipt_handler, verification_handler])
-        
         # Get the agent instance and completion model.
         agent = get_agent(agent_id=request.agent_id)
         completion_model = create_completion_model(request.model_id)
@@ -88,26 +90,20 @@ async def start_loop(request: LoopRequest):
         agent.workspace = workspace
         agent.completion_model = completion_model
 
-        # Create an AgenticLoop instance (persist paths can be adjusted as needed).
-        persist_dir = get_moatless_trajectory_dir(run_id)
+        trajectory_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
         loop = AgenticLoop.create(
             message=request.message,
-            run_id=run_id,
+            trajectory_id=trajectory_id,
+            project_id=f"{request.agent_id}_{request.model_id}",
             agent=agent,
             max_iterations=15,
-            persist_dir=str(persist_dir), # TODO: Change to Path
-            metadata={
-                "agent_id": request.agent_id,
-                "model_id": request.model_id,
-            }
+            max_cost=1.0
         )
 
-        # Append any attachment changes to the initial node.
-        loop.root.artifact_changes.extend(artifact_changes)
+        loop.persist()
 
-        # Start the loop asynchronously using the runner.
-        asyncio.create_task(agentic_runner.start(loop))
-        return LoopResponseDTO(run_id=run_id)
+        return LoopResponseDTO(trajectory_id=trajectory_id, project_id=f"{request.agent_id}_{request.model_id}")
     except Exception as e:
         logger.exception(f"Failed to start loop: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e)) 

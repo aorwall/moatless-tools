@@ -14,6 +14,7 @@ def get_moatless_dir() -> Path:
     if not dir_path.exists():
         dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
+    
 
 def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     """Get the moatless trajectories directory."""
@@ -24,11 +25,11 @@ def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
         eval_name = current_project_id.get()
 
     if eval_name:
-        # If evaluation context exists, use evals/eval_name/trajs
-        trajectories_dir = get_moatless_dir() / "evals" / eval_name / "trajs"
+        # If evaluation context exists, use projects/eval_name/trajs
+        trajectories_dir = get_moatless_dir() / "projects" / eval_name / "trajs"
     else:
         # Otherwise use default trajs directory
-        trajectories_dir = get_moatless_dir() / "trajs"
+        trajectories_dir = get_moatless_dir() / "projects" / "default" / "trajs"
     
     if not trajectories_dir.exists():
         trajectories_dir.mkdir(parents=True, exist_ok=True)

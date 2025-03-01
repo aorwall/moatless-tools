@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from moatless.api.swebench.schema import RunnerResponseDTO
 from moatless.runner.rq import RQRunner
+from moatless.runner.runner import JobsStatusSummary
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from moatless.api.agents.api import router as agent_router
@@ -237,6 +238,28 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             info=await runner.get_runner_info(),
             jobs=await runner.get_jobs()
         )
+
+    @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
+    async def get_job_status_summary(project_id: str) -> JobsStatusSummary:
+        """Get a summary of job statuses for a project"""
+        return await runner.get_job_status_summary(project_id)
+    
+    @router.post("/runner/jobs/{project_id}/cancel")
+    async def cancel_jobs(project_id: str, request: Request):
+        """Cancel jobs for a project"""
+        data = await request.json() if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0 else None
+        trajectory_id = data.get("trajectory_id") if data else None
+        await runner.cancel_job(project_id, trajectory_id)
+        return {"status": "success", "message": "Job(s) canceled successfully"}
+    
+    @router.post("/runner/jobs/{project_id}/{trajectory_id}/retry")
+    async def retry_job(project_id: str, trajectory_id: str):
+        """Retry a failed job"""
+        success = await runner.retry_job(project_id, trajectory_id)
+        if success:
+            return {"status": "success", "message": "Job requeued successfully"}
+        else:
+            raise HTTPException(status_code=400, detail="Failed to retry job, it may not exist or not be in a failed state")
 
     # Include model, agent, and loop configuration routers
     router.include_router(settings_router, prefix="/settings", tags=["settings"])

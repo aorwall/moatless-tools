@@ -1,23 +1,26 @@
 import { Badge } from "@/lib/components/ui/badge";
+import { Button } from "@/lib/components/ui/button";
+import { Trajectory } from "@/lib/types/trajectory";
+import { formatDistanceToNow } from "date-fns";
 import {
   AlertCircle,
   CheckCircle2,
-  Loader2,
-  Zap,
-  Coins,
   Clock,
+  Coins,
+  Loader2,
   Play,
+  Zap,
 } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
-import { Trajectory } from "@/lib/types/trajectory";
-import { Button } from "@/lib/components/ui/button";
+import { useState } from "react";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
-  startInstance?: () => void;
+  startInstance?: () => Promise<void> | void;
 }
 
 export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatusProps) {
+  const [isStarting, setIsStarting] = useState(false);
+
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
       case "error":
@@ -31,11 +34,27 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
     }
   };
 
-  // Check if the trajectory can be started (not running or completed)
-  const canStart = startInstance && 
-    trajectory.status !== "running" && 
-    trajectory.status !== "completed" &&
-    trajectory.status !== "evaluated";
+  // Check if the trajectory can be started (not running or finished)
+  const canStart = startInstance &&
+    trajectory.status.toLowerCase() !== "running" &&
+    trajectory.status.toLowerCase() !== "finished";
+
+  // Check if the trajectory has been started or not
+  const hasStarted = trajectory.system_status.started_at !== undefined &&
+    trajectory.system_status.started_at !== null;
+
+  const handleStartClick = async () => {
+    if (startInstance) {
+      setIsStarting(true);
+      try {
+        await startInstance();
+      } catch (error) {
+        console.error("Error starting trajectory:", error);
+      } finally {
+        setIsStarting(false);
+      }
+    }
+  };
 
   return (
     <div className="space-y-2 p-3">
@@ -66,22 +85,34 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
 
       {/* Start Button */}
       {canStart && (
-        <Button 
-          variant="outline" 
-          size="sm" 
+        <Button
+          variant="outline"
+          size="sm"
           className="w-full mt-2 flex items-center gap-2"
-          onClick={startInstance}
+          onClick={handleStartClick}
+          disabled={isStarting}
         >
-          <Play className="h-3 w-3" />
-          Start Instance
+          {isStarting ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Starting...
+            </>
+          ) : (
+            <>
+              <Play className="h-3 w-3" />
+              Start Instance
+            </>
+          )}
         </Button>
       )}
 
       {/* Timing Info */}
       <div className="grid grid-cols-2 gap-x-2 text-xs">
-        <div className="flex items-center gap-1 text-muted-foreground">
-          <Clock className="h-3 w-3" /> Started: {formatDistanceToNow(new Date(trajectory?.system_status.started_at))} ago
-        </div>
+        {hasStarted && (
+          <div className="flex items-center gap-1 text-muted-foreground">
+            <Clock className="h-3 w-3" /> Started: {formatDistanceToNow(new Date(trajectory.system_status.started_at))} ago
+          </div>
+        )}
         {trajectory?.system_status.finished_at && (
           <div className="flex items-center gap-1 text-muted-foreground">
             <Clock className="h-3 w-3" /> Finished: {formatDistanceToNow(new Date(trajectory?.system_status.finished_at))} ago
@@ -115,22 +146,22 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
 
         {((trajectory.failedActions !== undefined && trajectory.failedActions > 0) ||
           (trajectory.duplicatedActions !== undefined && trajectory.duplicatedActions > 0)) && (
-          <div className="space-y-1">
-            <div className="text-muted-foreground font-medium">Issues</div>
-            {trajectory.failedActions !== undefined && trajectory.failedActions > 0 && (
-              <div className="flex justify-between text-destructive">
-                <span>Failed:</span>
-                <span>{trajectory.failedActions}</span>
-              </div>
-            )}
-            {trajectory.duplicatedActions !== undefined && trajectory.duplicatedActions > 0 && (
-              <div className="flex justify-between text-warning">
-                <span>Duplicated:</span>
-                <span>{trajectory.duplicatedActions}</span>
-              </div>
-            )}
-          </div>
-        )}
+            <div className="space-y-1">
+              <div className="text-muted-foreground font-medium">Issues</div>
+              {trajectory.failedActions !== undefined && trajectory.failedActions > 0 && (
+                <div className="flex justify-between text-destructive">
+                  <span>Failed:</span>
+                  <span>{trajectory.failedActions}</span>
+                </div>
+              )}
+              {trajectory.duplicatedActions !== undefined && trajectory.duplicatedActions > 0 && (
+                <div className="flex justify-between text-warning">
+                  <span>Duplicated:</span>
+                  <span>{trajectory.duplicatedActions}</span>
+                </div>
+              )}
+            </div>
+          )}
       </div>
 
       {/* Flags */}

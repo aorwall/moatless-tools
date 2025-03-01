@@ -13,10 +13,8 @@ export function AgentSelector({
   onAgentSelect,
 }: AgentSelectorProps) {
   const { data: agents, isLoading } = useAgents();
-  const { setLastUsedAgent } = useLastUsedStore();
 
   const handleSelect = (id: string) => {
-    setLastUsedAgent(id);
     onAgentSelect(id);
   };
 
@@ -40,13 +38,6 @@ export function AgentSelector({
     return (
       <>
         <p>
-          <span className="font-medium">Model ID:</span> {agent.model_id}
-        </p>
-        <p>
-          <span className="font-medium">Response Format:</span>{" "}
-          {agent.response_format}
-        </p>
-        <p>
           <span className="font-medium">Enabled Actions:</span>{" "}
           {agent.actions.length}
         </p>
@@ -56,7 +47,6 @@ export function AgentSelector({
 
   return (
     <GenericSelector
-      title="Select Agent"
       value={selectedAgentId}
       onValueChange={handleSelect}
       placeholder="Select an agent"

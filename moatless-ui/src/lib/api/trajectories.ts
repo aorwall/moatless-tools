@@ -7,11 +7,16 @@ export const trajectoriesApi = {
     return apiRequest("/trajectories");
   },
 
-  getTrajectory: async (trajectoryId: string): Promise<Trajectory> => {
-    return apiRequest(`/trajectories/${trajectoryId}`, {
+  getTrajectory: async (projectId: string, trajectoryId: string): Promise<Trajectory> => {
+    return apiRequest(`/trajectories/${projectId}/${trajectoryId}`, {
       method: "GET",
     });
   },
+
+  start: (projectId: string, trajectoryId: string) =>
+    apiRequest(`/trajectories/${projectId}/${trajectoryId}/start`, {
+      method: 'POST',
+    }),
 
   resume: (trajectoryId: string, data: ResumeTrajectoryRequest) =>
     apiRequest(`/trajectories/${trajectoryId}/resume`, {

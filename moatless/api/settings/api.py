@@ -4,6 +4,7 @@ import logging
 from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException
+from moatless.artifacts.artifact import ArtifactHandler
 from pydantic import BeforeValidator, Field, model_validator
 from typing import Annotated
 
@@ -24,10 +25,6 @@ from moatless.feedback.base import BaseFeedbackGenerator
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-ValueFunctionModel = Annotated[BaseValueFunction, BeforeValidator(BaseValueFunction.model_validate)]
-SelectorModel = Annotated[BaseSelector, BeforeValidator(BaseSelector.model_validate)]
-FeedbackModel = Annotated[BaseFeedbackGenerator, BeforeValidator(BaseFeedbackGenerator.model_validate)]
 
 @router.get("/flows", response_model=List[FlowConfig])
 async def list_flow_configs() -> List[FlowConfig]:
@@ -83,6 +80,11 @@ async def get_available_feedback_generators():
     components = BaseFeedbackGenerator.get_available_components()
     return {name: comp.model_json_schema() for name, comp in components.items()}
 
+@router.get("/components/artifact-handlers")
+async def get_available_artifact_handlers():
+    """Get all available artifact handler components"""
+    components = ArtifactHandler.get_available_components()
+    return {name: comp.model_json_schema() for name, comp in components.items()}
 
 @router.get("/components/actions")
 async def get_available_actions():

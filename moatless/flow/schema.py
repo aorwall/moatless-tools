@@ -1,5 +1,7 @@
+from moatless.api.trajectory.schema import NodeDTO
+from moatless.artifacts.artifact import ArtifactHandler
 from pydantic import BaseModel, Field
-from typing import Any, Dict, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 import logging
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
@@ -7,6 +9,8 @@ from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 from pydantic import model_validator
+from datetime import datetime, timezone
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +25,7 @@ class FlowConfig(BaseModel):
     max_iterations: int = Field(100, description="Maximum number of iterations")
     max_cost: float = Field(4.0, description="Maximum cost allowed in USD")
     agent_id: Optional[str] = Field(None, description="ID of the agent to use")
+    artifact_handlers: List[ArtifactHandler] = Field(default_factory=list, description="List of artifact handlers used by the flow")
     
     # Tree-specific fields
     max_expansions: Optional[int] = Field(3, description="Maximum number of expansions per iteration")
@@ -64,7 +69,6 @@ class FlowConfig(BaseModel):
         if self.agent_id:
             components.append(f"Agent: {self.agent_id}")
 
-        # Add component names if present
         if self.selector:
             components.append(f"Selector: {self.selector.__class__.__name__}")
         if self.expander:
@@ -76,6 +80,9 @@ class FlowConfig(BaseModel):
         if self.discriminator:
             components.append(f"Discriminator: {self.discriminator.__class__.__name__}")
 
+        for artifact_handler in self.artifact_handlers:
+            components.append(f"Artifact handler: {artifact_handler.__class__.__name__}")
+
         return f"Flow Config '{self.id}':\n" + "\n".join(f"- {c}" for c in components)
 
     model_config = {
@@ -84,6 +91,7 @@ class FlowConfig(BaseModel):
             BaseValueFunction: lambda v: v.model_dump(),
             BaseFeedbackGenerator: lambda v: v.model_dump(),
             BaseDiscriminator: lambda v: v.model_dump(),
+            ArtifactHandler: lambda v: v.model_dump(),
         }
     }
 
@@ -101,6 +109,8 @@ class FlowConfig(BaseModel):
                 data["feedback_generator"] = BaseFeedbackGenerator.model_validate(data["feedback_generator"])
             if "discriminator" in data and data["discriminator"]:
                 data["discriminator"] = BaseDiscriminator.model_validate(data["discriminator"])
+            if "artifact_handlers" in data and data["artifact_handlers"]:
+                data["artifact_handlers"] = [ArtifactHandler.model_validate(handler) for handler in data["artifact_handlers"]]
 
         return data
 
@@ -121,5 +131,121 @@ class FlowConfig(BaseModel):
             feedback_data = self.feedback_generator.model_dump()
             feedback_data["feedback_generator_class"] = f"{self.feedback_generator.__class__.__module__}.{self.feedback_generator.__class__.__name__}"
             data["feedback_generator"] = feedback_data
+
+        if self.discriminator:
+            discriminator_data = self.discriminator.model_dump()
+            discriminator_data["discriminator_class"] = f"{self.discriminator.__class__.__module__}.{self.discriminator.__class__.__name__}"
+            data["discriminator"] = discriminator_data
+
+        if self.artifact_handlers:
+            data["artifact_handlers"] = [handler.model_dump() for handler in self.artifact_handlers]
             
         return data
+
+class FlowStatus(str, Enum):
+    """Enum for system status values."""
+    CREATED = "created"
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    PAUSED = "paused"
+    CANCELLED = "cancelled"
+    ERROR = "error"
+
+class RunAttempt(BaseModel):
+    """Information about a single run attempt"""
+    attempt_id: int
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    finished_at: Optional[datetime] = None
+    status: str = "running"  # running, error, completed
+    error: Optional[str] = None
+    error_trace: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class FlowStatusInfo(BaseModel):
+    """System status information"""
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    status: FlowStatus = FlowStatus.CREATED
+    error: Optional[str] = None
+    error_trace: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    restart_count: int = Field(default=0)
+    last_restart: Optional[datetime] = None
+    run_history: List[RunAttempt] = Field(default_factory=list)
+    current_attempt: Optional[int] = None
+
+    def start_new_attempt(self) -> RunAttempt:
+        """Start a new run attempt"""
+        attempt = RunAttempt(
+            attempt_id=len(self.run_history),
+            metadata=self.metadata
+        )
+        self.run_history.append(attempt)
+        self.current_attempt = attempt.attempt_id
+        return attempt
+
+    def get_current_attempt(self) -> Optional[RunAttempt]:
+        """Get the current run attempt"""
+        if self.current_attempt is not None:
+            return self.run_history[self.current_attempt]
+        return None
+
+    def complete_current_attempt(self, status: str = "completed", error: Optional[str] = None, error_trace: Optional[str] = None):
+        """Complete the current attempt"""
+        if attempt := self.get_current_attempt():
+            attempt.finished_at = datetime.now(timezone.utc)
+            attempt.status = status
+            attempt.error = error
+            attempt.error_trace = error_trace
+
+
+class TrajectoryEventDTO(BaseModel):
+    """Data transfer object for trajectory events."""
+    id: str
+    scope: str
+    event_type: str
+    timestamp: float
+    project_id: Optional[str] = None
+    trajectory_id: Optional[str] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+class TrajectoryListItem(BaseModel):
+    """List item for trajectories."""
+    project_id: str
+    trajectory_id: str
+    status: str
+    message: Optional[str] = None
+    error: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    last_restart: Optional[datetime] = None
+    cost: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+class StartTrajectoryRequest(BaseModel):
+    """Request to start a trajectory."""
+    agent_id: str
+    model_id: str
+    message: Optional[str] = None
+
+class RetryTrajectoryRequest(BaseModel):
+    """Request to retry a trajectory."""
+    node_id: str
+
+class ExecuteNodeRequest(BaseModel):
+    """Request to execute a node."""
+    node_id: str
+
+class TrajectoryResponseDTO(BaseModel):
+    """Data transfer object for trajectory responses."""
+    id: str
+    trajectory_id: str
+    project_id: str
+    status: FlowStatus
+    system_status: FlowStatusInfo
+    agent_id: Optional[str] = None
+    model_id: Optional[str] = None
+    events: List[TrajectoryEventDTO] = Field(default_factory=list)
+    nodes: List[NodeDTO] = Field(default_factory=list)

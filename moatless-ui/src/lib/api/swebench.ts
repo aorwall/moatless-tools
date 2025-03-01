@@ -32,7 +32,8 @@ export interface RunStatus {
 }
 
 export interface LoopResponse {
-  run_id: string;
+  project_id: string;
+  trajectory_id: string;
 }
 
 export interface LoopRequest {
@@ -40,6 +41,7 @@ export interface LoopRequest {
   model_id: string;
   message: string;
   attachments?: AttachmentData[];
+  repository_path?: string;
 }
 
 

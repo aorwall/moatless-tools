@@ -81,7 +81,12 @@ class Action(MoatlessComponent, ABC):
         if not self._workspace:
             raise ValueError("Workspace is not set")
         return self._workspace
+    
 
+    async def initialize(self, workspace: Workspace):
+        self._workspace = workspace
+
+    # TODO: Replace this with initialize method
     @workspace.setter
     def workspace(self, value: Workspace):
         self._workspace = value

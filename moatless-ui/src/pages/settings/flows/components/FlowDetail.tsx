@@ -31,9 +31,10 @@ import {
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Badge } from "@/lib/components/ui/badge";
 import { Card } from "@/lib/components/ui/card";
-import { useSelectors, useValueFunctions, useFeedbackGenerators } from "@/lib/hooks/useFlowComponents";
+import { useSelectors, useValueFunctions, useFeedbackGenerators, useArtifactHandlers } from "@/lib/hooks/useFlowComponents";
 import { ComponentSchema, ComponentProperty } from "@/lib/types/flow";
 import { ComponentSelect } from "./ComponentSelect";
+import { ArtifactHandlersSelect } from "./ArtifactHandlersSelect";
 
 interface FlowDetailProps {
   flow: FlowConfig;
@@ -70,11 +71,13 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
   const { data: selectors } = useSelectors();
   const { data: valueFunctions } = useValueFunctions();
   const { data: feedbackGenerators } = useFeedbackGenerators();
+  const { data: artifactHandlers } = useArtifactHandlers();
 
   const handleSubmit = async (data: FlowConfig) => {
     try {
       setIsSaving(true);
       setError(null);
+
       await onSubmit(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "An error occurred");
@@ -308,6 +311,14 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
               <FormMessage />
             </FormItem>
           )}
+        />
+
+        {/* Artifact Handlers */}
+        <ArtifactHandlersSelect
+          control={form.control}
+          componentsResponse={artifactHandlers}
+          label="Artifact Handlers"
+          description="Components that handle artifacts for this flow"
         />
 
         {/* Tree-specific fields in a 2x2 grid */}

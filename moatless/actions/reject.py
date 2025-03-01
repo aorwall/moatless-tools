@@ -25,4 +25,4 @@ class Reject(Action):
     args_schema: ClassVar[Type[ActionArguments]] = RejectArgs
 
     async def execute(self, args: RejectArgs, file_context: FileContext | None = None):
-        return Observation(message=args.rejection_reason, terminal=True)
+        return Observation(message="Rejected", terminal=True)

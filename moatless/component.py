@@ -1,5 +1,5 @@
 from abc import ABC
-from typing import Any, Dict, Type, ClassVar
+from typing import Any, Dict, Type, ClassVar, TypeVar, Generic, cast, Mapping
 import importlib
 import logging
 import pkgutil
@@ -9,10 +9,13 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# Global component cache
+# TypeVar for generic component types
+T = TypeVar('T', bound='MoatlessComponent')
+
+# ComponentType -> {QualifiedClassName -> ComponentClass}
 _GLOBAL_COMPONENT_CACHE: Dict[str, Dict[str, Type["MoatlessComponent"]]] = {}
 
-class MoatlessComponent(BaseModel, ABC):
+class MoatlessComponent(BaseModel, ABC, Generic[T]):
     """Base class for dynamically loadable components.
     
     This class provides functionality to:
@@ -36,6 +39,7 @@ class MoatlessComponent(BaseModel, ABC):
                 return Action
     """
     
+    # We store components in a dict without a generic type
     _components: ClassVar[Dict[str, Type["MoatlessComponent"]]] = {}
     
     @classmethod
@@ -81,35 +85,38 @@ class MoatlessComponent(BaseModel, ABC):
         raise NotImplementedError
 
     @classmethod
-    def get_component_by_name(cls, name: str) -> Type["MoatlessComponent"]:
+    def get_component_by_name(cls, name: str) -> Type[T] | None:
         """Get a component class by its name."""
         cls._initialize_components()
-        if name in cls._get_components():
-            return cls._get_components()[name]
-        for qualified_name, component in cls._get_components().items():
+        components = cls._get_components()
+        if name in components:
+            return cast(Type[T], components[name])
+        for qualified_name, component in components.items():
             if qualified_name.endswith(f".{name}"):
-                return component
+                return cast(Type[T], component)
         return None
 
     @classmethod
-    def get_available_components(cls) -> Dict[str, Type["MoatlessComponent"]]:
+    def get_available_components(cls) -> Dict[str, Type[T]]:
         """Get all available component classes."""
         cls._initialize_components()
-        return cls._get_components()
+        components = cls._get_components()
+        return cast(Dict[str, Type[T]], components)
 
     @classmethod
     def _initialize_components(cls):
         component_type = cls.get_component_type()
         if component_type not in _GLOBAL_COMPONENT_CACHE:
-            _GLOBAL_COMPONENT_CACHE[component_type] = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
+            result = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
+            _GLOBAL_COMPONENT_CACHE[component_type] = cast(Dict[str, Type["MoatlessComponent"]], result)
         cls._components = _GLOBAL_COMPONENT_CACHE[component_type]
 
     @classmethod
-    def _get_components(cls) -> Dict[str, Type["MoatlessComponent"]]:
+    def _get_components(cls) -> Dict[str, Type[T]]:
         component_type = cls.get_component_type()
         if component_type not in _GLOBAL_COMPONENT_CACHE:
             cls._initialize_components()
-        return _GLOBAL_COMPONENT_CACHE[component_type]
+        return cast(Dict[str, Type[T]], _GLOBAL_COMPONENT_CACHE[component_type])
 
     @classmethod
     def _get_package(cls) -> str:
@@ -117,14 +124,14 @@ class MoatlessComponent(BaseModel, ABC):
         raise NotImplementedError
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> Type[T]:
         """Get the base class for this component type."""
         raise NotImplementedError
 
     @classmethod
-    def _scan_classes_in_paths(cls, package: str, base_class: Type) -> Dict[str, Type[Any]]:
+    def _scan_classes_in_paths(cls, package: str, base_class: Type[T]) -> Dict[str, Type[T]]:
         """Scan for component classes in a package."""
-        registered_classes = {}
+        registered_classes: Dict[str, Type[T]] = {}
         try:
             logger.debug(f"Scanning package {package} for {base_class.__name__} subclasses")
             package_module = importlib.import_module(package)

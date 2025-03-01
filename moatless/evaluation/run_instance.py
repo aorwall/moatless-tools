@@ -30,6 +30,7 @@ from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import create_flow
 from moatless.node import Node
 from moatless.repository.repository import Repository
+from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
 from moatless.workspace import Workspace
@@ -53,7 +54,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
 
     trajectory_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
     print(f"Setting up job logging for run in {trajectory_dir}")
-    original_handlers = _setup_job_logging("run", trajectory_dir)
+    original_handlers = setup_job_logging("run", trajectory_dir)
     
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
     
@@ -97,7 +98,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
         )
         raise e
     finally:
-        _cleanup_job_logging(original_handlers)
+        cleanup_job_logging(original_handlers)
 
 async def _run_instance(evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict) -> None:
     current_project_id.set(evaluation_name)
@@ -217,51 +218,3 @@ def _emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: 
         run_async(event_bus.publish(event))
     except Exception as e:
         logger.error(f"Failed to publish event {event_type}: {e}")
-
-def _setup_job_logging(job_type: str, trajectory_dir: Path) -> List[logging.Handler]:
-    """Set up logging for a job and return the original handlers for cleanup.
-    
-    Args:
-        instance_id: The ID of the instance being processed
-        job_type: Type of job (run/eval) for log file naming
-        trajectory_dir: Directory for trajectory-specific logs
-        
-    Returns:
-        List of original handlers that should be restored after job completion
-    """
-
-    # Set up trajectory-specific logging
-    log_dir = trajectory_dir / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-    original_handlers = root_logger.handlers[:]
-    for handler in original_handlers:
-        root_logger.removeHandler(handler)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"{timestamp}_{job_type}.log"
-    file_handler = logging.FileHandler(str(log_dir / log_filename))
-    print(f"Setting up job logging for {job_type} in {log_dir}/{log_filename}")
-    formatter = logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s')
-    file_handler.setFormatter(formatter)
-    root_logger.addHandler(file_handler)
-    
-    return original_handlers
-
-def _cleanup_job_logging(original_handlers: List[logging.Handler]) -> None:
-    """Clean up job-specific logging and restore original handlers.
-    
-    Args:
-        original_handlers: List of handlers to restore
-    """
-    if original_handlers:
-        root_logger = logging.getLogger()
-        # Remove job-specific handlers
-        for handler in root_logger.handlers[:]:
-            handler.close()
-            root_logger.removeHandler(handler)
-        # Restore original handlers
-        for handler in original_handlers:
-            root_logger.addHandler(handler)

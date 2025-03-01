@@ -17,6 +17,7 @@ export function FlowDetailPage() {
 
   const handleSubmit = async (formData: FlowConfig) => {
     try {
+      console.log("formData", formData);
       await updateFlowMutation.mutateAsync(formData);
       toast.success("Changes saved successfully");
     } catch (error) {

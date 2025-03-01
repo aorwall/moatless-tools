@@ -18,6 +18,8 @@ import { Artifacts } from "@/pages/trajectories/components/Artifacts";
 import { cn } from "@/lib/utils";
 import { TrajectoryError } from "@/pages/trajectories/components/TrajectoryError";
 import { Trajectory } from "@/lib/types/trajectory";
+import { toast } from "sonner";
+import { useStartTrajectory } from "@/features/trajectories/hooks/useStartTrajectory";
 
 interface TrajectoryViewerProps {
   trajectory: Trajectory;
@@ -27,6 +29,15 @@ interface TrajectoryViewerProps {
 export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
   const { subscribe } = useWebSocketStore();
+  const startTrajectory = useStartTrajectory();
+
+  // Function to start the trajectory
+  const handleStartTrajectory = async () => {
+    startTrajectory.mutate({
+      projectId: trajectory.project_id,
+      trajectoryId: trajectory.trajectory_id
+    });
+  };
 
   // Handle websocket subscription
   useEffect(() => {
@@ -74,7 +85,6 @@ export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewer
     <div className="h-[calc(100vh-56px)]">
       <ResizablePanelGroup
         direction="horizontal"
-        className="h-full border rounded-lg"
       >
         <ResizablePanel defaultSize={25} minSize={0} className="border-r">
           <ResizablePanelGroup direction="vertical">
@@ -89,7 +99,10 @@ export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewer
                   <h2 className="font-semibold">Status</h2>
                 </div>
                 <ScrollArea className="flex-1">
-                  <TrajectoryStatus trajectory={trajectory} startInstance={startInstance} />
+                  <TrajectoryStatus 
+                    trajectory={trajectory} 
+                    startInstance={startInstance || (trajectory.status !== "running" ? handleStartTrajectory : undefined)}
+                  />
                 </ScrollArea>
               </div>
             </ResizablePanel>

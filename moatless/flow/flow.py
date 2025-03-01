@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Callable, Type, Union
 
-from moatless.telemetry import instrument, instrument_span
+from moatless.flow.schema import FlowStatus, FlowStatusInfo
 from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
@@ -15,7 +15,6 @@ from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
-from moatless.completion.manager import create_completion_model
 from moatless.context_data import current_trajectory_id
 from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent, FlowErrorEvent
 from moatless.events import event_bus
@@ -25,67 +24,13 @@ from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.utils.moatless import get_moatless_trajectory_dir
+from moatless.context_data import get_trajectory_dir
 from moatless.workspace import Workspace
+
 from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.flow")
-
-class RunAttempt(BaseModel):
-    """Information about a single run attempt"""
-    attempt_id: int
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: Optional[datetime] = None
-    status: str = "running"  # running, error, completed
-    error: Optional[str] = None
-    error_trace: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class SystemStatus(BaseModel):
-    """System status information"""
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    status: str = "running"  # running, error, completed
-    error: Optional[str] = None
-    error_trace: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    restart_count: int = Field(default=0)
-    last_restart: Optional[datetime] = None
-    run_history: List[RunAttempt] = Field(default_factory=list)
-    current_attempt: Optional[int] = None
-
-    def start_new_attempt(self) -> RunAttempt:
-        """Start a new run attempt"""
-        attempt = RunAttempt(
-            attempt_id=len(self.run_history),
-            metadata=self.metadata
-        )
-        self.run_history.append(attempt)
-        self.current_attempt = attempt.attempt_id
-        return attempt
-
-    def get_current_attempt(self) -> Optional[RunAttempt]:
-        """Get the current run attempt"""
-        if self.current_attempt is not None:
-            return self.run_history[self.current_attempt]
-        return None
-
-    def complete_current_attempt(self, status: str = "completed", error: Optional[str] = None, error_trace: Optional[str] = None):
-        """Complete the current attempt"""
-        if attempt := self.get_current_attempt():
-            attempt.finished_at = datetime.now(timezone.utc)
-            attempt.status = status
-            attempt.error = error
-            attempt.error_trace = error_trace
-
-    @classmethod
-    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None) -> "SystemStatus":
-        status_path = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id) / 'status.json'
-        if not status_path.exists():
-            raise FileNotFoundError(f"Status file not found for trajectory {trajectory_id}")
-        return SystemStatus.model_validate_json(status_path.read_text())
 
 
 class AgenticFlow(MoatlessComponent):
@@ -95,17 +40,14 @@ class AgenticFlow(MoatlessComponent):
     trajectory_id: str = Field(..., description="The trajectory ID.")
 
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
-
-    root: Optional[Node] = Field(None, description="The root node of the system.")
-
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     persist_path: Optional[str] = Field(None, description="Path to persist the system state.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
-
-    persist_dir: Optional[Path] = Field(None, description="Directory to persist system state", exclude=True)
     
-    _status: SystemStatus = PrivateAttr(default_factory=SystemStatus)
+    _persist_dir: Optional[Path] = PrivateAttr(default=None)
+    _root: Optional[Node] = PrivateAttr(default=None)
+    _status: FlowStatusInfo = PrivateAttr(default_factory=FlowStatusInfo)
     _events_file: Optional[Any] = PrivateAttr(default=None)
 
     @classmethod
@@ -120,13 +62,16 @@ class AgenticFlow(MoatlessComponent):
     def _get_base_class(cls) -> Type:
         return AgenticFlow
     
+    @property
+    def root(self) -> Node:
+        return self._root
     
     @classmethod
     def create(
         cls,
         message: str | None = None,
         trajectory_id: str | None = None,
-        project_id: str | None = None,
+        project_id: str = "default",
         agent: ActionAgent | None = None,
         agent_id: str | None = None,
         root: Node | None = None,
@@ -179,21 +124,22 @@ class AgenticFlow(MoatlessComponent):
             persist_dir = Path(persist_dir)
 
         if not persist_dir:
-            persist_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
+            persist_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
 
-        return cls(
+        instance = cls(
             trajectory_id=trajectory_id,
             project_id=project_id,
-            root=root,
             agent=agent,
             metadata=metadata or {},
             persist_path=persist_path,
-            persist_dir=persist_dir,
             max_iterations=max_iterations,
             max_cost=max_cost,
-            max_expansions=max_expansions,
             **kwargs,
         )
+
+        instance._root = root
+        instance._persist_dir = persist_dir
+        return instance
     
     @property
     def workspace(self) -> Workspace:
@@ -217,16 +163,16 @@ class AgenticFlow(MoatlessComponent):
                 
                 # Complete attempt successfully
                 self._status.complete_current_attempt("completed")
-                self._status.status = "completed"
+                self._status.status = FlowStatus.COMPLETED
                 self._status.finished_at = datetime.now(timezone.utc)
-                await event_bus.publish(FlowCompletedEvent(finish_reason=finish_reason))
+                await event_bus.publish(FlowCompletedEvent())
                 return node
             except Exception as e:
                 # Complete attempt with error
                 logger.exception(f"Error running flow {self.trajectory_id}")
                 error_trace = traceback.format_exc()
                 self._status.complete_current_attempt("error", str(e), error_trace)
-                self._status.status = "error" 
+                self._status.status = FlowStatus.ERROR
                 self._status.error = str(e)
                 self._status.error_trace = error_trace
                 self._status.finished_at = datetime.now(timezone.utc)
@@ -275,21 +221,21 @@ class AgenticFlow(MoatlessComponent):
 
     def _initialize_run_state(self):
         """Initialize or restore system run state and logging"""
-        if not self.persist_dir:            
+        if not self._persist_dir:            
             return
 
-        if not self.persist_dir.exists():
-            self.persist_dir.mkdir(parents=True, exist_ok=True)
+        if not self._persist_dir.exists():
+            self._persist_dir.mkdir(parents=True, exist_ok=True)
         
         # Initialize or restore status
-        status_path = self.persist_dir / 'status.json'
+        status_path = self._persist_dir / 'status.json'
         if status_path.exists():
             try:
-                existing_status = SystemStatus.model_validate_json(status_path.read_text())
+                existing_status = FlowStatusInfo.model_validate_json(status_path.read_text())
                 
                 # Resume previous run
                 self._status = existing_status
-                self._status.status = "running"
+                self._status.status = FlowStatus.RUNNING
                 self._status.restart_count += 1
                 self._status.error = None
                 self._status.error_trace = None
@@ -307,10 +253,10 @@ class AgenticFlow(MoatlessComponent):
                 logger.error(f"Error loading existing status: {e}")
         
         if not self._status:
-            self._status = SystemStatus()
+            self._status = FlowStatusInfo()
 
         self._status.started_at = datetime.now(timezone.utc)
-        self._status.status = "running"
+        self._status.status = FlowStatus.RUNNING
         self._status.metadata = self.metadata
 
         # Start new attempt
@@ -325,8 +271,8 @@ class AgenticFlow(MoatlessComponent):
 
     def _save_status(self):
         """Save current status to status.json"""
-        if self.persist_dir:
-            status_path = self.persist_dir / 'status.json'
+        if self._persist_dir:
+            status_path = self._persist_dir / 'status.json'
             self._status.metadata = self.metadata
             status_path.write_text(self._status.model_dump_json(indent=2))
 
@@ -343,22 +289,27 @@ class AgenticFlow(MoatlessComponent):
 
     def maybe_persist(self):
         """Persist the system state if a persist path is set."""
-        if self.persist_dir:
-            self.persist()
+        if self._persist_dir:
+            self.persist(self._persist_dir)
 
-    def persist(self):
+    def persist(self, persist_dir: Path | None = None):
         """Persist the system state to a file."""
+        if not persist_dir:
+            persist_dir = self._persist_dir
+
+        if not persist_dir:
+            raise ValueError("Persist directory is not set")
 
         trajectory_data = {
             "nodes": self.root.dump_as_list(),
         }
 
-        self._save_file(self.persist_dir / "trajectory.json", trajectory_data)
+        self._save_file(persist_dir / "trajectory.json", trajectory_data)
 
         flow_settings = self.model_dump(exclude_none=True)
-        self._save_file(self.persist_dir / "settings.json", flow_settings)
+        self._save_file(persist_dir / "settings.json", flow_settings)
     
-    def _save_file(self, file_path: str, data: Dict[str, Any]):
+    def _save_file(self, file_path: Path, data: Dict[str, Any]):
         with open(file_path, "w") as f:
             try:
                 json.dump(data, f, indent=2)
@@ -399,48 +350,6 @@ class AgenticFlow(MoatlessComponent):
         return super().model_validate(obj)
 
     @classmethod
-    def from_dict(
-        cls,
-        data: Dict[str, Any],
-        persist_path: str | None = None,
-        repository: Repository | None = None,
-        code_index: CodeIndex | None = None,
-        runtime: RuntimeEnvironment | None = None,
-        workspace: Workspace | None = None,
-        completion_model: BaseCompletionModel | None = None,
-    ):
-        data = data.copy()
-        if persist_path:
-            data["persist_path"] = persist_path
-
-        if "agent" in data and isinstance(data["agent"], dict):
-            agent_data = data["agent"]
-            # TODO: To keep backward compatibility
-            if "completion_model" in agent_data:
-                del agent_data["completion_model"]
-
-            agent = ActionAgent.model_validate(agent_data)
-            agent.completion_model = completion_model
-            if not workspace and (repository or runtime or code_index):
-                workspace = Workspace(repository=repository, runtime=runtime, code_index=code_index)
-            agent.workspace = workspace
-
-        return cls.model_validate(
-            data,
-            repository=workspace.repository if workspace else None,
-            runtime=workspace.runtime if workspace else None,
-        )
-
-    @classmethod
-    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "AgenticFlow":
-        """Load a system instance from a file."""
-        with open(file_path, "r") as f:
-            data = json.load(f)
-
-        return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
-    
-
-    @classmethod
     def from_dir(cls, trajectory_dir: Path, workspace: Workspace | None = None) -> "AgenticFlow":
         """Load a system instance from a directory."""
         settings_path = trajectory_dir / "settings.json"
@@ -450,21 +359,34 @@ class AgenticFlow(MoatlessComponent):
         trajectory_path = trajectory_dir / "trajectory.json"
         if not trajectory_path.exists():
             raise FileNotFoundError(f"Trajectory file not found in {trajectory_dir}")
+        
+        status_path = trajectory_dir / "status.json"
+        if status_path.exists():
+            with open(status_path, "r") as f:
+                status = FlowStatusInfo.model_validate_json(f.read())
+        else:
+            status = FlowStatusInfo(status=FlowStatus.CREATED)
 
         with open(settings_path, "r") as f:
             settings = json.load(f)
         
         flow = cls.model_validate(settings)
-        flow.root = Node.from_file(trajectory_path, repo=workspace.repository if workspace else None, runtime=workspace.runtime if workspace else None)
-        flow.workspace = workspace
-        flow.persist_dir = trajectory_dir
+        flow._root = Node.from_file(trajectory_path, repo=workspace.repository if workspace else None, runtime=workspace.runtime if workspace else None)
 
+        if workspace:
+            flow.workspace = workspace
+        flow._persist_dir = trajectory_dir
+        flow._status = status
         return flow
+
+    @abstractmethod
+    def is_finished(self) -> str | None:
+        raise NotImplementedError("Subclass must implement is_finished method")
 
 
     @classmethod
     def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None, workspace: Workspace | None = None) -> "AgenticFlow":
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
+        trajectory_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
         if not workspace:
             workspace = Workspace(trajectory_dir=trajectory_dir)
 
@@ -477,6 +399,6 @@ class AgenticFlow(MoatlessComponent):
         data["agent"] = self.agent.model_dump(**kwargs)
         return data
 
-    def get_status(self) -> SystemStatus:
+    def get_status(self) -> FlowStatusInfo:
         """Get the current status of the system."""
         return self._status

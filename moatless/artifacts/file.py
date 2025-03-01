@@ -5,8 +5,9 @@ import json
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Type
 
+from moatless.artifacts.json_handler import JsonArtifactHandler
 import pymupdf as fitz
 from PIL import Image, ImageEnhance
 from pydantic import Field, PrivateAttr
@@ -136,7 +137,7 @@ class ImageFileArtifact(FileArtifact):
         return base_repr
 
 
-class FileArtifactHandler(ArtifactHandler[FileArtifact]):
+class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
     type: str = "file"
 
     max_image_size: Tuple[int, int] = Field(default=(1024, 1024), description="Maximum size of the image to save")
@@ -144,9 +145,8 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
 
     _artifacts: Dict[str, FileArtifact] = PrivateAttr(default={})
 
-    def __init__(self, trajectory_dir: Path):
-        super().__init__(trajectory_dir=trajectory_dir)
-        self._load_artifacts()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     @classmethod
     def get_type(cls) -> str:
@@ -158,8 +158,11 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
 
     def get_file_path(self, artifact_id: str) -> Path:
         return self.trajectory_dir / "files" / artifact_id
+    
+    def get_artifact_class(self) -> Type[FileArtifact]:
+        return FileArtifact
 
-    def read(self, artifact_id: str) -> FileArtifact:
+    async def read(self, artifact_id: str) -> FileArtifact:
         file_path = self.get_file_path(artifact_id)
 
         mime_type = self._detect_mime_type(str(file_path))
@@ -199,7 +202,7 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
                 content=content,
             )
 
-    def create(self, artifact: FileArtifact) -> Artifact:
+    async def create(self, artifact: FileArtifact) -> Artifact:
         file_path = self.get_file_path(artifact.id)
         if artifact.content:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -211,7 +214,7 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
 
         return artifact
 
-    def update(self, artifact: FileArtifact) -> None:
+    async def update(self, artifact: FileArtifact) -> None:
         file_path = self.get_file_path(artifact.id)
         if artifact.content:
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,7 +224,7 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
         self._artifacts[artifact.id] = artifact
         self._save_artifacts()
 
-    def delete(self, artifact_id: str) -> None:
+    async def delete(self, artifact_id: str) -> None:
         file_path = self.get_file_path(artifact_id)
         if file_path.exists():
             file_path.unlink()
@@ -286,16 +289,3 @@ class FileArtifactHandler(ArtifactHandler[FileArtifact]):
 
         with open(self.get_storage_path(), "w") as file:
             json.dump(artifact_dumps, file, indent=4)
-
-    def _load_artifacts(self) -> None:
-        if not self.get_storage_path().exists():
-            logger.info(f"No artifacts found at {self.get_storage_path()}")
-            self._artifacts = {}
-            return
-
-        with open(self.get_storage_path(), "r") as file:
-            artifact_dumps = json.load(file)
-
-        for artifact_dump in artifact_dumps:
-            artifact = FileArtifact(**artifact_dump)
-            self._artifacts[artifact.id] = artifact

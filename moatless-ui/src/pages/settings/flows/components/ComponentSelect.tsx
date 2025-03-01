@@ -18,7 +18,7 @@ import { Loader2 } from "lucide-react";
 import { ComponentSchema, ComponentProperty, FlowConfig } from "@/lib/types/flow";
 import { ComponentProperties } from "./ComponentProperties";
 
-type ComponentField = "selector" | "value_function" | "feedback_generator";
+type ComponentField = "selector" | "value_function" | "feedback_generator" | "artifact_handlers";
 
 type ComponentsResponse = Record<string, ComponentSchema>;
 
@@ -28,6 +28,7 @@ interface ComponentSelectProps {
   componentsResponse: ComponentsResponse | undefined;
   label: string;
   description: string;
+  isMultiSelect?: boolean;
 }
 
 function getComponentTitle(schema: ComponentSchema): string {
@@ -41,6 +42,7 @@ export function ComponentSelect({
   componentsResponse,
   label,
   description,
+  isMultiSelect,
 }: ComponentSelectProps) {
   const hasComponents = componentsResponse && Object.keys(componentsResponse).length > 0;
   const selectedValue = useWatch({

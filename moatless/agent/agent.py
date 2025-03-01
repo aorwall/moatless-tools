@@ -150,6 +150,7 @@ class ActionAgent(MoatlessComponent):
     def workspace(self):
         return self._workspace
 
+    # TODO: Replace this with initialize method
     @workspace.setter
     def workspace(self, workspace: Workspace):
         self._workspace = workspace
@@ -157,6 +158,13 @@ class ActionAgent(MoatlessComponent):
             self._message_generator.workspace = workspace
         for action in self.actions:
             action.workspace = workspace
+
+    async def initialize(self, workspace: Workspace):
+        self._workspace = workspace
+        if self._message_generator:
+            self._message_generator.workspace = workspace
+        for action in self.actions:
+            await action.initialize(workspace)
 
     async def _emit_event(self, event: AgentEvent):
         """Emit a pure agent event"""

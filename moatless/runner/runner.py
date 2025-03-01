@@ -13,6 +13,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELED = "canceled"
+    NOT_FOUND = "not_found"
 
 
 class RunnerStatus(str, Enum):
@@ -114,7 +115,7 @@ class Runner(ABC):
         pass
     
     @abstractmethod
-    async def cancel_job(self, project_id: str, trajectory_id: str) -> None:
+    async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
         pass
     
     @abstractmethod
@@ -122,7 +123,7 @@ class Runner(ABC):
         pass
     
     @abstractmethod
-    async def retry_job(self, project_id: str, trajectory_id: str) -> None:
+    async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
         pass
     
     @abstractmethod
@@ -131,4 +132,8 @@ class Runner(ABC):
     
     @abstractmethod
     async def get_runner_info(self) -> RunnerInfo:
+        pass
+    
+    @abstractmethod
+    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
         pass

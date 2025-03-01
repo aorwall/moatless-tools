@@ -3,7 +3,6 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 
 from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.flow.flow import SystemStatus
 
 
 class AttachmentData(BaseModel):
@@ -36,17 +35,3 @@ class TrajectoryEventDTO(BaseModel):
     event_type: str
     trajectory_id: str
     data: Optional[Dict[str, Any]] = None
-
-class TrajectoryResponseDTO(TrajectoryDTO):
-    """Response containing run status, trajectory data, and events."""
-    id: str
-    project_id: Optional[str] = None
-    status: str
-    agent_id: Optional[str] = None
-    model_id: Optional[str] = None
-    system_status: SystemStatus
-    events: List[TrajectoryEventDTO] = []
-
-class TrajectoryListItem(SystemStatus):
-    """Response model for trajectory list items"""
-    trajectory_id: str 

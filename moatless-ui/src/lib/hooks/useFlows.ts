@@ -26,24 +26,23 @@ export function useUpdateFlow() {
   
   return useMutation({
     mutationFn: async (flow: FlowConfig) => {
-      return await flowsApi.updateFlow(flow.id, {
-        id: flow.id,
-        description: flow.description,
-        flow_type: flow.flow_type,
-        max_expansions: flow.max_expansions,
-        max_iterations: flow.max_iterations,
-        max_cost: flow.max_cost,
-        min_finished_nodes: flow.min_finished_nodes,
-        max_finished_nodes: flow.max_finished_nodes,
-        reward_threshold: flow.reward_threshold,
-        max_depth: flow.max_depth,
-        agent_id: flow.agent_id,
-        selector: flow.selector,
-        expander: flow.expander,
-        value_function: flow.value_function,
-        feedback_generator: flow.feedback_generator,
-        discriminator: flow.discriminator,
-      });
+      // Make a copy of the flow to avoid modifying the original
+      const flowToSend = { ...flow };
+      
+      // Ensure artifact_handlers is properly formatted
+      if (flowToSend.artifact_handlers && Array.isArray(flowToSend.artifact_handlers)) {
+        // Format each artifact handler to include its class name and properties
+        flowToSend.artifact_handlers = flowToSend.artifact_handlers.map(handler => {
+          if (typeof handler === 'object' && handler.artifact_handler_class) {
+            return {
+              ...handler
+            };
+          }
+          return handler;
+        });
+      }
+      
+      return await flowsApi.updateFlow(flowToSend.id, flowToSend);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["flows"] });
@@ -56,7 +55,23 @@ export function useCreateFlow() {
   
   return useMutation({
     mutationFn: async (flow: Omit<FlowConfig, "id"> & { id: string }) => {
-      return await flowsApi.createFlow(flow);
+      // Make a copy of the flow to avoid modifying the original
+      const flowToSend = { ...flow };
+      
+      // Ensure artifact_handlers is properly formatted
+      if (flowToSend.artifact_handlers && Array.isArray(flowToSend.artifact_handlers)) {
+        // Format each artifact handler to include its class name and properties
+        flowToSend.artifact_handlers = flowToSend.artifact_handlers.map(handler => {
+          if (typeof handler === 'object' && handler.artifact_handler_class) {
+            return {
+              ...handler
+            };
+          }
+          return handler;
+        });
+      }
+      
+      return await flowsApi.createFlow(flowToSend);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["flows"] });

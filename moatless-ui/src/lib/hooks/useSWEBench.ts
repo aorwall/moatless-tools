@@ -32,7 +32,8 @@ export function useStartLoop() {
       agent_id: string; 
       model_id: string; 
       message: string; 
-      attachments?: AttachmentData[] 
+      attachments?: AttachmentData[];
+      repository_path?: string;
     }) => swebenchApi.startLoop(data),
   });
 }

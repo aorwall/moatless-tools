@@ -112,20 +112,21 @@ class EventBus:
         try:
             from redis.asyncio import Redis
             
-            host = os.getenv('REDIS_HOST', 'localhost')
-            port = int(os.getenv('REDIS_PORT', 6379))
-            db = int(os.getenv('REDIS_DB', 0))
-            logger.info(f"Initializing Redis connection to {host}:{port}/{db}")
+            redis_url = os.getenv('REDIS_URL', None)
+            if not redis_url:
+                logger.info("REDIS_URL is not set, using local pub/sub only")
+                self._redis_available = False
+                return
+            
+            logger.info(f"Initializing Redis connection to {redis_url}")
             
             self._redis = Redis(
-                host=host,
-                port=port,
-                db=db,
+                url=redis_url,
                 decode_responses=True
             )
             self._pubsub = self._redis.pubsub()
             
-            logger.info(f"Successfully initialized Redis connection to {host}:{port}/{db}")
+            logger.info(f"Successfully initialized Redis connection to {redis_url}")
         except Exception as e:
             logger.warning(f"Failed to initialize Redis connection: {str(e)}")
             self._redis_available = False

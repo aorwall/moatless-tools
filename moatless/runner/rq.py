@@ -211,8 +211,47 @@ class RQRunner:
                             self.logger.warning(f"One of the jobs could not be fetched")
                 except Exception as exc:
                     self.logger.exception(f"Error batch canceling jobs: {exc}")
+        else:
+            # Cancel a specific job
+            job_id = self._job_id(project_id, trajectory_id)
+            try:
+                job = Job.fetch(job_id, connection=self.redis_conn)
+                if job:
+                    status = job.get_status()
+                    if status == 'started':
+                        self.logger.info(f"Stopping running job {job_id}")
+                        send_stop_job_command(self.redis_conn, job_id)
+                    else:
+                        self.logger.info(f"Canceling job {job_id} with status {status}")
+                        job.cancel()
+            except Exception as exc:
+                self.logger.warning(f"Error canceling job {job_id}: {exc}")
 
-  
+    @tracer.start_as_current_span("RQRunner.retry_job")
+    async def retry_job(self, project_id: str, trajectory_id: str):
+        """Retry a failed job.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            
+        Returns:
+            None
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+        try:
+            job = Job.fetch(job_id, connection=self.redis_conn)
+            if job and job.get_status() == 'failed':
+                self.logger.info(f"Retrying failed job {job_id}")
+                job.requeue()
+                return True
+            else:
+                self.logger.warning(f"Job {job_id} not found or not in failed state")
+                return False
+        except Exception as exc:
+            self.logger.exception(f"Error retrying job {job_id}: {exc}")
+            return False
+
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
         """Check if a job exists in Redis.
         
@@ -262,7 +301,34 @@ class RQRunner:
                     "error": str(exc)
                 }
             )
+
+
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+        """Get the status by checking if job_id is part of job id in queued or started job ids
         
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+        """
+        job_prefix = self._job_id(project_id, trajectory_id)
+
+        if any([job_id in job_id for job_id in self.queue.started_job_registry.get_job_ids() if job_id.startswith(job_prefix)]):
+            return JobStatus.RUNNING
+        
+        if any([job_id in job_id for job_id in self.queue.get_job_ids() if job_id.startswith(job_prefix)]):
+            return JobStatus.QUEUED
+        
+        if any([job_id in job_id for job_id in self.queue.failed_job_registry.get_job_ids() if job_id.startswith(job_prefix)]):
+            return JobStatus.FAILED
+        
+        if any([job_id in job_id for job_id in self.queue.finished_job_registry.get_job_ids() if job_id.startswith(job_prefix)]):
+            return JobStatus.COMPLETED
+        
+        if any([job_id in job_id for job_id in self.queue.canceled_job_registry.get_job_ids() if job_id.startswith(job_prefix)]):
+            return JobStatus.CANCELED
+        
+        return JobStatus.NOT_FOUND
+
     def _job_id(self, project_id: str, trajectory_id: str) -> str:
         return f"run_{project_id}_{trajectory_id}"
 

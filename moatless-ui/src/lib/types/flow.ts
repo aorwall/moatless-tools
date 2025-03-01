@@ -25,6 +25,11 @@ export const ComponentSchemaType = z.object({
   $id: z.string().optional(),
 });
 
+// Define a schema for artifact handler components
+export const ArtifactHandlerSchema = z.object({
+  artifact_handler_class: z.string(),
+}).catchall(z.any());
+
 // Flow configuration
 export const FlowConfigSchema = z.object({
   id: z.string(),
@@ -35,6 +40,7 @@ export const FlowConfigSchema = z.object({
   max_iterations: z.number().default(100),
   max_cost: z.number().default(4.0),
   agent_id: z.string().optional(),
+  artifact_handlers: z.array(ArtifactHandlerSchema).optional(),
   
   // Tree-specific fields
   max_expansions: z.number().optional(),
@@ -55,22 +61,4 @@ export const FlowConfigListSchema = z.array(FlowConfigSchema);
 
 export type FlowConfig = z.infer<typeof FlowConfigSchema>;
 export type ComponentProperty = z.infer<typeof ComponentPropertySchema>;
-export type ComponentSchema = z.infer<typeof ComponentSchemaType>;
-
-export interface ComponentSchema {
-  $defs?: Record<string, any>;
-  properties: Record<string, ComponentProperty>;
-  title?: string;
-  type: string;
-  $id?: string;
-}
-
-export interface ComponentProperty {
-  type: string;
-  title?: string;
-  description?: string;
-  default?: any;
-  enum?: string[];
-  anyOf?: Array<{type: string} | {$ref: string}>;
-  $ref?: string;
-} 
+export type ComponentSchema = z.infer<typeof ComponentSchemaType>; 

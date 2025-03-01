@@ -2,6 +2,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import List, Dict, Any
 
+from moatless.environment.base import BaseEnvironment
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.artifacts.artifact import (
@@ -21,29 +22,27 @@ class Workspace(BaseModel):
 
     _repository: Repository = PrivateAttr(default=None)
     _code_index: CodeIndex = PrivateAttr(default=None)
-    _runtime: RuntimeEnvironment = PrivateAttr(default=None)
+    _runtime: RuntimeEnvironment = PrivateAttr(default=None) # TODO: Replace this with BaseEnvironment
+    _environment: BaseEnvironment = PrivateAttr(default=None)
 
     def __init__(
         self,
-        trajectory_dir: Path | None = None,
         artifact_handlers: List[ArtifactHandler] | None = None,
         repository: Repository | None = None,
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
-        legacy_workspace: bool = False,
-        **data,
+        environment: BaseEnvironment | None = None,
+        **data
     ):
         super().__init__(**data)
 
-        if not legacy_workspace:
-            if not artifact_handlers and not trajectory_dir:
-                raise ValueError("Either artifact_handlers or trajectory_dir must be provided")
-
-            if not artifact_handlers:
-                artifact_handlers = ArtifactHandler.initiate_handlers(trajectory_dir=trajectory_dir)
-
+        if not artifact_handlers:
+            artifact_handlers = ArtifactHandler.initiate_handlers()           
             self.artifact_handlers = {handler.type: handler for handler in artifact_handlers}
 
+        self._environment = environment
+
+        # TODO: These are for the legacy workspace and should evnetually be replaced by artifact handlers and environment
         self._repository = repository
         self._code_index = code_index
         self._runtime = runtime
@@ -59,6 +58,10 @@ class Workspace(BaseModel):
     @property
     def runtime(self) -> RuntimeEnvironment:
         return self._runtime
+
+    @property
+    def environment(self) -> BaseEnvironment:
+        return self._environment
 
     def create_artifact(self, artifact: Artifact) -> Artifact:
         if artifact.type in self.artifact_handlers:

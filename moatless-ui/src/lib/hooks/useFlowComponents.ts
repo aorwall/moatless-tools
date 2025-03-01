@@ -6,6 +6,7 @@ export const componentKeys = {
   selectors: () => [...componentKeys.all, "selectors"] as const,
   valueFunctions: () => [...componentKeys.all, "value-functions"] as const,
   feedbackGenerators: () => [...componentKeys.all, "feedback-generators"] as const,
+  artifactHandlers: () => [...componentKeys.all, "artifact-handlers"] as const,
 };
 
 export function useSelectors() {
@@ -26,5 +27,12 @@ export function useFeedbackGenerators() {
   return useQuery({
     queryKey: componentKeys.feedbackGenerators(),
     queryFn: () => settingsApi.getAvailableFeedbackGenerators(),
+  });
+}
+
+export function useArtifactHandlers() {
+  return useQuery({
+    queryKey: componentKeys.artifactHandlers(),
+    queryFn: () => settingsApi.getAvailableArtifactHandlers(),
   });
 } 

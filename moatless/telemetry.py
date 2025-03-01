@@ -7,7 +7,6 @@ import asyncio
 from contextlib import contextmanager, asynccontextmanager
 from typing import Optional, Dict, Any, Iterator, Callable, TypeVar, ParamSpec, Literal, Union, AsyncIterator
 from functools import wraps
-from rq import Queue
 from opentelemetry import trace, context
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource

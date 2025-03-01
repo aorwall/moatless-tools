@@ -1,17 +1,13 @@
+import type { ActionStep, Node } from "@/lib/types/trajectory";
+import { cn } from "@/lib/utils";
 import {
-  Terminal,
-  Folder,
   AlertTriangle,
   ChevronDown,
-  Info,
-  BarChart,
   Cpu,
+  Folder,
+  Terminal,
 } from "lucide-react";
-import type { Node, ActionStep } from "@/lib/types/trajectory";
-import { truncateMessage } from "@/lib/utils/text";
-import { cn } from "@/lib/utils";
-import { useMemo, Fragment } from "react";
-import React from "react";
+import { Fragment, useMemo } from "react";
 
 interface TrajectoryNodeProps {
   node: Node;
@@ -65,12 +61,12 @@ export const TrajectoryNode = ({
   const formatActionDisplay = (action: ActionStep['action']) => {
     // Define priority properties that should be displayed first
     const priorityProps = ['path', 'class_name', 'function_name'];
-    
+
     return (
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-sm text-gray-700">{action.name}</span>
-          {priorityProps.map(propKey => 
+          {priorityProps.map(propKey =>
             action.properties?.[propKey] ? (
               <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
                 {action.properties[propKey]}
@@ -101,8 +97,8 @@ export const TrajectoryNode = ({
     <div className="flex flex-col gap-1.5">
       {/* Grouped Action Steps */}
       {groupedActions?.map((group, index) => (
-        <div 
-          key={index} 
+        <div
+          key={index}
           className={cn(
             "group relative flex items-start gap-2 py-1 pl-2 -ml-2 rounded-md transition-colors",
             "hover:bg-gray-50",
@@ -118,7 +114,7 @@ export const TrajectoryNode = ({
               <div className="flex-1">
                 {formatActionDisplay(group.action.action)}
               </div>
-              
+
               {/* Node total usage - show only on first action */}
               {index === 0 && hasNodeUsage && (
                 <div className="flex items-center gap-1">
@@ -177,19 +173,19 @@ export const TrajectoryNode = ({
             </div>
 
             {/* Expand Button - only show if has properties */}
-            {group.action.action.properties && 
-             Object.keys(group.action.action.properties).length > 0 && (
-              <button 
-                onClick={() => {/* Toggle expanded state */}}
-                className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 
+            {group.action.action.properties &&
+              Object.keys(group.action.action.properties).length > 0 && (
+                <button
+                  onClick={() => {/* Toggle expanded state */ }}
+                  className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 
                            text-gray-400 hover:text-gray-600 transition-opacity"
-              >
-                <ChevronDown className={cn(
-                  "h-3 w-3 transition-transform",
-                  { "transform rotate-180": expanded }
-                )} />
-              </button>
-            )}
+                >
+                  <ChevronDown className={cn(
+                    "h-3 w-3 transition-transform",
+                    { "transform rotate-180": expanded }
+                  )} />
+                </button>
+              )}
           </div>
         </div>
       ))}
@@ -210,6 +206,19 @@ export const TrajectoryNode = ({
             </div>
           ))}
         </>
+      )}
+
+      {/* Node Error */}
+      {node.error && (
+        <div className="flex items-start gap-1.5 text-xs text-red-600 mt-2 p-2 bg-red-50 rounded-md">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="flex flex-col w-full">
+            <span className="font-medium mb-0.5">Node Error</span>
+            <div className="whitespace-pre-wrap break-words bg-red-100/50 p-1.5 rounded border border-red-200 max-h-[120px] overflow-y-auto">
+              {node.error}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

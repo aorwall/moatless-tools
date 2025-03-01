@@ -3,8 +3,11 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Literal, Optional, Type, TypeVar, Generic, List, Any
+from typing import ClassVar, Dict, Literal, Optional, Type, TypeVar, Generic, List, Any
 
+from moatless.storage.base import BaseStorage
+from moatless.storage.file_storage import FileStorage
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.artifacts.content import ContentStructure
@@ -44,7 +47,7 @@ class ArtifactResponse(BaseModel):
 
 
 class Artifact(BaseModel, ABC):
-    id: Optional[str] = Field(default=None, description="Unique identifier for the artifact")
+    id: str = Field(description="Unique identifier for the artifact")
     type: str = Field(description="Type of artifact (e.g., 'receipt')")
     name: Optional[str] = Field(default=None, description="Name of the artifact")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="When the artifact was created")
@@ -74,7 +77,7 @@ class Artifact(BaseModel, ABC):
             type=self.type,
             name=self.name,
             created_at=self.created_at,
-            references=[ref.model_dump() for ref in self.references],
+            references=self.references,
             status=self.status,
             can_persist=self.can_persist and self.status in ["updated", "new"],
             data=model_data,
@@ -105,7 +108,7 @@ class ArtifactChange(BaseModel):
 
 
 # Create a TypeVar for the specific Artifact type
-T = TypeVar("T", bound="Artifact")
+T = TypeVar("T", bound="ArtifactHandler")
 
 
 class SearchCriteria(BaseModel):
@@ -116,19 +119,19 @@ class SearchCriteria(BaseModel):
     operator: Literal["eq", "contains", "gt", "lt", "gte", "lte"] = "eq"
     case_sensitive: bool = False
 
-class ArtifactHandler(MoatlessComponent, Generic[T]):
+class ArtifactHandler(MoatlessComponent[T]):
     """
     Defines how to load, save, update, and delete artifacts of a certain type.
     The type parameter T specifies which Artifact subclass this handler manages.
     """
 
-    type: str = Field(description="Type of artifact this handler manages")
-    trajectory_dir: Path = Field(description="Path to the trajectory directory")
-    _artifacts: Dict[str, T] = PrivateAttr(default={})
+    type: ClassVar[str]
 
-    @classmethod
-    def get_type(cls) -> str:
-        pass
+    _storage: BaseStorage | None = PrivateAttr(default=None)
+    
+    def __init__(self, storage: BaseStorage | None = None, **data):
+        super().__init__(**data)
+        self._storage = storage
 
     @classmethod
     def get_component_type(cls) -> str:
@@ -143,73 +146,50 @@ class ArtifactHandler(MoatlessComponent, Generic[T]):
         return ArtifactHandler
     
     @abstractmethod
-    def read(self, artifact_id: str) -> T:
+    async def read(self, artifact_id: str) -> T:
         """
         Read an existing artifact from the storage.
         """
         pass
 
     @abstractmethod
-    def create(self, artifact: T) -> T:
+    async def create(self, artifact: T) -> T:
         """
         Create a new artifact but do not persist it to the storage.
         """
         pass
 
-    def update(self, artifact: T) -> None:
+    @abstractmethod
+    async def update(self, artifact: T) -> None:
         """
         Update an existing artifact but do not persist it to the storage.
         """
         raise NotImplementedError("Update is not supported for this artifact type")
 
-    def delete(self, artifact_id: str) -> None:
+    @abstractmethod
+    async def delete(self, artifact_id: str) -> None:
         """
         Delete an existing artifact but do not persist it to the storage.
         """
         raise NotImplementedError("Delete is not supported for this artifact type")
     
-    def persist(self, artifact_id: str) -> None:
+    async def persist(self, artifact_id: str) -> None:
         """
         Finalize and save the artifact to its permanent storage (e.g., disk, remote server).
         Returns the updated artifact instance.
         """
         raise NotImplementedError("Persist is not supported for this artifact type")
 
-    def get_all_artifacts(self) -> List[ArtifactListItem]:
+    async def get_all_artifacts(self) -> List[ArtifactListItem]:
         """Get all artifacts managed by this handler as list items"""
-        list_items = []
-        for artifact in self._artifacts.values():
-            list_items.append(artifact.to_list_item())
-        return list_items
+        raise NotImplementedError("Get all artifacts is not supported for this artifact type")
 
-    def search(self, criteria: List[SearchCriteria]) -> List[T]:
+    async def search(self, criteria: List[SearchCriteria]) -> List[T]:
         """
         Search for artifacts based on the provided criteria.
         Each handler implements its own search logic.
         """
         raise NotImplementedError("Search is not supported for this artifact type")
-
-    def _save_artifacts(self) -> None:
-        artifact_dumps = []
-        for artifact in self._artifacts.values():
-            try:
-                artifact_dict = artifact.model_dump()
-                artifact_dumps.append(artifact_dict)
-            except Exception as e:
-                logger.error(f"Error dumping artifact {artifact}: {e}")
-
-        try:        
-            with open(self.get_storage_path(), "w") as file:
-                json.dump(artifact_dumps, file, indent=4)
-        except Exception as e:
-            logger.exception(f"Error saving artifacts {artifact_dumps} to {self.get_storage_path()}: {e}")
-
-    def get_storage_path(self) -> Path:
-        return self.trajectory_dir / f"{self.type}.json"
-
-    @classmethod
-    def get_component_type(cls) -> str:
-        return "artifact_handler"
 
     @classmethod
     def get_base_class(cls) -> Type:
@@ -220,13 +200,15 @@ class ArtifactHandler(MoatlessComponent, Generic[T]):
         return cls.type
     
     @classmethod
-    def initiate_handlers(cls, trajectory_dir: Path) -> List["ArtifactHandler"]:
+    def initiate_handlers(cls, storage: BaseStorage | None = None) -> List["ArtifactHandler"]:
         registered_classes = cls.get_available_components()
+        if not storage:
+            storage = FileStorage()
 
         logger.info(f"Registered classes: {list(registered_classes.keys())}")
         handlers = []
         for handler in registered_classes.values():
-            handler = handler(trajectory_dir=trajectory_dir)
+            handler = handler(storage=storage)
             handlers.append(handler)
 
         logger.info(f"Initialized handlers: {list(map(lambda h: h.type, handlers))}")

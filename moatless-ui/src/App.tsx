@@ -7,7 +7,6 @@ import ErrorBoundary from "@/lib/components/ErrorBoundary";
 import { WebSocketProvider } from "@/lib/providers/WebSocketProvider";
 import { Toaster } from "@/lib/components/ui/sonner";
 
-import { Home } from "@/pages/home/index";
 import { Trajectory } from "@/pages/trajectory";
 import { ModelsLayout } from "@/pages/settings/models/layout";
 import { ModelsPage } from "@/pages/settings/models";
@@ -16,10 +15,8 @@ import { AgentsLayout } from "@/pages/settings/agents/layout";
 import { AgentsPage } from "@/pages/settings/agents";
 import { AgentDetailPage } from "@/pages/settings/agents/[id]";
 import { ValidatePage } from "@/pages/validate";
-import { TrajectoryPage } from "@/pages/trajectories/[id]/index";
+import { TrajectoryPage } from "@/features/trajectory/pages/TrajectoryPage";
 import { NewAgentPage } from "@/pages/settings/agents/new";
-import { LoopPage } from "@/pages/loop";
-import { TrajectoriesPage } from "@/pages/trajectories";
 import { FlowsLayout } from "@/pages/settings/flows/layout";
 import { FlowsPage } from "@/pages/settings/flows";
 import { FlowDetailPage } from "@/pages/settings/flows/[id]";
@@ -32,6 +29,9 @@ import { EvaluationInstancePage } from "@/pages/swebench/evaluation/[id]/index";
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
 import { BaseModelsPage } from "./pages/settings/models/base";
 import { CreateModelPage } from "./pages/settings/models/create";
+import RunLoopPage, { RunPage } from "./features/loop/pages/RunLoopPage";
+import { TrajectoryListPage } from "./features/trajectory/pages/TrajectoryListPage";
+import { RunnerDashboardPage } from "./features/runner/pages/RunnerDashboardPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,7 +53,8 @@ function App() {
                 <Route index element={<Navigate to="/swebench/evaluation" replace />} />
                 <Route path="trajectory" element={<Trajectory />} />
                 <Route path="validate" element={<ValidatePage />} />
-                <Route path="loop" element={<LoopPage />} />
+                <Route path="loop" element={<RunLoopPage />} />
+                <Route path="runner" element={<RunnerDashboardPage />} />
 
                 {/* Nested settings routes */}
                 <Route path="settings" element={<SettingsLayout />}>
@@ -75,8 +76,8 @@ function App() {
                   </Route>
                 </Route>
 
-                <Route path="/trajectories" element={<TrajectoriesPage />} />
-                <Route path="/trajectories/:trajectoryId" element={<TrajectoryPage />} />
+                <Route path="/trajectories" element={<TrajectoryListPage />} />
+                <Route path="/trajectories/:projectId/:trajectoryId" element={<TrajectoryPage />} />
                 <Route path="/swebench">
                   <Route path="evaluation">
                     <Route index element={<EvaluationsPage />} />

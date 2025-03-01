@@ -224,6 +224,7 @@ export interface TrajectoryStatus {
 
 export interface Trajectory {
   id: string;
+  trajectory_id: string;
   project_id: string;
   status: "running" | "error" | "finished" | "unknown";
   agent_id: string;

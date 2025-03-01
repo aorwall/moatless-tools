@@ -1,7 +1,7 @@
 import importlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Optional, Tuple, Type, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -12,9 +12,11 @@ from moatless.component import MoatlessComponent
 
 logger = logging.getLogger(__name__)
 
+# TypeVar for ValueFunction types
+VF = TypeVar('VF', bound='BaseValueFunction')
 
-class BaseValueFunction(MoatlessComponent):
-    # Add this class variable to tell Pydantic to use model_validate
+class BaseValueFunction(MoatlessComponent[VF]):
+
     model_config = {
         "from_attributes": True,
     }
@@ -32,14 +34,5 @@ class BaseValueFunction(MoatlessComponent):
         return "moatless.value_function"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> Type['BaseValueFunction']:
         return BaseValueFunction
-    
-    @classmethod
-    def model_validate(cls, data: Any) -> "BaseValueFunction":
-        return super().model_validate(data)
-
-    def model_dump(self, *args, **kwargs):
-        data = super().model_dump(*args, **kwargs)
-        data["value_function_class"] = self.__class__.__module__ + "." + self.__class__.__name__
-        return data

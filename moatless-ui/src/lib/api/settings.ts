@@ -18,7 +18,7 @@ export const settingsApi = {
       body: JSON.stringify(config),
     }),
 
-  updateFlow: (id: string, config: Partial<FlowConfig>) =>
+  updateFlow: (id: string, config: FlowConfig) =>
     apiRequest<FlowConfig>(`/settings/flows/${id}`, {
       method: "PUT",
       body: JSON.stringify(config),
@@ -33,4 +33,7 @@ export const settingsApi = {
 
   getAvailableFeedbackGenerators: () => 
     apiRequest<ComponentsResponse>("/settings/components/feedback-generators"),
+
+  getAvailableArtifactHandlers: () => 
+    apiRequest<ComponentsResponse>("/settings/components/artifact-handlers"),
 }; 

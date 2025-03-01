@@ -60,7 +60,7 @@ class AgenticLoop(AgenticFlow):
     
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
-        child_node = Node(
+        child_node = Node( # type: ignore
             node_id=self._generate_unique_id(),
             parent=parent,
             file_context=parent.file_context.clone() if parent.file_context else None,
@@ -86,15 +86,3 @@ class AgenticLoop(AgenticFlow):
     def get_last_node(self) -> Node:
         """Get the last node in the action sequence."""
         return self.root.get_all_nodes()[-1]
-
-    @classmethod
-    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "AgenticLoop":
-        """Load a loop instance from a file, but don't initialize with the node."""
-        with open(file_path, "r") as f:
-            data = json.load(f)
-
-        # Remove root/nodes from loaded data since we'll provide it at runtime
-        data.pop("root", None)
-        data.pop("nodes", None)
-
-        return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
