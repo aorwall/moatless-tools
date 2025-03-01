@@ -551,10 +551,14 @@ class BaseCompletionModel(BaseModel, ABC):
         breakpoints_remaining = 3
         for message in reversed(messages):
             try:
+                
                 if isinstance(message.get("content"), list):
                     content = next((m for m in message["content"] if m.get("type") == "text"), None)
+                elif message.get("role") == "assistant" and not message.get("content") and message.get("tool_calls"):
+                    content = message["tool_calls"][-1]
                 else:
                     content = message
+        
         
                 if content:
                     if breakpoints_remaining:

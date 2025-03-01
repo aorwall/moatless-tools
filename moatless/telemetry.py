@@ -20,7 +20,7 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 try:
     from azure.monitor.opentelemetry import configure_azure_monitor
     HAS_AZURE_MONITOR = True
-except ImportError:
+except ImportError: 
     HAS_AZURE_MONITOR = False
 
 logger = logging.getLogger(__name__)

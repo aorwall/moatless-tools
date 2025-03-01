@@ -15,9 +15,16 @@ interface CompletionContentProps {
 }
 
 export function CompletionContent({ content }: CompletionContentProps) {
+  // Transform usage data to match the expected format in CompletionUsage
+  const transformedUsage = content.usage ? {
+    prompt_tokens: content.usage.promptTokens,
+    completion_tokens: content.usage.completionTokens,
+    cached_tokens: content.usage.cachedTokens
+  } : undefined;
+
   return (
     <div className="space-y-4 max-w-full">
-      {content.usage && <CompletionUsage usage={content.usage} />}
+      {transformedUsage && <CompletionUsage usage={transformedUsage} />}
       
       {content.response && (
         <div>
