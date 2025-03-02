@@ -6,7 +6,7 @@ import sys
 import threading
 import time
 from collections import defaultdict
-from typing import Dict, List, Optional
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

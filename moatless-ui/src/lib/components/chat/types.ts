@@ -5,7 +5,7 @@ export interface MessageContent {
 }
 
 export interface ActionContent {
-  [key: string]: any;  // For dynamic properties
+  [key: string]: any; // For dynamic properties
   errors?: string[];
   warnings?: string[];
 }
@@ -18,7 +18,7 @@ export interface ArtifactContent {
   actor: string;
 }
 
-export type TimelineItemType = 
+export type TimelineItemType =
   | "user_message"
   | "assistant_message"
   | "thought"
@@ -35,4 +35,4 @@ export type ChatMessage = TrajectoryTimelineItem & {
 export interface ChatMessageGroup {
   messages: ChatMessage[];
   isUser: boolean;
-} 
+}

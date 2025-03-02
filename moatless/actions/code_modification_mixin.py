@@ -1,16 +1,12 @@
 import logging
 from pathlib import Path
-from re import L
-from typing import Optional, Tuple
+from typing import Optional
 
 from opentelemetry import trace
 from pydantic import Field
 
-from moatless.actions.action import Action
 from moatless.actions.schema import Observation
-from moatless.file_context import ContextFile, FileContext
-from moatless.repository.git import GitRepository
-from moatless.telemetry import instrument
+from moatless.file_context import FileContext
 from moatless.utils.file import is_test
 
 logger = logging.getLogger(__name__)
@@ -24,7 +20,6 @@ class CodeModificationMixin:
     This includes path normalization, file validation, test running, and observation handling.
     """
 
-    persist_files: bool = Field(False, description="Whether to persist files")
     auto_run_tests: bool = Field(True, description="Whether to automatically run tests after modifying code")
 
     def normalize_path(self, file_path: str) -> str:

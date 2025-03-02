@@ -2,11 +2,10 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 from opentelemetry import trace
 
-from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
 from moatless.events import BaseEvent, event_bus
 

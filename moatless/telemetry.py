@@ -101,203 +101,6 @@ def setup_telemetry() -> None:
     logger.info("Initialized OpenTelemetry tracing")
 
 
-def get_tracer():
-    """Get the global tracer instance."""
-    if not _tracer:
-        setup_telemetry()
-    return _tracer
-
-
-@contextmanager
-def _sync_instrument_span(
-    name: str,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[trace.SpanKind] = None,
-) -> Iterator[Span]:
-    """Synchronous context manager for creating trace spans."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(name, attributes=attributes, kind=kind) as span:
-        try:
-            yield span
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR))
-            span.record_exception(e)
-            raise
-
-
-@asynccontextmanager
-async def _async_instrument_span(
-    name: str,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[trace.SpanKind] = None,
-):
-    """Asynchronous context manager for creating trace spans."""
-    tracer = get_tracer()
-    with tracer.start_as_current_span(
-        name,
-        attributes=attributes,
-        kind=kind,
-    ) as span:
-        try:
-            yield span
-        except Exception as e:
-            span.set_status(Status(StatusCode.ERROR))
-            span.record_exception(e)
-            raise
-
-
-def instrument_span(
-    name: str,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[trace.SpanKind] = None,
-) -> Union[Iterator[Span], AsyncIterator[Span]]:
-    """Context manager for creating trace spans. Works with both sync and async code.
-
-    Args:
-        name: Name of the span
-        attributes: Optional span attributes
-        kind: Optional span kind
-
-    Returns:
-        Context manager that yields the created span
-    """
-    if asyncio.get_event_loop().is_running():
-        return _async_instrument_span(name, attributes, kind)
-    return _sync_instrument_span(name, attributes, kind)
-
-
-def instrument(
-    name: Optional[Union[str, Callable[..., str]]] = None,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[trace.SpanKind] = None,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Decorator for tracing functions using OpenTelemetry.
-
-    Args:
-        name: Name for the span (defaults to function name). Can be a string or a callable that returns a string.
-        attributes: Static span attributes
-        kind: Optional span kind
-
-    Returns:
-        A decorator function that wraps the original function with tracing
-    """
-
-    def create_wrapper(func: Callable[P, R]) -> Callable[P, R]:
-        def get_span_name(*args, **kwargs) -> str:
-            # Get class name if method call
-            class_prefix = ""
-            if args and hasattr(args[0], func.__name__):
-                class_prefix = f"{args[0].__class__.__name__}."
-
-            if callable(name):
-                # If first arg is self/cls, pass it to the name function
-                if args and hasattr(args[0], func.__name__):
-                    return f"{class_prefix}{name(args[0])}"
-                return name()
-            return f"{class_prefix}{func.__name__}"
-
-        @wraps(func)
-        async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            if name is None:
-                span_name = get_span_name(*args, **kwargs)
-            else:
-                span_name = name
-            async with _async_instrument_span(span_name, attributes=attributes, kind=kind) as span:
-                try:
-                    result = await func(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR))
-                    span.record_exception(e)
-                    raise
-
-        @wraps(func)
-        def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            if name is None:
-                span_name = get_span_name(*args, **kwargs)
-            else:
-                span_name = name
-            with _sync_instrument_span(span_name, attributes=attributes, kind=kind) as span:
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR))
-                    span.record_exception(e)
-                    raise
-
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
-
-    return create_wrapper
-
-
-def get_current_span() -> Optional[Span]:
-    """Get the current active span.
-    Returns None if there is no active span.
-    """
-    return trace.get_current_span()
-
-
-def set_attribute(key: str, value: Any | None) -> None:
-    """Set an attribute on the current span.
-    Does nothing if there is no active span.
-
-    Args:
-        key: Attribute key
-        value: Attribute value
-    """
-    span = get_current_span()
-    if span and value is not None:
-        span.set_attribute(key, value)
-
-
-def set_attributes(attributes: dict[str, Any]) -> None:
-    """Set multiple attributes on the current span.
-    Does nothing if there is no active span.
-
-    Args:
-        attributes: Dictionary of attributes to set
-    """
-    span = get_current_span()
-    if span:
-        span.set_attributes(attributes)
-
-
-def set_span_status(span: Span, success: bool, message: Optional[str] = None) -> None:
-    """Set the status of a span.
-
-    Args:
-        span: The span to update
-        success: Whether the operation was successful
-        message: Optional status message
-    """
-    if success:
-        span.set_status(Status(StatusCode.OK))
-    else:
-        span.set_status(Status(StatusCode.ERROR, message))
-
-
-def add_span_event(span: Span, name: str, attributes: Optional[dict[str, Any]] = None) -> None:
-    """Add an event to a span.
-
-    Args:
-        span: The span to add the event to
-        name: Name of the event
-        attributes: Optional event attributes
-    """
-    span.add_event(name, attributes=attributes)
-
-
-def add_span_attributes(span: Span, attributes: dict[str, Any]) -> None:
-    """Add attributes to a span.
-
-    Args:
-        span: The span to add attributes to
-        attributes: The attributes to add
-    """
-    span.set_attributes(attributes)
-
-
 def extract_trace_context() -> dict[str, str]:
     """Extract current trace context into carrier dict.
 
@@ -430,7 +233,6 @@ def run_async(coro, span_name: Optional[str] = None):
     # Get current trace context and span
     current_context = context.get_current()
     current_span = trace.get_current_span()
-    tracer = get_tracer()
 
     # Capture current context data
     from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
@@ -455,8 +257,8 @@ def run_async(coro, span_name: Optional[str] = None):
             try:
                 # Create a new span if name is provided, otherwise just run with current context
                 if span_name:
-                    tracer = get_tracer()
-                    with tracer.start_as_current_span(
+                    global _tracer
+                    with _tracer.start_as_current_span(
                         span_name, context=current_context if current_span else None
                     ) as span:
                         return await coro

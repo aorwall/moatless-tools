@@ -12,10 +12,18 @@ export function useWebSocket() {
   const disconnect = useWebSocketStore((state) => state.disconnect);
 
   // Get server subscription methods
-  const serverSubscribeToProject = useWebSocketStore((state) => state.serverSubscribeToProject);
-  const serverSubscribeToTrajectory = useWebSocketStore((state) => state.serverSubscribeToTrajectory);
-  const serverUnsubscribeFromProject = useWebSocketStore((state) => state.serverUnsubscribeFromProject);
-  const serverUnsubscribeFromTrajectory = useWebSocketStore((state) => state.serverUnsubscribeFromTrajectory);
+  const serverSubscribeToProject = useWebSocketStore(
+    (state) => state.serverSubscribeToProject,
+  );
+  const serverSubscribeToTrajectory = useWebSocketStore(
+    (state) => state.serverSubscribeToTrajectory,
+  );
+  const serverUnsubscribeFromProject = useWebSocketStore(
+    (state) => state.serverUnsubscribeFromProject,
+  );
+  const serverUnsubscribeFromTrajectory = useWebSocketStore(
+    (state) => state.serverUnsubscribeFromTrajectory,
+  );
 
   // Client-side subscription methods
   const subscribe = useWebSocketStore((state) => state.subscribe);

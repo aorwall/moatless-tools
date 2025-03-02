@@ -1,17 +1,14 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
-    Observation,
-    RewardScaleEntry,
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 
 class GrepToolArgs(ActionArguments):
@@ -66,6 +63,7 @@ class GrepToolArgs(ActionArguments):
                     thoughts="I'll search for function definitions in JavaScript files using a regex pattern.",
                     pattern=r"function\s+\w+\s*\(",
                     include="*.js",
+                    max_results=10,
                 ),
             ),
             FewShotExample.create(
@@ -73,6 +71,8 @@ class GrepToolArgs(ActionArguments):
                 action=GrepToolArgs(
                     thoughts="I'll search for error logging patterns across all files.",
                     pattern=r"log.*Error|console\.error",
+                    include=None,
+                    max_results=10,
                 ),
             ),
             FewShotExample.create(
@@ -81,6 +81,7 @@ class GrepToolArgs(ActionArguments):
                     thoughts="I'll search for TODO comments in Python files.",
                     pattern=r"#\s*TODO",
                     include="*.py",
+                    max_results=10,
                 ),
             ),
         ]

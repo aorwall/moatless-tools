@@ -18,10 +18,13 @@ interface ChatProps {
 export function Chat({ trajectory }: ChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<ChatInputRef>(null);
-  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(new Set());
+  const [expandedMessages, setExpandedMessages] = useState<Set<string>>(
+    new Set(),
+  );
   const resumeTrajectory = useResumeTrajectory();
 
-  const disabled = trajectory.status === "running" || resumeTrajectory.isPending;
+  const disabled =
+    trajectory.status === "running" || resumeTrajectory.isPending;
 
   // Auto scroll to bottom when new messages arrive
   useEffect(() => {
@@ -52,7 +55,15 @@ export function Chat({ trajectory }: ChatProps) {
   trajectory.nodes.forEach((node: Node) => {
     // Add items in sequence
     node.items?.forEach((item: TimelineItem) => {
-      if (["user_message", "assistant_message", "thought", "action", "artifact"].includes(item.type)) {
+      if (
+        [
+          "user_message",
+          "assistant_message",
+          "thought",
+          "action",
+          "artifact",
+        ].includes(item.type)
+      ) {
         messages.push({
           ...item,
           nodeId: node.nodeId,
@@ -65,28 +76,37 @@ export function Chat({ trajectory }: ChatProps) {
   });
 
   // Group consecutive messages by sender, keeping artifacts with their related messages
-  const messageGroups: ChatMessageGroup[] = messages.reduce((groups: ChatMessageGroup[], message) => {
-    const isUser = message.type === "user_message" ||
-      (message.type === "artifact" && (message.content as any).actor === "user");
-    const lastGroup = groups[groups.length - 1];
+  const messageGroups: ChatMessageGroup[] = messages.reduce(
+    (groups: ChatMessageGroup[], message) => {
+      const isUser =
+        message.type === "user_message" ||
+        (message.type === "artifact" &&
+          (message.content as any).actor === "user");
+      const lastGroup = groups[groups.length - 1];
 
-    // If it's an artifact, add it to the current group if it matches the sender
-    if (message.type === "artifact") {
-      if (lastGroup && lastGroup.isUser === isUser) {
-        lastGroup.messages.push(message);
-        return groups;
+      // If it's an artifact, add it to the current group if it matches the sender
+      if (message.type === "artifact") {
+        if (lastGroup && lastGroup.isUser === isUser) {
+          lastGroup.messages.push(message);
+          return groups;
+        }
       }
-    }
 
-    // For regular messages, start a new group if sender changes
-    if (lastGroup && lastGroup.isUser === isUser && message.type !== "artifact") {
-      lastGroup.messages.push(message);
-    } else {
-      groups.push({ messages: [message], isUser });
-    }
+      // For regular messages, start a new group if sender changes
+      if (
+        lastGroup &&
+        lastGroup.isUser === isUser &&
+        message.type !== "artifact"
+      ) {
+        lastGroup.messages.push(message);
+      } else {
+        groups.push({ messages: [message], isUser });
+      }
 
-    return groups;
-  }, []);
+      return groups;
+    },
+    [],
+  );
 
   const toggleMessageExpand = (messageId: string) => {
     setExpandedMessages((prev) => {
@@ -109,7 +129,7 @@ export function Chat({ trajectory }: ChatProps) {
       onSuccess: () => {
         // Clear the input only on success
         chatInputRef.current?.clear();
-      }
+      },
     });
   };
 
@@ -122,7 +142,7 @@ export function Chat({ trajectory }: ChatProps) {
               key={groupIndex}
               className={cn(
                 "flex gap-3",
-                group.isUser ? "flex-row-reverse" : "flex-row"
+                group.isUser ? "flex-row-reverse" : "flex-row",
               )}
             >
               <div
@@ -157,17 +177,11 @@ export function Chat({ trajectory }: ChatProps) {
                       );
                     case "thought":
                       return (
-                        <ThoughtChatItem
-                          key={messageIndex}
-                          message={message}
-                        />
+                        <ThoughtChatItem key={messageIndex} message={message} />
                       );
                     case "action":
                       return (
-                        <ActionChatItem
-                          key={messageIndex}
-                          message={message}
-                        />
+                        <ActionChatItem key={messageIndex} message={message} />
                       );
                     case "artifact":
                       return (
@@ -194,4 +208,4 @@ export function Chat({ trajectory }: ChatProps) {
       />
     </div>
   );
-} 
+}

@@ -1,4 +1,4 @@
-import type { ContentStructure } from './content';
+import type { ContentStructure } from "./content";
 
 export interface Artifact {
   id: string;
@@ -6,8 +6,8 @@ export interface Artifact {
   name: string | null;
   created_at: string;
   references: ArtifactReference[];
-  status: 'updated' | 'persisted' | 'new' | 'unchanged';
+  status: "updated" | "persisted" | "new" | "unchanged";
   can_persist: boolean;
   data: Record<string, any>;
   content?: ContentStructure;
-} 
+}

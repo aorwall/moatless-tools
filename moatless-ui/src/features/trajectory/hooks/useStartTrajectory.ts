@@ -1,7 +1,7 @@
-import { trajectoriesApi } from '@/lib/api/trajectories.ts';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { trajectoryKeys } from './useGetTrajectory';
+import { trajectoriesApi } from "@/lib/api/trajectories.ts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { trajectoryKeys } from "./useGetTrajectory";
 
 export function useStartTrajectory() {
   const queryClient = useQueryClient();
@@ -9,7 +9,7 @@ export function useStartTrajectory() {
   return useMutation({
     mutationFn: ({
       projectId,
-      trajectoryId
+      trajectoryId,
     }: {
       projectId: string;
       trajectoryId: string;
@@ -18,16 +18,20 @@ export function useStartTrajectory() {
     onSuccess: (_, variables) => {
       // Invalidate the trajectory queries
       queryClient.invalidateQueries({
-        queryKey: trajectoryKeys.detail(variables.projectId, variables.trajectoryId)
+        queryKey: trajectoryKeys.detail(
+          variables.projectId,
+          variables.trajectoryId,
+        ),
       });
-      toast.success('Trajectory started successfully');
+      toast.success("Trajectory started successfully");
     },
 
     onError: (error) => {
-      console.error('Error starting trajectory:', error);
-      toast.error('Failed to start trajectory', {
-        description: error instanceof Error ? error.message : 'Unknown error occurred'
+      console.error("Error starting trajectory:", error);
+      toast.error("Failed to start trajectory", {
+        description:
+          error instanceof Error ? error.message : "Unknown error occurred",
       });
-    }
+    },
   });
-} 
+}

@@ -10,7 +10,9 @@ export interface ArtifactChatItemProps {
 
 export const ArtifactChatItem = ({ message }: ArtifactChatItemProps) => {
   const setSelectedItem = useTrajectoryStore((state) => state.setSelectedItem);
-  const selectedItem = useTrajectoryStore((state) => state.getSelectedItem(message.trajectoryId));
+  const selectedItem = useTrajectoryStore((state) =>
+    state.getSelectedItem(message.trajectoryId),
+  );
 
   const content = message.content as {
     artifact_id: string;
@@ -34,20 +36,27 @@ export const ArtifactChatItem = ({ message }: ArtifactChatItemProps) => {
 
   return (
     <div className={cn("flex w-full", isUser && "justify-end")}>
-      <Card 
+      <Card
         className={cn(
           "relative overflow-hidden p-3 cursor-pointer transition-colors hover:bg-muted/50",
           isSelected && "ring-2 ring-primary",
-          "max-w-[85%] border-border/50 bg-background/80"
+          "max-w-[85%] border-border/50 bg-background/80",
         )}
         onClick={handleClick}
       >
-        <div className={cn("flex items-center gap-2", isUser && "flex-row-reverse")}>
+        <div
+          className={cn(
+            "flex items-center gap-2",
+            isUser && "flex-row-reverse",
+          )}
+        >
           <Package className="h-4 w-4 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <div className="space-y-1">
               <p className="text-xs font-medium">{content.artifact_id}</p>
-              <div className={cn("flex flex-wrap gap-2", isUser && "justify-end")}>
+              <div
+                className={cn("flex flex-wrap gap-2", isUser && "justify-end")}
+              >
                 <span className="text-xs text-muted-foreground">
                   Type: {content.artifact_type}
                 </span>
@@ -64,4 +73,4 @@ export const ArtifactChatItem = ({ message }: ArtifactChatItemProps) => {
       </Card>
     </div>
   );
-}; 
+};

@@ -1,13 +1,12 @@
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, List
 
 from fastapi import HTTPException
 
 from moatless.api.trajectory.schema import (
     ActionDTO,
     ActionStepDTO,
-    CompletionDTO,
     FileContextDTO,
     FileContextFileDTO,
     FileContextSpanDTO,
@@ -16,7 +15,6 @@ from moatless.api.trajectory.schema import (
     RewardDTO,
     TrajectoryDTO,
     UpdatedFileDTO,
-    UsageDTO,
 )
 from moatless.api.trajectory.timeline_utils import generate_timeline_items
 from moatless.file_context import FileContext

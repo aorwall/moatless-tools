@@ -1,6 +1,6 @@
 import { Trajectory } from "../types/trajectory";
 import { apiRequest } from "./config";
-import { AttachmentData } from '@/types/attachments';
+import { AttachmentData } from "@/types/attachments";
 
 export interface SWEBenchInstance {
   instance_id: string;
@@ -44,7 +44,6 @@ export interface LoopRequest {
   repository_path?: string;
 }
 
-
 export const swebenchApi = {
   getInstances: (
     page: number,
@@ -63,16 +62,21 @@ export const swebenchApi = {
     }),
 
   startLoop: (data: LoopRequest) =>
-    apiRequest<LoopResponse>('/loop', {
-      method: 'POST',
+    apiRequest<LoopResponse>("/loop", {
+      method: "POST",
       body: JSON.stringify(data),
     }),
 
   startInstance: (evaluationName: string, instanceId: string) =>
-    apiRequest<any>(`/swebench/evaluations/${evaluationName}/instances/${instanceId}/start`, {
-      method: 'POST',
-    }),
+    apiRequest<any>(
+      `/swebench/evaluations/${evaluationName}/instances/${instanceId}/start`,
+      {
+        method: "POST",
+      },
+    ),
 
   getEvaluationInstance: (evaluationName: string, instanceId: string) =>
-    apiRequest<Trajectory>(`/swebench/evaluations/${evaluationName}/instances/${instanceId}`),
+    apiRequest<Trajectory>(
+      `/swebench/evaluations/${evaluationName}/instances/${instanceId}`,
+    ),
 };

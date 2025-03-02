@@ -77,7 +77,9 @@ export function ModelsLayout() {
         />
       ) : (
         <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-          <p className="text-sm text-gray-500 mb-4">No custom models configured</p>
+          <p className="text-sm text-gray-500 mb-4">
+            No custom models configured
+          </p>
           <Button
             variant="outline"
             onClick={() => navigate("/settings/models/base")}
@@ -94,10 +96,5 @@ export function ModelsLayout() {
     return <Outlet />;
   };
 
-  return (
-    <SplitLayout
-      left={modelList}
-      right={getRightContent()}
-    />
-  );
+  return <SplitLayout left={modelList} right={getRightContent()} />;
 }

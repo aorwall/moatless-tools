@@ -35,15 +35,20 @@ export function BaseModelsList() {
       <Alert variant="destructive" className="m-4">
         <AlertTitle>Error Loading Models</AlertTitle>
         <AlertDescription>
-          {error instanceof Error ? error.message : "Failed to load base models"}
+          {error instanceof Error
+            ? error.message
+            : "Failed to load base models"}
         </AlertDescription>
       </Alert>
     );
   }
 
   const filteredModels = baseModels?.models.filter((model) => {
-    const matchesSearch = model.model.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFormat = formatFilter === "all" || model.response_format === formatFilter;
+    const matchesSearch = model.model
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    const matchesFormat =
+      formatFilter === "all" || model.response_format === formatFilter;
     return matchesSearch && matchesFormat;
   });
 
@@ -62,7 +67,7 @@ export function BaseModelsList() {
           <p className="text-sm text-gray-500">
             Configure a new model with custom settings
           </p>
-          <Button 
+          <Button
             className="mt-2 w-full sm:w-auto"
             onClick={() => navigate("/settings/models/create")}
           >
@@ -70,7 +75,7 @@ export function BaseModelsList() {
             Create Custom Model
           </Button>
         </div>
-        
+
         <div className="flex flex-col gap-2">
           <h2 className="text-lg font-semibold">Start from a base model</h2>
           <p className="text-sm text-gray-500">
@@ -119,19 +124,25 @@ export function BaseModelsList() {
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">History Type</span>
-                    <span className="font-medium">{model.message_history_type}</span>
+                    <span className="font-medium">
+                      {model.message_history_type}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Temperature</span>
-                    <span className="font-medium">{model.temperature ?? "Default"}</span>
+                    <span className="font-medium">
+                      {model.temperature ?? "Default"}
+                    </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Max Tokens</span>
-                    <span className="font-medium">{model.max_tokens ?? "Default"}</span>
+                    <span className="font-medium">
+                      {model.max_tokens ?? "Default"}
+                    </span>
                   </div>
                 </div>
-                <Button 
-                  className="w-full" 
+                <Button
+                  className="w-full"
                   onClick={() => setSelectedModel(model)}
                 >
                   <Plus className="h-4 w-4 mr-2" />
@@ -152,4 +163,4 @@ export function BaseModelsList() {
       )}
     </div>
   );
-} 
+}

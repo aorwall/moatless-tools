@@ -8,13 +8,13 @@ interface UserMessageItemProps {
   maxLength?: number;
 }
 
-export const UserMessageItem = ({ 
-  message, 
-  maxLength = 200 
+export const UserMessageItem = ({
+  message,
+  maxLength = 200,
 }: UserMessageItemProps) => {
   const isLongMessage = message.length > maxLength;
   const [isExpanded, setIsExpanded] = useState(false);
-  
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-3 mb-3">
       <div className="flex items-start gap-2.5">
@@ -23,25 +23,26 @@ export const UserMessageItem = ({
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-sm text-gray-700 whitespace-pre-wrap break-words">
-            {isExpanded || !isLongMessage 
-              ? message 
+            {isExpanded || !isLongMessage
+              ? message
               : truncateMessage(message, maxLength)}
           </div>
-          
+
           {isLongMessage && (
-            <button 
+            <button
               onClick={() => setIsExpanded(!isExpanded)}
               className="mt-2 text-xs text-primary hover:text-primary/80 flex items-center gap-1"
             >
               {isExpanded ? "Show less" : "Show more"}
-              <ChevronDown className={cn(
-                "h-3 w-3 transition-transform",
-                { "transform rotate-180": isExpanded }
-              )} />
+              <ChevronDown
+                className={cn("h-3 w-3 transition-transform", {
+                  "transform rotate-180": isExpanded,
+                })}
+              />
             </button>
           )}
         </div>
       </div>
     </div>
   );
-}; 
+};

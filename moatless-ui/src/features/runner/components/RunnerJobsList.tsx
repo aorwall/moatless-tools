@@ -1,79 +1,131 @@
-import { useState, useMemo } from 'react';
-import { JobInfo, JobStatus } from '../types';
-import { useCancelJob, useRetryJob } from '../hooks/useJobsManagement';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from '@/lib/components/ui/table';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/lib/components/ui/select';
-import { Badge } from '@/lib/components/ui/badge';
-import { Button } from '@/lib/components/ui/button';
-import { Play, XCircle, Clock, CheckCircle, AlertCircle, XCircleIcon } from 'lucide-react';
-import { dateTimeFormat } from '@/lib/utils/date';
-import { cn } from '@/lib/utils';
-import { 
-  Tooltip, 
-  TooltipContent, 
-  TooltipProvider, 
-  TooltipTrigger 
-} from '@/lib/components/ui/tooltip';
+import { useState, useMemo } from "react";
+import { JobInfo, JobStatus } from "../types";
+import { useCancelJob, useRetryJob } from "../hooks/useJobsManagement";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/lib/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/lib/components/ui/select";
+import { Badge } from "@/lib/components/ui/badge";
+import { Button } from "@/lib/components/ui/button";
+import {
+  Play,
+  XCircle,
+  Clock,
+  CheckCircle,
+  AlertCircle,
+  XCircleIcon,
+} from "lucide-react";
+import { dateTimeFormat } from "@/lib/utils/date";
+import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/lib/components/ui/tooltip";
 
 interface RunnerJobsListProps {
   jobs: JobInfo[];
   isLoading?: boolean;
 }
 
-export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps) {
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+export function RunnerJobsList({
+  jobs,
+  isLoading = false,
+}: RunnerJobsListProps) {
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const cancelJob = useCancelJob();
   const retryJob = useRetryJob();
 
   // Filter jobs based on selected status
   const filteredJobs = useMemo(() => {
-    if (statusFilter === 'all') {
+    if (statusFilter === "all") {
       return jobs;
     }
-    return jobs.filter(job => job.status === statusFilter);
+    return jobs.filter((job) => job.status === statusFilter);
   }, [jobs, statusFilter]);
 
   // Parse project and trajectory IDs from job ID
   const parseJobId = (id: string) => {
     // Format: run_projectId_trajectoryId
-    const parts = id.split('_');
+    const parts = id.split("_");
     if (parts.length >= 3) {
       return {
         projectId: parts[1],
-        trajectoryId: parts.slice(2).join('_') // In case trajectory_id contains underscores
+        trajectoryId: parts.slice(2).join("_"), // In case trajectory_id contains underscores
       };
     }
-    return { projectId: '', trajectoryId: '' };
+    return { projectId: "", trajectoryId: "" };
   };
 
   // Get status badge for a job
   const getStatusBadge = (status: JobStatus) => {
-    switch(status) {
+    switch (status) {
       case JobStatus.RUNNING:
-        return <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Running</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-blue-50 text-blue-700 border-blue-200"
+          >
+            Running
+          </Badge>
+        );
       case JobStatus.QUEUED:
-        return <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">Queued</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-yellow-50 text-yellow-700 border-yellow-200"
+          >
+            Queued
+          </Badge>
+        );
       case JobStatus.COMPLETED:
-        return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">Completed</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-green-50 text-green-700 border-green-200"
+          >
+            Completed
+          </Badge>
+        );
       case JobStatus.FAILED:
-        return <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Failed</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-red-50 text-red-700 border-red-200"
+          >
+            Failed
+          </Badge>
+        );
       case JobStatus.CANCELED:
-        return <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">Canceled</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-orange-50 text-orange-700 border-orange-200"
+          >
+            Canceled
+          </Badge>
+        );
       default:
-        return <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">Pending</Badge>;
+        return (
+          <Badge
+            variant="outline"
+            className="bg-gray-50 text-gray-700 border-gray-200"
+          >
+            Pending
+          </Badge>
+        );
     }
   };
 
@@ -115,7 +167,7 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
           </Select>
         </div>
       </div>
-      
+
       <div className="border rounded-md">
         <Table>
           <TableHeader>
@@ -131,8 +183,11 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
           <TableBody>
             {filteredJobs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
-                  {isLoading ? 'Loading...' : 'No jobs found'}
+                <TableCell
+                  colSpan={6}
+                  className="text-center py-6 text-muted-foreground"
+                >
+                  {isLoading ? "Loading..." : "No jobs found"}
                 </TableCell>
               </TableRow>
             ) : (
@@ -155,20 +210,27 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
                     </TableCell>
                     <TableCell>{getStatusBadge(job.status)}</TableCell>
                     <TableCell className="text-sm">
-                      {job.enqueued_at ? dateTimeFormat.format(new Date(job.enqueued_at)) : '-'}
+                      {job.enqueued_at
+                        ? dateTimeFormat.format(new Date(job.enqueued_at))
+                        : "-"}
                     </TableCell>
                     <TableCell className="text-sm">
-                      {job.started_at ? dateTimeFormat.format(new Date(job.started_at)) : '-'}
+                      {job.started_at
+                        ? dateTimeFormat.format(new Date(job.started_at))
+                        : "-"}
                     </TableCell>
                     <TableCell className="text-sm">
-                      {job.ended_at ? dateTimeFormat.format(new Date(job.ended_at)) : '-'}
+                      {job.ended_at
+                        ? dateTimeFormat.format(new Date(job.ended_at))
+                        : "-"}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {(job.status === JobStatus.QUEUED || job.status === JobStatus.RUNNING) && (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                        {(job.status === JobStatus.QUEUED ||
+                          job.status === JobStatus.RUNNING) && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleCancel(job.id)}
                             disabled={cancelJob.isPending}
                           >
@@ -176,11 +238,11 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
                             <span className="sr-only">Cancel</span>
                           </Button>
                         )}
-                        
+
                         {job.status === JobStatus.FAILED && (
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             onClick={() => handleRetry(job.id)}
                             disabled={retryJob.isPending}
                           >
@@ -188,7 +250,7 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
                             <span className="sr-only">Retry</span>
                           </Button>
                         )}
-                        
+
                         {job.status === JobStatus.FAILED && job.exc_info && (
                           <TooltipProvider>
                             <Tooltip>
@@ -218,4 +280,4 @@ export function RunnerJobsList({ jobs, isLoading = false }: RunnerJobsListProps)
       </div>
     </div>
   );
-} 
+}

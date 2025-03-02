@@ -1,25 +1,16 @@
 """API endpoints for SWEBench validation."""
 
-import asyncio
-import json
 import logging
-import os
-from datetime import datetime, timezone
-from glob import glob
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 
-from moatless.api.trajectory.trajectory_utils import load_trajectory_from_file
 from moatless.completion.manager import get_model_config
 from moatless.evaluation.manager import EvaluationManager
 from moatless.evaluation.schema import Evaluation, EvaluationInstance
 from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instance, get_moatless_instances
-from moatless.flow.manager import get_flow_config
+from moatless.flow.manager import FlowManager, get_flow_config
 from moatless.flow.schema import TrajectoryResponseDTO
-from moatless.runner.runner import JobsStatusSummary, RunnerInfo
-from moatless.utils.moatless import get_moatless_trajectory_dir
-
 from .schema import (
     CancelJobsResponseDTO,
     DatasetDTO,
@@ -33,8 +24,6 @@ from .schema import (
     RunnerResponseDTO,
     SWEBenchInstanceDTO,
     SWEBenchInstancesResponseDTO,
-    SWEBenchValidationRequestDTO,
-    SWEBenchValidationResponseDTO,
     get_instance_status,
 )
 
@@ -138,32 +127,8 @@ async def process_evaluation_results(evaluation_name: str):
 async def get_evaluation_instance(evaluation_name: str, instance_id: str):
     """Get a specific instance of an evaluation."""
     try:
-        manager = await EvaluationManager.get_instance()
-        instance = await manager.get_evaluation_instance(evaluation_name=evaluation_name, instance_id=instance_id)
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
-        trajectory_path = trajectory_dir / "trajectory.json"
-        if not trajectory_path.exists():
-            raise HTTPException(status_code=404, detail="Trajectory not found")
-        try:
-            trajectory = load_trajectory_from_file(trajectory_path)
-            status = "finished"
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="Trajectory not found")
-
-        system_status = None  # load_trajectory_status(trajectory_dir)
-
-        events = None  # load_trajectory_events(trajectory_dir)
-
-        return TrajectoryResponseDTO(
-            id=instance_id,
-            project_id=evaluation_name,
-            status=instance.status,
-            system_status=system_status,
-            agent_id=system_status.metadata.get("agent_id"),
-            model_id=system_status.metadata.get("model_id"),
-            events=events,
-            **trajectory.model_dump(),
-        )
+        flow_manager = FlowManager.get_instance()
+        return await flow_manager.get_trajectory(project_id=evaluation_name, trajectory_id=instance_id)
     except Exception as e:
         logger.exception(f"Failed to get evaluation instance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

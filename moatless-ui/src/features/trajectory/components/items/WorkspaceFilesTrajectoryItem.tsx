@@ -1,9 +1,21 @@
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/lib/components/ui/tooltip.tsx";
+import {
+  calculateTotalChanges,
+  countPatchChanges,
+  truncateFilePath,
+} from "@/lib/hooks/useFileUtils.ts";
+import {
+  FileCode,
+  FileEdit,
+  FilePlus,
+  GitBranch
+} from "lucide-react";
 import { type FC } from "react";
-import { cn } from "@/lib/utils.ts";
-import { Badge } from "@/lib/components/ui/badge.tsx";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/lib/components/ui/tooltip.tsx";
-import { FileCode, FilePlus, FileEdit, FolderOpen, GitBranch } from "lucide-react";
-import { countPatchChanges, truncateFilePath, calculateTotalChanges } from "@/lib/hooks/useFileUtils.ts";
 
 interface Span {
   span_id: string;
@@ -38,9 +50,9 @@ export interface WorkspaceFilesTrajectoryItemProps {
   content: WorkspaceFilesTimelineContent;
 }
 
-export const WorkspaceFilesTrajectoryItem: FC<WorkspaceFilesTrajectoryItemProps> = ({
-  content,
-}) => {
+export const WorkspaceFilesTrajectoryItem: FC<
+  WorkspaceFilesTrajectoryItemProps
+> = ({ content }) => {
   // Calculate total changes across all files
   const totalChanges = calculateTotalChanges(content.files);
 
@@ -53,22 +65,26 @@ export const WorkspaceFilesTrajectoryItem: FC<WorkspaceFilesTrajectoryItemProps>
               <FileEdit size={12} className="text-blue-600" />
               <span>{content.updatedFiles.length} files updated</span>
             </div>
-            
+
             {(totalChanges.additions > 0 || totalChanges.deletions > 0) && (
               <div className="flex items-center gap-1 text-[10px] border-l border-gray-300 pl-2">
                 <GitBranch size={10} className="text-gray-500" />
-                <span className="text-green-700">+{totalChanges.additions}</span>
+                <span className="text-green-700">
+                  +{totalChanges.additions}
+                </span>
                 <span>/</span>
                 <span className="text-red-700">-{totalChanges.deletions}</span>
               </div>
             )}
           </div>
-          
+
           {content.updatedFiles.length <= 3 && (
             <div className="flex flex-col gap-0.5 mt-1">
               {content.updatedFiles.map((file, idx) => {
-                const { additions, deletions } = countPatchChanges(file.patch || '');
-                
+                const { additions, deletions } = countPatchChanges(
+                  file.patch || "",
+                );
+
                 return (
                   <TooltipProvider key={idx}>
                     <Tooltip>
@@ -84,10 +100,12 @@ export const WorkspaceFilesTrajectoryItem: FC<WorkspaceFilesTrajectoryItemProps>
                               {truncateFilePath(file.file_path)}
                             </span>
                           </div>
-                          
+
                           {file.patch && (additions > 0 || deletions > 0) && (
                             <div className="flex items-center gap-1 ml-2">
-                              <span className="text-green-700">+{additions}</span>
+                              <span className="text-green-700">
+                                +{additions}
+                              </span>
                               <span>/</span>
                               <span className="text-red-700">-{deletions}</span>
                             </div>
@@ -109,4 +127,4 @@ export const WorkspaceFilesTrajectoryItem: FC<WorkspaceFilesTrajectoryItemProps>
       )}
     </div>
   );
-}; 
+};

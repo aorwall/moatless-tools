@@ -1,4 +1,11 @@
-import type { ModelConfig, ModelsResponse, BaseModelsResponse, AddModelFromBaseRequest, ModelTestResult, CreateModelRequest } from "@/lib/types/model";
+import type {
+  ModelConfig,
+  ModelsResponse,
+  BaseModelsResponse,
+  AddModelFromBaseRequest,
+  ModelTestResult,
+  CreateModelRequest,
+} from "@/lib/types/model";
 import { apiRequest } from "./config";
 
 export const modelsApi = {
@@ -6,7 +13,7 @@ export const modelsApi = {
   getBaseModels: () => apiRequest<BaseModelsResponse>("/models/base"),
   getModel: (id: string) => apiRequest<ModelConfig>(`/models/${id}`),
   getBaseModel: (id: string) => apiRequest<ModelConfig>(`/models/base/${id}`),
-  addFromBase: (request: AddModelFromBaseRequest) => 
+  addFromBase: (request: AddModelFromBaseRequest) =>
     apiRequest<ModelConfig>("/models/base", {
       method: "POST",
       body: JSON.stringify(request),

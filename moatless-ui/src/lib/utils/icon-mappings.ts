@@ -12,7 +12,7 @@ import {
   Files,
   Code,
   TestTube,
-  type LucideIcon
+  type LucideIcon,
 } from "lucide-react";
 
 export const Icons: Record<string, LucideIcon> = {
@@ -32,4 +32,4 @@ export const Icons: Record<string, LucideIcon> = {
   reward: Award,
 };
 
-export type IconType = keyof typeof Icons; 
+export type IconType = keyof typeof Icons;

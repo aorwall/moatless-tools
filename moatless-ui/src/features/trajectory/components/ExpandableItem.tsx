@@ -22,7 +22,6 @@ export const ExpandableItem = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
     onExpandChange(true);
-  
   };
 
   return (
@@ -30,7 +29,7 @@ export const ExpandableItem = ({
       className={cn(
         "flex items-start gap-2",
         "group/expandable transition-all duration-150",
-        "cursor-pointer"
+        "cursor-pointer",
       )}
     >
       <div className="flex w-[80px] shrink-0 items-start justify-end sm:w-[150px]">
@@ -41,9 +40,8 @@ export const ExpandableItem = ({
                 "text-xs font-medium",
                 "max-w-[60px] truncate sm:max-w-[120px]",
                 "transition-colors duration-150",
-              
-                  "text-gray-600 group-hover/expandable:text-gray-900"
-                
+
+                "text-gray-600 group-hover/expandable:text-gray-900",
               )}
               onClick={handleClick}
             >
@@ -57,19 +55,19 @@ export const ExpandableItem = ({
         className={cn(
           "relative z-10 -ml-2 flex h-8 min-w-[2rem] items-center justify-center",
           "rounded-full border-2 bg-white transition-all duration-150",
-          "border-gray-200 group-hover/expandable:border-gray-300 group-hover/expandable:bg-gray-50 group-hover/expandable:shadow-sm"
-          
+          "border-gray-200 group-hover/expandable:border-gray-300 group-hover/expandable:bg-gray-50 group-hover/expandable:shadow-sm",
         )}
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         role="button"
         tabIndex={0}
       >
-        <Icon className={cn(
-          "h-4 w-4",
-          "text-gray-400 group-hover/expandable:text-gray-500"
-          
-        )} />
+        <Icon
+          className={cn(
+            "h-4 w-4",
+            "text-gray-400 group-hover/expandable:text-gray-500",
+          )}
+        />
       </div>
 
       <div className="min-w-0 flex-1 overflow-x-auto pl-4 sm:pl-8">

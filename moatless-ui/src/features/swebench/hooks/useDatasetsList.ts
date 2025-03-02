@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
-import { evaluationApi } from '../api/evaluation';
+import { useQuery } from "@tanstack/react-query";
+import { evaluationApi } from "../api/evaluation";
 
 export const datasetsKeys = {
-  all: ['datasets'] as const,
+  all: ["datasets"] as const,
 };
 
 export function useDatasetsList() {
@@ -10,4 +10,4 @@ export function useDatasetsList() {
     queryKey: datasetsKeys.all,
     queryFn: () => evaluationApi.getDatasets(),
   });
-} 
+}

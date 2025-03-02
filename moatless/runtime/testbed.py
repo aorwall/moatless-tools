@@ -8,16 +8,15 @@ from datetime import datetime
 from typing import List
 
 from opentelemetry import trace
+from testbeds.schema import EvaluationResult, TraceItem
+from testbeds.sdk import TestbedSDK
+from testbeds.sdk.exceptions import TestbedError
 
 from moatless.exceptions import RuntimeError
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 from moatless.schema import RankedFileSpan
-from moatless.telemetry import add_span_event, instrument, set_attributes, set_span_status
-from testbeds.schema import EvaluationResult, TraceItem
-from testbeds.sdk import TestbedSDK
-from testbeds.sdk.exceptions import TestbedError
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

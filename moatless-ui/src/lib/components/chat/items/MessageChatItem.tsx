@@ -8,8 +8,14 @@ export interface MessageChatItemProps {
   onExpandChange: () => void;
 }
 
-export const MessageChatItem = ({ message, isUser, isExpanded, onExpandChange }: MessageChatItemProps) => {
-  const isExpandable = (message.content as { message: string }).message.length > 300 || 
+export const MessageChatItem = ({
+  message,
+  isUser,
+  isExpanded,
+  onExpandChange,
+}: MessageChatItemProps) => {
+  const isExpandable =
+    (message.content as { message: string }).message.length > 300 ||
     (message.content as { message: string }).message.split("\n").length > 5;
 
   const truncateMessage = (text: string) => {
@@ -29,15 +35,15 @@ export const MessageChatItem = ({ message, isUser, isExpanded, onExpandChange }:
         "relative flex min-w-0 flex-col gap-1 rounded-lg px-3 py-2",
         isUser
           ? "bg-primary text-primary-foreground"
-          : "bg-muted text-foreground"
+          : "bg-muted text-foreground",
       )}
     >
       <p className="whitespace-pre-wrap break-words text-sm">
-        {isExpandable && !isExpanded 
+        {isExpandable && !isExpanded
           ? truncateMessage((message.content as { message: string }).message)
           : (message.content as { message: string }).message}
       </p>
-      
+
       {isExpandable && (
         <button
           className="absolute -bottom-7 left-1/2 -translate-x-1/2 transform text-muted-foreground hover:text-foreground"
@@ -54,4 +60,4 @@ export const MessageChatItem = ({ message, isUser, isExpanded, onExpandChange }:
       )}
     </div>
   );
-}; 
+};

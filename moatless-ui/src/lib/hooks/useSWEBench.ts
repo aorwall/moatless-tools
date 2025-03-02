@@ -1,6 +1,6 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { swebenchApi } from "@/lib/api/swebench";
-import { AttachmentData } from '@/types/attachments';
+import { AttachmentData } from "@/types/attachments";
 
 export const swebenchKeys = {
   all: ["swebench"] as const,
@@ -28,10 +28,10 @@ export function useStartValidation() {
 
 export function useStartLoop() {
   return useMutation({
-    mutationFn: (data: { 
-      agent_id: string; 
-      model_id: string; 
-      message: string; 
+    mutationFn: (data: {
+      agent_id: string;
+      model_id: string;
+      message: string;
       attachments?: AttachmentData[];
       repository_path?: string;
     }) => swebenchApi.startLoop(data),

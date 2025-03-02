@@ -52,4 +52,4 @@ export function EnumSelect({ name, control, property }: EnumSelectProps) {
       )}
     />
   );
-} 
+}

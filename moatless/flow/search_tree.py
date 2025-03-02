@@ -1,7 +1,6 @@
-import json
 import logging
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from opentelemetry import trace
 from pydantic import ConfigDict, Field, model_validator

@@ -38,9 +38,9 @@ def get_project_dir(project_id: str | None = None) -> Path:
         project_id = current_project_id.get()
 
     if project_id:
-        project_dir = get_moatless_dir() / "projects" / project_id
+        project_dir = get_moatless_dir() / "projects" / project_id / "trajs"
     else:
-        project_dir = get_moatless_dir() / "projects" / "default"
+        project_dir = get_moatless_dir() / "projects" / "default" / "trajs"
 
     if not project_dir.exists():
         project_dir.mkdir(parents=True, exist_ok=True)

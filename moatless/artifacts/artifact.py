@@ -1,9 +1,7 @@
-import json
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from pathlib import Path
-from typing import Any, ClassVar, Dict, Generic, List, Literal, Optional, Type, TypeVar
+from typing import Any, ClassVar, Literal, Optional, TypeVar
 
 from pydantic import BaseModel, Field, PrivateAttr
 
@@ -12,8 +10,6 @@ from moatless.completion.schema import MessageContentListBlock
 from moatless.component import MoatlessComponent
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
-from moatless.utils.class_loading import DynamicClassLoadingMixin
-from moatless.utils.moatless import get_moatless_trajectory_dir
 
 logger = logging.getLogger(__name__)
 

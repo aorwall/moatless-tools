@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/api/config';
-import { jobStatusKeys } from './useJobStatusSummary';
-import { evaluationKeys } from './useEvaluation';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api/config";
+import { jobStatusKeys } from "./useJobStatusSummary";
+import { evaluationKeys } from "./useEvaluation";
 
 export interface CancelJobsResponse {
   project_id: string;
@@ -10,23 +10,29 @@ export interface CancelJobsResponse {
   message: string;
 }
 
-const cancelJobs = async (evaluationId: string): Promise<CancelJobsResponse> => {
+const cancelJobs = async (
+  evaluationId: string,
+): Promise<CancelJobsResponse> => {
   return apiRequest(`/swebench/evaluations/${evaluationId}/jobs/cancel`, {
-    method: 'POST',
+    method: "POST",
   });
 };
 
 export function useCancelJobs() {
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: cancelJobs,
     onSuccess: (_, evaluationId) => {
       // Invalidate job status queries
-      queryClient.invalidateQueries({ queryKey: jobStatusKeys.detail(evaluationId) });
-      
+      queryClient.invalidateQueries({
+        queryKey: jobStatusKeys.detail(evaluationId),
+      });
+
       // Invalidate evaluation queries to reflect updated status
-      queryClient.invalidateQueries({ queryKey: evaluationKeys.detail(evaluationId) });
+      queryClient.invalidateQueries({
+        queryKey: evaluationKeys.detail(evaluationId),
+      });
     },
   });
-} 
+}

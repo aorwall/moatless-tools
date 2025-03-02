@@ -38,4 +38,4 @@ export function BooleanSwitch({ name, control, property }: BooleanSwitchProps) {
       )}
     />
   );
-} 
+}

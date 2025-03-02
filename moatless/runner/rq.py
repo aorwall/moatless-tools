@@ -1,25 +1,16 @@
-import asyncio
-import json
+import logging
 import logging
 import os
-import shutil
-import time
-import traceback
-import uuid
 from collections.abc import Callable
-from datetime import datetime, timezone
-from functools import wraps
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from opentelemetry import trace
 from redis import Redis
 from rq import Queue, Worker
 from rq.command import send_stop_job_command
-from rq.job import Dependency, Job
+from rq.job import Job
 
 from moatless.runner.runner import JobInfo, JobsStatusSummary, JobStatus, RunnerInfo, RunnerStatus
-from moatless.telemetry import extract_context_data, extract_trace_context
+from moatless.telemetry import extract_trace_context
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner.rq")

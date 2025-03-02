@@ -3,7 +3,10 @@ import { FlowDetail } from "@/pages/settings/flows/components/FlowDetail";
 import type { FlowConfig } from "@/lib/types/flow";
 import { toast } from "sonner";
 import { useCreateFlow } from "@/lib/hooks/useFlows";
-import { createDefaultFlow, generateResourceId } from "@/lib/utils/resourceDefaults";
+import {
+  createDefaultFlow,
+  generateResourceId,
+} from "@/lib/utils/resourceDefaults";
 
 export function NewFlowPage() {
   const navigate = useNavigate();
@@ -11,7 +14,9 @@ export function NewFlowPage() {
   const createFlowMutation = useCreateFlow();
 
   // Check if we have a duplicated flow from the location state
-  const duplicatedFlow = location.state?.duplicatedFlow as FlowConfig | undefined;
+  const duplicatedFlow = location.state?.duplicatedFlow as
+    | FlowConfig
+    | undefined;
 
   const defaultFlow: FlowConfig = duplicatedFlow || {
     id: "",
@@ -21,7 +26,9 @@ export function NewFlowPage() {
   const handleSubmit = async (formData: FlowConfig) => {
     try {
       const newFlow = await createFlowMutation.mutateAsync(formData);
-      navigate(`/settings/flows/${encodeURIComponent(newFlow.id)}`, { replace: true });
+      navigate(`/settings/flows/${encodeURIComponent(newFlow.id)}`, {
+        replace: true,
+      });
       toast.success("Flow created successfully");
     } catch (error) {
       toast.error("Failed to create flow");
@@ -34,12 +41,10 @@ export function NewFlowPage() {
       <div className="flex-none border-b px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">
-              New Flow
-            </h1>
+            <h1 className="text-2xl font-bold">New Flow</h1>
             <div className="mt-1 text-sm text-gray-500">
-              {duplicatedFlow 
-                ? "Create a new flow based on an existing configuration" 
+              {duplicatedFlow
+                ? "Create a new flow based on an existing configuration"
                 : "Create a new flow configuration"}
             </div>
           </div>
@@ -51,4 +56,4 @@ export function NewFlowPage() {
       </div>
     </div>
   );
-} 
+}

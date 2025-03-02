@@ -69,9 +69,10 @@ export function CreateModelForm() {
       toast.success("Model created successfully");
       navigate(`/settings/models/${encodeURIComponent(data.id)}`);
     } catch (error) {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as any)?.response?.data?.detail || "Failed to create model";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : (error as any)?.response?.data?.detail || "Failed to create model";
       toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -90,7 +91,7 @@ export function CreateModelForm() {
             {/* Left Column - Basic Settings */}
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Basic Settings</h2>
-              
+
               <FormField
                 control={form.control}
                 name="id"
@@ -148,7 +149,7 @@ export function CreateModelForm() {
                     <FormControl>
                       <Input
                         {...field}
-                        value={field.value ?? ''}
+                        value={field.value ?? ""}
                         placeholder="e.g. http://localhost:8000/v1"
                       />
                     </FormControl>
@@ -169,7 +170,7 @@ export function CreateModelForm() {
                     <FormControl>
                       <Input
                         {...field}
-                        value={field.value ?? ''}
+                        value={field.value ?? ""}
                         type="password"
                         placeholder="Optional API key"
                       />
@@ -203,17 +204,14 @@ export function CreateModelForm() {
             {/* Right Column - Model Parameters */}
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Model Parameters</h2>
-              
+
               <FormField
                 control={form.control}
                 name="response_format"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Response Format</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select response format" />
@@ -238,10 +236,7 @@ export function CreateModelForm() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Message History Type</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                    >
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select history type" />
@@ -252,9 +247,7 @@ export function CreateModelForm() {
                         <SelectItem value="messages">Messages</SelectItem>
                       </SelectContent>
                     </Select>
-                    <FormDescription>
-                      Message history format
-                    </FormDescription>
+                    <FormDescription>Message history format</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -267,7 +260,13 @@ export function CreateModelForm() {
                   <FormItem>
                     <FormLabel>Temperature</FormLabel>
                     <FormControl>
-                      <Input {...field} type="number" min="0" max="1" step="0.1" />
+                      <Input
+                        {...field}
+                        type="number"
+                        min="0"
+                        max="1"
+                        step="0.1"
+                      />
                     </FormControl>
                     <FormDescription>
                       Randomness in model output
@@ -408,9 +407,9 @@ export function CreateModelForm() {
           </div>
 
           <div className="mt-8 flex items-center justify-end gap-4">
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => navigate("/settings/models")}
               disabled={isSubmitting}
             >
@@ -424,4 +423,4 @@ export function CreateModelForm() {
       </Form>
     </div>
   );
-} 
+}

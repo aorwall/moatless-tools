@@ -17,8 +17,13 @@ interface TimelineItemDetailsProps {
   trajectory: Trajectory;
 }
 
-export const TimelineItemDetails = ({ trajectoryId, trajectory }: TimelineItemDetailsProps) => {
-  const selectedItem = useTrajectoryStore((state) => state.getSelectedItem(trajectoryId));
+export const TimelineItemDetails = ({
+  trajectoryId,
+  trajectory,
+}: TimelineItemDetailsProps) => {
+  const selectedItem = useTrajectoryStore((state) =>
+    state.getSelectedItem(trajectoryId),
+  );
 
   if (!selectedItem) {
     return (
@@ -33,7 +38,13 @@ export const TimelineItemDetails = ({ trajectoryId, trajectory }: TimelineItemDe
       case "completion":
         return <CompletionDetails content={selectedItem.content} />;
       case "action":
-        return <ActionDetails content={selectedItem.content} nodeId={selectedItem.nodeId} trajectory={trajectory} />;
+        return (
+          <ActionDetails
+            content={selectedItem.content}
+            nodeId={selectedItem.nodeId}
+            trajectory={trajectory}
+          />
+        );
       case "error":
         return <ErrorDetails content={selectedItem.content} />;
       case "user_message":
@@ -54,7 +65,12 @@ export const TimelineItemDetails = ({ trajectoryId, trajectory }: TimelineItemDe
       case "workspace_tests":
         return <WorkspaceTestsDetails content={selectedItem.content} />;
       case "artifact":
-        return <ArtifactDetails content={selectedItem.content} trajectoryId={trajectoryId} />;
+        return (
+          <ArtifactDetails
+            content={selectedItem.content}
+            trajectoryId={trajectoryId}
+          />
+        );
       case "reward":
         return <RewardDetails content={selectedItem.content} />;
       default:

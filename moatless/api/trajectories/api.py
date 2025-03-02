@@ -1,14 +1,12 @@
 """API endpoints for run status and trajectory data."""
 
 import logging
-from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import (
     ExecuteNodeRequest,
-    RetryTrajectoryRequest,
     StartTrajectoryRequest,
     TrajectoryListItem,
     TrajectoryResponseDTO,

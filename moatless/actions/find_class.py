@@ -1,5 +1,5 @@
 import logging
-from typing import ClassVar, List, Type
+from typing import ClassVar
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -39,6 +39,12 @@ class FindClassArgs(SearchBaseArgs):
 
     model_config = ConfigDict(title="FindClass")
 
+    def to_prompt(self):
+        prompt = f"Searching for class: {self.class_name}"
+        if self.file_pattern:
+            prompt += f" in files matching the pattern: {self.file_pattern}"
+        return prompt
+
     def short_summary(self) -> str:
         param_str = f"class_name={self.class_name}"
         if self.file_pattern:
@@ -68,12 +74,6 @@ class FindClassArgs(SearchBaseArgs):
 
 class FindClass(SearchBaseAction):
     args_schema: ClassVar[type[ActionArguments]] = FindClassArgs
-
-    def to_prompt(self):
-        prompt = f"Searching for class: {self.args.class_name}"
-        if self.args.file_pattern:
-            prompt += f" in files matching the pattern: {self.args.file_pattern}"
-        return prompt
 
     async def _search(self, args: FindClassArgs) -> SearchCodeResponse:
         logger.info(f"{self.name}: {args.class_name} (file_pattern: {args.file_pattern})")

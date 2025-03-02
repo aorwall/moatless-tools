@@ -23,9 +23,10 @@ export function FlowsPage() {
       });
       toast.success("Changes saved successfully");
     } catch (error) {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as any)?.response?.data?.detail || "Failed to save changes";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : (error as any)?.response?.data?.detail || "Failed to save changes";
       toast.error(errorMessage);
       throw error;
     }
@@ -42,4 +43,4 @@ export function FlowsPage() {
   }
 
   return <FlowDetail flow={selectedFlow} onSubmit={handleSubmit} />;
-} 
+}

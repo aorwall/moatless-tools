@@ -1,4 +1,4 @@
-from typing import ClassVar, List, Type
+from typing import ClassVar
 
 from pydantic import ConfigDict, Field
 
@@ -10,7 +10,6 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 
 class FinishArgs(ActionArguments):
@@ -42,7 +41,7 @@ class Finish(Action):
     args_schema: ClassVar[type[ActionArguments]] = FinishArgs
 
     async def execute(self, args: FinishArgs, file_context: FileContext | None = None):
-        return Observation(message="Finished", terminal=True)
+        return Observation.create(message="Finished", terminal=True)
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:

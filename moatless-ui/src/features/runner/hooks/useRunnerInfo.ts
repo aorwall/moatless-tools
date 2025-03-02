@@ -1,11 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
-import { runnerApi } from '../api/runnerApi';
+import { useQuery } from "@tanstack/react-query";
+import { runnerApi } from "../api/runnerApi";
 
 // Query keys for runner data
 export const runnerKeys = {
-  all: ['runner'] as const,
-  info: () => [...runnerKeys.all, 'info'] as const,
-  jobs: () => [...runnerKeys.all, 'jobs'] as const,
+  all: ["runner"] as const,
+  info: () => [...runnerKeys.all, "info"] as const,
+  jobs: () => [...runnerKeys.all, "jobs"] as const,
   jobSummary: (projectId: string) => [...runnerKeys.jobs(), projectId] as const,
 };
 
@@ -32,4 +32,4 @@ export function useJobStatusSummary(projectId: string) {
     enabled: !!projectId,
     refetchInterval: 5000, // Refetch every 5 seconds
   });
-} 
+}

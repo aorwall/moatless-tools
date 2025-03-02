@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
@@ -302,14 +302,14 @@ class ClaudeEditTool(Action, CodeModificationMixin):
     async def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
         context_file = file_context.get_context_file(str(path))
         if not context_file:
-            return Observation(
+            return Observation.create(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
 
         # Validate file exists and is not a directory
         if not file_context.file_exists(str(path)):
-            return Observation(
+            return Observation.create(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
             )
@@ -319,7 +319,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         n_lines_file = len(file_text_lines)
 
         if insert_line < 0 or insert_line > len(file_text_lines):
-            return Observation(
+            return Observation.create(
                 message=f"Invalid `insert_line` parameter: {insert_line}. It should be within the range of lines of the file: {[0, n_lines_file]}",
                 properties={"fail_reason": "invalid_line_number"},
             )
@@ -346,7 +346,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         )
         success_msg += "Review the changes and make sure they are as expected (correct indentation, no duplicate lines, etc). Edit the file again if necessary."
 
-        return Observation(
+        return Observation.create(
             message=success_msg,
             properties={"diff": diff},
         )

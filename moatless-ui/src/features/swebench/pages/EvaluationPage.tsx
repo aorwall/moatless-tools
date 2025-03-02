@@ -9,92 +9,112 @@ import { useProcessEvaluationResults } from "../hooks/useProcessEvaluationResult
 import { toast } from "sonner";
 import { format, formatDuration, intervalToDuration } from "date-fns";
 import { EvaluationTimeline } from "../components/EvaluationTimeline";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/lib/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/lib/components/ui/tooltip";
 import { EvaluationStatus } from "../components/EvaluationStatus";
 import { Link, useNavigate } from "react-router-dom";
 import { EvaluationToolbar } from "../components/EvaluationToolbar";
 import { EvaluationInstancesTable } from "../components/EvaluationInstancesTable";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/lib/components/ui/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/lib/components/ui/collapsible";
 
 interface EvaluationPageProps {
   evaluation: Evaluation;
 }
 
-function getDuration(start?: string, end?: string, isRunning?: boolean): string {
-  if (!start) return '-';
+function getDuration(
+  start?: string,
+  end?: string,
+  isRunning?: boolean,
+): string {
+  if (!start) return "-";
   if (isRunning) {
     const duration = intervalToDuration({
       start: new Date(start),
-      end: new Date()
+      end: new Date(),
     });
-    return formatDuration(duration, { format: ['minutes', 'seconds'] });
+    return formatDuration(duration, { format: ["minutes", "seconds"] });
   }
-  if (!end) return '-';
+  if (!end) return "-";
   const duration = intervalToDuration({
     start: new Date(start),
-    end: new Date(end)
+    end: new Date(end),
   });
-  return formatDuration(duration, { format: ['minutes', 'seconds'] });
+  return formatDuration(duration, { format: ["minutes", "seconds"] });
 }
 
 const formatDate = (date: string) => {
   return new Date(date).toLocaleString();
 };
 
-export function EvaluationPage({ 
-  evaluation
-}: EvaluationPageProps) {
+export function EvaluationPage({ evaluation }: EvaluationPageProps) {
   const navigate = useNavigate();
   const [concurrentInstances, setConcurrentInstances] = useState(1);
   const [timelineExpanded, setTimelineExpanded] = useState(false);
-  const { mutate: startEvaluation, isPending: isStartPending } = useStartEvaluation();
-  const { mutate: cloneEvaluation, isPending: isClonePending } = useCloneEvaluation();
-  const { mutate: processResults, isPending: isProcessPending } = useProcessEvaluationResults();
+  const { mutate: startEvaluation, isPending: isStartPending } =
+    useStartEvaluation();
+  const { mutate: cloneEvaluation, isPending: isClonePending } =
+    useCloneEvaluation();
+  const { mutate: processResults, isPending: isProcessPending } =
+    useProcessEvaluationResults();
 
   const handleStart = () => {
-    startEvaluation({
-      evaluationId: evaluation.evaluation_name,
-      numConcurrentInstances: concurrentInstances
-    }, {
-      onSuccess: () => {
-        toast.success('Evaluation started successfully');
+    startEvaluation(
+      {
+        evaluationId: evaluation.evaluation_name,
+        numConcurrentInstances: concurrentInstances,
       },
-      onError: (error) => {
-        toast.error(`Failed to start evaluation: ${error.message}`);
-      }
-    });
+      {
+        onSuccess: () => {
+          toast.success("Evaluation started successfully");
+        },
+        onError: (error) => {
+          toast.error(`Failed to start evaluation: ${error.message}`);
+        },
+      },
+    );
   };
 
   const handleClone = () => {
     cloneEvaluation(evaluation.evaluation_name, {
       onSuccess: (data) => {
-        toast.success('Evaluation cloned successfully');
+        toast.success("Evaluation cloned successfully");
         navigate(`/swebench/evaluation/${data.evaluation_name}`);
       },
       onError: (error) => {
         toast.error(`Failed to clone evaluation: ${error.message}`);
-      }
+      },
     });
   };
 
   const handleProcessResults = () => {
     processResults(evaluation.evaluation_name, {
       onSuccess: () => {
-        toast.success('Evaluation results synchronized successfully');
+        toast.success("Evaluation results synchronized successfully");
       },
       onError: (error) => {
-        toast.error(`Failed to synchronize evaluation results: ${error.message}`);
-      }
+        toast.error(
+          `Failed to synchronize evaluation results: ${error.message}`,
+        );
+      },
     });
   };
 
   const canStart = (() => {
-    if (evaluation.status.toLowerCase() === 'running') return false;
-    if (evaluation.status.toLowerCase() === 'completed') {
+    if (evaluation.status.toLowerCase() === "running") return false;
+    if (evaluation.status.toLowerCase() === "completed") {
       // Allow restart if there are any error instances
-      return evaluation.instances.some(instance => 
-        instance.status.toLowerCase() === 'error' || 
-        instance.status.toLowerCase() === 'failed'
+      return evaluation.instances.some(
+        (instance) =>
+          instance.status.toLowerCase() === "error" ||
+          instance.status.toLowerCase() === "failed",
       );
     }
     return true;
@@ -106,7 +126,9 @@ export function EvaluationPage({
       <div className="border-b pb-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">{evaluation.evaluation_name}</h1>
+            <h1 className="text-2xl font-semibold">
+              {evaluation.evaluation_name}
+            </h1>
             <p className="text-xs text-muted-foreground mt-1">
               Created {formatDate(evaluation.created_at)}
             </p>
@@ -130,12 +152,23 @@ export function EvaluationPage({
         <div className="rounded-lg border p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium">Model</h3>
-            <span className="text-xs text-muted-foreground">ID: {evaluation.model.id}</span>
+            <span className="text-xs text-muted-foreground">
+              ID: {evaluation.model.id}
+            </span>
           </div>
           <div className="space-y-1 text-sm">
-            <p><span className="text-muted-foreground">Name:</span> {evaluation.model.model}</p>
-            <p><span className="text-muted-foreground">Response Format:</span> {evaluation.model.response_format}</p>
-            <p><span className="text-muted-foreground">Temperature:</span> {evaluation.model.temperature || 'N/A'}</p>
+            <p>
+              <span className="text-muted-foreground">Name:</span>{" "}
+              {evaluation.model.model}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Response Format:</span>{" "}
+              {evaluation.model.response_format}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Temperature:</span>{" "}
+              {evaluation.model.temperature || "N/A"}
+            </p>
           </div>
         </div>
 
@@ -143,12 +176,23 @@ export function EvaluationPage({
         <div className="rounded-lg border p-4">
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium">Flow</h3>
-            <span className="text-xs text-muted-foreground">ID: {evaluation.flow.id}</span>
+            <span className="text-xs text-muted-foreground">
+              ID: {evaluation.flow.id}
+            </span>
           </div>
           <div className="space-y-1 text-sm">
-            <p><span className="text-muted-foreground">Type:</span> {evaluation.flow.flow_type}</p>
-            <p><span className="text-muted-foreground">Max Cost:</span> ${evaluation.flow.max_cost}</p>
-            <p><span className="text-muted-foreground">Max Iterations:</span> {evaluation.flow.max_iterations}</p>
+            <p>
+              <span className="text-muted-foreground">Type:</span>{" "}
+              {evaluation.flow.flow_type}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Max Cost:</span> $
+              {evaluation.flow.max_cost}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Max Iterations:</span>{" "}
+              {evaluation.flow.max_iterations}
+            </p>
           </div>
         </div>
 
@@ -156,17 +200,24 @@ export function EvaluationPage({
         <div className="rounded-lg border p-4">
           <h3 className="font-medium mb-2">Dataset</h3>
           <div className="space-y-1 text-sm">
-            <p><span className="text-muted-foreground">Name:</span> {evaluation.dataset_name}</p>
-            <p><span className="text-muted-foreground">Instances:</span> {evaluation.instances.length}</p>
-            <p><span className="text-muted-foreground">Workers:</span> {evaluation.num_workers}</p>
+            <p>
+              <span className="text-muted-foreground">Name:</span>{" "}
+              {evaluation.dataset_name}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Instances:</span>{" "}
+              {evaluation.instances.length}
+            </p>
+            <p>
+              <span className="text-muted-foreground">Workers:</span>{" "}
+              {evaluation.num_workers}
+            </p>
           </div>
         </div>
       </div>
 
       {/* Status Section */}
-      <EvaluationStatus
-        evaluation={evaluation}
-      />
+      <EvaluationStatus evaluation={evaluation} />
 
       <Collapsible
         open={timelineExpanded}
@@ -187,9 +238,7 @@ export function EvaluationPage({
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent className="p-4">
-          <EvaluationTimeline 
-            evaluation={evaluation}
-          />
+          <EvaluationTimeline evaluation={evaluation} />
         </CollapsibleContent>
       </Collapsible>
 

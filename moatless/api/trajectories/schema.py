@@ -1,8 +1,6 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
-
-from moatless.api.trajectory.schema import TrajectoryDTO
 
 
 class AttachmentData(BaseModel):

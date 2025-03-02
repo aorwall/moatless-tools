@@ -1,5 +1,3 @@
-import { FC } from "react";
-import { JsonView } from "@/lib/components/ui/json-view.tsx";
 
 export interface CompletionTimelineContent {
   usage?: {
@@ -20,7 +18,6 @@ export const CompletionTrajectoryItem = ({
   content,
   header,
 }: CompletionTrajectoryItemProps) => {
-
   return (
     <div className="space-y-4">
       {/* Token Usage Summary */}

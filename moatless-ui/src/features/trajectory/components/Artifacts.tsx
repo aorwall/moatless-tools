@@ -1,13 +1,20 @@
+import { useTrajectoryStore } from "@/features/trajectory/stores/trajectoryStore.ts";
+import { Button } from "@/lib/components/ui/button.tsx";
+import { Card } from "@/lib/components/ui/card.tsx";
 import { ScrollArea } from "@/lib/components/ui/scroll-area.tsx";
 import { ArtifactFilters, useListArtifacts } from "@/lib/hooks/useArtifact.ts";
-import { Card } from "@/lib/components/ui/card.tsx";
-import { formatDistanceToNow } from "date-fns";
-import { Loader2, ChevronDown, ChevronRight, File, CheckCircle, Database } from "lucide-react";
-import { useTrajectoryStore } from "@/features/trajectory/stores/trajectoryStore.ts";
-import { useState, useMemo } from "react";
-import { Button } from "@/lib/components/ui/button.tsx";
-import { ArrowUpDown } from "lucide-react";
 import { cn } from "@/lib/utils.ts";
+import { formatDistanceToNow } from "date-fns";
+import {
+  ArrowUpDown,
+  CheckCircle,
+  ChevronDown,
+  ChevronRight,
+  Database,
+  File,
+  Loader2,
+} from "lucide-react";
+import { useState } from "react";
 
 interface ArtifactsProps {
   trajectoryId: string;
@@ -15,10 +22,10 @@ interface ArtifactsProps {
 
 export function Artifacts({ trajectoryId }: ArtifactsProps) {
   const [filters, setFilters] = useState<ArtifactFilters>({
-    sortOrder: 'desc',
-    sortBy: 'created_at'
+    sortOrder: "desc",
+    sortBy: "created_at",
   });
-  
+
   const { data, isLoading, error } = useListArtifacts(trajectoryId, filters);
   const { setSelectedItem } = useTrajectoryStore();
 
@@ -86,26 +93,32 @@ export function Artifacts({ trajectoryId }: ArtifactsProps) {
               size="sm"
               className={cn(
                 "h-8",
-                !filters.type && "bg-primary text-primary-foreground hover:bg-primary/90"
+                !filters.type &&
+                "bg-primary text-primary-foreground hover:bg-primary/90",
               )}
-              onClick={() => setFilters(prev => ({ ...prev, type: undefined }))}
+              onClick={() =>
+                setFilters((prev) => ({ ...prev, type: undefined }))
+              }
             >
               All
             </Button>
-            {artifactTypes.map(type => (
+            {artifactTypes.map((type) => (
               <Button
                 key={type}
                 variant="outline"
                 size="sm"
                 className={cn(
                   "h-8 flex items-center gap-2",
-                  filters.type === type && "bg-primary text-primary-foreground hover:bg-primary/90",
-                  filters.type && filters.type !== type && "opacity-50"
+                  filters.type === type &&
+                  "bg-primary text-primary-foreground hover:bg-primary/90",
+                  filters.type && filters.type !== type && "opacity-50",
                 )}
-                onClick={() => setFilters(prev => ({ 
-                  ...prev, 
-                  type: prev.type === type ? undefined : type 
-                }))}
+                onClick={() =>
+                  setFilters((prev) => ({
+                    ...prev,
+                    type: prev.type === type ? undefined : type,
+                  }))
+                }
               >
                 {getArtifactIcon(type)}
                 {type}
@@ -120,13 +133,15 @@ export function Artifacts({ trajectoryId }: ArtifactsProps) {
               size="sm"
               className={cn(
                 "h-8",
-                filters.sortBy === 'created_at' && "bg-muted"
+                filters.sortBy === "created_at" && "bg-muted",
               )}
-              onClick={() => setFilters(prev => ({
-                ...prev,
-                sortBy: 'created_at',
-                sortOrder: prev.sortOrder === 'asc' ? 'desc' : 'asc'
-              }))}
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  sortBy: "created_at",
+                  sortOrder: prev.sortOrder === "asc" ? "desc" : "asc",
+                }))
+              }
             >
               Date
               <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -135,15 +150,14 @@ export function Artifacts({ trajectoryId }: ArtifactsProps) {
             <Button
               variant="outline"
               size="sm"
-              className={cn(
-                "h-8",
-                filters.sortBy === 'name' && "bg-muted"
-              )}
-              onClick={() => setFilters(prev => ({
-                ...prev,
-                sortBy: 'name',
-                sortOrder: prev.sortOrder === 'asc' ? 'desc' : 'asc'
-              }))}
+              className={cn("h-8", filters.sortBy === "name" && "bg-muted")}
+              onClick={() =>
+                setFilters((prev) => ({
+                  ...prev,
+                  sortBy: "name",
+                  sortOrder: prev.sortOrder === "asc" ? "desc" : "asc",
+                }))
+              }
             >
               Name
               <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -155,9 +169,9 @@ export function Artifacts({ trajectoryId }: ArtifactsProps) {
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-4">
           {artifacts.map((artifact) => (
-            <ArtifactItem 
-              key={artifact.id} 
-              artifact={artifact} 
+            <ArtifactItem
+              key={artifact.id}
+              artifact={artifact}
               allArtifacts={artifacts}
               onSelect={handleSelect}
             />
@@ -198,16 +212,17 @@ function ArtifactItem({ artifact, allArtifacts, onSelect }: ArtifactItemProps) {
 
   return (
     <Card className="p-4 mb-3">
-      <div 
-        className="flex items-center cursor-pointer" 
+      <div
+        className="flex items-center cursor-pointer"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        {isExpanded ? 
-          <ChevronDown className="w-5 h-5 mr-2" /> : 
+        {isExpanded ? (
+          <ChevronDown className="w-5 h-5 mr-2" />
+        ) : (
           <ChevronRight className="w-5 h-5 mr-2" />
-        }
+        )}
         {getArtifactIcon(artifact.type)}
-        <span 
+        <span
           className="ml-2 font-semibold hover:text-primary"
           onClick={(e) => {
             e.stopPropagation();
@@ -225,7 +240,8 @@ function ArtifactItem({ artifact, allArtifacts, onSelect }: ArtifactItemProps) {
         <div className="mt-4 ml-7 space-y-3">
           <p className="text-sm text-muted-foreground">ID: {artifact.id}</p>
           <p className="text-sm text-muted-foreground">
-            Created: {formatDistanceToNow(artifact.created_at, { addSuffix: true })}
+            Created:{" "}
+            {formatDistanceToNow(artifact.created_at, { addSuffix: true })}
           </p>
           {artifact.references && artifact.references.length > 0 && (
             <div className="mt-4">
@@ -234,15 +250,16 @@ function ArtifactItem({ artifact, allArtifacts, onSelect }: ArtifactItemProps) {
                 {artifact.references.map((ref) => {
                   const refArtifact = allArtifacts.find((a) => a.id === ref.id);
                   return (
-                    <li 
-                      key={ref.id} 
+                    <li
+                      key={ref.id}
                       className="text-sm text-muted-foreground flex items-center gap-2 cursor-pointer hover:text-primary"
                       onClick={() => refArtifact && onSelect(refArtifact)}
                     >
                       {getArtifactIcon(ref.type)}
-                      <span>{refArtifact ? 
-                        (refArtifact.name || refArtifact.id) : 
-                        `${ref.id} (${ref.type})`}
+                      <span>
+                        {refArtifact
+                          ? refArtifact.name || refArtifact.id
+                          : `${ref.id} (${ref.type})`}
                       </span>
                     </li>
                   );
@@ -254,4 +271,4 @@ function ArtifactItem({ artifact, allArtifacts, onSelect }: ArtifactItemProps) {
       )}
     </Card>
   );
-} 
+}

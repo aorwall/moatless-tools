@@ -1,6 +1,6 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { evaluationApi } from '../api/evaluation';
-import { evaluationKeys } from './useEvaluation';
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { evaluationApi } from "../api/evaluation";
+import { evaluationKeys } from "./useEvaluation";
 
 export function useCloneEvaluation() {
   const queryClient = useQueryClient();
@@ -13,4 +13,4 @@ export function useCloneEvaluation() {
       return data;
     },
   });
-} 
+}

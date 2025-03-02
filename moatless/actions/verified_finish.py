@@ -1,4 +1,4 @@
-from typing import ClassVar, List, Type
+from typing import ClassVar
 
 from pydantic import ConfigDict, Field
 
@@ -86,7 +86,7 @@ class VerifiedFinish(Action):
         file_context: FileContext | None = None,
         workspace: Workspace | None = None,
     ):
-        return Observation(message=args.finish_reason, terminal=True)
+        return Observation.create(message=args.finish_reason, terminal=True)
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:

@@ -14,14 +14,19 @@ interface EvaluationOverviewProps {
   getStatusColor: (status: string) => BadgeVariant;
 }
 
-export function EvaluationOverview({ evaluation, calculateProgress, getStatusColor }: EvaluationOverviewProps) {
-
+export function EvaluationOverview({
+  evaluation,
+  calculateProgress,
+  getStatusColor,
+}: EvaluationOverviewProps) {
   return (
     <div className="border-b bg-muted/40 p-4">
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <div className="min-w-0 flex-1">
-            <h2 className="font-semibold truncate">{evaluation.dataset_name}</h2>
+            <h2 className="font-semibold truncate">
+              {evaluation.dataset_name}
+            </h2>
             <p className="text-sm text-muted-foreground truncate">
               {evaluation.evaluation_name}
             </p>
@@ -42,4 +47,4 @@ export function EvaluationOverview({ evaluation, calculateProgress, getStatusCol
       </div>
     </div>
   );
-} 
+}

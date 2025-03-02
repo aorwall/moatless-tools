@@ -33,7 +33,7 @@ export type AddModelFromBaseRequest = {
   updates?: Partial<ModelConfig>;
 };
 
-export type CreateModelRequest = Omit<ModelConfig, 'id'> & { id: string };
+export type CreateModelRequest = Omit<ModelConfig, "id"> & { id: string };
 
 export const ModelTestResultSchema = z.object({
   success: z.boolean(),

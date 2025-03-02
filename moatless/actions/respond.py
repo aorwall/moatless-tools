@@ -16,9 +16,6 @@ class MessageArgs(ActionArguments):
     def to_prompt(self):
         return f"Message: {self.message}"
 
-    def equals(self, other: "ActionArguments") -> bool:
-        return other.message == self.message
-
 
 class MessageAction(Action):
     """
@@ -33,4 +30,4 @@ class MessageAction(Action):
         file_context: FileContext | None = None,
         workspace: Workspace | None = None,
     ) -> Observation:
-        return Observation()
+        return Observation.create(message=args.message)

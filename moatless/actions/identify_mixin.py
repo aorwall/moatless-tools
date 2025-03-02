@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -8,11 +8,9 @@ from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
-    ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
     ResponseSchema,
 )
-from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)

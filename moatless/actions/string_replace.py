@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Any, List
+from typing import Any
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -13,7 +13,6 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.repository.file import do_diff
 
 logger = logging.getLogger(__name__)
 
@@ -454,21 +453,19 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary."
 
-        observation = Observation(
-            message=message,
-            summary=summary,
-            properties=properties,
-        )
-
         test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
 
         if test_summary:
-            observation.message += f"\n\n{test_summary}"
+            message += f"\n\n{test_summary}"
 
-        return observation
+        return Observation.create(
+            message=message,
+            summary=summary,
+            properties=properties,
+        )
 
 
 def normalize_indentation(s):

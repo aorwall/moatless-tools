@@ -1,4 +1,4 @@
-import { apiRequest } from './config';
+import { apiRequest } from "./config";
 
 export interface RunnerInfo {
   runner_type: string;
@@ -15,5 +15,5 @@ export interface RunnerStatusResponse {
 }
 
 export const runnerApi = {
-  getStatus: () => apiRequest<RunnerStatusResponse>('/runner'),
-}; 
+  getStatus: () => apiRequest<RunnerStatusResponse>("/runner"),
+};

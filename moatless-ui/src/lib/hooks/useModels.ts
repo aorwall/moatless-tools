@@ -1,6 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { modelsApi } from "@/lib/api/models";
-import type { ModelConfig, AddModelFromBaseRequest, ModelTestResult, CreateModelRequest } from "@/lib/types/model";
+import type {
+  ModelConfig,
+  AddModelFromBaseRequest,
+  ModelTestResult,
+  CreateModelRequest,
+} from "@/lib/types/model";
 
 export const modelKeys = {
   all: ["models"] as const,
@@ -45,7 +50,8 @@ export function useBaseModel(id: string) {
 export function useAddFromBase() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: AddModelFromBaseRequest) => modelsApi.addFromBase(request),
+    mutationFn: (request: AddModelFromBaseRequest) =>
+      modelsApi.addFromBase(request),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["models"] });
     },

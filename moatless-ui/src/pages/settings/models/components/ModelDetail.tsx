@@ -51,10 +51,12 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
       setError(null);
       await onSubmit(data);
     } catch (e) {
-      const errorMessage = e instanceof Error 
-        ? e.message 
-        : (e as any)?.response?.data?.detail || "An unexpected error occurred";
-      
+      const errorMessage =
+        e instanceof Error
+          ? e.message
+          : (e as any)?.response?.data?.detail ||
+            "An unexpected error occurred";
+
       console.error(errorMessage);
       setError(errorMessage);
       throw e;
@@ -67,9 +69,10 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
     try {
       await testModelMutation.mutateAsync(model.id);
     } catch (e) {
-      const errorMessage = e instanceof Error 
-        ? e.message 
-        : (e as any)?.response?.data?.detail || "Failed to test model";
+      const errorMessage =
+        e instanceof Error
+          ? e.message
+          : (e as any)?.response?.data?.detail || "Failed to test model";
       console.error(errorMessage);
     }
   };
@@ -106,7 +109,8 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               <p>{testModelMutation.data.message}</p>
               {testModelMutation.data.response_time_ms && (
                 <p className="text-sm text-muted-foreground">
-                  Response time: {(testModelMutation.data.response_time_ms / 1000).toFixed(2)}s
+                  Response time:{" "}
+                  {(testModelMutation.data.response_time_ms / 1000).toFixed(2)}s
                 </p>
               )}
               {testModelMutation.data.error_details && (
@@ -138,7 +142,10 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               )}
               {testModelMutation.isPending ? "Testing..." : "Test Model"}
             </Button>
-            <Button type="submit" disabled={isSaving || testModelMutation.isPending}>
+            <Button
+              type="submit"
+              disabled={isSaving || testModelMutation.isPending}
+            >
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
@@ -148,7 +155,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
           {/* Left Column - Basic Settings */}
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Basic Settings</h2>
-            
+
             <FormField
               control={form.control}
               name="model"
@@ -185,7 +192,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   <FormControl>
                     <Input
                       {...field}
-                      value={field.value ?? ''}
+                      value={field.value ?? ""}
                       placeholder="e.g. http://localhost:8000/v1"
                     />
                   </FormControl>
@@ -206,7 +213,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   <FormControl>
                     <Input
                       {...field}
-                      value={field.value ?? ''}
+                      value={field.value ?? ""}
                       type="password"
                       placeholder="Optional API key"
                     />
@@ -228,9 +235,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   <FormControl>
                     <Input {...field} type="number" min="1" step="1" />
                   </FormControl>
-                  <FormDescription>
-                    Request timeout in seconds
-                  </FormDescription>
+                  <FormDescription>Request timeout in seconds</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -240,17 +245,14 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
           {/* Right Column - Model Parameters */}
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Model Parameters</h2>
-            
+
             <FormField
               control={form.control}
               name="response_format"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Response Format</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                  >
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select response format" />
@@ -261,9 +263,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                       <SelectItem value="tool_call">Tool Call</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormDescription>
-                    Format for model responses
-                  </FormDescription>
+                  <FormDescription>Format for model responses</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -275,10 +275,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Message History Type</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                  >
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select history type" />
@@ -289,9 +286,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                       <SelectItem value="messages">Messages</SelectItem>
                     </SelectContent>
                   </Select>
-                  <FormDescription>
-                    Message history format
-                  </FormDescription>
+                  <FormDescription>Message history format</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -304,11 +299,15 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                 <FormItem>
                   <FormLabel>Temperature</FormLabel>
                   <FormControl>
-                    <Input {...field} type="number" min="0" max="1" step="0.1" />
+                    <Input
+                      {...field}
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.1"
+                    />
                   </FormControl>
-                  <FormDescription>
-                    Randomness in model output
-                  </FormDescription>
+                  <FormDescription>Randomness in model output</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -323,9 +322,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
                   <FormControl>
                     <Input {...field} type="number" />
                   </FormControl>
-                  <FormDescription>
-                    Maximum tokens to generate
-                  </FormDescription>
+                  <FormDescription>Maximum tokens to generate</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -446,9 +443,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
 
         <div className="mt-8 flex items-center justify-end gap-4">
           {error && (
-            <p className="text-sm text-red-500 flex-1 break-words">
-              {error}
-            </p>
+            <p className="text-sm text-red-500 flex-1 break-words">{error}</p>
           )}
         </div>
       </form>

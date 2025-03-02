@@ -1,5 +1,5 @@
-import { JsonViewer } from '../ui/json-viewer';
-import { ChevronDown } from 'lucide-react';
+import { JsonViewer } from "../ui/json-viewer";
+import { ChevronDown } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -23,18 +23,24 @@ export function CompletionUsage({ usage }: CompletionUsageProps) {
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Prompt</span>
-            <span className="font-mono text-gray-900">{usage.prompt_tokens}</span>
+            <span className="font-mono text-gray-900">
+              {usage.prompt_tokens}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Completion</span>
-            <span className="font-mono text-gray-900">{usage.completion_tokens}</span>
+            <span className="font-mono text-gray-900">
+              {usage.completion_tokens}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="font-medium text-gray-500">Cached</span>
-            <span className="font-mono text-gray-900">{usage.cached_tokens}</span>
+            <span className="font-mono text-gray-900">
+              {usage.cached_tokens}
+            </span>
           </div>
         </div>
-        
+
         <Collapsible>
           <CollapsibleTrigger className="flex items-center w-full p-3 hover:bg-muted/50 rounded-lg border">
             <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200" />
@@ -49,4 +55,4 @@ export function CompletionUsage({ usage }: CompletionUsageProps) {
       </div>
     </Card>
   );
-} 
+}

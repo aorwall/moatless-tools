@@ -1,15 +1,14 @@
 import re
-from typing import List
 
 from pydantic import ConfigDict, Field
 
-from moatless.actions.action import Action, FewShotExample
+from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import ActionArguments, Observation
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.repository.file import do_diff
-from moatless.workspace import Workspace
 
 
 class AppendStringArgs(ActionArguments):
@@ -63,7 +62,6 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         self,
         args: AppendStringArgs,
         file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
     ) -> Observation:
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
@@ -72,7 +70,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
         context_file = file_context.get_context_file(str(path))
         if not context_file:
-            return Observation(
+            return Observation.create(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
@@ -84,7 +82,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         looks_like_import = bool(re.match(r"^(import|from)\s+\w+", new_str.lstrip()))
 
         if looks_like_import:
-            return Observation(
+            return Observation.create(
                 message=(
                     "It looks like you're trying to add imports or other top-of-file content. "
                     "Please use StringReplace action to add content at the beginning of files."
@@ -110,18 +108,16 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
             "Edit the file again if necessary."
         )
 
-        observation = Observation(
-            message=message,
-            summary=message,
-            properties={"diff": diff, "success": True},
-        )
-
         test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
 
         if test_summary:
-            observation.message += f"\n\n{test_summary}"
+            message += f"\n\n{test_summary}"
 
-        return observation
+        return Observation.create(
+            message=message,
+            summary=message,
+            properties={"diff": diff, "success": True},
+        )

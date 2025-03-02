@@ -1,8 +1,27 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/lib/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/lib/components/ui/card";
 import { Button } from "@/lib/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormDescription, FormMessage } from "@/lib/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormDescription,
+  FormMessage,
+} from "@/lib/components/ui/form";
 import { Input } from "@/lib/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/lib/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/lib/components/ui/select";
 import { Separator } from "@/lib/components/ui/separator";
 import { ModelSelector } from "@/lib/components/selectors/ModelSelector";
 import { useDatasetsList } from "../hooks/useDatasetsList";
@@ -20,7 +39,7 @@ const evaluationSchema = z.object({
   name: z.string().min(1, "Evaluation name is required"),
   dataset: z.string().min(1, "Please select a dataset"),
   flow_id: z.string().min(1, "Please select a flow"),
-  model_id: z.string().min(1, "Please select a model")
+  model_id: z.string().min(1, "Please select a model"),
 });
 
 type EvaluationFormData = z.infer<typeof evaluationSchema>;
@@ -30,28 +49,31 @@ interface EvaluationFormProps {
   isLoading?: boolean;
 }
 
-export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormProps) {
+export default function EvaluationForm({
+  onSubmit,
+  isLoading,
+}: EvaluationFormProps) {
   const { data: datasetsResponse, isError } = useDatasetsList();
   const { lastUsedModel } = useLastUsedStore();
   const [isNameManuallyEdited, setIsNameManuallyEdited] = React.useState(false);
-  
+
   const generateDefaultName = (values: Partial<EvaluationFormData>) => {
-    const date = format(new Date(), 'yyyyMMdd');
-    return `${date}_${values.flow_id || 'flow'}_${values.model_id || 'model'}_${values.dataset || 'dataset'}`;
+    const date = format(new Date(), "yyyyMMdd");
+    return `${date}_${values.flow_id || "flow"}_${values.model_id || "model"}_${values.dataset || "dataset"}`;
   };
-  
+
   const form = useForm<EvaluationFormData>({
     resolver: zodResolver(evaluationSchema),
     defaultValues: {
       name: generateDefaultName({}),
       flow_id: "",
       model_id: lastUsedModel,
-      dataset: ""
+      dataset: "",
     },
   });
 
   // Watch for changes in relevant fields to update the name
-  const watchedFields = form.watch(['flow_id', 'model_id', 'dataset']);
+  const watchedFields = form.watch(["flow_id", "model_id", "dataset"]);
   React.useEffect(() => {
     if (!isNameManuallyEdited) {
       const newName = generateDefaultName({
@@ -59,7 +81,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
         model_id: watchedFields[1],
         dataset: watchedFields[2],
       });
-      form.setValue('name', newName);
+      form.setValue("name", newName);
     }
   }, [watchedFields, isNameManuallyEdited]);
 
@@ -69,7 +91,7 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
 
   const handleSubmit = (data: EvaluationFormData) => {
     onSubmit({
-      ...data
+      ...data,
     });
   };
 
@@ -80,11 +102,15 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-8">
-            
+          <form
+            onSubmit={form.handleSubmit(handleSubmit)}
+            className="space-y-8"
+          >
             {/* Flow and Model Section */}
             <div className="space-y-4">
-              <h3 className="text-lg font-medium">Flow & Model Configuration</h3>
+              <h3 className="text-lg font-medium">
+                Flow & Model Configuration
+              </h3>
               <div className="grid gap-6 sm:grid-cols-2">
                 <FormField
                   control={form.control}
@@ -133,7 +159,10 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Select Dataset</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select
+                      onValueChange={field.onChange}
+                      defaultValue={field.value}
+                    >
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Choose a dataset to evaluate" />
@@ -158,7 +187,6 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
 
             <Separator />
 
-            
             {/* Evaluation Name Section */}
             <div className="space-y-4">
               <h3 className="text-lg font-medium">Evaluation Name</h3>
@@ -169,8 +197,8 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
                   <FormItem>
                     <FormLabel>Name</FormLabel>
                     <FormControl>
-                      <Input 
-                        {...field} 
+                      <Input
+                        {...field}
                         onChange={(e) => {
                           setIsNameManuallyEdited(true);
                           field.onChange(e);
@@ -187,9 +215,9 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
             </div>
 
             <div className="flex justify-end">
-              <Button 
-                type="submit" 
-                disabled={isLoading || !form.formState.isValid} 
+              <Button
+                type="submit"
+                disabled={isLoading || !form.formState.isValid}
                 className="w-[200px]"
               >
                 {isLoading ? "Creating Evaluation..." : "Create Evaluation"}
@@ -200,4 +228,4 @@ export default function EvaluationForm({ onSubmit, isLoading }: EvaluationFormPr
       </CardContent>
     </Card>
   );
-} 
+}

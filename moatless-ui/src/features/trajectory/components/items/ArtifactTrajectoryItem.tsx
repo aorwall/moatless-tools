@@ -1,6 +1,5 @@
-import { FC } from "react";
 import { Badge } from "@/lib/components/ui/badge.tsx";
-import { cn } from "@/lib/utils.ts";
+import { FC } from "react";
 
 export interface ArtifactTimelineContent {
   artifact_id: string;
@@ -39,7 +38,7 @@ export const ArtifactTrajectoryItem: FC<ArtifactTrajectoryItemProps> = ({
         {getChangeTypeBadge(content.change_type)}
         <span className="text-xs text-gray-500">by {content.actor}</span>
       </div>
-      
+
       <div className="rounded-md bg-gray-50 p-3">
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs text-gray-600">
@@ -49,7 +48,9 @@ export const ArtifactTrajectoryItem: FC<ArtifactTrajectoryItemProps> = ({
 
           {content.diff_details && (
             <div className="space-y-1">
-              <span className="text-xs font-medium text-gray-600">Changes:</span>
+              <span className="text-xs font-medium text-gray-600">
+                Changes:
+              </span>
               <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-100 p-2 text-xs">
                 {content.diff_details}
               </pre>
@@ -59,4 +60,4 @@ export const ArtifactTrajectoryItem: FC<ArtifactTrajectoryItemProps> = ({
       </div>
     </div>
   );
-}; 
+};

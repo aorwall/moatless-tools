@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 // Enum definitions matching backend
 export enum JobStatus {
@@ -7,13 +7,13 @@ export enum JobStatus {
   RUNNING = "running",
   COMPLETED = "completed",
   FAILED = "failed",
-  CANCELED = "canceled"
+  CANCELED = "canceled",
 }
 
 export enum RunnerStatus {
   RUNNING = "running",
   STOPPED = "stopped",
-  ERROR = "error"
+  ERROR = "error",
 }
 
 // Schema definitions
@@ -23,13 +23,13 @@ export const JobInfoSchema = z.object({
   enqueued_at: z.string().datetime().nullable(),
   started_at: z.string().datetime().nullable(),
   ended_at: z.string().datetime().nullable(),
-  exc_info: z.string().nullable()
+  exc_info: z.string().nullable(),
 });
 
 export const RunnerInfoSchema = z.object({
   runner_type: z.string(),
   status: z.nativeEnum(RunnerStatus),
-  data: z.record(z.any())
+  data: z.record(z.any()),
 });
 
 export const JobsStatusSummarySchema = z.object({
@@ -41,16 +41,16 @@ export const JobsStatusSummarySchema = z.object({
   failed_jobs: z.number(),
   canceled_jobs: z.number(),
   pending_jobs: z.number(),
-  job_ids: z.record(z.array(z.string())).optional()
+  job_ids: z.record(z.array(z.string())).optional(),
 });
 
 export const RunnerResponseSchema = z.object({
   info: RunnerInfoSchema,
-  jobs: z.array(JobInfoSchema)
+  jobs: z.array(JobInfoSchema),
 });
 
 // Type definitions
 export type JobInfo = z.infer<typeof JobInfoSchema>;
 export type RunnerInfo = z.infer<typeof RunnerInfoSchema>;
 export type JobsStatusSummary = z.infer<typeof JobsStatusSummarySchema>;
-export type RunnerResponse = z.infer<typeof RunnerResponseSchema>; 
+export type RunnerResponse = z.infer<typeof RunnerResponseSchema>;

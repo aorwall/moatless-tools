@@ -19,8 +19,7 @@ from moatless.completion.manager import (
     update_model_config,
 )
 from moatless.schema import MessageHistoryType
-
-from .schema import AddModelFromBaseDTO, BaseModelsResponseDTO, CreateModelDTO, ModelConfigUpdateDTO, ModelsResponseDTO
+from .schema import AddModelFromBaseDTO, BaseModelsResponseDTO, CreateModelDTO, ModelsResponseDTO
 
 logger = logging.getLogger(__name__)
 

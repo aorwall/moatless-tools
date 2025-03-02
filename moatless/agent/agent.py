@@ -1,11 +1,9 @@
-import importlib
-import json
 import logging
 import traceback
-from typing import Any, Dict, List, Type
+from typing import Any
 
 from opentelemetry import trace
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import (
@@ -29,7 +27,6 @@ from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import ActionStep, Node
 from moatless.repository.repository import Repository
-from moatless.telemetry import instrument, set_attribute
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -45,41 +42,6 @@ class ActionAgent(MoatlessComponent):
     _message_generator: MessageHistoryGenerator | None = PrivateAttr(default=None)
     _action_map: dict[type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
     _workspace: Workspace | None = PrivateAttr(default=None)
-
-    def __init__(
-        self,
-        agent_id: str,
-        actions: list[Action],
-        system_prompt: str,
-        completion_model: BaseCompletionModel | None = None,
-        repository: Repository | None = None,
-        code_index: CodeIndex | None = None,
-        runtime: Any | None = None,
-        workspace: Workspace | None = None,
-        artifact_handlers: list[ArtifactHandler] | None = None,
-        **data,
-    ):
-        super().__init__(
-            system_prompt=system_prompt,
-            actions=actions,
-            agent_id=agent_id,
-            **data,
-        )
-
-        if workspace:
-            self.workspace = workspace
-        elif repository and runtime and code_index and artifact_handlers:
-            self.workspace = Workspace(
-                repository=repository,
-                runtime=runtime,
-                code_index=code_index,
-                artifact_handlers=artifact_handlers,
-            )
-        else:
-            self._workspace = None
-
-        self._message_generator = MessageHistoryGenerator()
-        self.completion_model = completion_model
 
     @classmethod
     def get_component_type(cls) -> str:
@@ -162,8 +124,6 @@ class ActionAgent(MoatlessComponent):
 
     @tracer.start_as_current_span("ActionAgent._run")
     async def run(self, node: Node):
-        set_attribute("agent_id", self.agent_id)
-        set_attribute("node_id", node.node_id)
         """Run the agent on a node to generate and execute an action."""
         if not self._completion_model:
             raise RuntimeError("Completion model not set")
@@ -276,8 +236,6 @@ class ActionAgent(MoatlessComponent):
 
     @tracer.start_as_current_span("ActionAgent._execute")
     async def _execute(self, node: Node, action_step: ActionStep):
-        set_attribute("action_name", action_step.action.name)
-
         try:
             action_step.observation = await self._execute_action_step(node, action_step)
 

@@ -1,41 +1,46 @@
-import { useState } from "react"
-import { ChevronRight, ChevronDown, Copy, Check } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { useState } from "react";
+import { ChevronRight, ChevronDown, Copy, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface JsonViewerProps {
-  data: any
-  level?: number
-  expanded?: boolean
+  data: any;
+  level?: number;
+  expanded?: boolean;
 }
 
-export function JsonViewer({ data, level = 0, expanded = true }: JsonViewerProps) {
-  const [isExpanded, setIsExpanded] = useState(expanded)
-  const [copied, setCopied] = useState(false)
+export function JsonViewer({
+  data,
+  level = 0,
+  expanded = true,
+}: JsonViewerProps) {
+  const [isExpanded, setIsExpanded] = useState(expanded);
+  const [copied, setCopied] = useState(false);
 
   const copyToClipboard = async () => {
-    await navigator.clipboard.writeText(JSON.stringify(data, null, 2))
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+    await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const getValueColor = (value: any) => {
-    if (typeof value === "string") return "text-green-600 dark:text-green-400"
-    if (typeof value === "number") return "text-blue-600 dark:text-blue-400"
-    if (typeof value === "boolean") return "text-purple-600 dark:text-purple-400"
-    if (value === null) return "text-gray-500 dark:text-gray-400"
-    return "text-foreground"
-  }
+    if (typeof value === "string") return "text-green-600 dark:text-green-400";
+    if (typeof value === "number") return "text-blue-600 dark:text-blue-400";
+    if (typeof value === "boolean")
+      return "text-purple-600 dark:text-purple-400";
+    if (value === null) return "text-gray-500 dark:text-gray-400";
+    return "text-foreground";
+  };
 
   if (typeof data !== "object" || data === null) {
     return (
       <span className={cn("font-mono break-all", getValueColor(data))}>
         {JSON.stringify(data)}
       </span>
-    )
+    );
   }
 
-  const isArray = Array.isArray(data)
-  const isEmpty = Object.keys(data).length === 0
+  const isArray = Array.isArray(data);
+  const isEmpty = Object.keys(data).length === 0;
 
   return (
     <div className="font-mono text-xs">
@@ -44,7 +49,11 @@ export function JsonViewer({ data, level = 0, expanded = true }: JsonViewerProps
           onClick={copyToClipboard}
           className="mb-2 flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
         >
-          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          {copied ? (
+            <Check className="h-3 w-3" />
+          ) : (
+            <Copy className="h-3 w-3" />
+          )}
           {copied ? "Copied!" : "Copy"}
         </button>
       )}
@@ -55,7 +64,11 @@ export function JsonViewer({ data, level = 0, expanded = true }: JsonViewerProps
             className="mt-0.5 rounded-sm hover:bg-muted flex-shrink-0"
             aria-label={isExpanded ? "Collapse" : "Expand"}
           >
-            {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
           </button>
         )}
         <div className="min-w-0 break-words">
@@ -83,6 +96,5 @@ export function JsonViewer({ data, level = 0, expanded = true }: JsonViewerProps
         </div>
       </div>
     </div>
-  )
+  );
 }
-

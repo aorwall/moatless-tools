@@ -1,7 +1,6 @@
 """API endpoints for agent configuration management."""
 
 import logging
-from typing import List
 
 from fastapi import APIRouter
 
@@ -14,7 +13,6 @@ from moatless.config.agent_config import (
     get_all_agents,
     update_agent,
 )
-
 from .schema import (
     ActionConfigDTO,
     ActionsResponseDTO,

@@ -62,9 +62,7 @@ export function SelectedActions({
     }
   };
 
-  const sortedActions = actions.sort((a, b) =>
-    a.title.localeCompare(b.title),
-  );
+  const sortedActions = actions.sort((a, b) => a.title.localeCompare(b.title));
 
   return (
     <div className="flex flex-col h-full border rounded-lg overflow-hidden">
@@ -79,9 +77,7 @@ export function SelectedActions({
       <ScrollArea className="flex-1">
         <div className="p-4">
           {sortedActions.map((actionConfig) => {
-            const actionSchema = getActionByTitle(
-              actionConfig.title,
-            );
+            const actionSchema = getActionByTitle(actionConfig.title);
             if (!actionSchema) return null;
 
             return (

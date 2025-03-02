@@ -1,25 +1,19 @@
 import json
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
-from moatless.actions.schema import (
-    ActionArguments,
-    Observation,
-    RewardScaleEntry,
-)
-from moatless.artifacts.artifact import ArtifactReference
-from moatless.artifacts.diagnostics.diagnostic import (
+from moatless.actions.schema import ActionArguments
+from moatless.artifacts.diagnostic import (
     Diagnostic,
     DiagnosticArtifact,
-    DiagnosticHandler,
     DiagnosticSeverity,
     Position,
     Range,
 )
-from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
+from moatless.environment.base import EnvironmentExecutionError
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 
@@ -71,10 +65,8 @@ class RunMyPy(Action):
         if not args.files:
             return "No files specified for MyPy type checking."
 
-        # Ensure MyPy is installed
         await self._ensure_mypy_installed()
 
-        # Prepare the MyPy command
         cmd_parts = ["mypy", "--output", "json"]
         cmd_parts.extend(args.files)
 
@@ -100,17 +92,14 @@ class RunMyPy(Action):
             logger.error(f"Unexpected error running MyPy: {str(e)}")
             return f"Unexpected error running MyPy: {str(e)}"
 
-        # Save artifacts using the diagnostic handler from workspace
         diagnostic_handler = self.workspace.artifact_handlers.get("diagnostic")
         if not diagnostic_handler:
             logger.warning("No diagnostic handler found in workspace")
             return "No diagnostic handler found in workspace. MyPy results not saved."
 
-        # Generate a summary message
         if not artifacts:
             return "MyPy found no type issues."
 
-        # Create summary message using the to_prompt_message_content method
         summary_parts = [f"MyPy found {sum(len(artifact.diagnostics) for artifact in artifacts)} issues:"]
 
         for artifact in artifacts:
@@ -136,10 +125,8 @@ class RunMyPy(Action):
         Returns:
             List of DiagnosticArtifact objects, one per file
         """
-        # Group diagnostics by file
         diagnostics_by_file = {}
 
-        # Parse each line of the output as a separate JSON object
         for line in output.splitlines():
             if not line.strip():
                 continue
@@ -178,7 +165,6 @@ class RunMyPy(Action):
                     code=report.get("code", "unknown"),
                 )
 
-                # Group diagnostics by file
                 if file_path not in diagnostics_by_file:
                     diagnostics_by_file[file_path] = []
                 diagnostics_by_file[file_path].append(diagnostic)
@@ -187,7 +173,6 @@ class RunMyPy(Action):
                 logger.error(f"Failed to parse MyPy JSON output: {e}\nLine: {line}")
                 continue
 
-        # Create a DiagnosticArtifact for each file
         artifacts = []
         for file_path, diagnostics in diagnostics_by_file.items():
             artifact = DiagnosticArtifact(file_path=file_path, diagnostics=diagnostics)
@@ -200,14 +185,13 @@ class RunMyPy(Action):
         Ensure that MyPy is installed in the current environment.
         Installs it if not present.
         """
-        # Check if mypy is installed
 
         try:
             stdout = await self.workspace.environment.execute("pip list | grep mypy")
             mypy_installed = stdout and "mypy" in stdout
         except EnvironmentExecutionError:
-            # grep returns non-zero exit code if pattern not found
             mypy_installed = False
+
         except Exception as e:
             logger.error(f"Error checking if MyPy is installed: {str(e)}")
             raise RuntimeError(f"Error checking if MyPy is installed: {str(e)}") from e

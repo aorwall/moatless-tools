@@ -1,4 +1,3 @@
-import React, { useEffect } from "react";
 
 export interface ErrorTimelineContent {
   error: string;
@@ -8,10 +7,7 @@ export interface ErrorTrajectoryItemProps {
   content: ErrorTimelineContent;
 }
 
-export const ErrorTrajectoryItem = ({
-  content,
-}: ErrorTrajectoryItemProps) => {
-
+export const ErrorTrajectoryItem = ({ content }: ErrorTrajectoryItemProps) => {
   const firstLine = content.error.split("\n")[0];
   const remainingLines = content.error.split("\n").length - 1;
 

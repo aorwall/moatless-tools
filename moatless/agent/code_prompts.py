@@ -1,5 +1,3 @@
-from typing import List
-
 AGENT_ROLE = """You are an autonomous AI assistant with superior programming skills. As you're working autonomously, 
 you cannot communicate with the user but must rely on information you can get from the available functions.
 """

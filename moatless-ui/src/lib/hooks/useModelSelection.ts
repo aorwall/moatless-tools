@@ -12,4 +12,4 @@ export function useModelSelection() {
     selectedModelId: lastUsedModel,
     onModelSelect: handleModelSelect,
   };
-} 
+}

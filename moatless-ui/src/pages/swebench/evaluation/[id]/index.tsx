@@ -1,33 +1,28 @@
-import { useParams } from "react-router-dom";
-import { TrajectoryViewer } from "@/features/trajectory/components/TrajectoryViewer.tsx";
 import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationInstance";
+import { TrajectoryViewer } from "@/features/trajectory/components/TrajectoryViewer.tsx";
 import { Alert, AlertDescription } from "@/lib/components/ui/alert";
-import { AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/lib/components/ui/card";
-import { useStartInstance } from "@/features/swebench/hooks/useStartInstance";
+import { AlertCircle, Loader2 } from "lucide-react";
+import { useParams } from "react-router-dom";
 
 export function EvaluationInstancePage() {
-  const { evaluationId, instanceId } = useParams<{ evaluationId: string; instanceId: string }>();
+  const { evaluationId, instanceId } = useParams<{
+    evaluationId: string;
+    instanceId: string;
+  }>();
 
-  const { data: evaluation, isError: evalError, error: evaluationError } = useEvaluation(evaluationId!);
-  const { 
+  const {
+    data: evaluation,
+    isError: evalError,
+    error: evaluationError,
+  } = useEvaluation(evaluationId!);
+  const {
     data: trajectory,
     isError: trajectoryError,
     error: trajectoryErrorData,
-    isLoading
+    isLoading,
   } = useEvaluationInstance(evaluationId!, instanceId!);
-  
-  const startInstanceMutation = useStartInstance();
-
-  const handleStartInstance = () => {
-    if (evaluationId && instanceId) {
-      startInstanceMutation.mutate({
-        evaluationName: evaluationId,
-        instanceId: instanceId
-      });
-    }
-  };
 
   if (!evaluationId || !instanceId) {
     return (
@@ -46,7 +41,9 @@ export function EvaluationInstancePage() {
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {evaluationError instanceof Error ? evaluationError.message : "Failed to load evaluation data"}
+            {evaluationError instanceof Error
+              ? evaluationError.message
+              : "Failed to load evaluation data"}
           </AlertDescription>
         </Alert>
       </div>
@@ -89,7 +86,9 @@ export function EvaluationInstancePage() {
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {trajectoryErrorData instanceof Error ? trajectoryErrorData.message : "Failed to load trajectory data"}
+            {trajectoryErrorData instanceof Error
+              ? trajectoryErrorData.message
+              : "Failed to load trajectory data"}
           </AlertDescription>
         </Alert>
       </div>
@@ -98,10 +97,7 @@ export function EvaluationInstancePage() {
 
   return (
     <div className="h-full w-full">
-      <TrajectoryViewer 
-        trajectory={trajectory} 
-        startInstance={handleStartInstance}
-      />
+      <TrajectoryViewer trajectory={trajectory} />
     </div>
   );
-} 
+}

@@ -5,8 +5,6 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/lib/components/ui/card";
 import { useGetTrajectory } from "@/features/trajectory/hooks/useGetTrajectory";
 
-
-
 export function TrajectoryPage() {
   const { projectId, trajectoryId } = useParams();
 
@@ -15,13 +13,20 @@ export function TrajectoryPage() {
       <div className="container mx-auto p-6">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription>No project id or trajectory id found</AlertDescription>
+          <AlertDescription>
+            No project id or trajectory id found
+          </AlertDescription>
         </Alert>
       </div>
     );
   }
 
-  const { data: trajectory, isLoading, isError, error } = useGetTrajectory(projectId, trajectoryId);
+  const {
+    data: trajectory,
+    isLoading,
+    isError,
+    error,
+  } = useGetTrajectory(projectId, trajectoryId);
 
   if (isLoading) {
     return (
@@ -44,7 +49,9 @@ export function TrajectoryPage() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {error instanceof Error ? error.message : "Failed to load trajectory data"}
+            {error instanceof Error
+              ? error.message
+              : "Failed to load trajectory data"}
           </AlertDescription>
         </Alert>
       </div>

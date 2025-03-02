@@ -5,7 +5,8 @@ export const componentKeys = {
   all: ["components"] as const,
   selectors: () => [...componentKeys.all, "selectors"] as const,
   valueFunctions: () => [...componentKeys.all, "value-functions"] as const,
-  feedbackGenerators: () => [...componentKeys.all, "feedback-generators"] as const,
+  feedbackGenerators: () =>
+    [...componentKeys.all, "feedback-generators"] as const,
   artifactHandlers: () => [...componentKeys.all, "artifact-handlers"] as const,
 };
 
@@ -35,4 +36,4 @@ export function useArtifactHandlers() {
     queryKey: componentKeys.artifactHandlers(),
     queryFn: () => settingsApi.getAvailableArtifactHandlers(),
   });
-} 
+}

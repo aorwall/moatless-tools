@@ -25,15 +25,15 @@ export const settingsApi = {
     }),
 
   // Component endpoints
-  getAvailableSelectors: () => 
+  getAvailableSelectors: () =>
     apiRequest<ComponentsResponse>("/settings/components/selectors"),
 
-  getAvailableValueFunctions: () => 
+  getAvailableValueFunctions: () =>
     apiRequest<ComponentsResponse>("/settings/components/value-functions"),
 
-  getAvailableFeedbackGenerators: () => 
+  getAvailableFeedbackGenerators: () =>
     apiRequest<ComponentsResponse>("/settings/components/feedback-generators"),
 
-  getAvailableArtifactHandlers: () => 
+  getAvailableArtifactHandlers: () =>
     apiRequest<ComponentsResponse>("/settings/components/artifact-handlers"),
-}; 
+};

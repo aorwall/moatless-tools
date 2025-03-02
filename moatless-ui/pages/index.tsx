@@ -1,5 +1,5 @@
-import { GenericContentView } from "../components/GenericContentView"
-import type { ContentStructure } from "../types/content"
+import { GenericContentView } from "../components/GenericContentView";
+import type { ContentStructure } from "../types/content";
 
 const verificationData: ContentStructure = {
   title: "Verification Data",
@@ -8,8 +8,17 @@ const verificationData: ContentStructure = {
       id: "main",
       title: "Verification Details",
       blocks: [
-        { id: "status", type: "text", content: "Status: New", variant: "subheading" },
-        { id: "description", type: "text", content: "Description: Anthropic - API Credits (2024-05-13)" },
+        {
+          id: "status",
+          type: "text",
+          content: "Status: New",
+          variant: "subheading",
+        },
+        {
+          id: "description",
+          type: "text",
+          content: "Description: Anthropic - API Credits (2024-05-13)",
+        },
         { id: "voucher", type: "text", content: "Voucher Series: A" },
         { id: "date", type: "text", content: "Accounting Date: 2024-05-13" },
       ],
@@ -21,22 +30,61 @@ const verificationData: ContentStructure = {
             {
               id: "transactions-table",
               type: "table",
-              headers: ["Account", "Transaction Info", "Debit", "Credit", "Currency", "Original Amount"],
+              headers: [
+                "Account",
+                "Transaction Info",
+                "Debit",
+                "Credit",
+                "Currency",
+                "Original Amount",
+              ],
               rows: [
-                ["5422", "Anthropic - API Credits (2024-05-13) (USD 24.99 @ 10.8384)", 270.85, 0, "USD", 24.99],
-                ["2645", "Anthropic - API Credits (2024-05-13) (USD 6.25 @ 10.8384)", 67.71, 0, "USD", 6.25],
-                ["2614", "Anthropic - API Credits (2024-05-13) (USD 6.25 @ 10.8384)", 0, 67.71, "USD", 6.25],
-                ["2820", "Anthropic - API Credits (2024-05-13) (USD 24.99 @ 10.8384)", 0, 270.85, "USD", 24.99],
+                [
+                  "5422",
+                  "Anthropic - API Credits (2024-05-13) (USD 24.99 @ 10.8384)",
+                  270.85,
+                  0,
+                  "USD",
+                  24.99,
+                ],
+                [
+                  "2645",
+                  "Anthropic - API Credits (2024-05-13) (USD 6.25 @ 10.8384)",
+                  67.71,
+                  0,
+                  "USD",
+                  6.25,
+                ],
+                [
+                  "2614",
+                  "Anthropic - API Credits (2024-05-13) (USD 6.25 @ 10.8384)",
+                  0,
+                  67.71,
+                  "USD",
+                  6.25,
+                ],
+                [
+                  "2820",
+                  "Anthropic - API Credits (2024-05-13) (USD 24.99 @ 10.8384)",
+                  0,
+                  270.85,
+                  "USD",
+                  24.99,
+                ],
               ],
             },
             { id: "total-debit", type: "text", content: "Total Debit: 338.56" },
-            { id: "total-credit", type: "text", content: "Total Credit: 338.56" },
+            {
+              id: "total-credit",
+              type: "text",
+              content: "Total Credit: 338.56",
+            },
           ],
         },
       ],
     },
   ],
-}
+};
 
 const receiptData: ContentStructure = {
   title: "Receipt Data",
@@ -45,7 +93,12 @@ const receiptData: ContentStructure = {
       id: "main",
       title: "Receipt Details",
       blocks: [
-        { id: "status", type: "text", content: "Status: New", variant: "subheading" },
+        {
+          id: "status",
+          type: "text",
+          content: "Status: New",
+          variant: "subheading",
+        },
         { id: "merchant", type: "text", content: "Merchant: Anthropic" },
         { id: "country", type: "text", content: "Receipt Country: US" },
         { id: "amount", type: "text", content: "Total Amount: $24.99" },
@@ -70,7 +123,12 @@ const receiptData: ContentStructure = {
             {
               id: "contact-list",
               type: "list",
-              items: ["Email: support@anthropic.com", "Phone: N/A", "Website: N/A", "Org Number: N/A"],
+              items: [
+                "Email: support@anthropic.com",
+                "Phone: N/A",
+                "Website: N/A",
+                "Org Number: N/A",
+              ],
             },
           ],
         },
@@ -78,9 +136,21 @@ const receiptData: ContentStructure = {
           id: "additional-info",
           title: "Additional Information",
           blocks: [
-            { id: "receipt-number", type: "text", content: "Receipt Number: 2848-8242" },
-            { id: "purchase-date", type: "text", content: "Purchase Date: 2024-05-13" },
-            { id: "payment-method", type: "text", content: "Payment Method: American Express - 1009" },
+            {
+              id: "receipt-number",
+              type: "text",
+              content: "Receipt Number: 2848-8242",
+            },
+            {
+              id: "purchase-date",
+              type: "text",
+              content: "Purchase Date: 2024-05-13",
+            },
+            {
+              id: "payment-method",
+              type: "text",
+              content: "Payment Method: American Express - 1009",
+            },
           ],
         },
         {
@@ -100,13 +170,17 @@ const receiptData: ContentStructure = {
           title: "Additional Details",
           blocks: [
             { id: "currency", type: "text", content: "Currency: USD" },
-            { id: "account-number", type: "text", content: "Account Number: 5422" },
+            {
+              id: "account-number",
+              type: "text",
+              content: "Account Number: 5422",
+            },
           ],
         },
       ],
     },
   ],
-}
+};
 
 export default function Home() {
   return (
@@ -117,6 +191,5 @@ export default function Home() {
         <GenericContentView content={receiptData} />
       </div>
     </div>
-  )
+  );
 }
-

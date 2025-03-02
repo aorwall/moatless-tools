@@ -1,5 +1,4 @@
 import logging
-from typing import Any, List
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
@@ -89,7 +88,7 @@ class RunTests(Action):
             if directories:
                 error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
 
-            return Observation(
+            return Observation.create(
                 message="Unable to run tests: " + "; ".join(error_details),
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
@@ -105,7 +104,7 @@ class RunTests(Action):
         summary = f"\n{file_context.get_test_summary(args.test_files)}"
         response_msg += summary
 
-        return Observation(
+        return Observation.create(
             message=response_msg,
             summary=summary,
         )

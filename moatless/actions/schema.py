@@ -2,7 +2,7 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -26,7 +26,7 @@ class ActionArguments(ResponseSchema, ABC):
     @classmethod
     def format_name_for_llm(cls) -> str:
         """Format the class name for LLM consumption"""
-        return str(cls.get_name())
+        return str(cls.name)
 
     @classmethod
     def from_tool_call(cls, tool_args: dict[str, Any], tool_name: str | None = None):
@@ -42,20 +42,6 @@ class ActionArguments(ResponseSchema, ABC):
 
     def short_summary(self) -> str:
         return f"{self.name}()"
-
-    @model_validator(mode="before")
-    @classmethod
-    def fix_thoughts(cls, data: Any) -> Any:
-        """Allow thoughts to be null."""
-        if isinstance(data, dict):
-            if "scratch_pad" in data:
-                data["thoughts"] = data["scratch_pad"]
-                del data["scratch_pad"]
-
-            if not data.get("thoughts"):
-                data["thoughts"] = ""
-
-        return data
 
     @model_validator(mode="before")
     @classmethod

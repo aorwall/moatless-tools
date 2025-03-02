@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from moatless.completion.manager import ModelConfig
 from moatless.completion.model import Usage
-from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
+from moatless.evaluation.schema import Evaluation, EvaluationInstance
 from moatless.flow.schema import FlowConfig
 from moatless.runner.runner import JobInfo, RunnerInfo
 

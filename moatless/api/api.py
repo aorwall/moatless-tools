@@ -1,16 +1,10 @@
 """Main API module for Moatless."""
 
-import asyncio
-import gc
 import importlib.resources as pkg_resources
 import json
-import logging
 import os
-import tracemalloc
-from collections import Counter, defaultdict
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -18,8 +12,6 @@ from fastapi import (
     HTTPException,
     Request,
     UploadFile,
-    WebSocket,
-    WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -35,12 +27,11 @@ from moatless.api.swebench.schema import RunnerResponseDTO
 from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import (
-    create_trajectory_dto,
     load_trajectory_from_file,
 )
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
-from moatless.events import BaseEvent, event_bus
+from moatless.events import event_bus
 from moatless.logging_config import get_logger, setup_logging
 from moatless.runner.rq import RQRunner
 from moatless.runner.runner import JobsStatusSummary

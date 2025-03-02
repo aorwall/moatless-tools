@@ -15,9 +15,15 @@ interface ResumeTrajectoryParams {
 export function useResumeTrajectory() {
   const queryClient = useQueryClient();
 
-
   return useMutation({
-    mutationFn: ({ trajectoryId, projectId, agentId, modelId, message, onSuccess }: ResumeTrajectoryParams) =>
+    mutationFn: ({
+      trajectoryId,
+      projectId,
+      agentId,
+      modelId,
+      message,
+      onSuccess,
+    }: ResumeTrajectoryParams) =>
       trajectoriesApi.resume(trajectoryId, {
         agent_id: agentId,
         model_id: modelId,
@@ -27,14 +33,17 @@ export function useResumeTrajectory() {
       if (onSuccess) {
         onSuccess();
       }
-      queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId, projectId) });
+      queryClient.invalidateQueries({
+        queryKey: trajectoryKeys.detail(trajectoryId, projectId),
+      });
     },
     onError: (error) => {
       toast.error("Failed to send message", {
-        description: error instanceof Error
-          ? error.message
-          : "An unexpected error occurred",
+        description:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
       });
     },
   });
-} 
+}

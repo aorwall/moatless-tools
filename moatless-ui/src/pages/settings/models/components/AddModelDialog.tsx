@@ -36,7 +36,11 @@ interface AddModelDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function AddModelDialog({ baseModel, open, onOpenChange }: AddModelDialogProps) {
+export function AddModelDialog({
+  baseModel,
+  open,
+  onOpenChange,
+}: AddModelDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const addFromBase = useAddFromBase();
 
@@ -65,9 +69,10 @@ export function AddModelDialog({ baseModel, open, onOpenChange }: AddModelDialog
       onOpenChange(false);
       form.reset();
     } catch (error) {
-      const errorMessage = error instanceof Error 
-        ? error.message 
-        : (error as any)?.response?.data?.detail || "Failed to add model";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : (error as any)?.response?.data?.detail || "Failed to add model";
       toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
@@ -123,4 +128,4 @@ export function AddModelDialog({ baseModel, open, onOpenChange }: AddModelDialog
       </DialogContent>
     </Dialog>
   );
-} 
+}

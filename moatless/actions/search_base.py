@@ -1,6 +1,6 @@
 import logging
 from abc import ABC
-from typing import ClassVar, List, Optional, Tuple, Type
+from typing import ClassVar, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -9,11 +9,9 @@ from moatless.actions.schema import ActionArguments, Observation, RewardScaleEnt
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
-    ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
     ResponseSchema,
 )
-from moatless.exceptions import CompletionRejectError
 from moatless.file_context import FileContext
 from moatless.index.types import SearchCodeResponse
 
@@ -148,7 +146,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
         if search_result_context.is_empty():
             properties["fail_reason"] = "no_search_hits"
-            return Observation(message="No search results found", properties=properties)
+            return Observation.create(message="No search results found", properties=properties)
 
         context_size = search_result_context.context_size()
         properties["search_tokens"] = context_size
@@ -159,7 +157,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         if search_result_context.span_count() == 1 and context_size > self.max_identify_tokens:
             logger.warning(f"{self.name}: Conext is too large ({context_size} tokens).")
             properties["fail_reason"] = "search_too_large"
-            return Observation(
+            return Observation.create(
                 message="Search too large. Found a single code section that is too large to view. Please refine the search query.",
                 properties=properties,
             )
@@ -212,7 +210,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
             f"{self.name}: Found {span_count} code sections in search results. Viewed {view_context.span_count()} code sections."
         )
 
-        return Observation(
+        return Observation.create(
             message=message,
             summary=summary,
             properties=properties,
@@ -237,12 +235,6 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                 search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=True)
 
         return search_result_context, alternative_suggestion
-
-    def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
-        if not self.add_to_context:
-            return "Here's the search result with the first line of codes in each code block. Use ViewCode to view specific code sections. "
-
-        return "The search result is too large. You must identify the relevant code sections in the search results to use them. "
 
     async def _search(self, args: SearchBaseArgs) -> SearchCodeResponse:
         raise NotImplementedError("Subclasses must implement this method.")

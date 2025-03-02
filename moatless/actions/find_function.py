@@ -1,10 +1,10 @@
-from typing import ClassVar, List, Optional, Type
+from typing import ClassVar, Optional
 
 from pydantic import ConfigDict, Field, model_validator
 
 from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
-from moatless.codeblocks import CodeBlockType, get_parser_by_path
+from moatless.codeblocks import CodeBlockType
 from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeHit, SearchCodeResponse, SpanHit
 

@@ -14,11 +14,25 @@ import {
   ResizablePanelGroup,
 } from "@/lib/components/ui/resizable.tsx";
 import { ScrollArea } from "@/lib/components/ui/scroll-area.tsx";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/lib/components/ui/tabs.tsx";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/lib/components/ui/tabs.tsx";
 import { Trajectory } from "@/lib/types/trajectory.ts";
 import { cn } from "@/lib/utils.ts";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, ChevronDown, ChevronUp, Clock, List, MessageSquare, Package, Terminal } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  List,
+  MessageSquare,
+  Package,
+  Terminal,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface TrajectoryViewerProps {
@@ -29,54 +43,61 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
   const [showBottomPanel, setShowBottomPanel] = useState(() => {
     // Try to get from localStorage, default to true if not found
-    const saved = localStorage.getItem('trajectoryViewerShowBottomPanel');
-    return saved !== null ? saved === 'true' : true;
+    const saved = localStorage.getItem("trajectoryViewerShowBottomPanel");
+    return saved !== null ? saved === "true" : true;
   });
-  const [activeBottomTab, setActiveBottomTab] = useState<"events" | "logs">(() => {
-    // Try to get from localStorage, default to events if not found
-    const saved = localStorage.getItem('trajectoryViewerActiveTab');
-    return (saved === 'logs' ? 'logs' : 'events') as "events" | "logs";
-  });
+  const [activeBottomTab, setActiveBottomTab] = useState<"events" | "logs">(
+    () => {
+      // Try to get from localStorage, default to events if not found
+      const saved = localStorage.getItem("trajectoryViewerActiveTab");
+      return (saved === "logs" ? "logs" : "events") as "events" | "logs";
+    },
+  );
 
   // Save preferences when they change
   useEffect(() => {
-    localStorage.setItem('trajectoryViewerShowBottomPanel', String(showBottomPanel));
+    localStorage.setItem(
+      "trajectoryViewerShowBottomPanel",
+      String(showBottomPanel),
+    );
   }, [showBottomPanel]);
 
   useEffect(() => {
-    localStorage.setItem('trajectoryViewerActiveTab', activeBottomTab);
+    localStorage.setItem("trajectoryViewerActiveTab", activeBottomTab);
   }, [activeBottomTab]);
 
   // Subscribe to updates for this trajectory and its project
-  useTrajectorySubscription(
-    trajectory.id,
-    trajectory.project_id,
-    {
-      onEvent: (message) => {
-        if (message.type === 'event') {
-          queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
-        }
-      },
-      // Enable toasts only in development environment
-      showToasts: process.env.NODE_ENV === 'development',
-      queryInvalidation: true
-    }
-  );
+  useTrajectorySubscription(trajectory.id, trajectory.project_id, {
+    onEvent: (message) => {
+      if (message.type === "event") {
+        queryClient.invalidateQueries({
+          queryKey: ["trajectory", trajectory.id],
+        });
+      }
+    },
+    // Enable toasts only in development environment
+    showToasts: process.env.NODE_ENV === "development",
+    queryInvalidation: true,
+  });
 
   interface TabItem {
-    id: string
-    label: string
-    icon: React.ReactNode
+    id: string;
+    label: string;
+    icon: React.ReactNode;
   }
 
   const enableTabs = false;
 
   const tabs: TabItem[] = [
-    ...(trajectory.system_status.error ? [{
-      id: "error",
-      label: "Error",
-      icon: <AlertCircle className="h-4 w-4" />,
-    }] : []),
+    ...(trajectory.system_status.error
+      ? [
+          {
+            id: "error",
+            label: "Error",
+            icon: <AlertCircle className="h-4 w-4" />,
+          },
+        ]
+      : []),
     {
       id: "timeline",
       label: "Timeline",
@@ -97,9 +118,7 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
       {/* Status Bar */}
-      <TrajectoryStatus
-        trajectory={trajectory}
-      />
+      <TrajectoryStatus trajectory={trajectory} />
 
       {/* Main Content Area with two columns */}
       <ResizablePanelGroup direction="horizontal" className="flex-1">
@@ -114,13 +133,17 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
             >
               {enableTabs ? (
                 <Tabs
-                  defaultValue={trajectory.system_status.error ? "error" : "timeline"}
+                  defaultValue={
+                    trajectory.system_status.error ? "error" : "timeline"
+                  }
                   className="flex h-full flex-col"
                 >
                   <TabsList
                     className={cn(
                       "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
-                      trajectory.system_status.error ? "grid-cols-4" : "grid-cols-3"
+                      trajectory.system_status.error
+                        ? "grid-cols-4"
+                        : "grid-cols-3",
                     )}
                   >
                     {tabs.map((tab) => (
@@ -157,7 +180,10 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
                     <ScrollArea className="flex-1 w-full">
                       <div className="p-6 min-w-[600px]">
                         {trajectory.nodes && (
-                          <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+                          <Timeline
+                            trajectory={trajectory}
+                            isRunning={trajectory.status === "running"}
+                          />
                         )}
                       </div>
                     </ScrollArea>
@@ -181,7 +207,10 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
                 <div className="flex h-full flex-col overflow-hidden">
                   <ScrollArea className="flex-1">
                     <div className="p-10 min-w-[600px]">
-                      <Timeline trajectory={trajectory} isRunning={trajectory.status === "running"} />
+                      <Timeline
+                        trajectory={trajectory}
+                        isRunning={trajectory.status === "running"}
+                      />
                     </div>
                   </ScrollArea>
                 </div>
@@ -189,7 +218,9 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
             </ResizablePanel>
 
             {/* Resizable handle that only shows when bottom panel is visible */}
-            {showBottomPanel && <ResizableHandle className="bg-border hover:bg-ring" />}
+            {showBottomPanel && (
+              <ResizableHandle className="bg-border hover:bg-ring" />
+            )}
 
             {/* Bottom Panel for Events and Logs */}
             {showBottomPanel && (
@@ -198,7 +229,9 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
                   {/* Tabs for switching between Events and Logs */}
                   <Tabs
                     value={activeBottomTab}
-                    onValueChange={(value) => setActiveBottomTab(value as "events" | "logs")}
+                    onValueChange={(value) =>
+                      setActiveBottomTab(value as "events" | "logs")
+                    }
                     className="flex flex-col h-full"
                   >
                     <div className="flex items-center justify-between border-b h-9 bg-muted/10 flex-shrink-0">
@@ -232,11 +265,17 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
 
                     {/* Panel Content */}
                     <div className="flex-1 relative overflow-hidden">
-                      <TabsContent value="events" className="h-full data-[state=active]:flex flex-col m-0 p-0 overflow-hidden">
+                      <TabsContent
+                        value="events"
+                        className="h-full data-[state=active]:flex flex-col m-0 p-0 overflow-hidden"
+                      >
                         <TrajectoryEvents events={trajectory.events} />
                       </TabsContent>
 
-                      <TabsContent value="logs" className="h-full data-[state=active]:flex flex-col m-0 p-0 overflow-hidden">
+                      <TabsContent
+                        value="logs"
+                        className="h-full data-[state=active]:flex flex-col m-0 p-0 overflow-hidden"
+                      >
                         <TrajectoryLogs
                           projectId={trajectory.project_id}
                           trajectoryId={trajectory.trajectory_id}
@@ -254,9 +293,15 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
                 className="flex justify-center items-center h-7 border-t cursor-pointer bg-muted/20 hover:bg-muted/30 transition-colors"
                 onClick={() => setShowBottomPanel(true)}
               >
-                <Button variant="ghost" size="sm" className="h-7 py-0 px-2 hover:bg-transparent">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 py-0 px-2 hover:bg-transparent"
+                >
                   <ChevronUp className="h-4 w-4" />
-                  <span className="text-xs font-medium ml-1">Show Events & Logs</span>
+                  <span className="text-xs font-medium ml-1">
+                    Show Events & Logs
+                  </span>
                 </Button>
               </div>
             )}
@@ -267,7 +312,10 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
 
         {/* Right column: Details */}
         <ResizablePanel defaultSize={40} minSize={20}>
-          <TimelineItemDetails trajectoryId={trajectory.id} trajectory={trajectory} />
+          <TimelineItemDetails
+            trajectoryId={trajectory.id}
+            trajectory={trajectory}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

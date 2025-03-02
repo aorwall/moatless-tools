@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Optional
 
 from moatless.events import BaseEvent
 

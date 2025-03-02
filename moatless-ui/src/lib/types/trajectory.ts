@@ -6,7 +6,7 @@ export interface ResumeTrajectoryRequest {
 
 export interface TimelineItem {
   label: string;
-  icon: string;  // Now a string matching lucide-react icon names
+  icon: string; // Now a string matching lucide-react icon names
   type: TimelineItemType;
   content: TimelineContent;
 }
@@ -191,7 +191,6 @@ export interface Node {
   items: TimelineItem[];
 }
 
-
 export interface ArtifactChangeContent {
   artifact_id: string;
   artifact_type: string;
@@ -199,7 +198,6 @@ export interface ArtifactChangeContent {
   diff_details?: string;
   actor: "user" | "assistant";
 }
-
 
 export interface TrajectoryEvent {
   timestamp: number;

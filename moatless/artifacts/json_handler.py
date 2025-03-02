@@ -1,9 +1,6 @@
-import json
 import logging
-import uuid
 from abc import abstractmethod
-from pathlib import Path
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, cast
+from typing import TypeVar
 
 from pydantic import PrivateAttr
 
@@ -151,7 +148,24 @@ class JsonArtifactHandler(ArtifactHandler[T]):
                     search_value = search_value.lower()
 
                 # Apply the operator
-                if criterion.operator == "eq" and field_value == search_value or criterion.operator == "contains" and search_value in field_value or (criterion.operator == "gt" and field_value > search_value or criterion.operator == "lt" and field_value < search_value) or (criterion.operator == "gte" and field_value >= search_value or criterion.operator == "lte" and field_value <= search_value):
+                if (
+                    criterion.operator == "eq"
+                    and field_value == search_value
+                    or criterion.operator == "contains"
+                    and search_value in field_value
+                    or (
+                        criterion.operator == "gt"
+                        and field_value > search_value
+                        or criterion.operator == "lt"
+                        and field_value < search_value
+                    )
+                    or (
+                        criterion.operator == "gte"
+                        and field_value >= search_value
+                        or criterion.operator == "lte"
+                        and field_value <= search_value
+                    )
+                ):
                     filtered_results.append(artifact)
 
             results = filtered_results

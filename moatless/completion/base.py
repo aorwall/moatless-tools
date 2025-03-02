@@ -11,7 +11,7 @@ import litellm
 import tenacity
 from litellm import BadRequestError, RateLimitError
 from opentelemetry import trace
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, Field, PrivateAttr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from moatless.completion.model import Completion, Usage
@@ -26,7 +26,6 @@ from moatless.completion.schema import (
 from moatless.events import BaseEvent, event_bus
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
-from moatless.telemetry import set_attribute
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -213,13 +212,6 @@ class BaseCompletionModel(BaseModel, ABC):
         messages: list[dict],
         system_prompt: str | None = None,
     ) -> CompletionResponse:
-        set_attribute("model", self.model)
-        set_attribute("model_id", self.model_id)
-        set_attribute("temperature", self.temperature)
-        set_attribute("max_tokens", self.max_tokens)
-        set_attribute("timeout", self.timeout)
-        set_attribute("model_base_url", self.model_base_url)
-
         if not self._initialized:
             raise ValueError("Model must be initialized with response schema before creating completion")
 

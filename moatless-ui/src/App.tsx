@@ -19,7 +19,6 @@ import { NewFlowPage } from "@/pages/settings/flows/new";
 import { ModelsPage } from "@/pages/settings/models";
 import { ModelDetailPage } from "@/pages/settings/models/[id]";
 import { ModelsLayout } from "@/pages/settings/models/layout";
-import { ValidatePage } from "@/pages/validate";
 
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
 import { EvaluationsPage } from "@/pages/swebench/evaluation";
@@ -49,12 +48,13 @@ function App() {
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<RootLayout />}>
-                <Route index element={<Navigate to="/swebench/evaluation" replace />} />
-                <Route path="validate" element={<ValidatePage />} />
+                <Route
+                  index
+                  element={<Navigate to="/swebench/evaluation" replace />}
+                />
                 <Route path="loop" element={<RunLoopPage />} />
                 <Route path="runner" element={<RunnerDashboardPage />} />
 
-                {/* Nested settings routes */}
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route path="agents" element={<AgentsLayout />}>
                     <Route index element={<AgentsPage />} />
@@ -75,14 +75,23 @@ function App() {
                 </Route>
 
                 <Route path="/trajectories" element={<TrajectoryListPage />} />
-                <Route path="/trajectories/:projectId/:trajectoryId" element={<TrajectoryPage />} />
+                <Route
+                  path="/trajectories/:projectId/:trajectoryId"
+                  element={<TrajectoryPage />}
+                />
                 <Route path="/swebench">
                   <Route path="evaluation">
                     <Route index element={<EvaluationsPage />} />
                     <Route path="create" element={<CreateEvaluationPage />} />
-                    <Route path=":evaluationId" element={<EvaluationDetailsPage />} />
+                    <Route
+                      path=":evaluationId"
+                      element={<EvaluationDetailsPage />}
+                    />
                     <Route element={<EvaluationLayout />}>
-                      <Route path=":evaluationId/:instanceId" element={<EvaluationInstancePage />} />
+                      <Route
+                        path=":evaluationId/:instanceId"
+                        element={<EvaluationInstancePage />}
+                      />
                     </Route>
                   </Route>
                 </Route>

@@ -1,4 +1,4 @@
-from typing import ClassVar, Type
+from typing import ClassVar
 
 from pydantic import ConfigDict, Field
 
@@ -25,4 +25,4 @@ class Reject(Action):
     args_schema: ClassVar[type[ActionArguments]] = RejectArgs
 
     async def execute(self, args: RejectArgs, file_context: FileContext | None = None):
-        return Observation(message="Rejected", terminal=True)
+        return Observation.create(message="Rejected", terminal=True)

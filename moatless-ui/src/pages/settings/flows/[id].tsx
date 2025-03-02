@@ -28,17 +28,19 @@ export function FlowDetailPage() {
 
   const handleDuplicate = () => {
     if (!flow) return;
-    
+
     // Create a duplicate flow with a new ID
     const duplicatedFlow: FlowConfig = {
       ...flow,
       id: `${flow.id}-copy`,
-      description: flow.description ? `${flow.description} (Copy)` : "Copy of flow"
+      description: flow.description
+        ? `${flow.description} (Copy)`
+        : "Copy of flow",
     };
-    
+
     // Navigate to the new flow page with the duplicated flow data
-    navigate("/settings/flows/new", { 
-      state: { duplicatedFlow }
+    navigate("/settings/flows/new", {
+      state: { duplicatedFlow },
     });
   };
 
@@ -82,12 +84,10 @@ export function FlowDetailPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">{flow.id}</h1>
-            <div className="mt-1 text-sm text-gray-500">
-              Flow Configuration
-            </div>
+            <div className="mt-1 text-sm text-gray-500">Flow Configuration</div>
           </div>
-          <Button 
-            variant="outline" 
+          <Button
+            variant="outline"
             onClick={handleDuplicate}
             className="flex items-center gap-2"
           >
@@ -102,4 +102,4 @@ export function FlowDetailPage() {
       </div>
     </div>
   );
-} 
+}

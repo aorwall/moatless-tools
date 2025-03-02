@@ -1,5 +1,3 @@
-from typing import List
-
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
@@ -9,7 +7,6 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 
 class ListFilesArgs(ActionArguments):
@@ -56,7 +53,6 @@ class ListFiles(Action):
         self,
         args: ListFilesArgs,
         file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
     ) -> Observation:
         if not file_context._repo:
             raise RuntimeError("Repository not available for listing files.")

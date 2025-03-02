@@ -4,14 +4,12 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, List, Optional
+from typing import Optional
 
 import aiofiles
 from pydantic import BaseModel, Field, field_validator
 
 from moatless.utils.moatless import get_moatless_trajectory_dir
-
 from . import context_data
 
 logger = logging.getLogger(__name__)
@@ -231,14 +229,7 @@ class EventBus:
             traj_dir = get_moatless_trajectory_dir(project_id=event.project_id, trajectory_id=event.trajectory_id)
             events_path = traj_dir / "events.jsonl"
 
-            if not os.path.exists(events_path):
-                logger.info(f"Creating events file {events_path}")
-                with open(events_path, "w") as f:
-                    f.write(json.dumps(event.to_dict()) + "\n")
-                    f.flush()
-            else:
-                logger.info(f"Appending event to {events_path}")
-
+            async with self._lock:
                 async with aiofiles.open(events_path, mode="a", encoding="utf-8") as f:
                     await f.write(json.dumps(event.to_dict()) + "\n")
                     await f.flush()

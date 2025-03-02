@@ -11,7 +11,6 @@ export const MessageTrajectoryItem = ({
   content,
   type,
 }: MessageTrajectoryItemProps) => {
-
   const truncateMessage = (message?: string): string => {
     if (!message) return "";
     return message.length > 200 ? message.slice(0, 200) + "..." : message;

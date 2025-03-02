@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -128,6 +128,12 @@ class Node(BaseModel):
     def message(self, value: Optional[str]):
         """Backward compatibility: Set message maps to user_message"""
         self.user_message = value
+
+    @classmethod
+    def create_root(cls, user_message: str, shadow_mode: bool = True, **kwargs):
+        """Create a root node with a unique ID."""
+        file_context = FileContext(shadow_mode=shadow_mode)
+        return cls(node_id=0, user_message=user_message, file_context=file_context, **kwargs)
 
     @classmethod
     def stub(cls, **kwargs):

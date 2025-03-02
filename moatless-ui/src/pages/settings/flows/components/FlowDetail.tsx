@@ -31,7 +31,12 @@ import {
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Badge } from "@/lib/components/ui/badge";
 import { Card } from "@/lib/components/ui/card";
-import { useSelectors, useValueFunctions, useFeedbackGenerators, useArtifactHandlers } from "@/lib/hooks/useFlowComponents";
+import {
+  useSelectors,
+  useValueFunctions,
+  useFeedbackGenerators,
+  useArtifactHandlers,
+} from "@/lib/hooks/useFlowComponents";
 import { ComponentSchema, ComponentProperty } from "@/lib/types/flow";
 import { ComponentSelect } from "./ComponentSelect";
 import { ArtifactHandlersSelect } from "./ArtifactHandlersSelect";
@@ -99,15 +104,17 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
               <FormItem>
                 <FormLabel>Flow ID</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
+                  <Input
+                    {...field}
                     disabled={!isNew}
-                    placeholder={isNew ? "Enter a unique identifier" : undefined}
+                    placeholder={
+                      isNew ? "Enter a unique identifier" : undefined
+                    }
                   />
                 </FormControl>
                 <FormDescription>
-                  {isNew 
-                    ? "Enter a unique identifier for this flow" 
+                  {isNew
+                    ? "Enter a unique identifier for this flow"
                     : "The unique identifier for this flow"}
                 </FormDescription>
                 <FormMessage />
@@ -170,16 +177,14 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
               <FormItem>
                 <FormLabel>Max Iterations</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    type="number" 
+                  <Input
+                    {...field}
+                    type="number"
                     min={1}
-                    onChange={e => field.onChange(Number(e.target.value))}
+                    onChange={(e) => field.onChange(Number(e.target.value))}
                   />
                 </FormControl>
-                <FormDescription>
-                  Maximum number of iterations
-                </FormDescription>
+                <FormDescription>Maximum number of iterations</FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -192,16 +197,18 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
               <FormItem>
                 <FormLabel>Max Cost ($)</FormLabel>
                 <FormControl>
-                  <Input 
-                    {...field} 
-                    type="number" 
+                  <Input
+                    {...field}
+                    type="number"
                     step="0.1"
                     min={0}
-                    value={field.value || ''}
-                    onChange={e => {
+                    value={field.value || ""}
+                    onChange={(e) => {
                       const value = e.target.value;
-                      const cleanValue = value ? Number(value).toString() : '';
-                      field.onChange(cleanValue ? Number(cleanValue) : undefined);
+                      const cleanValue = value ? Number(value).toString() : "";
+                      field.onChange(
+                        cleanValue ? Number(cleanValue) : undefined,
+                      );
                     }}
                   />
                 </FormControl>
@@ -221,10 +228,7 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
           render={({ field }) => (
             <FormItem className="space-y-1">
               <FormLabel>Agent</FormLabel>
-              <Select 
-                onValueChange={field.onChange} 
-                value={field.value || ""}
-              >
+              <Select onValueChange={field.onChange} value={field.value || ""}>
                 <FormControl>
                   <SelectTrigger>
                     {isLoadingAgents ? (
@@ -275,14 +279,18 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                           </div>
                         </div>
                         <div>
-                          <div className="text-sm font-medium">Response Format</div>
+                          <div className="text-sm font-medium">
+                            Response Format
+                          </div>
                           <Badge variant="secondary">
                             {selectedAgent.response_format}
                           </Badge>
                         </div>
                         {selectedAgent.system_prompt && (
                           <div>
-                            <div className="text-sm font-medium">System Prompt</div>
+                            <div className="text-sm font-medium">
+                              System Prompt
+                            </div>
                             <div className="text-sm text-muted-foreground">
                               {selectedAgent.system_prompt}
                             </div>
@@ -293,10 +301,7 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                             <div className="text-sm font-medium">Actions</div>
                             <div className="mt-1 flex flex-wrap gap-1">
                               {selectedAgent.actions.map((action) => (
-                                <Badge
-                                  key={action.title}
-                                  variant="outline"
-                                >
+                                <Badge key={action.title} variant="outline">
                                   {action.title}
                                 </Badge>
                               ))}
@@ -332,11 +337,11 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                   <FormItem>
                     <FormLabel>Max Expansions</FormLabel>
                     <FormControl>
-                      <Input 
-                        {...field} 
-                        type="number" 
+                      <Input
+                        {...field}
+                        type="number"
                         min={1}
-                        onChange={e => field.onChange(Number(e.target.value))}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
                       />
                     </FormControl>
                     <FormDescription>
@@ -354,11 +359,11 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                   <FormItem>
                     <FormLabel>Max Depth</FormLabel>
                     <FormControl>
-                      <Input 
-                        {...field} 
-                        type="number" 
+                      <Input
+                        {...field}
+                        type="number"
                         min={1}
-                        onChange={e => field.onChange(Number(e.target.value))}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
                       />
                     </FormControl>
                     <FormDescription>
@@ -378,11 +383,15 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                   <FormItem>
                     <FormLabel>Min Finished Nodes</FormLabel>
                     <FormControl>
-                      <Input 
-                        {...field} 
-                        type="number" 
+                      <Input
+                        {...field}
+                        type="number"
                         min={0}
-                        onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                        onChange={(e) =>
+                          field.onChange(
+                            e.target.value ? Number(e.target.value) : undefined,
+                          )
+                        }
                       />
                     </FormControl>
                     <FormDescription>
@@ -400,11 +409,15 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                   <FormItem>
                     <FormLabel>Max Finished Nodes</FormLabel>
                     <FormControl>
-                      <Input 
-                        {...field} 
-                        type="number" 
+                      <Input
+                        {...field}
+                        type="number"
                         min={0}
-                        onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                        onChange={(e) =>
+                          field.onChange(
+                            e.target.value ? Number(e.target.value) : undefined,
+                          )
+                        }
                       />
                     </FormControl>
                     <FormDescription>
@@ -423,11 +436,15 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
                 <FormItem>
                   <FormLabel>Reward Threshold</FormLabel>
                   <FormControl>
-                    <Input 
-                      {...field} 
-                      type="number" 
+                    <Input
+                      {...field}
+                      type="number"
                       step="0.1"
-                      onChange={e => field.onChange(e.target.value ? Number(e.target.value) : undefined)}
+                      onChange={(e) =>
+                        field.onChange(
+                          e.target.value ? Number(e.target.value) : undefined,
+                        )
+                      }
                     />
                   </FormControl>
                   <FormDescription>
@@ -465,7 +482,13 @@ export function FlowDetail({ flow, onSubmit, isNew }: FlowDetailProps) {
         <div className="mt-8 flex items-center justify-end gap-4">
           {error && <p className="text-sm text-red-500">{error}</p>}
           <Button type="submit" disabled={isSaving}>
-            {isSaving ? (isNew ? "Creating..." : "Saving...") : (isNew ? "Create Flow" : "Save Changes")}
+            {isSaving
+              ? isNew
+                ? "Creating..."
+                : "Saving..."
+              : isNew
+                ? "Create Flow"
+                : "Save Changes"}
           </Button>
         </div>
       </form>

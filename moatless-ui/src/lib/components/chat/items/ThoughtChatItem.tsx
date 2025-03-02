@@ -16,4 +16,4 @@ export const ThoughtChatItem = ({ message }: ThoughtChatItemProps) => {
       </div>
     </div>
   );
-}; 
+};

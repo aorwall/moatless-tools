@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { apiRequest } from '@/lib/api/config';
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api/config";
 
 export interface JobStatusSummary {
   project_id: string;
@@ -12,15 +12,18 @@ export interface JobStatusSummary {
   pending_jobs: number;
 }
 
-const fetchJobStatusSummary = async (evaluationId: string): Promise<JobStatusSummary> => {
+const fetchJobStatusSummary = async (
+  evaluationId: string,
+): Promise<JobStatusSummary> => {
   return apiRequest(`/swebench/evaluations/${evaluationId}/jobs/status`, {
-    method: 'GET',
+    method: "GET",
   });
 };
 
 export const jobStatusKeys = {
-  all: ['job-status'] as const,
-  detail: (evaluationId: string) => [...jobStatusKeys.all, evaluationId] as const,
+  all: ["job-status"] as const,
+  detail: (evaluationId: string) =>
+    [...jobStatusKeys.all, evaluationId] as const,
 };
 
 export function useJobStatusSummary(evaluationId: string) {
@@ -29,4 +32,4 @@ export function useJobStatusSummary(evaluationId: string) {
     queryFn: () => fetchJobStatusSummary(evaluationId),
     refetchInterval: 5000, // Refetch every 5 seconds
   });
-} 
+}

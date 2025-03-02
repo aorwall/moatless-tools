@@ -1,6 +1,4 @@
-import {
-  AlertTriangle,
-} from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import {
   ActionTrajectoryItem,
   ActionTimelineContent,
@@ -33,7 +31,7 @@ import {
   ArtifactTrajectoryItem,
   ArtifactTimelineContent,
 } from "@/features/trajectory/components/items/ArtifactTrajectoryItem.tsx";
-import './timeline.css';  // Import CSS directly
+import "./timeline.css"; // Import CSS directly
 import { cn } from "@/lib/utils.ts";
 import {
   WorkspaceFilesTrajectoryItem,
@@ -97,7 +95,7 @@ export const TimelineItem = ({
         );
       case "action":
         // Determine the correct action name from the content structure
-        
+
         return (
           <ActionTrajectoryItem
             name={label}
@@ -136,9 +134,7 @@ export const TimelineItem = ({
         );
       case "error":
         return (
-          <ErrorTrajectoryItem
-            content={content as ErrorTimelineContent}
-          />
+          <ErrorTrajectoryItem content={content as ErrorTimelineContent} />
         );
       case "artifact":
         return (
@@ -148,9 +144,7 @@ export const TimelineItem = ({
         );
       case "reward":
         return (
-          <RewardTrajectoryItem
-            content={content as RewardTimelineContent}
-          />
+          <RewardTrajectoryItem content={content as RewardTimelineContent} />
         );
       default:
         return null;
@@ -160,12 +154,14 @@ export const TimelineItem = ({
   const Icon = getIcon(type);
 
   return (
-    <div onClick={handleSelect} className="cursor-pointer relative group">    
-      <div className={cn(
-        "relative py-2 transition-colors duration-150",
-        "hover:bg-gray-50/50 rounded-md -mx-2 px-2",
-        "group/item"
-      )}>
+    <div onClick={handleSelect} className="cursor-pointer relative group">
+      <div
+        className={cn(
+          "relative py-2 transition-colors duration-150",
+          "hover:bg-gray-50/50 rounded-md -mx-2 px-2",
+          "group/item",
+        )}
+      >
         <ExpandableItem
           label={label}
           icon={Icon}

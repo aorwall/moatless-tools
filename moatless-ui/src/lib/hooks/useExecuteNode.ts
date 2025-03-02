@@ -17,12 +17,14 @@ export const useExecuteNode = () => {
         throw new Error("Node ID is required to execute a node");
       }
       if (!trajectory.id || !trajectory.project_id) {
-        throw new Error("Trajectory ID and Project ID must be set to execute a node");
+        throw new Error(
+          "Trajectory ID and Project ID must be set to execute a node",
+        );
       }
       return trajectoriesApi.executeNode(
-        trajectory.id, 
-        trajectory.project_id, 
-        nodeId
+        trajectory.id,
+        trajectory.project_id,
+        nodeId,
       );
     },
     onSuccess: (data, { onSuccess }) => {
@@ -35,10 +37,11 @@ export const useExecuteNode = () => {
         onError(error);
       }
       toast.error("Failed to execute node", {
-        description: error instanceof Error 
-          ? error.message 
-          : "An unexpected error occurred",
+        description:
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred",
       });
     },
   });
-}; 
+};

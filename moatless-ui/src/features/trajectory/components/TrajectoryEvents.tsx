@@ -28,17 +28,27 @@ export function TrajectoryEvents({ events }: TrajectoryEventsProps) {
                 <span className="text-xs font-medium text-foreground">
                   {event.event_type}
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {timeAgo}
-                </span>
+                <span className="text-xs text-muted-foreground">{timeAgo}</span>
               </div>
               <div className="flex gap-2 items-start mt-1">
                 <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5"></div>
                 <div>
                   <div className="text-sm">
-                    {event.scope && <span className="text-muted-foreground">{event.scope}</span>}
-                    {event.node_id !== undefined && <span className="ml-1 text-muted-foreground">Node: {event.node_id}</span>}
-                    {event.action_name && <span className="ml-1 text-muted-foreground">Action: {event.action_name}</span>}
+                    {event.scope && (
+                      <span className="text-muted-foreground">
+                        {event.scope}
+                      </span>
+                    )}
+                    {event.node_id !== undefined && (
+                      <span className="ml-1 text-muted-foreground">
+                        Node: {event.node_id}
+                      </span>
+                    )}
+                    {event.action_name && (
+                      <span className="ml-1 text-muted-foreground">
+                        Action: {event.action_name}
+                      </span>
+                    )}
                   </div>
                   {event.data && (
                     <pre className="mt-1 text-xs font-mono bg-muted p-2 rounded overflow-x-auto">

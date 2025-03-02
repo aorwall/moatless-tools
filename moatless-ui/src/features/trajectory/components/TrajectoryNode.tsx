@@ -21,7 +21,11 @@ interface ActionGroup {
   references: { step: number; count: number }[];
 }
 
-const formatTokenCount = (prompt: number = 0, completion: number = 0, cached: number = 0) => {
+const formatTokenCount = (
+  prompt: number = 0,
+  completion: number = 0,
+  cached: number = 0,
+) => {
   return (
     <div className="flex items-center gap-1 text-[10px] bg-gray-50 px-1.5 py-0.5 rounded">
       <span className="font-mono text-gray-600">{prompt}p</span>
@@ -58,20 +62,20 @@ export const TrajectoryNode = ({
     }, []);
   }, [node.actionSteps]);
 
-  const formatActionDisplay = (action: ActionStep['action']) => {
+  const formatActionDisplay = (action: ActionStep["action"]) => {
     // Define priority properties that should be displayed first
-    const priorityProps = ['path', 'class_name', 'function_name'];
+    const priorityProps = ["path", "class_name", "function_name"];
 
     return (
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-1.5">
           <span className="font-mono text-sm text-gray-700">{action.name}</span>
-          {priorityProps.map(propKey =>
+          {priorityProps.map((propKey) =>
             action.properties?.[propKey] ? (
               <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
                 {action.properties[propKey]}
               </span>
-            ) : null
+            ) : null,
           )}
         </div>
         {action.properties && Object.keys(action.properties).length > 0 && (
@@ -83,7 +87,7 @@ export const TrajectoryNode = ({
                 <div key={key} className="flex items-start gap-1">
                   <span className="text-gray-400">{key}:</span>
                   <span className="font-mono truncate max-w-[400px]">
-                    {typeof value === 'string' ? value : JSON.stringify(value)}
+                    {typeof value === "string" ? value : JSON.stringify(value)}
                   </span>
                 </div>
               ))}
@@ -103,8 +107,8 @@ export const TrajectoryNode = ({
             "group relative flex items-start gap-2 py-1 pl-2 -ml-2 rounded-md transition-colors",
             "hover:bg-gray-50",
             {
-              "opacity-90": group.count > 1
-            }
+              "opacity-90": group.count > 1,
+            },
           )}
         >
           <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-500" />
@@ -122,7 +126,7 @@ export const TrajectoryNode = ({
                   {formatTokenCount(
                     node.usage?.prompt_tokens || 0,
                     node.usage?.completion_tokens || 0,
-                    node.usage?.cache_read_tokens || 0
+                    node.usage?.cache_read_tokens || 0,
                   )}
                 </div>
               )}
@@ -143,7 +147,7 @@ export const TrajectoryNode = ({
                   {formatTokenCount(
                     group.action.completion.usage.prompt_tokens || 0,
                     group.action.completion.usage.completion_tokens || 0,
-                    group.action.completion.usage.cache_read_tokens || 0
+                    group.action.completion.usage.cache_read_tokens || 0,
                   )}
                 </div>
               )}
@@ -159,10 +163,10 @@ export const TrajectoryNode = ({
               {/* References */}
               {group.references && group.references.length > 0 && (
                 <span className="text-[10px] text-gray-400">
-                  Same as step{' '}
+                  Same as step{" "}
                   {group.references.map((ref, i) => (
                     <Fragment key={ref.step}>
-                      {i > 0 && ', '}
+                      {i > 0 && ", "}
                       <button className="hover:text-gray-600 underline-offset-2 hover:underline">
                         {ref.step}
                       </button>
@@ -176,14 +180,17 @@ export const TrajectoryNode = ({
             {group.action.action.properties &&
               Object.keys(group.action.action.properties).length > 0 && (
                 <button
-                  onClick={() => {/* Toggle expanded state */ }}
+                  onClick={() => {
+                    /* Toggle expanded state */
+                  }}
                   className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 
                            text-gray-400 hover:text-gray-600 transition-opacity"
                 >
-                  <ChevronDown className={cn(
-                    "h-3 w-3 transition-transform",
-                    { "transform rotate-180": expanded }
-                  )} />
+                  <ChevronDown
+                    className={cn("h-3 w-3 transition-transform", {
+                      "transform rotate-180": expanded,
+                    })}
+                  />
                 </button>
               )}
           </div>
@@ -194,13 +201,19 @@ export const TrajectoryNode = ({
       {showWorkspace && node.fileContext && (
         <>
           {node.fileContext.updatedFiles?.map((file, index) => (
-            <div key={index} className="flex items-start gap-1.5 text-xs text-gray-500">
+            <div
+              key={index}
+              className="flex items-start gap-1.5 text-xs text-gray-500"
+            >
               <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span className="font-mono">{file.file_path}</span>
             </div>
           ))}
           {node.fileContext.warnings?.map((warning, index) => (
-            <div key={index} className="flex items-center gap-1.5 text-xs text-yellow-600">
+            <div
+              key={index}
+              className="flex items-center gap-1.5 text-xs text-yellow-600"
+            >
               <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
               {warning}
             </div>

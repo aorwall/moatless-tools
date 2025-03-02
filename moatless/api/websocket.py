@@ -1,7 +1,6 @@
 """WebSocket module for Moatless API."""
 
 import json
-import logging
 from typing import Dict, Set
 
 from fastapi import WebSocket, WebSocketDisconnect

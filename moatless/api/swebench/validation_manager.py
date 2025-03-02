@@ -5,7 +5,7 @@ import os
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Optional
 
 from moatless.benchmark.swebench import create_repository
 from moatless.completion.manager import create_completion_model

@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import List
 
 from pydantic import ConfigDict, Field
 
@@ -10,7 +9,6 @@ from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.repository.file import do_diff
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -107,20 +105,20 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         path = Path(args.path)
 
         if not file_context.file_exists(str(path)):
-            return Observation(
+            return Observation.create(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
             )
 
         context_file = file_context.get_context_file(str(path))
         if not context_file:
-            return Observation(
+            return Observation.create(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
 
         if not context_file.lines_is_in_context(args.insert_line - 1, args.insert_line):
-            return Observation(
+            return Observation.create(
                 message=f"Line {args.insert_line} is not in the visible portion of file {path}. Please provide a line number within the visible code, use ViewCode to see the code.",
                 properties={"fail_reason": "lines_not_in_context"},
             )
@@ -131,7 +129,7 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         n_lines_file = len(file_text_lines)
 
         if args.insert_line < 0 or args.insert_line > len(file_text_lines):
-            return Observation(
+            return Observation.create(
                 message=f"Invalid `insert_line` parameter: {args.insert_line}. It should be within the range of lines of the file: [0, {n_lines_file}]",
                 properties={"fail_reason": "invalid_line_number"},
             )
@@ -147,7 +145,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
         new_file_text = "\n".join(new_file_text_lines)
         snippet = "\n".join(snippet_lines)
 
-        diff = do_diff(str(path), file_text, new_file_text)
         context_file.apply_changes(new_file_text)
 
         # Format the snippet with line numbers
@@ -156,23 +153,19 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             for i, line in enumerate(snippet.split("\n"))
         )
 
-        success_msg = (
+        message = (
             f"The file {path} has been edited. Here's the result of running `cat -n` "
             f"on a snippet of the edited file:\n{snippet_with_lines}\n"
             "Review the changes and make sure they are as expected (correct indentation, no duplicate lines, etc). "
             "Edit the file again if necessary."
         )
 
-        observation = Observation(
-            message=success_msg,
-            properties={"diff": diff, "success": True},
-        )
         test_summary = await self.run_tests(
             file_path=str(path),
             file_context=file_context,
         )
 
         if test_summary:
-            observation.message += f"\n\n{test_summary}"
+            message += f"\n\n{test_summary}"
 
-        return observation
+        return Observation.create(message=message)

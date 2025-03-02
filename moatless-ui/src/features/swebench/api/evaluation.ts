@@ -1,6 +1,6 @@
-import { apiRequest } from '@/lib/api/config';
-import { FlowConfig } from '@/lib/types/flow';
-import { ModelConfig } from '@/lib/types/model';
+import { apiRequest } from "@/lib/api/config";
+import { FlowConfig } from "@/lib/types/flow";
+import { ModelConfig } from "@/lib/types/model";
 
 export interface Dataset {
   name: string;
@@ -89,13 +89,17 @@ export interface StartEvaluationParams {
 }
 
 export const evaluationApi = {
-  getDatasets: () => 
-    apiRequest<{ datasets: Dataset[] }>('/swebench/datasets'),
+  getDatasets: () => apiRequest<{ datasets: Dataset[] }>("/swebench/datasets"),
 
-  startEvaluation: ({ evaluationId, numConcurrentInstances }: StartEvaluationParams) =>
+  startEvaluation: ({
+    evaluationId,
+    numConcurrentInstances,
+  }: StartEvaluationParams) =>
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/start`, {
-      method: 'POST',
-      body: JSON.stringify({ num_concurrent_instances: numConcurrentInstances }),
+      method: "POST",
+      body: JSON.stringify({
+        num_concurrent_instances: numConcurrentInstances,
+      }),
     }),
 
   cloneEvaluation: (evaluationId: string) =>
@@ -103,18 +107,18 @@ export const evaluationApi = {
 
   processEvaluationResults: (evaluationId: string) =>
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}/process`, {
-      method: 'POST',
+      method: "POST",
     }),
 
   getEvaluation: (evaluationId: string) =>
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}`),
 
   listEvaluations: () =>
-    apiRequest<EvaluationListResponse>('/swebench/evaluations'),
+    apiRequest<EvaluationListResponse>("/swebench/evaluations"),
 
   createEvaluation: (data: EvaluationRequest) =>
     apiRequest<Evaluation>(`/swebench/evaluations`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(data),
     }),
-}; 
+};

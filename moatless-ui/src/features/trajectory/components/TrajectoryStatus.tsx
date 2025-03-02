@@ -27,7 +27,10 @@ interface TrajectoryStatusProps {
   className?: string;
 }
 
-export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProps) {
+export function TrajectoryStatus({
+  trajectory,
+  className,
+}: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const queryClient = useQueryClient();
@@ -49,10 +52,13 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
   };
 
   // Check if the trajectory can be started (not running or finished)
-  const canStart = trajectory.status.toLowerCase() !== "running" && trajectory.status.toLowerCase() !== "completed";
+  const canStart =
+    trajectory.status.toLowerCase() !== "running" &&
+    trajectory.status.toLowerCase() !== "completed";
 
   // Check if the trajectory has been started or not
-  const hasStarted = trajectory.system_status.started_at !== undefined &&
+  const hasStarted =
+    trajectory.system_status.started_at !== undefined &&
     trajectory.system_status.started_at !== null;
 
   // Check if the trajectory can be retried (not running)
@@ -63,7 +69,7 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
     try {
       await startTrajectory.mutateAsync({
         projectId: trajectory.project_id,
-        trajectoryId: trajectory.trajectory_id
+        trajectoryId: trajectory.trajectory_id,
       });
     } catch (error) {
       console.error("Error starting trajectory:", error);
@@ -77,7 +83,7 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
     try {
       await retryTrajectory.mutateAsync({
         projectId: trajectory.project_id,
-        trajectoryId: trajectory.trajectory_id
+        trajectoryId: trajectory.trajectory_id,
       });
     } catch (error) {
       console.error("Error retrying trajectory:", error);
@@ -89,7 +95,7 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
   const handleCancelClick = async () => {
     cancelJob.mutate({
       projectId: trajectory.project_id,
-      trajectoryId: trajectory.trajectory_id
+      trajectoryId: trajectory.trajectory_id,
     });
   };
 
@@ -100,7 +106,10 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
     if (trajectory.status.toLowerCase() === "running") {
       intervalId = window.setInterval(() => {
         queryClient.invalidateQueries({
-          queryKey: trajectoryKeys.detail(trajectory.project_id, trajectory.trajectory_id)
+          queryKey: trajectoryKeys.detail(
+            trajectory.project_id,
+            trajectory.trajectory_id,
+          ),
         });
       }, 5000); // Refetch every 5 seconds
     }
@@ -110,7 +119,12 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
         clearInterval(intervalId);
       }
     };
-  }, [trajectory.status, trajectory.project_id, trajectory.trajectory_id, queryClient]);
+  }, [
+    trajectory.status,
+    trajectory.project_id,
+    trajectory.trajectory_id,
+    queryClient,
+  ]);
 
   // Determine which action buttons to show
   const getActionButtons = () => {
@@ -186,7 +200,12 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
   };
 
   return (
-    <div className={cn("flex items-center h-14 px-4 py-2 gap-3 border-b bg-background/50", className)}>
+    <div
+      className={cn(
+        "flex items-center h-14 px-4 py-2 gap-3 border-b bg-background/50",
+        className,
+      )}
+    >
       {/* Status Badge */}
       <Badge
         variant={trajectory?.status === "error" ? "destructive" : "default"}
@@ -203,12 +222,24 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
           <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/20 rounded-md">
             <div className="flex items-center gap-1">
               <Clock className="h-3 w-3 text-muted-foreground" />
-              <span>Started: {formatDistanceToNow(new Date(trajectory.system_status.started_at))} ago</span>
+              <span>
+                Started:{" "}
+                {formatDistanceToNow(
+                  new Date(trajectory.system_status.started_at),
+                )}{" "}
+                ago
+              </span>
             </div>
             {trajectory?.system_status.finished_at && (
               <>
                 <Separator orientation="vertical" className="mx-1 h-3" />
-                <span>Finished: {formatDistanceToNow(new Date(trajectory?.system_status.finished_at))} ago</span>
+                <span>
+                  Finished:{" "}
+                  {formatDistanceToNow(
+                    new Date(trajectory?.system_status.finished_at),
+                  )}{" "}
+                  ago
+                </span>
               </>
             )}
           </div>
@@ -227,41 +258,59 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
           <div className="flex items-center gap-2 px-2 py-1 bg-muted/20 rounded-md">
             <div className="flex items-center gap-1">
               <span className="text-muted-foreground">Prompt:</span>
-              <span className="font-medium">{trajectory.usage.prompt_tokens?.toLocaleString() || 0}</span>
+              <span className="font-medium">
+                {trajectory.usage.prompt_tokens?.toLocaleString() || 0}
+              </span>
             </div>
 
             <Separator orientation="vertical" className="h-3" />
 
             <div className="flex items-center gap-1">
-              <span className="text-muted-foreground hidden sm:inline">Completion:</span>
-              <span className="font-medium">{trajectory.usage.completion_tokens?.toLocaleString() || 0}</span>
+              <span className="text-muted-foreground hidden sm:inline">
+                Completion:
+              </span>
+              <span className="font-medium">
+                {trajectory.usage.completion_tokens?.toLocaleString() || 0}
+              </span>
             </div>
 
-            {(trajectory.usage.cache_read_tokens && trajectory.usage.cache_read_tokens > 0) && (
-              <>
-                <Separator orientation="vertical" className="h-3" />
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground hidden md:inline">Cached:</span>
-                  <span className="font-medium">{trajectory.usage.cache_read_tokens.toLocaleString()}</span>
-                </div>
-              </>
-            )}
+            {trajectory.usage.cache_read_tokens &&
+              trajectory.usage.cache_read_tokens > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-3" />
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground hidden md:inline">
+                      Cached:
+                    </span>
+                    <span className="font-medium">
+                      {trajectory.usage.cache_read_tokens.toLocaleString()}
+                    </span>
+                  </div>
+                </>
+              )}
 
-            {(trajectory.usage.cache_write_tokens && trajectory.usage.cache_write_tokens > 0) && (
-              <>
-                <Separator orientation="vertical" className="h-3" />
-                <div className="flex items-center gap-1">
-                  <span className="text-muted-foreground hidden md:inline">Cache Write:</span>
-                  <span className="font-medium">{trajectory.usage.cache_write_tokens.toLocaleString()}</span>
-                </div>
-              </>
-            )}
+            {trajectory.usage.cache_write_tokens &&
+              trajectory.usage.cache_write_tokens > 0 && (
+                <>
+                  <Separator orientation="vertical" className="h-3" />
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground hidden md:inline">
+                      Cache Write:
+                    </span>
+                    <span className="font-medium">
+                      {trajectory.usage.cache_write_tokens.toLocaleString()}
+                    </span>
+                  </div>
+                </>
+              )}
 
             <Separator orientation="vertical" className="h-3" />
 
             <div className="flex items-center gap-1">
               <Coins className="h-3 w-3 text-muted-foreground" />
-              <span className="font-medium">${trajectory.usage.completion_cost?.toFixed(4) || 0}</span>
+              <span className="font-medium">
+                ${trajectory.usage.completion_cost?.toFixed(4) || 0}
+              </span>
             </div>
           </div>
         )}
@@ -279,10 +328,7 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
       </div>
 
       {/* Action buttons */}
-      <div className="ml-auto">
-        {getActionButtons()}
-      </div>
+      <div className="ml-auto">{getActionButtons()}</div>
     </div>
   );
 }
-

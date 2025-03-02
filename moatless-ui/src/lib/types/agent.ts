@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 export interface ActionProperty {
   type: string;
@@ -25,7 +25,7 @@ export type ActionConfig = z.infer<typeof ActionConfigSchema>;
 export const AgentConfigSchema = z.object({
   id: z.string(),
   model_id: z.string(),
-  response_format: z.enum(['TOOL_CALL', 'REACT']),
+  response_format: z.enum(["TOOL_CALL", "REACT"]),
   actions: z.array(ActionConfigSchema).default([]),
   system_prompt: z.string().optional(),
 });
@@ -44,4 +44,4 @@ export interface ActionInfo {
 
 export interface ActionsResponse {
   actions: Record<string, ActionSchema>;
-} 
+}

@@ -1,5 +1,9 @@
 import { AlertCircle } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert.tsx";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@/lib/components/ui/alert.tsx";
 import { ScrollArea } from "@/lib/components/ui/scroll-area.tsx";
 import { Trajectory } from "@/lib/types/trajectory.ts";
 
@@ -16,9 +20,7 @@ export function TrajectoryError({ trajectory }: TrajectoryErrorProps) {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Execution Error</AlertTitle>
-          <AlertDescription>
-            {trajectory.system_status.error}
-          </AlertDescription>
+          <AlertDescription>{trajectory.system_status.error}</AlertDescription>
         </Alert>
 
         {trajectory.system_status.error_trace && (
@@ -32,4 +34,4 @@ export function TrajectoryError({ trajectory }: TrajectoryErrorProps) {
       </div>
     </ScrollArea>
   );
-} 
+}

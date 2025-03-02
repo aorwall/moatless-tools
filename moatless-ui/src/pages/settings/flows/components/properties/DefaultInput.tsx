@@ -28,10 +28,13 @@ export function DefaultInput({ name, control, property }: DefaultInputProps) {
               {...field}
               type={property.type === "integer" ? "number" : "text"}
               value={field.value ?? ""}
-              onChange={e => {
-                const value = property.type === "integer" 
-                  ? e.target.value ? parseInt(e.target.value) : undefined
-                  : e.target.value;
+              onChange={(e) => {
+                const value =
+                  property.type === "integer"
+                    ? e.target.value
+                      ? parseInt(e.target.value)
+                      : undefined
+                    : e.target.value;
                 field.onChange(value);
               }}
             />
@@ -43,4 +46,4 @@ export function DefaultInput({ name, control, property }: DefaultInputProps) {
       )}
     />
   );
-} 
+}

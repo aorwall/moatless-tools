@@ -13,4 +13,4 @@ export interface FlowStatusInfo {
 export interface TrajectoryListItem extends FlowStatusInfo {
   trajectory_id: string;
   project_id: string;
-} 
+}

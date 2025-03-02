@@ -1,5 +1,3 @@
-from typing import List
-
 from moatless.node import Node
 from moatless.selector.base import BaseSelector
 

@@ -11,7 +11,6 @@ import aiofiles
 import faiss
 import fsspec
 import numpy as np
-from dataclasses_json import DataClassJsonMixin
 from fsspec.implementations.local import LocalFileSystem
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.schema import BaseNode

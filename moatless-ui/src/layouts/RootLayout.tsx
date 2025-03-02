@@ -9,7 +9,8 @@ export function RootLayout() {
   };
 
   // Check if the current route is an evaluation instance page
-  const isEvaluationInstancePage = /^\/swebench\/evaluation\/[^/]+\/[^/]+$/.test(location.pathname);
+  const isEvaluationInstancePage =
+    /^\/swebench\/evaluation\/[^/]+\/[^/]+$/.test(location.pathname);
 
   const showBetaFeatures = true;
 
@@ -27,19 +28,21 @@ export function RootLayout() {
                   <>
                     <Link
                       to="/trajectories"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/trajectories")
+                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                        isActivePath("/trajectories")
                           ? "text-primary"
                           : "text-muted-foreground"
-                        }`}
+                      }`}
                     >
                       Trajectories
                     </Link>
                     <Link
                       to="/loop"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/loop")
+                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                        isActivePath("/loop")
                           ? "text-primary"
                           : "text-muted-foreground"
-                        }`}
+                      }`}
                     >
                       Run Loop
                     </Link>
@@ -47,37 +50,41 @@ export function RootLayout() {
                 )}
                 <Link
                   to="/swebench/evaluation"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/swebench/evaluation")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/swebench/evaluation")
                       ? "text-primary"
                       : "text-muted-foreground"
-                    }`}
+                  }`}
                 >
                   Evaluation
                 </Link>
                 <Link
                   to="/settings/agents"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/agents")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/settings/agents")
                       ? "text-primary"
                       : "text-muted-foreground"
-                    }`}
+                  }`}
                 >
                   Agents
                 </Link>
                 <Link
                   to="/settings/models"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/models")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/settings/models")
                       ? "text-primary"
                       : "text-muted-foreground"
-                    }`}
+                  }`}
                 >
                   Models
                 </Link>
                 <Link
                   to="/settings/flows"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/flows")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
+                    isActivePath("/settings/flows")
                       ? "text-primary"
                       : "text-muted-foreground"
-                    }`}
+                  }`}
                 >
                   Flows
                 </Link>

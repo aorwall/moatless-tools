@@ -1,7 +1,5 @@
+import { AlertCircle, CheckCircle, Clock } from "lucide-react";
 import { type FC } from "react";
-import { cn } from "@/lib/utils.ts";
-import { Badge } from "@/lib/components/ui/badge.tsx";
-import { CheckCircle, AlertCircle, AlertTriangle, Clock } from "lucide-react";
 
 interface TestResult {
   status: string;
@@ -21,17 +19,18 @@ export interface WorkspaceTestsTrajectoryItemProps {
   content: WorkspaceTestsTimelineContent;
 }
 
-export const WorkspaceTestsTrajectoryItem: FC<WorkspaceTestsTrajectoryItemProps> = ({
-  content,
-}) => {
+export const WorkspaceTestsTrajectoryItem: FC<
+  WorkspaceTestsTrajectoryItemProps
+> = ({ content }) => {
   // Calculate total test results across all test files
-  const allTestResults = content.test_files?.flatMap(f => f.test_results) ?? [];
+  const allTestResults =
+    content.test_files?.flatMap((f) => f.test_results) ?? [];
   const testStatusCounts = {
     total: allTestResults.length,
-    passed: allTestResults.filter(t => t.status === "PASSED").length,
-    failed: allTestResults.filter(t => t.status === "FAILED").length,
-    error: allTestResults.filter(t => t.status === "ERROR").length,
-    skipped: allTestResults.filter(t => t.status === "SKIPPED").length,
+    passed: allTestResults.filter((t) => t.status === "PASSED").length,
+    failed: allTestResults.filter((t) => t.status === "FAILED").length,
+    error: allTestResults.filter((t) => t.status === "ERROR").length,
+    skipped: allTestResults.filter((t) => t.status === "SKIPPED").length,
   };
 
   return (
@@ -42,23 +41,26 @@ export const WorkspaceTestsTrajectoryItem: FC<WorkspaceTestsTrajectoryItemProps>
             <CheckCircle size={12} className="text-green-600" />
             <span className="text-green-700">{testStatusCounts.passed}</span>
           </div>
-          
+
           {(testStatusCounts.failed > 0 || testStatusCounts.error > 0) && (
             <div className="flex items-center gap-1">
               <AlertCircle size={12} className="text-red-600" />
-              <span className="text-red-700">{testStatusCounts.failed + testStatusCounts.error}</span>
+              <span className="text-red-700">
+                {testStatusCounts.failed + testStatusCounts.error}
+              </span>
             </div>
           )}
-          
+
           {testStatusCounts.skipped > 0 && (
             <div className="flex items-center gap-1">
               <Clock size={12} className="text-gray-500" />
               <span className="text-gray-600">{testStatusCounts.skipped}</span>
             </div>
           )}
-          
+
           <span className="text-gray-500">
-            of {testStatusCounts.total} tests in {content.test_files.length} files
+            of {testStatusCounts.total} tests in {content.test_files.length}{" "}
+            files
           </span>
         </div>
       ) : (
@@ -66,4 +68,4 @@ export const WorkspaceTestsTrajectoryItem: FC<WorkspaceTestsTrajectoryItemProps>
       )}
     </div>
   );
-}; 
+};

@@ -1,15 +1,16 @@
-import asyncio
+import fnmatch
 import fnmatch
 import json
 import logging
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Optional
 
 import aiofiles
-
-from moatless.telemetry import instrument
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer(__name__)
 
 
 class CodeBlockIndex:
@@ -92,7 +93,6 @@ class CodeBlockIndex:
                             results.add(new_path)
             return results
 
-    @instrument()
     async def match_glob_pattern(self, file_pattern: str) -> set[str]:
         """
         Match files against a glob pattern using the tree index.
@@ -112,12 +112,10 @@ class CodeBlockIndex:
         logger.debug(f"Pattern '{file_pattern}' matched files: {matches}")
         return matches
 
-    @instrument()
     async def get_blocks_by_class(self, class_name: str) -> list[tuple[str, str]]:
         """Get all blocks for a given class name."""
         return self._blocks_by_class_name.get(class_name, [])
 
-    @instrument()
     async def get_blocks_by_function(self, function_name: str) -> list[tuple[str, str]]:
         """Get all blocks for a given function name."""
         return self._blocks_by_function_name.get(function_name, [])

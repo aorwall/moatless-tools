@@ -18,8 +18,7 @@ from opentelemetry import trace
 from redis import Redis
 from rq.job import Dependency
 
-from moatless.benchmark.report import BenchmarkResult, to_result
-from moatless.benchmark.swebench.utils import create_index_async, create_repository, create_repository_async
+from moatless.benchmark.swebench.utils import create_index_async, create_repository
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import Evaluation, EvaluationEvent, EvaluationStatus, InstanceStatus
@@ -32,7 +31,7 @@ from moatless.repository.repository import Repository
 from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.telemetry import run_async, setup_telemetry
-from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
+from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -62,7 +61,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
         runtime = TestbedEnvironment(
             repository=repository,
             instance_id=trajectory_id,
-            log_dir=testbed_log_dir,
+            log_dir=str(testbed_log_dir),
             enable_cache=True,
         )
 
@@ -96,7 +95,7 @@ async def _run_instance(
     current_project_id.set(evaluation_name)
     current_trajectory_id.set(instance_id)
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
-    with tracer.start_as_current_span(f"run_instance_{instance_id}") as span:
+    with tracer.start_as_current_span(f"run_instance_{instance_id}"):
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
         print(f"Setting up job logging for run in {trajectory_dir}")
         litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
@@ -105,7 +104,7 @@ async def _run_instance(
 
         workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
 
-        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir, workspace=workspace)
+        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
 
         leaf_nodes = flow.root.get_leaf_nodes()
         for node in leaf_nodes:
@@ -114,15 +113,13 @@ async def _run_instance(
                 node.reset()
         flow.persist()
 
-        node = await flow.run()
+        node = await flow.run(workspace=workspace)
         logger.info(f"Flow completed for instance {instance_id}")
-
-        return flow
 
 
 def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, runtime: TestbedEnvironment) -> None:
     """Evaluate an instance's results."""
-    with tracer.start_as_current_span(f"evaluate_instance_{instance_id}") as span:
+    with tracer.start_as_current_span(f"evaluate_instance_{instance_id}"):
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
         leaf_nodes = root_node.get_leaf_nodes()
         eval_result_path = trajectory_dir / "eval_result.json"

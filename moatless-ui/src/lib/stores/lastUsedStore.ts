@@ -20,4 +20,4 @@ export const useLastUsedStore = create<LastUsedStore>()(
       name: "last-used-store",
     },
   ),
-); 
+);

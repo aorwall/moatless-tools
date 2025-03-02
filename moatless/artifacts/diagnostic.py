@@ -1,7 +1,6 @@
 import builtins
-from abc import abstractmethod
 from enum import Enum
-from typing import ClassVar, List, Optional, Type
+from typing import ClassVar, Optional
 
 from pydantic import BaseModel, Field
 

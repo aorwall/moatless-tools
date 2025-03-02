@@ -11,14 +11,18 @@ interface ComponentPropertiesProps {
   basePath: string;
 }
 
-export function ComponentProperties({ schema, control, basePath }: ComponentPropertiesProps) {
+export function ComponentProperties({
+  schema,
+  control,
+  basePath,
+}: ComponentPropertiesProps) {
   return (
     <div className="space-y-4 mt-4 ml-6 border-l-2 pl-4 border-muted">
       {Object.entries(schema.properties).map(([key, propRaw]) => {
         // Ensure the property matches our expected type
         const prop = propRaw as ComponentProperty;
-        if (!prop || typeof prop.type !== 'string') return null;
-        
+        if (!prop || typeof prop.type !== "string") return null;
+
         const fieldName = `${basePath}.${key}`;
 
         // Special handling for model_id
@@ -68,4 +72,4 @@ export function ComponentProperties({ schema, control, basePath }: ComponentProp
       })}
     </div>
   );
-} 
+}

@@ -1,9 +1,14 @@
-import { type FC } from "react";
-import { cn } from "@/lib/utils.ts";
 import { Badge } from "@/lib/components/ui/badge.tsx";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/lib/components/ui/tabs.tsx";
-import { FileCode, FilePlus, FileEdit } from "lucide-react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/lib/components/ui/tabs.tsx";
 import { countPatchChanges, getFileName } from "@/lib/hooks/useFileUtils.ts";
+import { cn } from "@/lib/utils.ts";
+import { FileCode, FileEdit, FilePlus } from "lucide-react";
+import { type FC } from "react";
 
 interface Span {
   span_id: string;
@@ -42,9 +47,10 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
   content,
 }) => {
   // Count new vs modified files
-  const newFiles = content.updatedFiles?.filter(f => f.is_new)?.length || 0;
-  const modifiedFiles = content.updatedFiles?.filter(f => !f.is_new && f.patch)?.length || 0;
-  
+  const newFiles = content.updatedFiles?.filter((f) => f.is_new)?.length || 0;
+  const modifiedFiles =
+    content.updatedFiles?.filter((f) => !f.is_new && f.patch)?.length || 0;
+
   return (
     <div className="space-y-4">
       {/* Summary Section */}
@@ -68,11 +74,14 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
 
       {/* Files Tabs */}
       {content.updatedFiles && content.updatedFiles.length > 0 && (
-        <Tabs defaultValue={content.updatedFiles[0].file_path} className="w-full">
+        <Tabs
+          defaultValue={content.updatedFiles[0].file_path}
+          className="w-full"
+        >
           <TabsList className="w-full overflow-x-auto flex-nowrap whitespace-nowrap">
             {content.updatedFiles.map((file, idx) => (
-              <TabsTrigger 
-                key={idx} 
+              <TabsTrigger
+                key={idx}
                 value={file.file_path}
                 className="flex items-center gap-1.5"
               >
@@ -87,28 +96,40 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
               </TabsTrigger>
             ))}
           </TabsList>
-          
+
           {content.updatedFiles.map((file, idx) => {
             const fullFile = file;
-            const { additions, deletions } = countPatchChanges(fullFile?.patch || '');
-            
+            const { additions, deletions } = countPatchChanges(
+              fullFile?.patch || "",
+            );
+
             return (
-              <TabsContent key={idx} value={file.file_path} className="space-y-4 mt-4">
+              <TabsContent
+                key={idx}
+                value={file.file_path}
+                className="space-y-4 mt-4"
+              >
                 <div className="flex items-center justify-between">
                   <div className="font-mono text-sm text-gray-700 truncate max-w-[70%]">
                     {file.file_path}
                   </div>
                   <div className="flex items-center gap-2">
                     {file.is_new ? (
-                      <Badge variant="default" className="bg-green-100 text-green-800">
+                      <Badge
+                        variant="default"
+                        className="bg-green-100 text-green-800"
+                      >
                         New File
                       </Badge>
                     ) : (
-                      <Badge variant="default" className="bg-blue-100 text-blue-800">
+                      <Badge
+                        variant="default"
+                        className="bg-blue-100 text-blue-800"
+                      >
                         Modified
                       </Badge>
                     )}
-                    
+
                     {fullFile?.patch && (
                       <div className="flex items-center gap-1 text-xs">
                         <span className="text-green-700">+{additions}</span>
@@ -118,17 +139,25 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
                     )}
                   </div>
                 </div>
-                
+
                 {/* File Patch */}
                 {fullFile?.patch && (
                   <div className="border rounded-md overflow-hidden">
                     <div className="bg-gray-100 px-3 py-1.5 border-b flex items-center justify-between">
-                      <span className="text-xs font-medium text-gray-700">Patch</span>
+                      <span className="text-xs font-medium text-gray-700">
+                        Patch
+                      </span>
                       <div className="flex items-center gap-2">
-                        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                        <Badge
+                          variant="outline"
+                          className="text-xs bg-green-50 text-green-700 border-green-200"
+                        >
                           +{additions}
                         </Badge>
-                        <Badge variant="outline" className="text-xs bg-red-50 text-red-700 border-red-200">
+                        <Badge
+                          variant="outline"
+                          className="text-xs bg-red-50 text-red-700 border-red-200"
+                        >
                           -{deletions}
                         </Badge>
                       </div>
@@ -140,12 +169,20 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
                             key={i}
                             className={cn(
                               "leading-5 px-1",
-                              line.startsWith("+") && !line.startsWith("+++") && "bg-green-50 text-green-700",
-                              line.startsWith("-") && !line.startsWith("---") && "bg-red-50 text-red-700",
-                              line.startsWith("@@") && "text-purple-600 border-t border-b border-gray-200 bg-gray-100 py-0.5 my-1",
-                              line.startsWith("diff") && "text-blue-600 font-semibold",
+                              line.startsWith("+") &&
+                              !line.startsWith("+++") &&
+                              "bg-green-50 text-green-700",
+                              line.startsWith("-") &&
+                              !line.startsWith("---") &&
+                              "bg-red-50 text-red-700",
+                              line.startsWith("@@") &&
+                              "text-purple-600 border-t border-b border-gray-200 bg-gray-100 py-0.5 my-1",
+                              line.startsWith("diff") &&
+                              "text-blue-600 font-semibold",
                               line.startsWith("index") && "text-gray-500",
-                              (line.startsWith("---") || line.startsWith("+++")) && "text-gray-600"
+                              (line.startsWith("---") ||
+                                line.startsWith("+++")) &&
+                              "text-gray-600",
                             )}
                           >
                             {line}
@@ -155,12 +192,14 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
                     </div>
                   </div>
                 )}
-                
+
                 {/* Spans */}
                 {fullFile?.spans && fullFile.spans.length > 0 && (
                   <div className="border rounded-md overflow-hidden mt-4">
                     <div className="bg-gray-100 px-3 py-1.5 border-b">
-                      <span className="text-xs font-medium text-gray-700">Spans</span>
+                      <span className="text-xs font-medium text-gray-700">
+                        Spans
+                      </span>
                     </div>
                     <div className="p-3 bg-gray-50">
                       <div className="flex flex-wrap gap-2">
@@ -169,7 +208,7 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
                             key={span.span_id}
                             className={cn(
                               "inline-flex items-center gap-1.5 rounded border border-gray-200 px-2 py-1 text-xs text-gray-700",
-                              span.pinned && "bg-purple-50 border-purple-200"
+                              span.pinned && "bg-purple-50 border-purple-200",
                             )}
                           >
                             <span className="font-medium">{span.span_id}</span>
@@ -194,4 +233,4 @@ export const WorkspaceFilesDetails: FC<WorkspaceFilesDetailsProps> = ({
       )}
     </div>
   );
-}; 
+};

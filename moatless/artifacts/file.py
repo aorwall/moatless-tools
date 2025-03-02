@@ -5,13 +5,13 @@ import json
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Type
+from typing import Any, Optional
 
 import pymupdf as fitz
 from PIL import Image, ImageEnhance
 from pydantic import Field, PrivateAttr
 
-from moatless.artifacts.artifact import Artifact, ArtifactHandler, ArtifactResponse
+from moatless.artifacts.artifact import Artifact, ArtifactResponse
 from moatless.artifacts.json_handler import JsonArtifactHandler
 from moatless.completion.schema import (
     ChatCompletionImageUrlObject,

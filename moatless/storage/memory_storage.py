@@ -6,7 +6,6 @@ in memory, which is useful for testing or temporary storage.
 """
 
 import logging
-from typing import Dict
 
 from moatless.storage.base import BaseStorage
 

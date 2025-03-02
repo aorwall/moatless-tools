@@ -1,16 +1,16 @@
 /**
  * Standard date/time formatter for the application
  */
-export const dateTimeFormat = new Intl.DateTimeFormat('en-US', {
-  dateStyle: 'short',
-  timeStyle: 'medium',
+export const dateTimeFormat = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "short",
+  timeStyle: "medium",
 });
 
 /**
  * Format for dates only
  */
-export const dateFormat = new Intl.DateTimeFormat('en-US', {
-  dateStyle: 'medium',
+export const dateFormat = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "medium",
 });
 
 /**
@@ -37,14 +37,14 @@ export function formatRelativeTime(date: Date | string | number): string {
   const diffDays = Math.floor(diffHr / 24);
 
   if (diffSec < 60) {
-    return 'just now';
+    return "just now";
   } else if (diffMin < 60) {
-    return `${diffMin} minute${diffMin !== 1 ? 's' : ''} ago`;
+    return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
   } else if (diffHr < 24) {
-    return `${diffHr} hour${diffHr !== 1 ? 's' : ''} ago`;
+    return `${diffHr} hour${diffHr !== 1 ? "s" : ""} ago`;
   } else if (diffDays < 7) {
-    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+    return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
   } else {
     return dateFormat.format(targetDate);
   }
-} 
+}

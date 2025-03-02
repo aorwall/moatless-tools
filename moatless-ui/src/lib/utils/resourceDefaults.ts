@@ -18,5 +18,5 @@ export const createDefaultFlow = (): Omit<FlowConfig, "id"> => ({
   discriminator: undefined,
 });
 
-export const generateResourceId = (prefix: string) => 
-  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; 
+export const generateResourceId = (prefix: string) =>
+  `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;

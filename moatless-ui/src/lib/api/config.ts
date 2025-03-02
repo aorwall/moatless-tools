@@ -9,17 +9,17 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
-    public data?: any
+    public data?: any,
   ) {
     super(message);
-    this.name = 'ApiError';
+    this.name = "ApiError";
   }
 
   toString() {
-    if (this.data && typeof this.data === 'object') {
+    if (this.data && typeof this.data === "object") {
       const details = Object.entries(this.data)
         .map(([key, value]) => `${key}: ${value}`)
-        .join(', ');
+        .join(", ");
       return details || this.message;
     }
     return this.message;
@@ -55,33 +55,31 @@ export async function apiRequest<T>(
     if (!response.ok) {
       let errorMessage: string;
       let errorData: any;
-      
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
+
+      const contentType = response.headers.get("content-type");
+      if (contentType && contentType.includes("application/json")) {
         try {
           errorData = await response.json();
           // Handle FastAPI validation errors
           if (errorData.detail && Array.isArray(errorData.detail)) {
             errorMessage = errorData.detail
-              .map((err: any) => `${err.loc.join('.')}: ${err.msg}`)
-              .join(', ');
+              .map((err: any) => `${err.loc.join(".")}: ${err.msg}`)
+              .join(", ");
           } else {
-            errorMessage = errorData.detail || errorData.message || response.statusText;
+            errorMessage =
+              errorData.detail || errorData.message || response.statusText;
           }
         } catch {
-          errorMessage = 'Failed to parse error response';
+          errorMessage = "Failed to parse error response";
           errorData = null;
         }
       } else {
-        errorMessage = await response.text() || response.statusText || 'Unknown error';
+        errorMessage =
+          (await response.text()) || response.statusText || "Unknown error";
         errorData = null;
       }
 
-      throw new ApiError(
-        response.status,
-        errorMessage,
-        errorData
-      );
+      throw new ApiError(response.status, errorMessage, errorData);
     }
 
     return response.json();
@@ -92,8 +90,8 @@ export async function apiRequest<T>(
     // Handle network errors or other exceptions
     throw new ApiError(
       0,
-      error instanceof Error ? error.message : 'Network error',
-      error
+      error instanceof Error ? error.message : "Network error",
+      error,
     );
   }
 }

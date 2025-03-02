@@ -74,7 +74,8 @@ export const useWebSocketStore = create<WebSocketStore>()(
         }
 
         // Add initial delay for first connection attempt
-        const delay = retryCount === 0 ? INITIAL_CONNECTION_DELAY : WS_RETRY_DELAY;
+        const delay =
+          retryCount === 0 ? INITIAL_CONNECTION_DELAY : WS_RETRY_DELAY;
 
         // Check retry limit
         if (retryCount >= MAX_RETRIES) {
@@ -91,7 +92,9 @@ export const useWebSocketStore = create<WebSocketStore>()(
 
         setTimeout(() => {
           try {
-            console.log(`Connecting to WebSocket... (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`);
+            console.log(
+              `Connecting to WebSocket... (attempt ${retryCount + 1}/${MAX_RETRIES + 1})`,
+            );
             const wsUrl = getWebSocketUrl();
             console.log("WebSocket URL:", wsUrl);
 
@@ -271,13 +274,17 @@ export const useWebSocketStore = create<WebSocketStore>()(
               type: "subscribe",
               subscription: "project",
               id: projectId,
-            })
+            }),
           );
 
           set((state) => {
-            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
+            const newActiveProjectSubscriptions = new Set(
+              state.activeProjectSubscriptions,
+            );
             newActiveProjectSubscriptions.add(projectId);
-            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
+            return {
+              activeProjectSubscriptions: newActiveProjectSubscriptions,
+            };
           });
 
           console.log(`Sent subscription request for project: ${projectId}`);
@@ -301,16 +308,22 @@ export const useWebSocketStore = create<WebSocketStore>()(
               type: "subscribe",
               subscription: "trajectory",
               id: trajectoryId,
-            })
+            }),
           );
 
           set((state) => {
-            const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+            const newActiveTrajectorySubscriptions = new Set(
+              state.activeTrajectorySubscriptions,
+            );
             newActiveTrajectorySubscriptions.add(trajectoryId);
-            return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+            return {
+              activeTrajectorySubscriptions: newActiveTrajectorySubscriptions,
+            };
           });
 
-          console.log(`Sent subscription request for trajectory: ${trajectoryId}`);
+          console.log(
+            `Sent subscription request for trajectory: ${trajectoryId}`,
+          );
           return true;
         } catch (error) {
           console.error("Failed to send trajectory subscription:", error);
@@ -331,13 +344,17 @@ export const useWebSocketStore = create<WebSocketStore>()(
               type: "unsubscribe",
               subscription: "project",
               id: projectId,
-            })
+            }),
           );
 
           set((state) => {
-            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
+            const newActiveProjectSubscriptions = new Set(
+              state.activeProjectSubscriptions,
+            );
             newActiveProjectSubscriptions.delete(projectId);
-            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
+            return {
+              activeProjectSubscriptions: newActiveProjectSubscriptions,
+            };
           });
 
           console.log(`Sent unsubscription request for project: ${projectId}`);
@@ -361,16 +378,22 @@ export const useWebSocketStore = create<WebSocketStore>()(
               type: "unsubscribe",
               subscription: "trajectory",
               id: trajectoryId,
-            })
+            }),
           );
 
           set((state) => {
-            const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+            const newActiveTrajectorySubscriptions = new Set(
+              state.activeTrajectorySubscriptions,
+            );
             newActiveTrajectorySubscriptions.delete(trajectoryId);
-            return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+            return {
+              activeTrajectorySubscriptions: newActiveTrajectorySubscriptions,
+            };
           });
 
-          console.log(`Sent unsubscription request for trajectory: ${trajectoryId}`);
+          console.log(
+            `Sent unsubscription request for trajectory: ${trajectoryId}`,
+          );
           return true;
         } catch (error) {
           console.error("Failed to send trajectory unsubscription:", error);
@@ -404,7 +427,10 @@ export const useWebSocketStore = create<WebSocketStore>()(
           set((state) => ({
             messages: {
               ...state.messages,
-              [trajectory_id]: [...(state.messages[trajectory_id] || []), message],
+              [trajectory_id]: [
+                ...(state.messages[trajectory_id] || []),
+                message,
+              ],
             },
           }));
         }

@@ -45,10 +45,14 @@ export function RunPage() {
       return;
     }
     try {
-      const attachmentsData = attachments ? await Promise.all(Array.from(attachments).map(async (file) => ({
-        name: file.name,
-        data: await toBase64(file),
-      }))) : undefined;
+      const attachmentsData = attachments
+        ? await Promise.all(
+            Array.from(attachments).map(async (file) => ({
+              name: file.name,
+              data: await toBase64(file),
+            })),
+          )
+        : undefined;
 
       const data = await startLoop.mutateAsync({
         agent_id: selectedAgentId,
@@ -65,12 +69,13 @@ export function RunPage() {
   };
 
   // Helper function to convert file to base64
-  const toBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+  const toBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
   return (
     <div className="container mx-auto py-6 h-full overflow-y-auto">

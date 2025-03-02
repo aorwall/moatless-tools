@@ -1,10 +1,10 @@
-import asyncio
+import base64
 import base64
 import logging
 import mimetypes
 import os
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -16,7 +16,6 @@ from moatless.completion.manager import create_completion_model
 from moatless.config.agent_config import get_agent
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.loop import AgenticLoop
-from moatless.flow.runner import agentic_runner
 from moatless.repository.git import GitRepository
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace

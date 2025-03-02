@@ -5,18 +5,27 @@ interface TrajectoryState {
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
   events: TrajectoryEvent[];
-  selectedItems: Record<string, {
-    nodeId: number;
-    itemId: string;
-    type: string;
-    content: any;
-  }>;
+  selectedItems: Record<
+    string,
+    {
+      nodeId: number;
+      itemId: string;
+      type: string;
+      content: any;
+    }
+  >;
 
   // Actions
   toggleNode: (instanceId: string, nodeId: number) => void;
   toggleItem: (instanceId: string, nodeId: number, itemId: string) => void;
   resetInstance: (instanceId: string) => void;
-  setSelectedItem: (instanceId: string, item: Omit<NonNullable<TrajectoryState["selectedItems"][string]>, "instanceId"> | null) => void;
+  setSelectedItem: (
+    instanceId: string,
+    item: Omit<
+      NonNullable<TrajectoryState["selectedItems"][string]>,
+      "instanceId"
+    > | null,
+  ) => void;
   setEvents: (events: TrajectoryEvent[]) => void;
   addEvent: (event: TrajectoryEvent) => void;
 
@@ -27,7 +36,9 @@ interface TrajectoryState {
     nodeId: number,
     itemId: string,
   ) => boolean;
-  getSelectedItem: (instanceId: string) => TrajectoryState["selectedItems"][string] | null;
+  getSelectedItem: (
+    instanceId: string,
+  ) => TrajectoryState["selectedItems"][string] | null;
 }
 
 export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
@@ -89,15 +100,16 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
       },
     })),
 
-  setSelectedItem: (instanceId, item) => set((state) => {
-    const newSelectedItems = { ...state.selectedItems };
-    if (item === null) {
-      delete newSelectedItems[instanceId];
-    } else {
-      newSelectedItems[instanceId] = item;
-    }
-    return { selectedItems: newSelectedItems };
-  }),
+  setSelectedItem: (instanceId, item) =>
+    set((state) => {
+      const newSelectedItems = { ...state.selectedItems };
+      if (item === null) {
+        delete newSelectedItems[instanceId];
+      } else {
+        newSelectedItems[instanceId] = item;
+      }
+      return { selectedItems: newSelectedItems };
+    }),
 
   getSelectedItem: (instanceId) => {
     const state = get();
@@ -116,5 +128,6 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
 
   setEvents: (events: TrajectoryEvent[]) => set({ events }),
 
-  addEvent: (event: TrajectoryEvent) => set((state) => ({ events: [...state.events, event] })),
+  addEvent: (event: TrajectoryEvent) =>
+    set((state) => ({ events: [...state.events, event] })),
 }));

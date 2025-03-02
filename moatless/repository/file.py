@@ -7,13 +7,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anyio
+from opentelemetry import trace
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.module import Module
 from moatless.repository.repository import Repository
-from moatless.telemetry import instrument
 
+tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)
 
 
@@ -199,7 +200,7 @@ class FileRepository(Repository):
         with open(self.get_full_path(file_path), "w") as f:
             f.write(updated_content)
 
-    @instrument()
+    @tracer.start_as_current_span("matching_files")
     async def matching_files(self, file_pattern: str) -> list[str]:
         """
         Returns a list of files matching the given pattern within the repository.
@@ -263,7 +264,7 @@ class FileRepository(Repository):
 
         return matched_files
 
-    @instrument()
+    @tracer.start_as_current_span("find_by_pattern")
     async def find_by_pattern(self, patterns: list[str]) -> list[str]:
         """
         Returns a list of files matching the given patterns within the repository.

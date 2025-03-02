@@ -1,15 +1,14 @@
 import logging
 from pathlib import Path
-from typing import List
 
 from pydantic import ConfigDict, Field
 
-from moatless.actions.action import Action, FewShotExample
+from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import ActionArguments, Observation
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.repository.file import do_diff
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -98,7 +97,7 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         path = Path(args.path)
 
         if file_context.file_exists(str(path)):
-            return Observation(
+            return Observation.create(
                 message=f"File already exists at: {path}. Cannot overwrite files using create command.",
                 properties={"fail_reason": "file_exists"},
             )
@@ -106,12 +105,7 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         context_file = file_context.add_file(str(path), show_all_spans=True)
         context_file.apply_changes(args.file_text)
 
-        diff = do_diff(str(path), "", args.file_text)
-
-        observation = Observation(
-            message=f"File created successfully at: {path}",
-            properties={"diff": diff, "success": True},
-        )
+        message = f"File created successfully at: {path}"
 
         test_summary = await self.run_tests(
             file_path=str(path),
@@ -119,6 +113,6 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         )
 
         if test_summary:
-            observation.message += f"\n\n{test_summary}"
+            message += f"\n\n{test_summary}"
 
-        return observation
+        return Observation.create(message=message, summary=message)

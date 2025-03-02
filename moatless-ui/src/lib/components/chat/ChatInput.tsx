@@ -23,92 +23,88 @@ export interface ChatInputRef {
   clear: () => void;
 }
 
-export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(function ChatInput(
-  { onSend, disabled, agentId, modelId }, 
-  ref
-) {
-  const [message, setMessage] = useState("");
-  const [selectedAgent, setSelectedAgent] = useState<string>(agentId || "");
-  const [selectedModel, setSelectedModel] = useState<string>(modelId || "");
-  
-  const { data: agents, isLoading: isLoadingAgents } = useAgents();
-  const { data: models, isLoading: isLoadingModels } = useModels();
+export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
+  function ChatInput({ onSend, disabled, agentId, modelId }, ref) {
+    const [message, setMessage] = useState("");
+    const [selectedAgent, setSelectedAgent] = useState<string>(agentId || "");
+    const [selectedModel, setSelectedModel] = useState<string>(modelId || "");
 
-  useImperativeHandle(ref, () => ({
-    clear: () => setMessage("")
-  }));
+    const { data: agents, isLoading: isLoadingAgents } = useAgents();
+    const { data: models, isLoading: isLoadingModels } = useModels();
 
-  const handleSend = () => {
-    if (message.trim() && selectedAgent && selectedModel) {
-      onSend(message.trim(), selectedAgent, selectedModel);
-    }
-  };
+    useImperativeHandle(ref, () => ({
+      clear: () => setMessage(""),
+    }));
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+    const handleSend = () => {
+      if (message.trim() && selectedAgent && selectedModel) {
+        onSend(message.trim(), selectedAgent, selectedModel);
+      }
+    };
 
-  return (
-    <div className="flex flex-col gap-4 p-4 border-t">
-      <Textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Type your message..."
-        className="min-h-[100px] resize-none"
-      />
-      
-      <div className="flex gap-4">
-        <Select
-          value={selectedAgent}
-          onValueChange={setSelectedAgent}
-          disabled={isLoadingAgents}
-        >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Select agent" />
-          </SelectTrigger>
-          <SelectContent>
-            {agents?.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
-                {agent.id}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSend();
+      }
+    };
 
-        <Select
-          value={selectedModel}
-          onValueChange={setSelectedModel}
-          disabled={isLoadingModels}
-        >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Select model" />
-          </SelectTrigger>
-          <SelectContent>
-            {models?.models.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
-                {model.model}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    return (
+      <div className="flex flex-col gap-4 p-4 border-t">
+        <Textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Type your message..."
+          className="min-h-[100px] resize-none"
+        />
 
-        <Button
-          onClick={handleSend}
-          disabled={
-            disabled ||
-            !message.trim() ||
-            !selectedAgent ||
-            !selectedModel
-          }
-          className="ml-auto"
-        >
-          <Send className="h-4 w-4" />
-        </Button>
+        <div className="flex gap-4">
+          <Select
+            value={selectedAgent}
+            onValueChange={setSelectedAgent}
+            disabled={isLoadingAgents}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select agent" />
+            </SelectTrigger>
+            <SelectContent>
+              {agents?.map((agent) => (
+                <SelectItem key={agent.id} value={agent.id}>
+                  {agent.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={selectedModel}
+            onValueChange={setSelectedModel}
+            disabled={isLoadingModels}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select model" />
+            </SelectTrigger>
+            <SelectContent>
+              {models?.models.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {model.model}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
+            onClick={handleSend}
+            disabled={
+              disabled || !message.trim() || !selectedAgent || !selectedModel
+            }
+            className="ml-auto"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
-    </div>
-  );
-}); 
+    );
+  },
+);

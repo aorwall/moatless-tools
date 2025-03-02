@@ -40,23 +40,25 @@ export function AgentDetail({ agent, onSubmit }: AgentDetailProps) {
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    
+
     try {
       setIsSaving(true);
       setError(null);
-      
+
       const agentData = {
         ...agent,
         system_prompt: systemPrompt,
         actions: selectedActions,
       };
-      
+
       await onSubmit(agentData);
     } catch (e) {
-      const errorMessage = e instanceof Error 
-        ? e.message 
-        : (e as any)?.response?.data?.detail || "An unexpected error occurred";
-      
+      const errorMessage =
+        e instanceof Error
+          ? e.message
+          : (e as any)?.response?.data?.detail ||
+            "An unexpected error occurred";
+
       console.error(errorMessage);
       setError(errorMessage);
     } finally {
@@ -137,11 +139,7 @@ export function AgentDetail({ agent, onSubmit }: AgentDetailProps) {
             >
               {deleteAgent.isPending ? "Deleting..." : "Delete Agent"}
             </Button>
-            <Button
-              type="submit"
-              form="agent-form"
-              disabled={isSaving}
-            >
+            <Button type="submit" form="agent-form" disabled={isSaving}>
               {isSaving ? "Saving..." : "Save Changes"}
             </Button>
           </div>
@@ -208,4 +206,4 @@ export function AgentDetail({ agent, onSubmit }: AgentDetailProps) {
       </div>
     </div>
   );
-} 
+}

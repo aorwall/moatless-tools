@@ -33,7 +33,9 @@ export function EvaluationLayout() {
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
-            {error instanceof Error ? error.message : "Failed to load evaluation data"}
+            {error instanceof Error
+              ? error.message
+              : "Failed to load evaluation data"}
           </AlertDescription>
         </Alert>
       </div>
@@ -72,8 +74,8 @@ export function EvaluationLayout() {
               </Button>
             </div>
           )}
-          <InstanceList 
-            evaluation={evaluation} 
+          <InstanceList
+            evaluation={evaluation}
             selectedInstanceId={instanceId}
           />
         </ResizablePanel>

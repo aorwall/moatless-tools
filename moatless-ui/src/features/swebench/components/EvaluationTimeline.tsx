@@ -25,9 +25,16 @@ interface TimelineBarProps {
   children?: React.ReactNode;
 }
 
-function TimelineBar({ instance, isFirstSegment, left, width, children }: TimelineBarProps) {
-  const baseStyles = "absolute inset-y-0 transition-all group-hover:scale-y-110 timeline-bar";
-  
+function TimelineBar({
+  instance,
+  isFirstSegment,
+  left,
+  width,
+  children,
+}: TimelineBarProps) {
+  const baseStyles =
+    "absolute inset-y-0 transition-all group-hover:scale-y-110 timeline-bar";
+
   const getBarStyles = () => {
     if (isFirstSegment && !instance.completed_at) {
       // Running instance (first segment)
@@ -57,7 +64,7 @@ function TimelineBar({ instance, isFirstSegment, left, width, children }: Timeli
 export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
   const now = new Date();
   const instances = evaluation.instances;
-  
+
   // Add validation for timestamps
   const isValidDate = (timestamp: string | null | undefined): boolean => {
     if (!timestamp) return false;
@@ -67,44 +74,56 @@ export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
 
   // Filter out not started instances and sort by started_at timestamp
   const sortedInstances = [...instances]
-    .filter(instance => {
+    .filter((instance) => {
       // Include instances that have a valid started_at timestamp or are currently running
       return isValidDate(instance.started_at) || instance.status === "running";
     })
     .sort((a, b) => {
       // For running instances without started_at, use current time
-      const aTime = a.started_at && isValidDate(a.started_at) ? new Date(a.started_at).getTime() : now.getTime();
-      const bTime = b.started_at && isValidDate(b.started_at) ? new Date(b.started_at).getTime() : now.getTime();
+      const aTime =
+        a.started_at && isValidDate(a.started_at)
+          ? new Date(a.started_at).getTime()
+          : now.getTime();
+      const bTime =
+        b.started_at && isValidDate(b.started_at)
+          ? new Date(b.started_at).getTime()
+          : now.getTime();
       return aTime - bTime;
     });
 
-  
   // Only continue if we have instances to show
   if (sortedInstances.length === 0) {
     return <div>No started instances</div>;
   }
-  
+
   // Update the getEndTime function with validation
   const getEndTime = (instance: Evaluation["instances"][number]) => {
-    if (instance.completed_at && isValidDate(instance.completed_at)) return instance.completed_at;
-    if (instance.error_at && isValidDate(instance.error_at)) return instance.error_at;
+    if (instance.completed_at && isValidDate(instance.completed_at))
+      return instance.completed_at;
+    if (instance.error_at && isValidDate(instance.error_at))
+      return instance.error_at;
     // For running instances, end 5 seconds before current time
     return new Date(now.getTime() - 5000).toISOString();
   };
 
   // Update the timestamps calculation with validation
-  const timestamps = sortedInstances.flatMap(instance => [
-    instance.started_at,
-    getEndTime(instance),
-    instance.evaluated_at
-  ].filter(timestamp => isValidDate(timestamp)) as string[]);
-  
+  const timestamps = sortedInstances.flatMap(
+    (instance) =>
+      [instance.started_at, getEndTime(instance), instance.evaluated_at].filter(
+        (timestamp) => isValidDate(timestamp),
+      ) as string[],
+  );
+
   if (timestamps.length === 0) {
     return <div>No valid timestamps available</div>;
   }
 
-  const startTime = new Date(Math.min(...timestamps.map(t => new Date(t).getTime())));
-  const endTime = new Date(Math.max(...timestamps.map(t => new Date(t).getTime())));
+  const startTime = new Date(
+    Math.min(...timestamps.map((t) => new Date(t).getTime())),
+  );
+  const endTime = new Date(
+    Math.max(...timestamps.map((t) => new Date(t).getTime())),
+  );
   const totalDuration = endTime.getTime() - startTime.getTime();
 
   // Update getPositionPercentage with validation
@@ -117,22 +136,22 @@ export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
   return (
     <div className="space-y-2">
       <style>{progressAnimation}</style>
-      
+
       <div className="flex gap-4">
         {/* Fixed-width column for instance IDs */}
         <div className="w-32 flex-none">
           {/* Empty space to align with timeline */}
         </div>
-        
+
         {/* Timeline header with timestamps */}
         <div className="flex-1">
           <div className="flex justify-between text-xs text-muted-foreground mb-4">
-            <span>{format(startTime, 'HH:mm:ss')}</span>
-            <span>{format(endTime, 'HH:mm:ss')}</span>
+            <span>{format(startTime, "HH:mm:ss")}</span>
+            <span>{format(endTime, "HH:mm:ss")}</span>
           </div>
         </div>
       </div>
-      
+
       {sortedInstances.map((instance) => (
         <div key={instance.instance_id} className="flex gap-4">
           {/* Instance ID column */}
@@ -144,38 +163,48 @@ export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
               {instance.instance_id}
             </Link>
           </div>
-          
+
           {/* Timeline column */}
           <div className="flex-1 relative h-6 group">
             <div className="absolute inset-y-0 left-0 w-full bg-muted/20 rounded-full" />
-            
+
             {instance.started_at && (
               <TimelineBar
                 instance={instance}
                 isFirstSegment={true}
                 left={getPositionPercentage(instance.started_at)}
-                width={getPositionPercentage(getEndTime(instance)) - getPositionPercentage(instance.started_at)}
+                width={
+                  getPositionPercentage(getEndTime(instance)) -
+                  getPositionPercentage(instance.started_at)
+                }
               >
                 {!instance.completed_at && (
                   <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[2px]">
-                    <div className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}>
+                    <div
+                      className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}
+                    >
                       {instance.status}
                     </div>
                   </div>
                 )}
               </TimelineBar>
             )}
-            
+
             {instance.completed_at && instance.evaluated_at && (
               <TimelineBar
                 instance={instance}
                 isFirstSegment={false}
                 left={getPositionPercentage(instance.completed_at)}
-                width={getPositionPercentage(instance.evaluated_at) - getPositionPercentage(instance.completed_at)}
+                width={
+                  getPositionPercentage(instance.evaluated_at) -
+                  getPositionPercentage(instance.completed_at)
+                }
               >
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[2px]">
                   {instance.resolved != null && (
-                    <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
+                    <div
+                      className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}
+                    >
                       {instance.resolved ? "✓" : "✗"}
                     </div>
                   )}
@@ -185,7 +214,7 @@ export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
           </div>
         </div>
       ))}
-      
+
       {/* Legend */}
       <div className="flex gap-4">
         <div className="w-32 flex-none" />
@@ -204,4 +233,4 @@ export function EvaluationTimeline({ evaluation }: EvaluationTimelineProps) {
       </div>
     </div>
   );
-} 
+}

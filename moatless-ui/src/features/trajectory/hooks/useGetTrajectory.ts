@@ -3,7 +3,8 @@ import { trajectoriesApi } from "@/lib/api/trajectories";
 
 export const trajectoryKeys = {
   all: ["trajectory"] as const,
-  detail: (projectId: string, trajectoryId: string) => [...trajectoryKeys.all, projectId, trajectoryId] as const,
+  detail: (projectId: string, trajectoryId: string) =>
+    [...trajectoryKeys.all, projectId, trajectoryId] as const,
 };
 
 export function useGetTrajectory(projectId: string, trajectoryId: string) {

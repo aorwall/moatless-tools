@@ -1,18 +1,19 @@
 import asyncio
-import json
 import logging
 import mimetypes
 import os
 import shutil
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import aiofiles
-import requests
 from llama_index.core import SimpleDirectoryReader
+from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-from llama_index.core.storage.docstore import SimpleDocumentStore
+from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
+from llama_index.core.vector_stores.types import BasePydanticVectorStore
+from opentelemetry import trace
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
@@ -29,11 +30,12 @@ from moatless.index.types import (
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
-from moatless.telemetry import instrument, set_attribute
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer(__name__)
 
 # Add constant for persist filename outside TYPE_CHECKING
 DEFAULT_PERSIST_FNAME = "docstore.json"
@@ -58,11 +60,11 @@ class CodeIndex:
         self,
         file_repo: Repository | None = None,
         index_name: Optional[str] = None,
-        vector_store: "BasePydanticVectorStore | None" = None,
-        docstore: "DocumentStore | None" = None,
-        embed_model: "BaseEmbedding | None" = None,
-        code_block_index: CodeBlockIndex | None = None,
-        settings: IndexSettings | None = None,
+        vector_store: Optional[BasePydanticVectorStore] = None,
+        docstore: Optional[DocumentStore] = None,
+        embed_model: Optional[BaseEmbedding] = None,
+        code_block_index: Optional[CodeBlockIndex] = None,
+        settings: Optional[IndexSettings] = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
@@ -130,8 +132,6 @@ class CodeIndex:
         vector_store = await SimpleFaissVectorStore.from_persist_dir_async(persist_dir)
 
         from llama_index.core.storage.docstore import SimpleDocumentStore
-
-        from moatless.index.embed_model import get_embed_model
 
         # These are still synchronous operations
         docstore, settings = await asyncio.gather(
@@ -221,7 +221,7 @@ class CodeIndex:
             return module
         return None
 
-    @instrument()
+    @tracer.start_as_current_span("semantic_search")
     async def semantic_search(
         self,
         query: Optional[str] = None,
@@ -368,11 +368,11 @@ class CodeIndex:
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
 
-    @instrument()
+    @tracer.start_as_current_span("find_class")
     async def find_class(self, class_name: str, file_pattern: Optional[str] = None):
         return await self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
 
-    @instrument()
+    @tracer.start_as_current_span("find_function")
     async def find_function(
         self,
         function_name: str,
@@ -546,15 +546,12 @@ class CodeIndex:
                     span.rank = rank
                 search_hits.append(file)
 
-        set_attribute("hits", len(search_hits))
-        set_attribute("files", len(files_with_spans))
-
         return SearchCodeResponse(
             message=message,
             hits=search_hits,
         )
 
-    @instrument()
+    @tracer.start_as_current_span("find_test_files")
     async def find_test_files(
         self,
         file_path: str,
@@ -582,8 +579,6 @@ class CodeIndex:
         elif span_id or query and max_results > 1:
             # Try to find the most similar test file by file name if no exact match on file name
             files = await self.find_test_files(file_path, max_results=1, max_spans=max_spans)
-
-        set_attribute("files", len(files))
 
         for result in search_results:
             file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
@@ -619,8 +614,6 @@ class CodeIndex:
 
             if not max_spans and len(files) >= max_results:
                 break
-
-        set_attribute("files", len(files))
 
         if max_spans:
             files = [f for f in files if len(f.span_ids) > 0]
@@ -658,7 +651,7 @@ class CodeIndex:
 
         return best_match
 
-    @instrument()
+    @tracer.start_as_current_span("vector_search")
     async def _vector_search(
         self,
         query: str = "",

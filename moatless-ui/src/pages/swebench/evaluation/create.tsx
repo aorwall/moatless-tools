@@ -1,11 +1,9 @@
-"use client";
-
-import { toast } from "sonner";
-import { PageLayout } from "@/lib/components/layouts/PageLayout";
-import { useNavigate } from "react-router-dom";
+import type { EvaluationRequest } from "@/features/swebench/api/evaluation";
 import EvaluationForm from "@/features/swebench/components/EvaluationForm";
 import { useEvaluationCreate } from "@/features/swebench/hooks/useEvaluationCreate";
-import type { EvaluationRequest } from "@/features/swebench/api/evaluation";
+import { PageLayout } from "@/lib/components/layouts/PageLayout";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 export function CreateEvaluationPage() {
   const navigate = useNavigate();
@@ -37,4 +35,4 @@ export function CreateEvaluationPage() {
       </div>
     </PageLayout>
   );
-} 
+}

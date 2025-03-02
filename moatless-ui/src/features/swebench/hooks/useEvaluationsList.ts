@@ -1,9 +1,9 @@
-import { useQuery } from '@tanstack/react-query';
-import { evaluationApi } from '../api/evaluation';
-import type { EvaluationListResponse } from '../api/evaluation';
+import { useQuery } from "@tanstack/react-query";
+import { evaluationApi } from "../api/evaluation";
+import type { EvaluationListResponse } from "../api/evaluation";
 
 export const evaluationsKeys = {
-  all: ['evaluations'] as const,
+  all: ["evaluations"] as const,
 };
 
 export function useEvaluationsList() {
@@ -11,4 +11,4 @@ export function useEvaluationsList() {
     queryKey: evaluationsKeys.all,
     queryFn: () => evaluationApi.listEvaluations(),
   });
-} 
+}

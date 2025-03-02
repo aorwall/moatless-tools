@@ -1,6 +1,9 @@
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Evaluation, EvaluationInstance } from "@/features/swebench/api/evaluation";
+import {
+  Evaluation,
+  EvaluationInstance,
+} from "@/features/swebench/api/evaluation";
 import { Badge } from "@/lib/components/ui/badge";
 import { format } from "date-fns";
 import { Input } from "@/lib/components/ui/input";
@@ -18,8 +21,14 @@ interface InstanceListProps {
   selectedInstanceId?: string;
 }
 
-export function InstanceList({ evaluation, selectedInstanceId }: InstanceListProps) {
-  const [filters, setFilters] = useState<{ status: string; instanceId: string }>({
+export function InstanceList({
+  evaluation,
+  selectedInstanceId,
+}: InstanceListProps) {
+  const [filters, setFilters] = useState<{
+    status: string;
+    instanceId: string;
+  }>({
     status: "all",
     instanceId: "",
   });
@@ -27,14 +36,14 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
   // Get unique statuses from instances
   const uniqueStatuses = useMemo(() => {
     const statuses = new Set<string>();
-    evaluation.instances.forEach(instance => {
+    evaluation.instances.forEach((instance) => {
       statuses.add(instance.status.toLowerCase());
       // Also add resolved/failed for completed instances
-      if (instance.status.toLowerCase() === 'completed') {
+      if (instance.status.toLowerCase() === "completed") {
         if (instance.resolved === true) {
-          statuses.add('resolved');
+          statuses.add("resolved");
         } else if (instance.resolved === false) {
-          statuses.add('failed');
+          statuses.add("failed");
         }
       }
     });
@@ -42,14 +51,22 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
   }, [evaluation.instances]);
 
   const filteredInstances = evaluation.instances.filter((instance) => {
-    const matchesStatus = filters.status === "all" || 
-      (instance.status.toLowerCase() === filters.status) ||
+    const matchesStatus =
+      filters.status === "all" ||
+      instance.status.toLowerCase() === filters.status ||
       // Special handling for resolved/failed
-      (filters.status === "resolved" && instance.status.toLowerCase() === "completed" && instance.resolved === true) ||
-      (filters.status === "failed" && instance.status.toLowerCase() === "completed" && instance.resolved === false);
-    
-    const matchesId = !filters.instanceId || 
-      instance.instance_id.toLowerCase().includes(filters.instanceId.toLowerCase());
+      (filters.status === "resolved" &&
+        instance.status.toLowerCase() === "completed" &&
+        instance.resolved === true) ||
+      (filters.status === "failed" &&
+        instance.status.toLowerCase() === "completed" &&
+        instance.resolved === false);
+
+    const matchesId =
+      !filters.instanceId ||
+      instance.instance_id
+        .toLowerCase()
+        .includes(filters.instanceId.toLowerCase());
     return matchesStatus && matchesId;
   });
 
@@ -69,9 +86,11 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
 
   // Function to determine if we should show job status
   const shouldShowJobStatus = (instance: EvaluationInstance) => {
-    return instance.status !== "EVALUATED" && 
-           instance.status !== "ERROR" && 
-           instance.job_status;
+    return (
+      instance.status !== "EVALUATED" &&
+      instance.status !== "ERROR" &&
+      instance.job_status
+    );
   };
 
   return (
@@ -80,14 +99,16 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
         <div className="space-y-2">
           <Select
             value={filters.status}
-            onValueChange={(value) => setFilters(prev => ({ ...prev, status: value }))}
+            onValueChange={(value) =>
+              setFilters((prev) => ({ ...prev, status: value }))
+            }
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
-              {uniqueStatuses.map(status => (
+              {uniqueStatuses.map((status) => (
                 <SelectItem key={status} value={status}>
                   {status.charAt(0).toUpperCase() + status.slice(1)}
                 </SelectItem>
@@ -98,7 +119,9 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
             type="text"
             placeholder="Search instance ID..."
             value={filters.instanceId}
-            onChange={(e) => setFilters(prev => ({ ...prev, instanceId: e.target.value }))}
+            onChange={(e) =>
+              setFilters((prev) => ({ ...prev, instanceId: e.target.value }))
+            }
             className="w-full"
           />
         </div>
@@ -112,29 +135,42 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
               to={`/swebench/evaluation/${evaluation.evaluation_name}/${instance.instance_id}`}
               className={cn(
                 "block border-b px-4 py-3 transition-colors hover:bg-gray-50",
-                selectedInstanceId === instance.instance_id && "bg-blue-50 hover:bg-blue-50"
+                selectedInstanceId === instance.instance_id &&
+                  "bg-blue-50 hover:bg-blue-50",
               )}
             >
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-sm">{instance.instance_id}</div>
+                  <div className="truncate font-medium text-sm">
+                    {instance.instance_id}
+                  </div>
                   <div className="mt-1 flex items-center gap-2">
-                    <div className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}>
+                    <div
+                      className={`status-badge status-bg-${instance.status.toLowerCase()} status-text-${instance.status.toLowerCase()}`}
+                    >
                       {instance.status}
                     </div>
-                    {instance.status === "completed" && instance.resolved != null && (
-                      <div className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}>
-                        {instance.resolved ? "✓" : "✗"}
-                      </div>
-                    )}
+                    {instance.status === "completed" &&
+                      instance.resolved != null && (
+                        <div
+                          className={`status-badge ${instance.resolved ? "status-bg-resolved status-text-resolved" : "status-bg-failed status-text-failed"}`}
+                        >
+                          {instance.resolved ? "✓" : "✗"}
+                        </div>
+                      )}
                     {shouldShowJobStatus(instance) && (
-                      <div className={`status-badge status-bg-${instance.job_status.toLowerCase()} status-text-${instance.job_status.toLowerCase()}`}>
+                      <div
+                        className={`status-badge status-bg-${instance.job_status.toLowerCase()} status-text-${instance.job_status.toLowerCase()}`}
+                      >
                         {instance.job_status}
                       </div>
                     )}
                     <span className="text-[10px] text-muted-foreground">
-                      {getRelevantTimestamp(instance) && 
-                        format(new Date(getRelevantTimestamp(instance)!), 'MMM d, HH:mm')}
+                      {getRelevantTimestamp(instance) &&
+                        format(
+                          new Date(getRelevantTimestamp(instance)!),
+                          "MMM d, HH:mm",
+                        )}
                     </span>
                     {instance.resolved_by !== undefined && (
                       <span className="text-[10px] text-muted-foreground">
@@ -150,4 +186,4 @@ export function InstanceList({ evaluation, selectedInstanceId }: InstanceListPro
       </div>
     </div>
   );
-} 
+}

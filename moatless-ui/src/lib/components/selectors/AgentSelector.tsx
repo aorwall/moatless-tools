@@ -23,7 +23,9 @@ export function AgentSelector({
   }
 
   if (!agents?.length) {
-    return <div className="text-sm text-muted-foreground">No agents available</div>;
+    return (
+      <div className="text-sm text-muted-foreground">No agents available</div>
+    );
   }
 
   const options: OptionType[] = agents.map((agent) => ({

@@ -1,8 +1,9 @@
 import logging
 from abc import ABC
-from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
+from typing import Any, ClassVar, Optional
 
-from pydantic import BaseModel, ConfigDict, PrivateAttr
+from opentelemetry import trace
+from pydantic import ConfigDict, PrivateAttr
 
 from moatless.actions.schema import (
     ActionArguments,
@@ -12,16 +13,15 @@ from moatless.actions.schema import (
     RewardScaleEntry,
 )
 from moatless.completion.base import BaseCompletionModel
-from moatless.completion.schema import FewShotExample
 from moatless.component import MoatlessComponent
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.telemetry import instrument
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class CompletionModelMixin:
@@ -51,7 +51,7 @@ class Action(MoatlessComponent, ABC):
 
     args_schema: ClassVar[type[ActionArguments]]
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    _workspace: Workspace = PrivateAttr(default=None)
+    _workspace: Workspace | None = PrivateAttr(default=None)
 
     @classmethod
     def get_component_type(cls) -> str:
@@ -65,14 +65,14 @@ class Action(MoatlessComponent, ABC):
     def _get_base_class(cls) -> type:
         return Action
 
-    @instrument(name=lambda self: f"{self.name}")
+    @tracer.start_as_current_span("execute")
     async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """Execute the action."""
         if not self._workspace:
             raise RuntimeError("No workspace set")
 
         message = await self._execute(args, file_context=file_context)
-        return Observation.create(message)
+        return Observation.create(message=message or "")
 
     async def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
         """Execute the action and return the updated FileContext."""
@@ -116,7 +116,7 @@ class Action(MoatlessComponent, ABC):
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
-        if trajectory_length < 3:
+        if trajectory_length is None or trajectory_length < 2:
             return [
                 "Exploratory Actions: Recognize that initial searches and information-gathering steps are essential and should not be heavily penalized if they don't yield immediate results.",
                 "Appropriateness of Action: Evaluate if the action is logical given the agent's current knowledge and the early stage of problem-solving.",
@@ -146,22 +146,6 @@ class Action(MoatlessComponent, ABC):
             RewardScaleEntry(min_value=min_val, max_value=max_val, description=desc)
             for min_val, max_val, desc in descriptions
         ]
-
-    @classmethod
-    def get_reward_range(cls, trajectory_length: int) -> tuple[int, int]:
-        """
-        Get the minimum and maximum reward values for this action.
-
-        Args:
-            trajectory_length: The length of the current trajectory
-
-        Returns:
-            A tuple containing the minimum and maximum reward values
-        """
-        reward_scale = cls.get_reward_scale(trajectory_length)
-        min_reward = min(entry.min_value for entry in reward_scale)
-        max_reward = max(entry.max_value for entry in reward_scale)
-        return min_reward, max_reward
 
     @classmethod
     def get_value_function_prompt(cls) -> str | None:
@@ -200,7 +184,10 @@ class Action(MoatlessComponent, ABC):
         Dynamically import and return the appropriate Action class for the given action name.
         """
         cls._initialize_components()
-        return cls._get_components().get(action_name)
+        action_class = cls._get_components().get(action_name)
+        if not action_class:
+            raise ValueError(f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}")
+        return action_class
 
     @classmethod
     def create_by_name(cls, name: str, **kwargs) -> "Action":

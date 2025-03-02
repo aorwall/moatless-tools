@@ -1,13 +1,13 @@
-import { MessageDetails } from "./MessageDetails.tsx";
 import { ActionDetails } from "./ActionDetails.tsx";
-import { ObservationDetails } from "./ObservationDetails.tsx";
-import { CompletionDetails } from "./CompletionDetails.tsx";
-import { WorkspaceFilesDetails } from "./WorkspaceFilesDetails.tsx";
-import { WorkspaceContextDetails } from "./WorkspaceContextDetails.tsx";
-import { WorkspaceTestsDetails } from "./WorkspaceTestsDetails.tsx";
-import { ErrorDetails } from "./ErrorDetails.tsx";
 import { ArtifactDetails } from "./ArtifactDetails.tsx";
+import { CompletionDetails } from "./CompletionDetails.tsx";
+import { ErrorDetails } from "./ErrorDetails.tsx";
+import { MessageDetails } from "./MessageDetails.tsx";
+import { ObservationDetails } from "./ObservationDetails.tsx";
 import { RewardDetails } from "./RewardDetails.tsx";
+import { WorkspaceContextDetails } from "./WorkspaceContextDetails.tsx";
+import { WorkspaceFilesDetails } from "./WorkspaceFilesDetails.tsx";
+import { WorkspaceTestsDetails } from "./WorkspaceTestsDetails.tsx";
 
 interface DetailsProps {
   type: string;
@@ -17,18 +17,26 @@ interface DetailsProps {
   trajectory?: any;
 }
 
-export const Details = ({ type, content, nodeId, trajectoryId, trajectory }: DetailsProps) => {
+export const Details = ({
+  type,
+  content,
+  nodeId,
+  trajectoryId,
+  trajectory,
+}: DetailsProps) => {
   switch (type) {
     case "user_message":
     case "assistant_message":
     case "thought":
       return <MessageDetails content={content} type={type} />;
     case "action":
-      return <ActionDetails 
-        content={content} 
-        nodeId={nodeId || 0} 
-        trajectory={trajectory || {}} 
-      />;
+      return (
+        <ActionDetails
+          content={content}
+          nodeId={nodeId || 0}
+          trajectory={trajectory || {}}
+        />
+      );
     case "observation":
       return <ObservationDetails content={content} />;
     case "completion":
@@ -42,10 +50,12 @@ export const Details = ({ type, content, nodeId, trajectoryId, trajectory }: Det
     case "error":
       return <ErrorDetails content={content} />;
     case "artifact":
-      return <ArtifactDetails content={content} trajectoryId={trajectoryId || ""} />;
+      return (
+        <ArtifactDetails content={content} trajectoryId={trajectoryId || ""} />
+      );
     case "reward":
       return <RewardDetails content={content} />;
     default:
       return <div>Unknown item type: {type}</div>;
   }
-}; 
+};

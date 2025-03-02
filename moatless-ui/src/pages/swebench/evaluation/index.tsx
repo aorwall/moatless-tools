@@ -1,14 +1,12 @@
-"use client";
-
-import { toast } from "sonner";
-import { PageLayout } from "@/lib/components/layouts/PageLayout";
-import { ScrollArea } from "@/lib/components/ui/scroll-area";
-import { useNavigate } from "react-router-dom";
-import { Button } from "@/lib/components/ui/button";
-import { Plus } from "lucide-react";
-import { useEvaluationsList } from "@/features/swebench/hooks/useEvaluationsList";
-import React from "react";
 import { EvaluationTable } from "@/features/swebench/components/EvaluationTable";
+import { useEvaluationsList } from "@/features/swebench/hooks/useEvaluationsList";
+import { PageLayout } from "@/lib/components/layouts/PageLayout";
+import { Button } from "@/lib/components/ui/button";
+import { ScrollArea } from "@/lib/components/ui/scroll-area";
+import { Plus } from "lucide-react";
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 
 export function EvaluationsPage() {
   const navigate = useNavigate();
@@ -16,8 +14,8 @@ export function EvaluationsPage() {
 
   React.useEffect(() => {
     if (error) {
-      toast.error('Failed to fetch evaluations', {
-        description: error.message || 'Please try again later'
+      toast.error("Failed to fetch evaluations", {
+        description: error.message || "Please try again later",
       });
     }
   }, [error]);
@@ -34,12 +32,12 @@ export function EvaluationsPage() {
 
       <ScrollArea className="h-[calc(100vh-56px-8rem)]">
         <div className="pr-4">
-          <EvaluationTable 
-            evaluations={evaluations?.evaluations} 
-            isLoading={isLoading} 
+          <EvaluationTable
+            evaluations={evaluations?.evaluations}
+            isLoading={isLoading}
           />
         </div>
       </ScrollArea>
     </PageLayout>
   );
-} 
+}

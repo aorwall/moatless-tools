@@ -1,10 +1,8 @@
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.completion.base import LLMResponseFormat
 from moatless.completion.manager import ModelConfig
-from moatless.schema import MessageHistoryType
 
 
 class ModelConfigUpdateDTO(BaseModel):

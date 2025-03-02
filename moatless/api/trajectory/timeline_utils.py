@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.think import ThinkArgs

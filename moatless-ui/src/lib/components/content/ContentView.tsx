@@ -1,8 +1,8 @@
-import type { ContentStructure } from "@/lib/types/content"
-import { SectionRenderer } from "./SectionRenderer"
+import type { ContentStructure } from "@/lib/types/content";
+import { SectionRenderer } from "./SectionRenderer";
 
 interface ContentViewProps {
-  content: ContentStructure
+  content: ContentStructure;
 }
 
 export function ContentView({ content }: ContentViewProps) {
@@ -15,6 +15,5 @@ export function ContentView({ content }: ContentViewProps) {
         ))}
       </div>
     </div>
-  )
+  );
 }
-

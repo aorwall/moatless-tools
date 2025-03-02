@@ -1,12 +1,11 @@
-import { FC, useEffect, useState } from 'react';
-import { FileText } from 'lucide-react';
-import { Button } from '@/lib/components/ui/button';
-import { Document, pdfjs } from 'react-pdf'
-
+import { FC, useEffect, useState } from "react";
+import { FileText } from "lucide-react";
+import { Button } from "@/lib/components/ui/button";
+import { Document, pdfjs } from "react-pdf";
 
 console.log(import.meta.url);
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
+  "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
 
@@ -37,7 +36,7 @@ export const PDFPreview: FC<PDFPreviewProps> = ({ content, fileName }) => {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => window.open(url, '_blank')}
+          onClick={() => window.open(url, "_blank")}
         >
           <FileText className="mr-2 h-4 w-4" />
           Open in New Tab
@@ -47,9 +46,9 @@ export const PDFPreview: FC<PDFPreviewProps> = ({ content, fileName }) => {
           size="sm"
           onClick={() => {
             // Create temporary link to download the PDF
-            const link = document.createElement('a');
+            const link = document.createElement("a");
             link.href = url;
-            link.download = fileName || 'document.pdf';
+            link.download = fileName || "document.pdf";
             link.click();
           }}
         >
@@ -59,4 +58,4 @@ export const PDFPreview: FC<PDFPreviewProps> = ({ content, fileName }) => {
       </div>
     </div>
   );
-}; 
+};

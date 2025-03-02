@@ -1,5 +1,5 @@
-import { JsonViewer } from '../ui/json-viewer';
-import { ChevronDown } from 'lucide-react';
+import { JsonViewer } from "../ui/json-viewer";
+import { ChevronDown } from "lucide-react";
 import {
   Collapsible,
   CollapsibleContent,
@@ -34,20 +34,26 @@ interface CompletionResponseProps {
 
 function isContentItemArray(content: any): content is ContentItem[] {
   if (!Array.isArray(content)) return false;
-  return content.every(item => 
-    item && 
-    typeof item === 'object' && 
-    'type' in item && 
-    'text' in item
+  return content.every(
+    (item) =>
+      item && typeof item === "object" && "type" in item && "text" in item,
   );
 }
 
-function ContentItemView({ item, index }: { item: ContentItem; index: number }) {
+function ContentItemView({
+  item,
+  index,
+}: {
+  item: ContentItem;
+  index: number;
+}) {
   return (
     <Collapsible defaultOpen className="border rounded-lg mb-2 last:mb-0">
       <CollapsibleTrigger className="flex items-center w-full p-3 hover:bg-muted/50 rounded-lg border">
         <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 rotate-180" />
-        <Badge variant="secondary" className="ml-2">{item.type}</Badge>
+        <Badge variant="secondary" className="ml-2">
+          {item.type}
+        </Badge>
         <span className="text-xs text-muted-foreground ml-2">#{index + 1}</span>
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -74,15 +80,19 @@ export function CompletionResponse({ choices }: CompletionResponseProps) {
       <div className="space-y-2">
         {message.content && (
           <>
-            {typeof message.content === 'string' ? (
+            {typeof message.content === "string" ? (
               <Collapsible defaultOpen>
                 <CollapsibleTrigger className="flex items-center w-full p-3 hover:bg-muted/50 rounded-lg border">
                   <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 rotate-180" />
-                  <Badge variant="secondary" className="ml-2">content</Badge>
+                  <Badge variant="secondary" className="ml-2">
+                    content
+                  </Badge>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="px-4 pb-3 pt-1">
-                    <pre className="whitespace-pre-wrap text-sm">{message.content}</pre>
+                    <pre className="whitespace-pre-wrap text-sm">
+                      {message.content}
+                    </pre>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
@@ -104,14 +114,18 @@ export function CompletionResponse({ choices }: CompletionResponseProps) {
           <Collapsible key={tool.id} defaultOpen>
             <CollapsibleTrigger className="flex items-center w-full p-3 hover:bg-muted/50 rounded-lg border">
               <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200 rotate-180" />
-              <Badge variant="secondary" className="ml-2">{tool.function.name}</Badge>
-              <span className="text-xs text-muted-foreground ml-2">#{index + 1}</span>
+              <Badge variant="secondary" className="ml-2">
+                {tool.function.name}
+              </Badge>
+              <span className="text-xs text-muted-foreground ml-2">
+                #{index + 1}
+              </span>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="px-4 pb-3 pt-1">
                 <JsonViewer
                   data={
-                    typeof tool.function.arguments === 'string'
+                    typeof tool.function.arguments === "string"
                       ? JSON.parse(tool.function.arguments)
                       : tool.function.arguments
                   }
@@ -123,4 +137,4 @@ export function CompletionResponse({ choices }: CompletionResponseProps) {
       </div>
     </Card>
   );
-} 
+}

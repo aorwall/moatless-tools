@@ -1077,7 +1077,7 @@ class FileContext(BaseModel):
 
     def __init__(
         self,
-        repo: Repository | None,
+        repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
         **data,
     ):

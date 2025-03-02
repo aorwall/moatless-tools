@@ -23,17 +23,17 @@ export function useNodeActions({ nodeId, trajectory }: UseNodeActionsProps) {
 
   const handleFork = async () => {
     if (!trajectory.id) return;
-    
+
     const response = await fetch(`/api/trajectories/${trajectory.id}/fork`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        nodeId
-      })
+        nodeId,
+      }),
     });
-    
+
     const data = await response.json();
     navigate(`/trajectory/${data.trajectoryId}`);
   };
@@ -42,6 +42,6 @@ export function useNodeActions({ nodeId, trajectory }: UseNodeActionsProps) {
     handleRetry,
     handleFork,
     isRetryPending: retryNode.isPending,
-    canPerformActions: !!trajectory.id
+    canPerformActions: !!trajectory.id,
   };
-} 
+}

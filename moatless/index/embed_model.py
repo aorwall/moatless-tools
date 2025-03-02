@@ -1,7 +1,10 @@
 import os
+from typing import Optional
+
+from llama_index.core.embeddings import BaseEmbedding
 
 
-def get_embed_model(model_name: str) -> "BaseEmbedding":
+def get_embed_model(model_name: str) -> Optional[BaseEmbedding]:
     if model_name.startswith("voyage"):
         try:
             from llama_index.embeddings.voyageai import VoyageEmbedding

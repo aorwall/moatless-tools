@@ -12,7 +12,6 @@ export function AgentsLayout() {
   const { id } = useParams();
   const { data: agents = [], isLoading, error } = useAgents();
 
-
   const getAgentDisplay = (agent: AgentConfig) => ({
     title: agent.id,
     subtitle: ``,

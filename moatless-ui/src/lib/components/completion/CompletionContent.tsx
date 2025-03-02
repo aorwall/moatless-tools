@@ -1,6 +1,6 @@
-import { CompletionInput } from './CompletionInput';
-import { CompletionResponse } from './CompletionResponse';
-import { CompletionUsage } from './CompletionUsage';
+import { CompletionInput } from "./CompletionInput";
+import { CompletionResponse } from "./CompletionResponse";
+import { CompletionUsage } from "./CompletionUsage";
 
 interface CompletionContentProps {
   content: {
@@ -16,11 +16,13 @@ interface CompletionContentProps {
 
 export function CompletionContent({ content }: CompletionContentProps) {
   // Transform usage data to match the expected format in CompletionUsage
-  const transformedUsage = content.usage ? {
-    prompt_tokens: content.usage.prompt_tokens,
-    completion_tokens: content.usage.completion_tokens,
-    cached_tokens: content.usage.cached_tokens
-  } : undefined;
+  const transformedUsage = content.usage
+    ? {
+        prompt_tokens: content.usage.prompt_tokens,
+        completion_tokens: content.usage.completion_tokens,
+        cached_tokens: content.usage.cached_tokens,
+      }
+    : undefined;
 
   return (
     <div className="space-y-4 max-w-full">
@@ -36,4 +38,4 @@ export function CompletionContent({ content }: CompletionContentProps) {
       {content.input && <CompletionInput input={content.input} />}
     </div>
   );
-} 
+}

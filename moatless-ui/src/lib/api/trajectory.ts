@@ -28,5 +28,4 @@ export const trajectoryApi = {
 
     return response.json();
   },
-
 };

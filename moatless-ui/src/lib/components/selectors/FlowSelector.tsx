@@ -19,7 +19,9 @@ export function FlowSelector({
   }
 
   if (!flows?.length) {
-    return <div className="text-sm text-muted-foreground">No flows available</div>;
+    return (
+      <div className="text-sm text-muted-foreground">No flows available</div>
+    );
   }
 
   const options: OptionType[] = flows.map((flow) => ({
@@ -34,18 +36,32 @@ export function FlowSelector({
     return (
       <>
         {flow.description && (
-          <p className="text-sm text-muted-foreground mb-2">{flow.description}</p>
+          <p className="text-sm text-muted-foreground mb-2">
+            {flow.description}
+          </p>
         )}
         <div className="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
-          <p><span className="font-medium">Type:</span> {flow.flow_type}</p>
-          <p><span className="font-medium">Max Iterations:</span> {flow.max_iterations}</p>
+          <p>
+            <span className="font-medium">Type:</span> {flow.flow_type}
+          </p>
+          <p>
+            <span className="font-medium">Max Iterations:</span>{" "}
+            {flow.max_iterations}
+          </p>
           {flow.max_expansions && (
-            <p><span className="font-medium">Max Expansions:</span> {flow.max_expansions}</p>
+            <p>
+              <span className="font-medium">Max Expansions:</span>{" "}
+              {flow.max_expansions}
+            </p>
           )}
           {flow.max_depth && (
-            <p><span className="font-medium">Max Depth:</span> {flow.max_depth}</p>
+            <p>
+              <span className="font-medium">Max Depth:</span> {flow.max_depth}
+            </p>
           )}
-          <p><span className="font-medium">Max Cost:</span> {flow.max_cost}</p>
+          <p>
+            <span className="font-medium">Max Cost:</span> {flow.max_cost}
+          </p>
         </div>
       </>
     );
@@ -61,4 +77,4 @@ export function FlowSelector({
       renderAdditionalInfo={renderInfo}
     />
   );
-} 
+}

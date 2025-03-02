@@ -1,5 +1,5 @@
 // Import CSS
-import './timeline.css';
+import "./timeline.css";
 
 // Re-export all trajectory components
 export * from "./Timeline.tsx";

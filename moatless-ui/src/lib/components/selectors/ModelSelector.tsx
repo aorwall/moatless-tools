@@ -31,7 +31,9 @@ export function ModelSelector({
   if (!models?.length) {
     return (
       <div className="flex items-center gap-2">
-        <div className="text-sm text-muted-foreground flex-1">No models available</div>
+        <div className="text-sm text-muted-foreground flex-1">
+          No models available
+        </div>
         <Button asChild variant="outline" size="sm">
           <Link to="/settings/models" className="flex items-center gap-2">
             <PlusCircle className="h-4 w-4" />

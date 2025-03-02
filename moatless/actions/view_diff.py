@@ -1,5 +1,4 @@
 import logging
-from typing import List
 
 from pydantic import ConfigDict
 
@@ -40,15 +39,18 @@ class ViewDiff(Action):
     args_schema = ViewDiffArgs
 
     async def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None) -> Observation:
+        if not file_context:
+            raise ValueError("File context is required to view diff")
+
         diff = file_context.generate_git_patch()
 
         if not diff:
-            return Observation(
+            return Observation.create(
                 message="No changes detected in the workspace.",
                 properties={"diff": "", "success": True},
             )
 
-        return Observation(
+        return Observation.create(
             message="Current changes in workspace:",
             properties={"diff": diff, "success": True},
         )

@@ -1,7 +1,7 @@
-import { FC } from 'react';
-import { FileText } from 'lucide-react';
-import { Button } from '@/lib/components/ui/button';
-import { PDFPreview } from '@/lib/components/artifact/PDFPreview';
+import { FC } from "react";
+import { FileText } from "lucide-react";
+import { Button } from "@/lib/components/ui/button";
+import { PDFPreview } from "@/lib/components/artifact/PDFPreview";
 
 interface FilePreviewProps {
   mimeType: string;
@@ -9,15 +9,19 @@ interface FilePreviewProps {
   fileName?: string;
 }
 
-export const FilePreview: FC<FilePreviewProps> = ({ mimeType, content, fileName }) => {
+export const FilePreview: FC<FilePreviewProps> = ({
+  mimeType,
+  content,
+  fileName,
+}) => {
   if (!content) return null;
 
-  if (mimeType.startsWith('image/')) {
+  if (mimeType.startsWith("image/")) {
     return (
       <div className="relative aspect-video w-full overflow-hidden rounded-lg border bg-gray-100">
         <img
           src={`data:${mimeType};base64,${content}`}
-          alt={fileName || 'File preview'}
+          alt={fileName || "File preview"}
           className="h-full w-full object-contain"
           loading="lazy"
         />
@@ -25,11 +29,11 @@ export const FilePreview: FC<FilePreviewProps> = ({ mimeType, content, fileName 
     );
   }
 
-  if (mimeType === 'application/pdf') {
+  if (mimeType === "application/pdf") {
     return <PDFPreview content={content} fileName={fileName} />;
   }
 
-  if (mimeType.startsWith('text/')) {
+  if (mimeType.startsWith("text/")) {
     try {
       const decodedContent = atob(content);
       return (
@@ -38,7 +42,7 @@ export const FilePreview: FC<FilePreviewProps> = ({ mimeType, content, fileName 
         </pre>
       );
     } catch (e) {
-      console.error('Failed to decode text content:', e);
+      console.error("Failed to decode text content:", e);
       return (
         <div className="rounded-lg border bg-red-50 p-4 text-sm text-red-600">
           Failed to decode text content
@@ -48,24 +52,22 @@ export const FilePreview: FC<FilePreviewProps> = ({ mimeType, content, fileName 
   }
 
   // Default file representation with download option
-  const blob = new Blob([Buffer.from(content, 'base64')], { type: mimeType });
+  const blob = new Blob([Buffer.from(content, "base64")], { type: mimeType });
   const url = URL.createObjectURL(blob);
 
   return (
     <div className="flex items-center justify-between rounded-lg border bg-gray-50 p-4">
       <div className="flex items-center gap-2">
         <FileText className="h-5 w-5 text-gray-400" />
-        <span className="text-sm text-gray-600">
-          File type: {mimeType}
-        </span>
+        <span className="text-sm text-gray-600">File type: {mimeType}</span>
       </div>
       <Button
         variant="outline"
         size="sm"
         onClick={() => {
-          const link = document.createElement('a');
+          const link = document.createElement("a");
           link.href = url;
-          link.download = fileName || 'download';
+          link.download = fileName || "download";
           link.click();
           setTimeout(() => URL.revokeObjectURL(url), 100);
         }}
@@ -75,4 +77,4 @@ export const FilePreview: FC<FilePreviewProps> = ({ mimeType, content, fileName 
       </Button>
     </div>
   );
-}; 
+};

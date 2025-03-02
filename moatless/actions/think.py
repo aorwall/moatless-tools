@@ -1,11 +1,16 @@
-from typing import List
-
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
+from pydantic import ConfigDict, Field
+
+from moatless.actions.action import Action
+from moatless.actions.schema import ActionArguments, Observation
+from moatless.completion.schema import FewShotExample
+from moatless.file_context import FileContext
+
 
 # https://github.com/sierra-research/tau-bench/blob/14bf0ef52e595922d597a38f32d3e8c0dce3a8f8/tau_bench/envs/retail/tools/think.py
 
