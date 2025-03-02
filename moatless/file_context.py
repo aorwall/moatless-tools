@@ -753,12 +753,6 @@ class ContextFile(BaseModel):
                 return span
         return None
 
-    def get_patches(self) -> List[str]:
-        """
-        Get all patches associated with this ContextFile.
-        """
-        return self.patches
-
     @property
     def is_new(self) -> bool:
         """
@@ -887,6 +881,12 @@ class FileContext(BaseModel):
     def workspace(self):
         raise AttributeError("workspace property is write-only")
 
+    @property
+    def repository(self) -> Repository:
+        if not self._repo:
+            raise ValueError("Repository is not set")
+        return self._repo
+
     @workspace.setter 
     def workspace(self, workspace: Workspace):
         self._repo = workspace.repository
@@ -1009,22 +1009,6 @@ class FileContext(BaseModel):
             logger.warning(f"Could not find file {file_path} in the repository")
             return []
 
-    def apply(self, file_context: "FileContext"):
-        """
-        Apply a list of FileContext instances, collecting their ContextFiles.
-        """
-        for context_file in file_context.files:
-            file_path = context_file.file_path
-            if file_path not in self.files:
-                self._files[file_path] = ContextFile(
-                    file_path=file_path,
-                    repo=self.repo,
-                    initial_patch=file_context.generate_full_patch(),
-                )
-
-            self._files[file_path].spans.extend(context_file.spans)
-            self._files[file_path].show_all_spans = context_file.show_all_spans
-
     def has_file(self, file_path: str):
         return file_path in self._files and (self._files[file_path].spans or self._files[file_path].show_all_spans)
 
@@ -1033,23 +1017,23 @@ class FileContext(BaseModel):
 
     def file_exists(self, file_path: str):
         context_file = self._files.get(file_path)
-        return context_file or self._repo.file_exists(file_path)
+        return context_file or self.repository.file_exists(file_path)
 
     def is_directory(self, file_path: str):
-        return self._repo.is_directory(file_path)
+        return self.repository.is_directory(file_path)
 
     def get_context_file(self, file_path: str, add_extra: bool = False) -> Optional[ContextFile]:
         if self._repo and hasattr(self._repo, "get_relative_path"):
-            file_path = self._repo.get_relative_path(file_path)
+            file_path = self.repository.get_relative_path(file_path)
 
         context_file = self._files.get(file_path)
 
         if not context_file:
-            if not self._repo.file_exists(file_path):
+            if not self.repository.file_exists(file_path):
                 logger.info(f"get_context_file({file_path}) File not found")
                 return None
 
-            if self._repo.is_directory(file_path):
+            if self.repository.is_directory(file_path):
                 logger.info(f"get_context_file({file_path}) File is a directory")
                 return None
 
@@ -1082,7 +1066,8 @@ class FileContext(BaseModel):
         return self._max_tokens - self.context_size()
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
-        self._repo.save_file(file_path, updated_content)
+        if updated_content:
+            self.repository.save_file(file_path, updated_content)
 
     def reset(self):
         self._files = {}
@@ -1260,7 +1245,7 @@ class FileContext(BaseModel):
 
         return "\n".join(summary)
 
-    def add_file_context(self, other_context: "FileContext") -> List[str]:
+    def add_file_context(self, other_context: "FileContext") -> bool:
         """
         Adds spans from another FileContext to the current one and returns newly added span IDs.
         Also copies over cached content and module if they exist.
@@ -1282,14 +1267,16 @@ class FileContext(BaseModel):
             else:
                 context_file = self.get_context_file(file_path)
 
-            # Copy show_all_spans flag if either context has it enabled
-            if not context_file.show_all_spans and other_file.show_all_spans:
-                added_new_spans = True
-                context_file.show_all_spans = other_file.show_all_spans
-            else: 
-                for span in other_file.spans:
-                    if context_file.add_span(span.span_id):
-                        added_new_spans = True
+            if context_file:
+
+                # Copy show_all_spans flag if either context has it enabled
+                if not context_file.show_all_spans and other_file.show_all_spans:
+                    added_new_spans = True
+                    context_file.show_all_spans = other_file.show_all_spans
+                else: 
+                    for span in other_file.spans:
+                        if context_file.add_span(span.span_id):
+                            added_new_spans = True
 
         return added_new_spans
 
@@ -1589,3 +1576,9 @@ class FileContext(BaseModel):
             List[str]: List of created file paths
         """
         return [file_path for file_path, file in self._files.items() if file.is_new]
+
+    def persist(self):
+        """Persist all files in the context"""
+        for file_path, file in self._files.items():
+            if file.patch:
+                self.repository.save_file(file_path, file.content)

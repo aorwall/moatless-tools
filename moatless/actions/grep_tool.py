@@ -1,6 +1,7 @@
-from typing import List, Dict, Any, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -11,13 +12,12 @@ from moatless.actions.schema import (
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
-from datetime import datetime
 
 
 class GrepToolArgs(ActionArguments):
     """
     Search file contents using regular expressions.
-    
+
     - Fast content search tool that works with any codebase size
     - Searches file contents using regular expressions
     - Supports full regex syntax (eg. "log.*Error", "function\\s+\\w+", etc.)
@@ -32,12 +32,12 @@ class GrepToolArgs(ActionArguments):
         ...,
         description="The regex pattern to search for in file contents. Supports full regex syntax.",
     )
-    
+
     include: Optional[str] = Field(
         None,
         description="Optional glob pattern to filter files (e.g. '*.py', '*.{ts,tsx}')",
     )
-    
+
     max_results: int = Field(
         100,
         description="Maximum number of results to return",
@@ -90,7 +90,7 @@ class GrepTool(Action):
     """
     Fast content search tool using regular expressions.
     """
-    
+
     args_schema = GrepToolArgs
 
     async def _execute(
@@ -104,9 +104,7 @@ class GrepTool(Action):
         try:
             # Use the new regex search method from FileRepository
             matches = await file_context._repo.find_regex_matches(
-                regex_pattern=args.pattern,
-                include_pattern=args.include,
-                max_results=args.max_results
+                regex_pattern=args.pattern, include_pattern=args.include, max_results=args.max_results
             )
 
             if not matches:
@@ -124,25 +122,18 @@ class GrepTool(Action):
                 file_path = match["file_path"]
                 if file_path not in files_grouped:
                     mod_time = datetime.fromtimestamp(match["mod_time"]).strftime("%Y-%m-%d %H:%M:%S")
-                    files_grouped[file_path] = {
-                        "mod_time": mod_time,
-                        "matches": []
-                    }
-                
-                files_grouped[file_path]["matches"].append({
-                    "line_num": match["line_num"],
-                    "content": match["content"]
-                })
-            
+                    files_grouped[file_path] = {"mod_time": mod_time, "matches": []}
+
+                files_grouped[file_path]["matches"].append({"line_num": match["line_num"], "content": match["content"]})
 
             for file_path, file_data in files_grouped.items():
                 message += f"📄 {file_path}\n"
-                
+
                 for match in file_data["matches"]:
                     line_num = match["line_num"]
                     content = match["content"].strip()
                     message += f"    Line {line_num}: {content}\n"
-                
+
                 message += "\n"
 
             return message

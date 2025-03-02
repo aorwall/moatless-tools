@@ -2,7 +2,7 @@ import logging
 import re
 from typing import List
 
-from pydantic import Field, field_validator, model_validator, ConfigDict
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
@@ -78,8 +78,8 @@ class StringReplaceArgs(ActionArguments):
         self.new_str = remove_line_numbers(self.new_str.rstrip("\n"))
 
         return self
-    
-    @field_validator("old_str", mode='before')
+
+    @field_validator("old_str", mode="before")
     @classmethod
     def validate_old_str(cls, v):
         if v is None or v.strip() == "":
@@ -123,7 +123,6 @@ class StringReplaceArgs(ActionArguments):
     def short_summary(self) -> str:
         param_str = f'path="{self.path}"'
         return f"{self.name}({param_str})"
-
 
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
@@ -254,6 +253,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
     )
 
     async def execute(self, args: StringReplaceArgs, file_context: FileContext | None = None) -> Observation:
+        if not file_context:
+            raise ValueError("File context is required")
+
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:
@@ -270,7 +272,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"The old_str and new_str are the same. No changes were made.",
                 properties={"fail_reason": "no_changes"},
-            )
+            )  # type: ignore
 
         # Use find_exact_matches instead of inline code
         exact_matches = find_exact_matches(old_str, file_content)
@@ -439,6 +441,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         diff = do_diff(str(path), file_content, new_file_content)
 
         context_file.apply_changes(new_file_content)
+        self.persist(file_context)
 
         # Create a snippet of the edited section
         snippet_start_line = max(0, start_line - SNIPPET_LINES - 1)
@@ -472,6 +475,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             observation.message += f"\n\n{test_summary}"
 
         return observation
+
 
 def normalize_indentation(s):
     return "\n".join(line.strip() for line in s.splitlines())

@@ -1,10 +1,11 @@
 import logging
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
 
-from moatless.actions.schema import ActionArguments
 from pydantic import BaseModel, Field
 
 from moatless.actions.action import CompletionModelMixin
+from moatless.actions.schema import ActionArguments
+from moatless.completion.base import CompletionRetryError
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
@@ -12,7 +13,6 @@ from moatless.completion.schema import (
     ResponseSchema,
 )
 from moatless.exceptions import CompletionRejectError
-from moatless.completion.base import CompletionRetryError
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
@@ -78,16 +78,17 @@ class IdentifyMixin(CompletionModelMixin):
 
     def _initialize_completion_model(self):
         """Initialize the completion model with validation function for token limits"""
+
         async def validate_identified_code(
             structured_outputs: List[ResponseSchema],
             text_response: Optional[str],
             flags: List[str],
         ) -> Tuple[List[ResponseSchema], Optional[str], List[str]]:
             identified_context = FileContext(repo=self._repository)
-            
+
             if not structured_outputs:
                 return structured_outputs, text_response, flags
-                
+
             for identified_code in structured_outputs:
                 if identified_code.identified_spans:
                     for identified_spans in identified_code.identified_spans:
@@ -100,17 +101,21 @@ class IdentifyMixin(CompletionModelMixin):
 
             tokens = identified_context.context_size()
             if tokens > self.max_identify_tokens:
-                logger.warning(f"Identified code is too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. ")
+                logger.warning(
+                    f"Identified code is too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. "
+                )
                 raise CompletionRetryError(
                     f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. "
                     f"Please identify a smaller subset of the most relevant code sections."
                 )
-                
+
             return structured_outputs, text_response, flags
 
         self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
 
-    async def _identify_code(self, args: ActionArguments, view_context: FileContext, max_tokens: int) -> Tuple[FileContext, Completion]:
+    async def _identify_code(
+        self, args: ActionArguments, view_context: FileContext, max_tokens: int
+    ) -> Tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:

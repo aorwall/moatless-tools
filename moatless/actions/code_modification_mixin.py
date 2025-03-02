@@ -1,18 +1,19 @@
 import logging
-
-from pydantic import Field
 from pathlib import Path
 from typing import Optional, Tuple
 
+from opentelemetry import trace
+from pydantic import Field
+
+from moatless.actions.action import Action
 from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
 from moatless.telemetry import instrument
 from moatless.utils.file import is_test
-from opentelemetry import trace
+
 logger = logging.getLogger(__name__)
 
 tracer = trace.get_tracer(__name__)
-
 
 
 class CodeModificationMixin:
@@ -21,6 +22,7 @@ class CodeModificationMixin:
     This includes path normalization, file validation, test running, and observation handling.
     """
 
+    persist_artifacts: bool = Field(False, description="Whether to persist artifacts after modifying code")
     auto_run_tests: bool = Field(True, description="Whether to automatically run tests after modifying code")
 
     def normalize_path(self, file_path: str) -> str:
@@ -30,6 +32,13 @@ class CodeModificationMixin:
         if file_path.startswith("/"):
             file_path = file_path[1:]
         return file_path
+
+    def persist(self, file_context: FileContext):
+        """Persist the modified files"""
+        if not self.persist_artifacts:
+            return
+
+        file_context.persist()
 
     def validate_file_access(
         self, file_path: str, file_context: FileContext
@@ -49,13 +58,13 @@ class CodeModificationMixin:
             return None, Observation(
                 message=f"File {path} not found.",
                 properties={"fail_reason": "file_not_found"},
-            )
+            )  # type: ignore
 
         if not file_context.has_file(str(path)):
             return None, Observation(
                 message=f"You have not yet viewed the file {path}. Use ViewCode to view the parts of the file that you want to modify.",
                 properties={"fail_reason": "file_not_in_context"},
-            )
+            )  # type: ignore
 
         return path, None
 
@@ -76,7 +85,9 @@ class CodeModificationMixin:
             file_context.add_test_file(file_path)
         elif self._workspace.code_index:
             # If the file is not a test file, find test files that might be related to the file
-            search_results = await self._workspace.code_index.find_test_files(file_path, query=file_path, max_results=2, max_spans=2)
+            search_results = await self._workspace.code_index.find_test_files(
+                file_path, query=file_path, max_results=2, max_spans=2
+            )
 
             for search_result in search_results:
                 file_context.add_test_file(search_result.file_path)
