@@ -4,6 +4,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from enum import Enum
+from math import log
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import litellm
@@ -114,7 +115,7 @@ class BaseCompletionModel(BaseModel, ABC):
     max_tokens: Optional[int] = Field(2000, description="The maximum number of tokens to generate")
     timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
     model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
-    model_api_key: Optional[str] = Field(default=None, description="The API key for the model", exclude=True)
+    model_api_key: Optional[str] = Field(default=None, description="The API key for the model")
     response_format: LLMResponseFormat = Field(..., description="The response format expected from the LLM")
     metadata: Optional[dict] = Field(default=None, description="Additional metadata for the completion model")
     message_cache: bool = Field(
@@ -332,11 +333,6 @@ class BaseCompletionModel(BaseModel, ABC):
             usage = Usage.from_completion_response(completion_response, self.model)
             if usage:
                 accumulated_usage += usage
-                set_attribute("prompt_tokens", usage.prompt_tokens)
-                set_attribute("completion_tokens", usage.completion_tokens)
-                set_attribute("cache_read_tokens", usage.cache_read_tokens)
-                set_attribute("cache_write_tokens", usage.cache_write_tokens)
-                set_attribute("completion_cost", usage.completion_cost)
             else:
                 logger.warning(f"No usage found for completion response: {completion_response}")
 
@@ -388,10 +384,11 @@ class BaseCompletionModel(BaseModel, ABC):
 
                     messages.append(completion_response.choices[0].message.model_dump())
 
-                logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
                 if e.retry_messages:
+                    logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
                     messages.extend(e.retry_messages)
                 else:
+                    logger.warning(f"Post validation failed with retry message: {e}")
                     if tool_call_id:
                         messages.append(
                             ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)
@@ -484,6 +481,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
                 if self.model_base_url:
                     params["api_base"] = self.model_base_url
+
                 if self.model_api_key:
                     params["api_key"] = self.model_api_key
 
@@ -600,8 +598,6 @@ class BaseCompletionModel(BaseModel, ABC):
 
     def model_dump(self, **kwargs):
         dump = super().model_dump(**kwargs)
-        if "model_api_key" in dump:
-            dump["model_api_key"] = None
         if "response_format" in dump:
             dump["response_format"] = dump["response_format"].value
         if "message_history_type" in dump:
@@ -635,13 +631,6 @@ class BaseCompletionModel(BaseModel, ABC):
             return cls.create(**obj)
 
         return obj
-
-    @model_validator(mode="after")
-    def set_api_key(self) -> "BaseCompletionModel":
-        """Update the model with the API key from env vars if model base URL is set but API key is not"""
-        if self.model_base_url and not self.model_api_key:
-            self.model_api_key = os.getenv("CUSTOM_LLM_API_KEY")
-        return self
 
     def _merge_same_role_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Merge consecutive messages with the 'user' role into a single message.

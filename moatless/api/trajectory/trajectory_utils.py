@@ -38,6 +38,9 @@ def convert_moatless_node_to_api_node(
         warnings = []
         errors = []
 
+        if step.action.name == "Think":
+            continue
+
         # Convert action
         action = ActionDTO(
             name=step.action.name,
@@ -81,40 +84,6 @@ def convert_moatless_node_to_api_node(
             elif not node.file_context.has_test_patch():
                 warnings.append("finish_without_test_patch")
 
-        # Convert completion
-        completion = None
-        if step.completion and step.completion.usage:
-            usage = UsageDTO(
-                completionCost=step.completion.usage.get_calculated_cost(step.completion.model),
-                promptTokens=step.completion.usage.get_total_prompt_tokens(step.completion.model),
-                completionTokens=step.completion.usage.completion_tokens,
-                cachedTokens=step.completion.usage.cache_read_tokens,
-            )
-            tokens = []
-            if step.completion.usage.prompt_tokens:
-                tokens.append(f"{step.completion.usage.get_total_prompt_tokens(step.completion.model)}↑")
-            if step.completion.usage.completion_tokens:
-                tokens.append(f"{step.completion.usage.completion_tokens}↓")
-            if step.completion.usage.cache_read_tokens:
-                tokens.append(f"{step.completion.usage.cache_read_tokens}⚡")
-
-            completion = CompletionDTO(
-                type="action_step",
-                usage=usage,
-                retries=step.completion.retries,
-                tokens=" ".join(tokens),
-                input=json.dumps(step.completion.input, indent=2)
-                if hasattr(step.completion, "input") and step.completion.input is not None
-                else None,
-                response=json.dumps(step.completion.response, indent=2)
-                if hasattr(step.completion, "response") and step.completion.response is not None
-                else None,
-            )
-
-            # Add retries warning
-            if step.completion.retries and step.completion.retries > 1:
-                warnings.append("retries")
-
         # Add step errors and warnings to the overall lists
         all_errors.extend(errors)
         all_warnings.extend(warnings)
@@ -124,65 +93,10 @@ def convert_moatless_node_to_api_node(
                 thoughts=getattr(step.action, "thoughts", None),
                 action=action,
                 observation=observation,
-                completion=completion,
                 errors=errors,
                 warnings=warnings,
             )
         )
-
-    # Convert action completion
-    action_completion = None
-    if "build_action" in node.completions:
-        completion = node.completions["build_action"]
-        if completion and completion.usage:
-            usage = UsageDTO(
-                completionCost=completion.usage.get_calculated_cost(completion.model),
-                promptTokens=completion.usage.prompt_tokens,
-                completionTokens=completion.usage.completion_tokens,
-                cachedTokens=completion.usage.cache_read_tokens,
-            )
-            tokens = []
-            if completion.usage.prompt_tokens:
-                tokens.append(f"{completion.usage.get_total_prompt_tokens(completion.model)}↑")
-            if completion.usage.completion_tokens:
-                tokens.append(f"{completion.usage.completion_tokens}↓")
-            if completion.usage.cache_read_tokens:
-                tokens.append(f"{completion.usage.cache_read_tokens}⚡")
-
-            action_completion = CompletionDTO(
-                type="build_action",
-                usage=usage,
-                retries=completion.retries,
-                tokens=" ".join(tokens),
-                input=json.dumps(completion.input, indent=2)
-                if hasattr(completion, "input") and completion.input is not None
-                else None,
-                response=json.dumps(completion.response, indent=2)
-                if hasattr(completion, "response") and completion.response is not None
-                else None,
-            )
-
-            # Add retries warning for build action
-            if completion.retries and completion.retries > 1:
-                if action_steps and "retries" not in action_steps[0].warnings:
-                    action_steps[0].warnings.append("retries")
-                all_warnings.append("retries")
-
-    # Get test results summary if available
-    test_results_summary = None
-    if node.file_context and node.file_context.test_files:
-        all_test_results = [
-            result.model_dump() for test_file in node.file_context.test_files for result in test_file.test_results
-        ]
-        test_results_summary = get_test_results_summary(all_test_results)
-
-        # Add test-related warnings
-        error_tests = sum(1 for t in all_test_results if t.get("status") == "error")
-        failed_tests = sum(1 for t in all_test_results if t.get("status") == "failed")
-        if failed_tests > 0:
-            all_warnings.append(f"{failed_tests} tests failed")
-        if error_tests > 0:
-            all_warnings.append(f"{error_tests} test errors")
 
     timeline_items = generate_timeline_items(node)
 

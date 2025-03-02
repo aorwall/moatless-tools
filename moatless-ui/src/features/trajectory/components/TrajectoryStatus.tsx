@@ -186,7 +186,7 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
   };
 
   return (
-    <div className={cn("flex items-center h-14 px-4 py-2 gap-4 border-b bg-background/50", className)}>
+    <div className={cn("flex items-center h-14 px-4 py-2 gap-3 border-b bg-background/50", className)}>
       {/* Status Badge */}
       <Badge
         variant={trajectory?.status === "error" ? "destructive" : "default"}
@@ -196,68 +196,92 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
         {trajectory?.status}
       </Badge>
 
-      {/* Timing Info */}
-      {hasStarted && (
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          Started: {formatDistanceToNow(new Date(trajectory.system_status.started_at))} ago
-          {trajectory?.system_status.finished_at && (
-            <>
-              <Separator orientation="vertical" className="mx-2 h-3" />
-              Finished: {formatDistanceToNow(new Date(trajectory?.system_status.finished_at))} ago
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Stats - Token usage and activity */}
-      <div className="flex items-center gap-4 text-xs">
-        <div className="flex items-center gap-2">
-          <Zap className="h-3 w-3 text-muted-foreground" />
-          <span>{trajectory.nodes.length} Nodes</span>
-        </div>
-
-        {trajectory.promptTokens !== undefined && (
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Tokens:</span>
-            <span>{trajectory.promptTokens.toLocaleString()} P / {trajectory.completionTokens?.toLocaleString() || 0} C</span>
+      {/* Main Stats Group */}
+      <div className="flex items-center gap-3 text-xs">
+        {/* Timing Info */}
+        {hasStarted && (
+          <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/20 rounded-md">
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3 text-muted-foreground" />
+              <span>Started: {formatDistanceToNow(new Date(trajectory.system_status.started_at))} ago</span>
+            </div>
+            {trajectory?.system_status.finished_at && (
+              <>
+                <Separator orientation="vertical" className="mx-1 h-3" />
+                <span>Finished: {formatDistanceToNow(new Date(trajectory?.system_status.finished_at))} ago</span>
+              </>
+            )}
           </div>
         )}
 
-        {trajectory.completionCost !== undefined && (
+        {/* Activity Info */}
+        <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
           <div className="flex items-center gap-1">
-            <Coins className="h-3 w-3 text-muted-foreground" />
-            <span>${trajectory.completionCost.toFixed(4)}</span>
+            <Zap className="h-3 w-3 text-muted-foreground" />
+            <span>{trajectory.nodes.length} Nodes</span>
+          </div>
+        </div>
+
+        {/* Token Usage Group */}
+        {trajectory.usage && (
+          <div className="flex items-center gap-2 px-2 py-1 bg-muted/20 rounded-md">
+            <div className="flex items-center gap-1">
+              <span className="text-muted-foreground">Prompt:</span>
+              <span className="font-medium">{trajectory.usage.prompt_tokens?.toLocaleString() || 0}</span>
+            </div>
+
+            <Separator orientation="vertical" className="h-3" />
+
+            <div className="flex items-center gap-1">
+              <span className="text-muted-foreground hidden sm:inline">Completion:</span>
+              <span className="font-medium">{trajectory.usage.completion_tokens?.toLocaleString() || 0}</span>
+            </div>
+
+            {(trajectory.usage.cache_read_tokens && trajectory.usage.cache_read_tokens > 0) && (
+              <>
+                <Separator orientation="vertical" className="h-3" />
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground hidden md:inline">Cached:</span>
+                  <span className="font-medium">{trajectory.usage.cache_read_tokens.toLocaleString()}</span>
+                </div>
+              </>
+            )}
+
+            {(trajectory.usage.cache_write_tokens && trajectory.usage.cache_write_tokens > 0) && (
+              <>
+                <Separator orientation="vertical" className="h-3" />
+                <div className="flex items-center gap-1">
+                  <span className="text-muted-foreground hidden md:inline">Cache Write:</span>
+                  <span className="font-medium">{trajectory.usage.cache_write_tokens.toLocaleString()}</span>
+                </div>
+              </>
+            )}
+
+            <Separator orientation="vertical" className="h-3" />
+
+            <div className="flex items-center gap-1">
+              <Coins className="h-3 w-3 text-muted-foreground" />
+              <span className="font-medium">${trajectory.usage.completion_cost?.toFixed(4) || 0}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Flags */}
+        {trajectory.flags !== undefined && trajectory.flags.length > 0 && (
+          <div className="flex items-center gap-1 px-2 py-1 bg-muted/20 rounded-md">
+            {trajectory.flags.map((flag, index) => (
+              <Badge key={index} variant="outline" className="text-xs">
+                {flag}
+              </Badge>
+            ))}
           </div>
         )}
       </div>
 
-      {/* Issues - conditionally show if there are any */}
-      {((trajectory.failedActions !== undefined && trajectory.failedActions > 0) ||
-        (trajectory.duplicatedActions !== undefined && trajectory.duplicatedActions > 0)) && (
-          <div className="flex items-center gap-2 text-xs">
-            {trajectory.failedActions !== undefined && trajectory.failedActions > 0 && (
-              <span className="text-destructive">Failed: {trajectory.failedActions}</span>
-            )}
-            {trajectory.duplicatedActions !== undefined && trajectory.duplicatedActions > 0 && (
-              <span className="text-warning">Duplicated: {trajectory.duplicatedActions}</span>
-            )}
-          </div>
-        )}
-
-      {/* Flags */}
-      {trajectory.flags !== undefined && trajectory.flags.length > 0 && (
-        <div className="flex items-center gap-1">
-          {trajectory.flags.map((flag, index) => (
-            <Badge key={index} variant="secondary" className="text-xs">
-              {flag}
-            </Badge>
-          ))}
-        </div>
-      )}
-
       {/* Action buttons */}
-      {getActionButtons()}
+      <div className="ml-auto">
+        {getActionButtons()}
+      </div>
     </div>
   );
 }

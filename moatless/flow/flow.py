@@ -96,15 +96,17 @@ class AgenticFlow(MoatlessComponent):
         if not trajectory_id:
             trajectory_id = str(uuid.uuid4())
 
-        if not agent:
-            agent = get_agent(agent_id, completion_model, repository, code_index, runtime)
+        if not agent and agent_id:
+            agent = get_agent(agent_id)
 
-        if not agent.workspace:
+        if agent and not agent._workspace:
             if not workspace and repository:
                 workspace = Workspace(repository=repository, runtime=runtime, code_index=code_index)
-            agent.workspace = workspace
 
-        if not file_context:
+            if workspace:
+                agent._workspace = workspace
+
+        if not file_context and agent._workspace:
             file_context = FileContext(
                 repo=agent.workspace.repository if agent.workspace else None,
                 runtime=agent.workspace.runtime if agent.workspace else None,

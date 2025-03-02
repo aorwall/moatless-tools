@@ -130,7 +130,7 @@ class ViewCode(Action, IdentifyMixin):
 
         # Validate all file spans before processing
         for file_path, file_span in grouped_files.items():
-            logger.info(f"Processing file {file_path} with span_ids {file_span.span_ids}")
+            logger.debug(f"Processing file {file_path} with span_ids {file_span.span_ids}")
             file = file_context.get_file(file_path)
 
             if not file:

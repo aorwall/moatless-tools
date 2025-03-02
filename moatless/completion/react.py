@@ -64,11 +64,6 @@ Important: You can include multiple Action blocks to perform sequential actions.
 """)
         return system_prompt
 
-    def _get_completion_params(self, schema: ResponseSchema) -> dict[str, str | dict | list]:
-        params = super()._get_completion_params(schema)
-        params["stop"] = ["Observation:"]
-        return params
-
     def _supports_react_format(self) -> bool:
         if not isinstance(self._response_schema, list):
             return False
@@ -113,9 +108,6 @@ Important: You can include multiple Action blocks to perform sequential actions.
             thought, action_blocks = self._extract_action_blocks(response_text)
             validated_actions = []
 
-            if thought:
-                validated_actions.append(ThinkArgs(thought=thought))  # type: ignore
-
             for i, action_input in enumerate(action_blocks):
                 action_name, action_input = self._parse_action(action_input)
                 action_class = self._get_action_class(action_name)
@@ -124,6 +116,12 @@ Important: You can include multiple Action blocks to perform sequential actions.
                     try:
                         action_request = action_class.model_validate_xml(action_input)
                     except Exception as e:
+                        if validated_actions:
+                            logger.warning(
+                                f"Invalid XML format for {action_name}. Error: {e}. Will break flow and return the already validated actions"
+                            )
+                            break
+
                         format_example = (
                             action_class.format_schema_for_llm()
                             if hasattr(action_class, "format_schema_for_llm")
@@ -137,12 +135,21 @@ Important: You can include multiple Action blocks to perform sequential actions.
                     try:
                         action_request = action_class.model_validate_json(action_input)
                     except Exception as e:
+                        if validated_actions:
+                            logger.warning(
+                                f"Invalid JSON format for {action_name}. Error: {e}. Will break flow and return the already validated actions"
+                            )
+                            break
+
                         raise CompletionRetryError(
                             f"Invalid format for {action_name}. Error: {e}\n\n"
                             f"Expected schema:\n{action_class.format_schema_for_llm()}"
                         )
 
                 validated_actions.append(action_request)
+
+            if thought:
+                validated_actions.insert(0, ThinkArgs(thought=thought))  # type: ignore
 
             return validated_actions, None
         except CompletionRetryError as e:
@@ -163,21 +170,14 @@ Important: You can include multiple Action blocks to perform sequential actions.
         Raises:
             ValueError: If format is invalid
         """
-        # Split into lines and remove empty ones
         lines = [line.strip() for line in response_text.split("\n") if line.strip()]
 
-        # Count occurrences of each section using case-insensitive matching
-        thought_count = sum(1 for line in lines if line.lower().startswith(("thought:", "thoughts:")))
         action_count = sum(1 for line in lines if line.lower().startswith("action:"))
 
-        # Check if all sections exist
-        if not self.disable_thoughts and thought_count < 1:
-            raise CompletionRetryError("The response is incorrect, it should start with 'Thoughts:'")
         if action_count < 1:
             raise CompletionRetryError("Response must have one 'Action:' section")
 
         if not self.disable_thoughts:
-            # Find the starting lines for each section
             thought_line = next(
                 (i for i, line in enumerate(lines) if line.lower().startswith(("thought:", "thoughts:"))), -1
             )
@@ -218,17 +218,12 @@ Important: You can include multiple Action blocks to perform sequential actions.
         first_action_pos = action_positions[0]
         thought = ""
 
-        if not self.disable_thoughts:
-            # Find the first occurrence of either "thought:" or "thoughts:" case-insensitive
-            thought_start = min(
-                (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:")) if pos != -1),
-                default=-1,
-            )
+        thought_start = min(
+            (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:")) if pos != -1),
+            default=-1,
+        )
 
-            if thought_start == -1:
-                raise ValueError("Missing Thought section")
-
-            # Extract the thought text
+        if thought_start >= 0:
             thought_prefix_end = response_text.find(":", thought_start) + 1
             thought = response_text[thought_prefix_end:first_action_pos].strip()
 

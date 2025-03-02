@@ -35,4 +35,4 @@ class Think(Action):
     args_schema = ThinkArgs
 
     async def execute(self, args: ThinkArgs, file_context: FileContext):
-        return Observation(message="The thought was logged")
+        return Observation.create(message="The thought was logged")

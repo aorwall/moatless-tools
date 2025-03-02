@@ -36,12 +36,8 @@ class LogHandler(CustomLogger):
         if self.log_dir:
             log_dir = f"{self.log_dir}/{trajectory_id}/completions" if trajectory_id else self.log_dir
         else:
-            if self.trajectory_dir:
-                log_dir = self.trajectory_dir
-            elif trajectory_id:
-                log_dir = get_moatless_trajectory_dir(trajectory_id) / "completions"
-            else:
-                log_dir = get_moatless_trajectories_dir() / "completions"
+            trajectory_dir = get_moatless_trajectory_dir()
+            log_dir = trajectory_dir / "completions"
 
         if not os.path.exists(log_dir):
             logger.debug(f"Creating log directory: {log_dir}")

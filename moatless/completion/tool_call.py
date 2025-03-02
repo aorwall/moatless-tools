@@ -8,7 +8,6 @@ from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.schema import ChatCompletionToolMessage, ResponseSchema
 from moatless.exceptions import CompletionRuntimeError
-from moatless.node import ThoughtBlock
 
 logger = logging.getLogger(__name__)
 

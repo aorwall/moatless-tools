@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from moatless.api.trajectory.schema import NodeDTO
 from moatless.artifacts.artifact import ArtifactHandler
+from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
@@ -238,6 +239,7 @@ class TrajectoryListItem(BaseModel):
     last_restart: Optional[datetime] = None
     cost: Optional[float] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    usage: Optional[Usage] = None
 
 
 class StartTrajectoryRequest(BaseModel):
@@ -272,3 +274,4 @@ class TrajectoryResponseDTO(BaseModel):
     model_id: Optional[str] = None
     events: list[TrajectoryEventDTO] = Field(default_factory=list)
     nodes: list[NodeDTO] = Field(default_factory=list)
+    usage: Optional[Usage] = None

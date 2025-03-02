@@ -140,8 +140,9 @@ class GitRepository(FileRepository):
         self.commit(file_path)
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
-        file = super().save_file(file_path, updated_content)
-        self.commit(file_path)
+        if updated_content:
+            file = super().save_file(file_path, updated_content)
+
         return file
 
     def commit(self, file_path: str):
@@ -226,6 +227,55 @@ class GitRepository(FileRepository):
                 return self.current_diff
             else:
                 return None
+
+    def file_diff(self, file_path: str) -> Optional[str]:
+        """
+        Returns the diff of a specific file since the last commit.
+        Handles both tracked files with changes and new/untracked files.
+
+        Args:
+            file_path: Path to the file relative to repository root
+
+        Returns:
+            The diff as a string, or None if there's an error or no changes
+        """
+        try:
+            import os
+
+            from git import Repo
+
+            # Get absolute path to the file
+            abs_file_path = os.path.join(self.repo_path, file_path)
+
+            # Check if file exists
+            if not os.path.exists(abs_file_path):
+                logger.error(f"File {file_path} does not exist")
+                return None
+
+            # Check if file is untracked (new file)
+            untracked_files = self._repo.untracked_files
+            if file_path in untracked_files:
+                logger.info(f"File {file_path} is new/untracked")
+                # For new files, return the entire content as the diff
+                with open(abs_file_path, "r") as f:
+                    file_content = f.read()
+                return f"New file: {file_path}\n\n{file_content}"
+
+            # For tracked files, get the diff
+            try:
+                # Check if file has changes
+                if not self._repo.git.diff("--name-only", file_path):
+                    return None  # No changes
+
+                # Get the diff for the specific file
+                return self._repo.git.diff("HEAD", file_path)
+            except Exception as e:
+                logger.error(f"Error getting diff for file {file_path}: {e}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Unexpected error getting file diff: {e}")
+            return None
 
     def model_dump(self, **kwargs) -> builtins.dict[str, Any]:
         dump = super().model_dump(**kwargs)

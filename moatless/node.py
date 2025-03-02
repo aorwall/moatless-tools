@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
 from moatless.actions.schema import ActionArguments, Observation
-from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import (
     Completion,
@@ -103,7 +102,7 @@ class Node(BaseModel):
     visits: int = Field(0, description="The number of times the node has been visited")
     value: Optional[float] = Field(None, description="The total value (reward) of the node")
     max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
-    agent_settings: Optional[AgentSettings] = Field(None, description="The agent settings associated with the node")
+    agent_id: Optional[str] = Field(None, description="The agent ID associated with the node")
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
 
     @property

@@ -77,7 +77,7 @@ async def add_model(request: CreateModelDTO) -> ModelConfig:
 
 
 @router.post("/base", response_model=ModelConfig)
-async def add_model(request: AddModelFromBaseDTO) -> ModelConfig:
+async def add_base_model(request: AddModelFromBaseDTO) -> ModelConfig:
     """
     Creating from a base model (when base_model_id is provided)
     """

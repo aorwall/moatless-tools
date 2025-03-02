@@ -1,6 +1,7 @@
 from typing import Any, List
 
-from moatless.actions.schema import Observation
+from moatless.actions.schema import ActionArguments, Observation
+from moatless.actions.think import ThinkArgs
 from moatless.api.trajectory.schema import TimelineItemDTO, TimelineItemType
 from moatless.node import ActionStep, Node
 
@@ -63,32 +64,21 @@ def create_completion_item(completion: Any, label: str = "Completion") -> Timeli
     return None
 
 
-def create_thought_item(thoughts: str) -> TimelineItemDTO | None:
+def create_thought_item(action: ActionArguments) -> TimelineItemDTO | None:
     """Create timeline item for thoughts."""
-    if thoughts:
-        return TimelineItemDTO(label="Thought", type=TimelineItemType.THOUGHT, content={"message": thoughts})
-    return None
-
-
-def create_thought_block_item(thoughts: list[dict]) -> TimelineItemDTO | None:
-    """Create timeline item for thought blocks."""
-    if not thoughts:
-        return None
-
-    thoughts_str = ""
-    for thought in thoughts:
-        if thought["type"] == "thinking" and "thinking" in thought:
-            thoughts_str += thought["thinking"]
-        elif thought["type"] == "redacted_thinking":
-            thoughts_str += "Redacted Thought\n"
-    if thoughts_str:
-        return TimelineItemDTO(label="Thought", type=TimelineItemType.THOUGHT, content={"message": thoughts_str})
+    if hasattr(action, "thoughts") and action.thoughts:
+        return TimelineItemDTO(label="Thought", type=TimelineItemType.THOUGHT, content={"message": action.thoughts})
+    elif isinstance(action, ThinkArgs):
+        return TimelineItemDTO(label="Thought", type=TimelineItemType.THOUGHT, content={"message": action.thought})
     return None
 
 
 def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
     """Create timeline item for an action."""
     if step.action:
+        if step.action.name == "Think":
+            return None
+
         # Remove properties that are empty
         if step.action.name == "str_replace_editor" and hasattr(step.action, "command"):
             if step.action.command == "str_replace":
@@ -121,6 +111,9 @@ def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
 
 def create_observation_item(step: ActionStep) -> TimelineItemDTO | None:
     """Create timeline item for an observation."""
+    if step.action.name == "Think":
+        return None
+
     if step.observation:
         return TimelineItemDTO(
             label="Observation", type=TimelineItemType.OBSERVATION, content=step.observation.model_dump()
@@ -229,16 +222,15 @@ def generate_timeline_items(node: Node) -> list[TimelineItemDTO]:
         if completion_item := create_completion_item(node.completions["build_action"]):
             items.append(completion_item)
 
-    if thought_item := create_thought_block_item(node.thoughts):
-        items.append(thought_item)
-
     if assistant_item := create_assistant_message_item(node):
         items.append(assistant_item)
 
     for step in node.action_steps:
-        if thoughts := getattr(step.action, "thoughts", None):
-            if thought_item := create_thought_item(thoughts):
-                items.append(thought_item)
+        if thought_item := create_thought_item(step.action):
+            items.append(thought_item)
+
+        if isinstance(step.action, ThinkArgs):
+            continue
 
         if action_item := create_action_item(step):
             items.append(action_item)

@@ -1,5 +1,5 @@
-import { Link, Outlet, useLocation } from "react-router-dom";
 import { RunnerStatusBar } from "@/features/runner/components/RunnerStatusBar";
+import { Link, Outlet, useLocation } from "react-router-dom";
 
 export function RootLayout() {
   const location = useLocation();
@@ -27,79 +27,63 @@ export function RootLayout() {
                   <>
                     <Link
                       to="/trajectories"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                      isActivePath("/trajectories")
-                        ? "text-primary"
-                        : "text-muted-foreground"
-                    }`}
+                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/trajectories")
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                        }`}
                     >
                       Trajectories
                     </Link>
                     <Link
                       to="/loop"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                        isActivePath("/loop")
+                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/loop")
                           ? "text-primary"
                           : "text-muted-foreground"
-                      }`}
-                      >
-                        Run Loop
-                      </Link>
+                        }`}
+                    >
+                      Run Loop
+                    </Link>
                   </>
                 )}
                 <Link
                   to="/swebench/evaluation"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/swebench/evaluation")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/swebench/evaluation")
                       ? "text-primary"
                       : "text-muted-foreground"
-                  }`}
+                    }`}
                 >
                   Evaluation
                 </Link>
                 <Link
-                  to="/runner"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/runner")
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  Jobs
-                </Link>
-                <Link
                   to="/settings/agents"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/agents")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/agents")
                       ? "text-primary"
                       : "text-muted-foreground"
-                  }`}
+                    }`}
                 >
                   Agents
                 </Link>
                 <Link
                   to="/settings/models"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/models")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/models")
                       ? "text-primary"
                       : "text-muted-foreground"
-                  }`}
+                    }`}
                 >
                   Models
                 </Link>
                 <Link
                   to="/settings/flows"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/flows")
+                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${isActivePath("/settings/flows")
                       ? "text-primary"
                       : "text-muted-foreground"
-                  }`}
+                    }`}
                 >
                   Flows
                 </Link>
               </div>
             </div>
-            
+
             {/* Runner Status Bar */}
             <div className="flex-shrink-0">
               <RunnerStatusBar />

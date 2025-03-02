@@ -1211,12 +1211,7 @@ class FileContext(BaseModel):
     def snapshot(self):
         dict = self.model_dump()
         del dict["max_tokens"]
-        return dict
-
-    def restore_from_snapshot(self, snapshot: dict):
-        self._files.clear()
-        self._test_files.clear()
-        self.load_files_from_dict(snapshot.get("files", []))
+        return dic
 
     def to_files_with_spans(self) -> list[FileWithSpans]:
         return [

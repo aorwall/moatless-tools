@@ -87,6 +87,7 @@ export interface Usage {
   prompt_tokens?: number;
   completion_tokens?: number;
   cache_read_tokens?: number;
+  cache_write_tokens?: number;
 }
 
 export interface Completion {
@@ -232,16 +233,12 @@ export interface Trajectory {
   system_status: TrajectoryStatus;
   duration?: number;
   error?: string;
-  completionCost?: number;
-  promptTokens?: number;
-  completionTokens?: number;
-  cachedTokens?: number;
-  totalTokens?: number;
   flags?: string[];
   failedActions?: number;
   duplicatedActions?: number;
   nodes: Node[];
   events: TrajectoryEvent[];
+  usage?: Usage;
 }
 
 export interface TrajectoryLogFile {

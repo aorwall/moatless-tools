@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from re import L
 from typing import Optional, Tuple
 
 from opentelemetry import trace
@@ -7,7 +8,8 @@ from pydantic import Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import Observation
-from moatless.file_context import FileContext
+from moatless.file_context import ContextFile, FileContext
+from moatless.repository.git import GitRepository
 from moatless.telemetry import instrument
 from moatless.utils.file import is_test
 
@@ -22,7 +24,7 @@ class CodeModificationMixin:
     This includes path normalization, file validation, test running, and observation handling.
     """
 
-    persist_artifacts: bool = Field(False, description="Whether to persist artifacts after modifying code")
+    persist_files: bool = Field(False, description="Whether to persist files")
     auto_run_tests: bool = Field(True, description="Whether to automatically run tests after modifying code")
 
     def normalize_path(self, file_path: str) -> str:
@@ -33,9 +35,20 @@ class CodeModificationMixin:
             file_path = file_path[1:]
         return file_path
 
+    def save(self, context_file: ContextFile):
+        if self.persist_files and isinstance(self.workspace.repository, GitRepository):
+            logger.info(f"Saving file {context_file.file_path}")
+            self.workspace.repository.save_file(context_file.file_path, context_file.content)
+            diff = self.workspace.repository.file_diff(context_file.file_path)
+            logger.info(f"Diff: {diff}")
+            if diff:
+                context_file.set_patch(diff)
+        else:
+            context_file.apply_changes(context_file.content)
+
     def persist(self, file_context: FileContext):
         """Persist the modified files"""
-        if not self.persist_artifacts:
+        if not self.persist_files:
             return
 
         file_context.persist()

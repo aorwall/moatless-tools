@@ -441,11 +441,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         else:
             new_file_content = file_content.replace(args.old_str, args.new_str)
 
-        # Generate diff and apply changes
-        diff = do_diff(str(path), file_content, new_file_content)
-
-        context_file.apply_changes(new_file_content)
-        self.persist(file_context)
+        self.save(context_file)
 
         # Create a snippet of the edited section
         snippet_start_line = max(0, start_line - SNIPPET_LINES - 1)
@@ -461,8 +457,6 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         )
 
         summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary."
-
-        properties["diff"] = diff
 
         observation = Observation(
             message=message,

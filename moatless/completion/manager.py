@@ -287,8 +287,6 @@ class ModelConfigManager:
         if not config:
             raise ValueError(f"Model {model_id} not found")
 
-        # Convert string enums to proper enum types
-
         logger.debug(f"Creating completion model for {model_id} with config: {config}")
 
         return BaseCompletionModel.create(**config.model_dump(), model_id=model_id)

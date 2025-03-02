@@ -4,7 +4,6 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from moatless.agent.settings import AgentSettings
 from moatless.node import Node
 
 logger = logging.getLogger(__name__)
@@ -14,7 +13,7 @@ class Expander(BaseModel):
     random_settings: bool = Field(False, description="Whether to select agent settings randomly")
     max_expansions: int = Field(1, description="The maximum number of children to create for each node")
 
-    agent_settings: list[AgentSettings] = Field(
+    agent_settings: list[str] = Field(
         [],
         description="The settings for the agent model",
     )
@@ -36,7 +35,7 @@ class Expander(BaseModel):
             parent=node,
             file_context=node.file_context.clone() if node.file_context else None,
             max_expansions=self.max_expansions,
-            agent_settings=settings_to_use[0] if settings_to_use else None,
+            agent_id=settings_to_use[0] if settings_to_use else None,
         )  # type: ignore
 
         node.add_child(child_node)
@@ -44,13 +43,13 @@ class Expander(BaseModel):
         logger.info(f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
-    def _get_agent_settings(self, node: Node) -> list[AgentSettings]:
+    def _get_agent_settings(self, node: Node) -> list[str]:
         """Get agent settings for a single expansion."""
         if not self.agent_settings:
             return []
 
         if self.random_settings:
-            used_settings = {child.agent_settings for child in node.children if child.agent_settings is not None}
+            used_settings = {child.agent_id for child in node.children if child.agent_id is not None}
 
             available_settings = [setting for setting in self.agent_settings if setting not in used_settings]
 

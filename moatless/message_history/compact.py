@@ -85,7 +85,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
             tokens += count_tokens(observation)
 
-        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+        logger.debug(f"Generated {len(messages)} messages with {tokens} tokens")
 
         return messages
 
@@ -100,7 +100,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
             - Observation summary string
         """
         previous_nodes = node.get_trajectory()
-        logger.info(f"Previous nodes: {len(previous_nodes)}")
+        logger.debug(f"Previous nodes: {len(previous_nodes)}")
         if not previous_nodes:
             return []
 
@@ -311,5 +311,5 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
             node_messages = current_messages + node_messages
 
-        logger.info(f"Generated message history with {total_tokens} tokens")
+        logger.debug(f"Generated message history with {total_tokens} tokens")
         return node_messages

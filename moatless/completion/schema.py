@@ -94,6 +94,7 @@ class ChatCompletionMessage(TypedDict, total=False):
 
 class ChatCompletionAssistantMessage(ChatCompletionMessage, total=False):
     name: Optional[str]
+    content: Optional[Union[str, Iterable[ChatCompletionTextObject]]]
     tool_calls: Optional[list[ChatCompletionAssistantToolCall]]
     function_call: Optional[ChatCompletionToolCallFunctionChunk]
     cache_control: Optional[ChatCompletionCachedContent]

@@ -13,9 +13,8 @@ from moatless.actions.schema import (
     Observation,
 )
 from moatless.agent.events import ActionCreatedEvent, ActionExecutedEvent, AgentErrorEvent, AgentEvent, RunAgentEvent
-from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactHandler
-from moatless.completion import BaseCompletionModel, LLMResponseFormat
+from moatless.completion import BaseCompletionModel
 from moatless.completion.manager import create_completion_model
 from moatless.completion.model import Completion
 from moatless.component import MoatlessComponent
@@ -83,17 +82,6 @@ class ActionAgent(MoatlessComponent):
         self.completion_model = completion_model
 
     @classmethod
-    def from_agent_settings(cls, agent_settings: AgentSettings, actions: list[Action] | None = None):
-        if agent_settings.actions:
-            actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
-
-        return cls(
-            completion_model=agent_settings.completion_model,
-            system_prompt=agent_settings.system_prompt,
-            actions=actions,
-        )
-
-    @classmethod
     def get_component_type(cls) -> str:
         return "agent"
 
@@ -113,6 +101,13 @@ class ActionAgent(MoatlessComponent):
     def action_map(self):
         if not self._action_map:
             self._action_map = {action.args_schema: action for action in self.actions}
+
+        # Think action is not automatically added to the action map as it's sometimes used to replace thoughts
+        from moatless.actions.think import Think, ThinkArgs
+
+        if ThinkArgs not in self._action_map:
+            self._action_map[ThinkArgs] = Think()
+
         return self._action_map
 
     @completion_model.setter

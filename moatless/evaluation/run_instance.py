@@ -99,7 +99,7 @@ async def _run_instance(
     with tracer.start_as_current_span(f"run_instance_{instance_id}") as span:
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
         print(f"Setting up job logging for run in {trajectory_dir}")
-        litellm.callbacks = [LogHandler(trajectory_dir=trajectory_dir)]
+        litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
 
         code_index = await create_index_async(swebench_instance, repository=repository)
 

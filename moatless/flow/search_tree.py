@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
+from moatless.context_data import current_node_id
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.exceptions import RejectError, RuntimeError
 from moatless.expander import Expander
@@ -22,10 +23,7 @@ from moatless.flow.events import (
     NodeSelectedEvent,
 )
 from moatless.node import Node, generate_ascii_tree
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
-from moatless.telemetry import add_span_event, instrument, set_span_status
 from moatless.value_function.base import BaseValueFunction
 
 logger = logging.getLogger(__name__)
@@ -227,6 +225,7 @@ class SearchTree(AgenticFlow):
         if node.observation:
             logger.info(f"Node{node.node_id}: Action already executed. Skipping.")
         else:
+            current_node_id.set(node.node_id)
             await self.agent.run(node)
             logger.info(f"Node{node.node_id}: Action executed. Depth: {node.get_depth()} ({self.max_depth})")
 

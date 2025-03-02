@@ -288,8 +288,7 @@ class FlowManager:
             else:
                 flow_status = flow_status_info.status
 
-            events = self.load_trajectory_events(trajectory_dir)
-
+            logger.info(f"Trajectory {trajectory_id} status: {flow_status}: {flow.total_usage()}")
             return TrajectoryResponseDTO(
                 id=trajectory_id,
                 trajectory_id=trajectory_id,
@@ -298,8 +297,8 @@ class FlowManager:
                 system_status=flow_status_info,
                 agent_id=flow_status_info.metadata.get("agent_id"),
                 model_id=flow_status_info.metadata.get("model_id"),
-                events=events,
                 nodes=nodes,
+                usage=flow.total_usage(),
             )
         except Exception as e:
             logger.exception(f"Error getting trajectory data: {str(e)}")
@@ -495,16 +494,13 @@ class FlowManager:
         """
         trajectory_dir = get_trajectory_dir(project_id, trajectory_id)
         logs_dir = trajectory_dir / "logs"
-        logger.info(f"Logs directory: {logs_dir}")
 
         if not logs_dir.exists():
-            logger.info(f"Logs directory does not exist: {logs_dir}")
             return {"logs": "", "files": [], "current_file": None}
 
         log_files = sorted(list(logs_dir.glob("*.log")), key=lambda p: p.stat().st_mtime, reverse=True)
 
         if not log_files:
-            logger.info(f"No log files found in {logs_dir}")
             return {"logs": "", "files": [], "current_file": None}
 
         # Get a list of all log files with their modified times
@@ -515,8 +511,6 @@ class FlowManager:
             }
             for f in log_files
         ]
-
-        logger.info(f"Log files: {file_list}")
 
         # If a specific file is requested, try to find it
         if file_name:
@@ -531,8 +525,6 @@ class FlowManager:
         # Read the log contents
         with open(current_file, "r") as f:
             log_content = f.read()
-
-        logger.info(f"Log content: {log_content}")
 
         return {
             "logs": log_content,

@@ -2,6 +2,9 @@ import logging
 import os
 from pathlib import Path
 
+import litellm
+
+from moatless.completion.log_handler import LogHandler
 from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.flow import AgenticFlow
@@ -17,7 +20,6 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
     print(f"Running instance {trajectory_id} for project {project_id}")
 
     trajectory_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
-    print(f"Setting up job logging for run in {trajectory_dir}")
     original_handlers = setup_job_logging("run", trajectory_dir)
 
     repo_path = os.getenv("REPO_PATH", str(Path.cwd()))
@@ -25,6 +27,8 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
     try:
         repository = GitRepository(repo_path=repo_path)
         workspace = Workspace(repository=repository, environment=LocalBashEnvironment(cwd=repo_path))
+
+        litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
 

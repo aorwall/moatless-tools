@@ -73,13 +73,13 @@ class LocalBashEnvironment(BaseEnvironment):
 
             if output.strip():
                 logger.info("Command output:")
-                for line in output.splitlines():
-                    logger.info(f"  {line}")
+                logger.info(output[:200])
             if error.strip():
                 logger.warning("Command stderr:")
-                for line in error.splitlines():
-                    logger.warning(f"  {line}")
-            logger.info(f"Command return code: {return_code}")
+                logger.warning(error[:200])
+
+            if return_code != 0:
+                logger.info(f"Command return code {return_code}")
 
             return output
 
