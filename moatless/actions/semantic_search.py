@@ -77,7 +77,7 @@ class SemanticSearch(SearchBaseAction):
     args_schema: ClassVar[type[ActionArguments]] = SemanticSearchArgs
 
     async def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
-        return await self._code_index.semantic_search(
+        return await self.code_index.semantic_search(
             args.query,
             file_pattern=args.file_pattern,
             max_results=self.max_hits,
@@ -86,7 +86,7 @@ class SemanticSearch(SearchBaseAction):
 
     async def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
         if args.file_pattern:
-            return await self._code_index.semantic_search(
+            return await self.code_index.semantic_search(
                 args.query,
                 max_results=self.max_hits,
                 category=args.category,

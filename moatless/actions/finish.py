@@ -15,10 +15,6 @@ from moatless.file_context import FileContext
 class FinishArgs(ActionArguments):
     """Indicate that the task is fully completed."""
 
-    thoughts: str = Field(
-        ...,
-        description="Your reasoning about why the task is complete and verified with new tests.",
-    )
     finish_reason: str = Field(
         ...,
         description="Explain why the task is complete.",

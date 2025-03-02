@@ -182,7 +182,7 @@ class FlowManager:
                 for config in configs:
                     try:
                         self._configs[config["id"]] = config
-                        logger.info(f"Loaded flow config {config['id']}")
+                        logger.debug(f"Loaded flow config {config['id']}")
                     except Exception:
                         logger.exception(f"Failed to load flow config {config['id']} from {config_path}")
             else:

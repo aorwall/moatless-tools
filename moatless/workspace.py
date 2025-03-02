@@ -20,10 +20,10 @@ class Workspace(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
     artifact_handlers: dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
 
-    _repository: Repository = PrivateAttr(default=None)
-    _code_index: CodeIndex = PrivateAttr(default=None)
-    _runtime: RuntimeEnvironment = PrivateAttr(default=None)  # TODO: Replace this with BaseEnvironment
-    _environment: BaseEnvironment = PrivateAttr(default=None)
+    _repository: Repository | None = PrivateAttr(default=None)
+    _code_index: CodeIndex | None = PrivateAttr(default=None)
+    _runtime: RuntimeEnvironment | None = PrivateAttr(default=None)  # TODO: Replace this with BaseEnvironment
+    _environment: BaseEnvironment | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -49,18 +49,26 @@ class Workspace(BaseModel):
 
     @property
     def repository(self) -> Repository:
+        if not self._repository:
+            raise ValueError("Repository is not set")
         return self._repository
 
     @property
     def code_index(self) -> CodeIndex:
+        if not self._code_index:
+            raise ValueError("Code index is not set")
         return self._code_index
 
     @property
     def runtime(self) -> RuntimeEnvironment:
+        if not self._runtime:
+            raise ValueError("Runtime is not set")
         return self._runtime
 
     @property
     def environment(self) -> BaseEnvironment:
+        if not self._environment:
+            raise ValueError("Environment is not set")
         return self._environment
 
     def create_artifact(self, artifact: Artifact) -> Artifact:

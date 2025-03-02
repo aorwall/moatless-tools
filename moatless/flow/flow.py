@@ -48,18 +48,10 @@ class AgenticFlow(MoatlessComponent):
     trajectory_id: str = Field(..., description="The trajectory ID.")
 
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
-    metadata: dict[str, Any] = Field(
-        default_factory=dict, description="Additional metadata."
-    )
-    persist_path: Optional[str] = Field(
-        None, description="Path to persist the system state."
-    )
-    max_iterations: int = Field(
-        10, description="The maximum number of iterations to run."
-    )
-    max_cost: Optional[float] = Field(
-        None, description="The maximum cost spent on tokens before finishing."
-    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
+    persist_path: Optional[str] = Field(None, description="Path to persist the system state.")
+    max_iterations: int = Field(10, description="The maximum number of iterations to run.")
+    max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
 
     _persist_dir: Optional[Path] = PrivateAttr(default=None)
     _root: Optional[Node] = PrivateAttr(default=None)
@@ -124,9 +116,7 @@ class AgenticFlow(MoatlessComponent):
             persist_dir = Path(persist_dir)
 
         if not persist_dir:
-            persist_dir = get_trajectory_dir(
-                trajectory_id=trajectory_id, project_id=project_id
-            )
+            persist_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
 
         instance = cls(
             trajectory_id=trajectory_id,
@@ -151,9 +141,7 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
-    async def run(
-        self, message: str | None = None, workspace: Workspace | None = None
-    ) -> Node:
+    async def run(self, message: str | None = None, workspace: Workspace | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:
             raise ValueError("Root node is not set")
@@ -224,9 +212,7 @@ class AgenticFlow(MoatlessComponent):
         if not node.parent:
             node.reset()
         else:
-            node.parent.children = [
-                child for child in node.parent.children if child.node_id != node.node_id
-            ]
+            node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
     async def emit_event(self, event: BaseEvent):
         self.maybe_persist()
@@ -245,9 +231,7 @@ class AgenticFlow(MoatlessComponent):
         status_path = self._persist_dir / "status.json"
         if status_path.exists():
             try:
-                existing_status = FlowStatusInfo.model_validate_json(
-                    status_path.read_text()
-                )
+                existing_status = FlowStatusInfo.model_validate_json(status_path.read_text())
 
                 # Resume previous run
                 self._status = existing_status
@@ -365,9 +349,7 @@ class AgenticFlow(MoatlessComponent):
         return super().model_validate(obj)
 
     @classmethod
-    def from_dir(
-        cls, trajectory_dir: Path, workspace: Workspace | None = None
-    ) -> "AgenticFlow":
+    def from_dir(cls, trajectory_dir: Path) -> "AgenticFlow":
         """Load a system instance from a directory."""
         settings_path = trajectory_dir / "settings.json"
         if not settings_path.exists():
@@ -388,14 +370,8 @@ class AgenticFlow(MoatlessComponent):
             settings = json.load(f)
 
         flow = cls.model_validate(settings)
-        flow._root = Node.from_file(
-            trajectory_path,
-            repo=workspace.repository if workspace else None,
-            runtime=workspace.runtime if workspace else None,
-        )
+        flow._root = Node.from_file(trajectory_path)
 
-        if workspace:
-            flow.workspace = workspace
         flow._persist_dir = trajectory_dir
         flow._status = status
         return flow
@@ -409,21 +385,13 @@ class AgenticFlow(MoatlessComponent):
         cls,
         trajectory_id: str,
         project_id: str | None = None,
-        workspace: Workspace | None = None,
     ) -> "AgenticFlow":
-        trajectory_dir = get_trajectory_dir(
-            trajectory_id=trajectory_id, project_id=project_id
-        )
-        if not workspace:
-            workspace = Workspace(trajectory_dir=trajectory_dir)
-
-        return cls.from_dir(trajectory_dir, workspace)
+        trajectory_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
+        return cls.from_dir(trajectory_dir)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""
-        data = super().model_dump(
-            exclude={"agent", "root", "persist_dir", "persist_path"}
-        )
+        data = super().model_dump(exclude={"agent", "root", "persist_dir", "persist_path"})
         data["agent"] = self.agent.model_dump(**kwargs)
         return data
 

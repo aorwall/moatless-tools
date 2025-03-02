@@ -80,12 +80,11 @@ class IdentifyMixin(CompletionModelMixin):
         async def validate_identified_code(
             structured_outputs: list[ResponseSchema],
             text_response: Optional[str],
-            flags: list[str],
-        ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+        ) -> tuple[list[ResponseSchema], Optional[str]]:
             identified_context = FileContext(repo=self._repository)
 
             if not structured_outputs:
-                return structured_outputs, text_response, flags
+                return structured_outputs, text_response
 
             for identified_code in structured_outputs:
                 if identified_code.identified_spans:
@@ -107,7 +106,7 @@ class IdentifyMixin(CompletionModelMixin):
                     f"Please identify a smaller subset of the most relevant code sections."
                 )
 
-            return structured_outputs, text_response, flags
+            return structured_outputs, text_response
 
         self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
 

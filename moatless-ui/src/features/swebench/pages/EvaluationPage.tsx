@@ -1,29 +1,17 @@
-import { Badge } from "@/lib/components/ui/badge";
 import { Button } from "@/lib/components/ui/button";
-import { Play, Copy, ChevronDown, ChevronUp } from "lucide-react";
-import { useState } from "react";
-import { Evaluation } from "../api/evaluation";
-import { useStartEvaluation } from "../hooks/useStartEvaluation";
-import { useCloneEvaluation } from "../hooks/useCloneEvaluation";
-import { useProcessEvaluationResults } from "../hooks/useProcessEvaluationResults";
-import { toast } from "sonner";
-import { format, formatDuration, intervalToDuration } from "date-fns";
-import { EvaluationTimeline } from "../components/EvaluationTimeline";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/lib/components/ui/tooltip";
-import { EvaluationStatus } from "../components/EvaluationStatus";
-import { Link, useNavigate } from "react-router-dom";
-import { EvaluationToolbar } from "../components/EvaluationToolbar";
-import { EvaluationInstancesTable } from "../components/EvaluationInstancesTable";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/lib/components/ui/collapsible";
+import { formatDuration, intervalToDuration } from "date-fns";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { Evaluation } from "../api/evaluation";
+import { EvaluationInstancesTable } from "../components/EvaluationInstancesTable";
+import { EvaluationStatus } from "../components/EvaluationStatus";
+import { EvaluationTimeline } from "../components/EvaluationTimeline";
+import { EvaluationToolbar } from "../components/EvaluationToolbar";
 
 interface EvaluationPageProps {
   evaluation: Evaluation;
@@ -55,57 +43,7 @@ const formatDate = (date: string) => {
 };
 
 export function EvaluationPage({ evaluation }: EvaluationPageProps) {
-  const navigate = useNavigate();
-  const [concurrentInstances, setConcurrentInstances] = useState(1);
   const [timelineExpanded, setTimelineExpanded] = useState(false);
-  const { mutate: startEvaluation, isPending: isStartPending } =
-    useStartEvaluation();
-  const { mutate: cloneEvaluation, isPending: isClonePending } =
-    useCloneEvaluation();
-  const { mutate: processResults, isPending: isProcessPending } =
-    useProcessEvaluationResults();
-
-  const handleStart = () => {
-    startEvaluation(
-      {
-        evaluationId: evaluation.evaluation_name,
-        numConcurrentInstances: concurrentInstances,
-      },
-      {
-        onSuccess: () => {
-          toast.success("Evaluation started successfully");
-        },
-        onError: (error) => {
-          toast.error(`Failed to start evaluation: ${error.message}`);
-        },
-      },
-    );
-  };
-
-  const handleClone = () => {
-    cloneEvaluation(evaluation.evaluation_name, {
-      onSuccess: (data) => {
-        toast.success("Evaluation cloned successfully");
-        navigate(`/swebench/evaluation/${data.evaluation_name}`);
-      },
-      onError: (error) => {
-        toast.error(`Failed to clone evaluation: ${error.message}`);
-      },
-    });
-  };
-
-  const handleProcessResults = () => {
-    processResults(evaluation.evaluation_name, {
-      onSuccess: () => {
-        toast.success("Evaluation results synchronized successfully");
-      },
-      onError: (error) => {
-        toast.error(
-          `Failed to synchronize evaluation results: ${error.message}`,
-        );
-      },
-    });
-  };
 
   const canStart = (() => {
     if (evaluation.status.toLowerCase() === "running") return false;
@@ -135,12 +73,6 @@ export function EvaluationPage({ evaluation }: EvaluationPageProps) {
           </div>
           <EvaluationToolbar
             evaluation={evaluation}
-            onClone={handleClone}
-            onStart={handleStart}
-            onProcess={handleProcessResults}
-            isStartPending={isStartPending}
-            isClonePending={isClonePending}
-            isProcessPending={isProcessPending}
             canStart={canStart}
           />
         </div>

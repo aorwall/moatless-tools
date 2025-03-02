@@ -159,16 +159,11 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         **data,
     ):
         super().__init__(**data)
-        self._str_replace = StringReplace(auto_run_tests=False)
-        self._create_file = CreateFile(auto_run_tests=False)
+        self._str_replace = StringReplace(auto_run_tests=self.auto_run_tests)
+        self._create_file = CreateFile(auto_run_tests=self.auto_run_tests)
         self._view_code = ViewCode()
 
-    async def execute(
-        self,
-        args: EditActionArguments,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> Observation:
+    async def execute(self, args: EditActionArguments, file_context: FileContext | None = None) -> Observation:
         # Claude tends to add /repo in the start of the file path.
         # TODO: Maybe we should add /repo as default on all paths?
         if args.path.startswith("/repo"):
@@ -183,7 +178,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         validation_error = self.validate_path(file_context, args.command, path)
         if validation_error:
-            return Observation(message=validation_error, properties={"fail_reason": "invalid_path"})
+            return Observation.create(message=validation_error, properties={"fail_reason": "invalid_path"})
 
         if args.command == "view":
             return await self._view(file_context, path, args)
@@ -209,7 +204,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         elif args.command == "insert":
             observation = await self._insert(file_context, path, args.insert_line, args.new_str)
         else:
-            return Observation(
+            return Observation.create(
                 message=f"Unknown command: {args.command}",
                 properties={"fail_reason": "unknwon_command"},
             )
@@ -220,22 +215,13 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         if not self._runtime:
             return observation
 
-        run_tests = RunTests(
-            fail_on_not_found=False,
-            repository=self._repository,
-            runtime=self._runtime,
-            code_index=self._code_index,
-        )
-        test_observation = await run_tests.execute(
-            RunTestsArgs(
-                thoughts=args.thoughts,
-                test_files=[args.path],
-            ),
-            file_context,
+        test_summary = await self.run_tests(
+            file_path=str(path),
+            file_context=file_context,
         )
 
-        if test_observation:
-            observation.message += f"\n\n{test_observation}"
+        if test_summary:
+            observation.message += f"\n\n{test_summary}"
 
         return observation
 
@@ -275,17 +261,14 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         #        f"The path {path} is not an absolute path, it should start with `/`. Maybe you meant {suggested_path}?"
         #    )
 
-        # Check if path exists
         if not file_context.file_exists(str(path)) and command != "create":
             return f"The path {path} does not exist. Please provide a valid path."
 
         if file_context.file_exists(str(path)) and command == "create":
             return f"File already exists at: {path}. Cannot overwrite files using command `create`."
 
-        # Check if the path points to a directory
-        if file_context._repo.is_directory(str(path)):
-            if command != "view":
-                return f"The path {path} is a directory and only the `view` command can be used on directories"
+        if file_context._repo.is_directory(str(path)) and command != "view":
+            return f"The path {path} is a directory and only the `view` command can be used on directories"
 
         return None
 

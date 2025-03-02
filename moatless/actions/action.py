@@ -27,7 +27,7 @@ tracer = trace.get_tracer(__name__)
 class CompletionModelMixin:
     """Mixin to provide completion model functionality to actions that need it"""
 
-    _completion_model: Optional[BaseCompletionModel] = None
+    _completion_model: Optional[BaseCompletionModel] = PrivateAttr(default=None)
 
     @property
     def completion_model(self):
@@ -66,7 +66,9 @@ class Action(MoatlessComponent, ABC):
         return Action
 
     @tracer.start_as_current_span("execute")
-    async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
+    async def execute(
+        self, args: ActionArguments, file_context: FileContext | None = None
+    ) -> Observation:
         """Execute the action."""
         if not self._workspace:
             raise RuntimeError("No workspace set")
@@ -74,7 +76,9 @@ class Action(MoatlessComponent, ABC):
         message = await self._execute(args, file_context=file_context)
         return Observation.create(message=message or "")
 
-    async def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
+    async def _execute(
+        self, args: ActionArguments, file_context: FileContext | None = None
+    ) -> str | None:
         """Execute the action and return the updated FileContext."""
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -156,7 +160,9 @@ class Action(MoatlessComponent, ABC):
         return None
 
     @classmethod
-    def get_action_by_args_class(cls, args_class: type[ActionArguments]) -> Optional[type["Action"]]:
+    def get_action_by_args_class(
+        cls, args_class: type[ActionArguments]
+    ) -> type["Action"] | None:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -168,7 +174,10 @@ class Action(MoatlessComponent, ABC):
         """
 
         def search_subclasses(current_class):
-            if hasattr(current_class, "args_schema") and current_class.args_schema == args_class:
+            if (
+                hasattr(current_class, "args_schema")
+                and current_class.args_schema == args_class
+            ):
                 return current_class
             for subclass in current_class.__subclasses__():
                 result = search_subclasses(subclass)
@@ -186,7 +195,9 @@ class Action(MoatlessComponent, ABC):
         cls._initialize_components()
         action_class = cls._get_components().get(action_name)
         if not action_class:
-            raise ValueError(f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}")
+            raise ValueError(
+                f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}"
+            )
         return action_class
 
     @classmethod
@@ -195,12 +206,17 @@ class Action(MoatlessComponent, ABC):
 
         action_class = cls.get_action_by_name(name)
         if not action_class:
-            raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
+            raise ValueError(
+                f"Unknown action: {name}, available actions: {cls._get_components().keys()}"
+            )
         return action_class(**kwargs)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
-        dump["action_class"] = self.get_class_name()
+
+        if isinstance(self, CompletionModelMixin) and self.completion_model:
+            dump["model_id"] = self.completion_model.model_id
+
         return dump
 
     @classmethod
@@ -221,7 +237,10 @@ class Action(MoatlessComponent, ABC):
             description = cls.args_schema.model_json_schema().get("description", "")
 
         return ActionSchema(
-            title=cls.__name__, description=description, properties=properties, action_class=cls.get_class_name()
+            title=cls.__name__,
+            description=description,
+            properties=properties,
+            action_class=cls.get_class_name(),
         )
 
     @classmethod
@@ -229,7 +248,10 @@ class Action(MoatlessComponent, ABC):
         """Get all available actions with their schema."""
         cls._initialize_components()
 
-        return [action_class.get_action_schema() for action_class in cls._get_components().values()]
+        return [
+            action_class.get_action_schema()
+            for action_class in cls._get_components().values()
+        ]
 
     @classmethod
     def get_class_name(cls) -> str:

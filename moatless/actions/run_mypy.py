@@ -25,7 +25,6 @@ class RunMyPyArgs(ActionArguments):
     Run MyPy type checking on the specified Python files.
     """
 
-    thoughts: str = Field(..., description="Your reasoning on what files to check with MyPy.")
     files: list[str] = Field(..., description="The list of Python files or directories to check with MyPy")
 
     model_config = ConfigDict(title="RunMyPy")

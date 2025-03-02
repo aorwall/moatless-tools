@@ -17,7 +17,7 @@ _action_args: dict[str, type["ActionArguments"]] = {}
 
 
 class ActionArguments(ResponseSchema, ABC):
-    thoughts: str = Field(..., description="Your reasoning for the action.")
+    thoughts: Optional[str] = Field(None, description="Your reasoning for the action.")
 
     def format_for_llm(self) -> str:
         """Format the action name for LLM consumption"""

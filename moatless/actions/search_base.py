@@ -13,7 +13,9 @@ from moatless.completion.schema import (
     ResponseSchema,
 )
 from moatless.file_context import FileContext
+from moatless.index.code_index import CodeIndex
 from moatless.index.types import SearchCodeResponse
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +98,22 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         description="The maximum number of search hits to display.",
     )
 
+    async def initialize(self, workspace: Workspace):
+        if not workspace.code_index:
+            raise ValueError("Code index is not set")
+
+        self._workspace = workspace
+
+    @property
+    def code_index(self) -> CodeIndex:
+        if not self._workspace:
+            raise ValueError("Workspace is not set")
+
+        if not self._workspace.code_index:
+            raise ValueError("Code index is not set")
+
+        return self._workspace.code_index
+
     def _initialize_completion_model(self):
         """Override mixin method to customize initialization"""
         if self._completion_model:
@@ -103,12 +121,11 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
             async def validate_identified_code(
                 structured_outputs: list[ResponseSchema],
                 text_response: Optional[str],
-                flags: list[str],
             ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
                 view_context = FileContext(repo=self._repository)
 
                 if not structured_outputs:
-                    return structured_outputs, text_response, flags
+                    return structured_outputs, text_response
 
                 for identified_code in structured_outputs:
                     if identified_code.identified_spans:
@@ -127,7 +144,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                         f"Please identify a smaller subset of the most relevant code sections."
                     )
 
-                return structured_outputs, text_response, flags
+                return structured_outputs, text_response
 
             self._completion_model.initialize(
                 Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code

@@ -12,6 +12,7 @@ from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,6 @@ class RunTestsArgs(ActionArguments):
     Run the specified unit tests on the codebase.
     """
 
-    thoughts: str = Field(..., description="Your reasoning on what tests to run.")
     test_files: list[str] = Field(..., description="The list of test files to run")
 
     model_config = ConfigDict(title="RunTests")

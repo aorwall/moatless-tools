@@ -83,7 +83,7 @@ class FindFunction(SearchBaseAction):
         logger.info(
             f"{self.name}: {args.function_name} (class_name: {args.class_name}, file_pattern: {args.file_pattern})"
         )
-        return await self._code_index.find_function(
+        return await self.code_index.find_function(
             args.function_name,
             class_name=args.class_name,
             file_pattern=args.file_pattern,
@@ -117,7 +117,7 @@ class FindFunction(SearchBaseAction):
                     ]
                 )
 
-            return await self._code_index.find_class(args.class_name, file_pattern=args.file_pattern)
+            return await self.code_index.find_class(args.class_name, file_pattern=args.file_pattern)
 
         return SearchCodeResponse()
 

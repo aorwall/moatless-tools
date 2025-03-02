@@ -43,7 +43,6 @@ class CodeSpan(BaseModel):
 class ViewCodeArgs(ActionArguments):
     """View the code in a file or a specific code span."""
 
-    thoughts: str = Field(..., description="Your thoughts on the code change.")
     files: list[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
 
     model_config = ConfigDict(title="ViewCode")

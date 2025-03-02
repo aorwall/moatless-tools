@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 class AgentConfigManager:
     """Manages agent configurations."""
 
+    @classmethod
+    def get_instance(cls) -> "AgentConfigManager":
+        """Get the singleton instance."""
+        return _manager
+
     def __init__(self):
         """Initialize the agent config manager."""
         self._configs = {}

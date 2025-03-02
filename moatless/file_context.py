@@ -65,6 +65,7 @@ class ContextFile(BaseModel):
         None,
         description="Git-formatted patch representing the latest changes applied in this ContextFile.",
     )
+
     spans: list[ContextSpan] = Field(
         default_factory=list,
         description="List of context spans associated with this file.",
@@ -97,6 +98,7 @@ class ContextFile(BaseModel):
         super().__init__(**data)
         self._repo = repo
         self._is_new = False if repo is None else not repo.file_exists(self.file_path)
+        self._cached_content = data.get("content", None)  # Store initial content if provided
 
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
@@ -108,14 +110,13 @@ class ContextFile(BaseModel):
 
     def get_base_content(self) -> str:
         """
-        Retrieves the base content of the file by applying the initial_patch to the original content.
+        Retrieves the base content of the file.
 
         Returns:
             str: The base content of the file.
 
         Raises:
             FileNotFoundError: If the file does not exist in the repository.
-            Exception: If applying the initial_patch fails.
         """
         if not self._repo:
             logger.warning("No repo set")
@@ -128,6 +129,10 @@ class ContextFile(BaseModel):
             original_content = ""
         else:
             original_content = self._repo.get_file_content(self.file_path)
+
+        # Ensure original_content is a string, not None
+        if original_content is None:
+            original_content = ""
 
         self._cached_base_content = original_content
 
@@ -510,7 +515,44 @@ class ContextFile(BaseModel):
             return ""
 
         # Pre-process both strings to ensure consistent line endings
-        # This is especially important to handle consecutive empty lines
+        # Split by line but don't keep the line endings - we'll normalize them
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
+
+        # Generate the unified diff with 3 lines of context (standard for git)
+        diff_lines = list(
+            difflib.unified_diff(
+                old_lines,
+                new_lines,
+                fromfile="a/" + self.file_path,
+                tofile="b/" + self.file_path,
+                lineterm="",
+                n=3,
+            )
+        )
+
+        # Early return if no differences
+        if not diff_lines:
+            return ""
+
+        # Join with newlines and add a final newline
+        patch = "\n".join(diff_lines) + "\n"
+
+        try:
+            # Validate by test-parsing the patch
+            PatchSet(io.StringIO(patch))
+
+            # If we got here, the patch is valid
+            return patch
+        except Exception as e:
+            logger.debug(f"Failed to generate valid patch with simplified method: {e}")
+
+            # Fallback to the original method with context size variation
+            return self._generate_fallback_patch(old_content, new_content)
+
+    def _generate_fallback_patch(self, old_content: str, new_content: str) -> str:
+        """Fallback method for patch generation when the simple approach fails."""
+        # Pre-process both strings to ensure consistent line endings
         old_lines = old_content.splitlines(keepends=True)
         new_lines = new_content.splitlines(keepends=True)
 
@@ -562,8 +604,8 @@ class ContextFile(BaseModel):
             diff_text = (
                 "\n".join(
                     difflib.unified_diff(
-                        old_lines,
-                        new_lines,
+                        old_content.splitlines(),
+                        new_content.splitlines(),
                         fromfile="a/" + self.file_path,
                         tofile="b/" + self.file_path,
                         lineterm="",
@@ -1344,8 +1386,9 @@ class FileContext(BaseModel):
 
     def get_context_files(self) -> list[ContextFile]:
         file_paths = list(self._files.keys())
-        for file_path in file_paths:
-            yield self.get_context_file(file_path)
+        return [
+            self.get_context_file(file_path) for file_path in file_paths if self.get_context_file(file_path) is not None
+        ]
 
     def context_size(self):
         if self._repo:
