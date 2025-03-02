@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
+import { TrajectoryViewer } from "@/features/trajectory/components/TrajectoryViewer.tsx";
 import { Alert, AlertDescription } from "@/lib/components/ui/alert";
 import { AlertCircle, Loader2 } from "lucide-react";
 import { Card, CardContent } from "@/lib/components/ui/card";

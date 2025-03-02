@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { TrajectoryViewer } from "@/lib/components/trajectory/TrajectoryViewer";
+import { TrajectoryViewer } from "@/features/trajectory/components/TrajectoryViewer.tsx";
 import { useEvaluation } from "@/features/swebench/hooks/useEvaluation";
 import { useEvaluationInstance } from "@/features/swebench/hooks/useEvaluationInstance";
 import { Alert, AlertDescription } from "@/lib/components/ui/alert";

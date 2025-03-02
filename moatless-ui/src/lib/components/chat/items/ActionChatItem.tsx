@@ -1,7 +1,7 @@
 import { Terminal } from "lucide-react";
 import { Card } from "@/lib/components/ui/card";
 import { ChatMessage } from "../types";
-import { useTrajectoryStore } from "@/pages/trajectory/stores/trajectoryStore";
+import { useTrajectoryStore } from "@/features/trajectory/stores/trajectoryStore";
 import { cn } from "@/lib/utils";
 
 export interface ActionChatItemProps {
