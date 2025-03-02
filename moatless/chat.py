@@ -1,20 +1,21 @@
 import logging
-from typing import Optional, Dict, Any, Callable, List
+from collections.abc import Callable
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.agent.agent import ActionAgent
-from moatless.artifacts.artifact import ArtifactChange, ArtifactHandler, Artifact
+from moatless.artifacts.artifact import Artifact, ArtifactChange, ArtifactHandler
 from moatless.artifacts.file import FileArtifact
 from moatless.completion.model import Usage
 from moatless.exceptions import RuntimeError
 from moatless.node import Node
 from moatless.schema import (
+    ActionView,
+    AssistantMessage,
     Attachment,
     Message,
     UserMessage,
-    ActionView,
-    AssistantMessage,
 )
 from moatless.workspace import Workspace
 
@@ -26,12 +27,12 @@ class Chat(BaseModel):
 
     current_node: Optional[Node] = Field(None, description="The root node of the chat sequence.")
     agent: ActionAgent = Field(..., description="Agent for generating responses.")
-    artifact_handlers: List[ArtifactHandler] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the chat.")
+    artifact_handlers: list[ArtifactHandler] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata for the chat.")
     identifier_index: int = Field(0, description="")
     persist_path: Optional[str] = Field(None, description="Path to persist the chat sequence.")
 
-    def send_message(self, message: str, attachments: Optional[List[Attachment]] = None) -> str:
+    def send_message(self, message: str, attachments: Optional[list[Attachment]] = None) -> str:
         """Send a message with optional attachments and get a response."""
 
         if not self.current_node:
@@ -56,7 +57,7 @@ class Chat(BaseModel):
         self,
         workspace: Workspace,
         message: str,
-        attachments: Optional[List[Attachment]] = None,
+        attachments: Optional[list[Attachment]] = None,
     ) -> Node:
         artifact_changes = []
         if attachments:
@@ -87,7 +88,7 @@ class Chat(BaseModel):
             user_message=message,
         )
 
-    def get_messages(self) -> List[Message]:
+    def get_messages(self) -> list[Message]:
         messages = []
         for node in self.current_node.get_trajectory():
             user_artifacts = [change.artifact_id for change in node.artifact_changes if change.actor == "user"]
@@ -101,7 +102,7 @@ class Chat(BaseModel):
 
         return messages
 
-    def get_artifacts(self) -> List[Artifact]:
+    def get_artifacts(self) -> list[Artifact]:
         return self.current_node.workspace.artifacts
 
     def get_last_node(self) -> Node:
@@ -120,7 +121,7 @@ class Chat(BaseModel):
         if self.persist_path:
             self.persist(self.persist_path)
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         """
         Generate a dictionary representation of the Chat.
 

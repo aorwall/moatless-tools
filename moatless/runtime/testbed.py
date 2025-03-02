@@ -7,18 +7,17 @@ import string
 from datetime import datetime
 from typing import List
 
+from opentelemetry import trace
+
 from moatless.exceptions import RuntimeError
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.runtime.runtime import TestResult, TestStatus
+from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 from moatless.schema import RankedFileSpan
-from moatless.telemetry import instrument, add_span_event, set_attributes, set_span_status
+from moatless.telemetry import add_span_event, instrument, set_attributes, set_span_status
 from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
-
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -63,7 +62,7 @@ class TestbedEnvironment(RuntimeEnvironment):
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(testbed_sdk=TestbedSDK(), repository=repository, instance=instance, **kwargs)
 
-    def _generate_cache_key(self, test_files: List[str] | None, patch: str | None = None) -> str:
+    def _generate_cache_key(self, test_files: list[str] | None, patch: str | None = None) -> str:
         """Generate a unique cache key based on test files and patch content"""
         key_parts = []
         if test_files:
@@ -76,7 +75,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         combined = "|".join(key_parts)
         return hashlib.sha256(combined.encode()).hexdigest()
 
-    def _filter_failing_tests(self, test_results: List[TestResult], patch: str | None = None) -> List[TestResult]:
+    def _filter_failing_tests(self, test_results: list[TestResult], patch: str | None = None) -> list[TestResult]:
         """
         Filter out tests that fail without any changes to isolate patch-specific failures.
 
@@ -119,7 +118,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         return filtered_results
 
     @tracer.start_as_current_span("TestbedEnvironment.run_tests")
-    async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> List[TestResult]:
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
         async with await self.testbed_sdk.create_async_client(
             instance_id=self.instance_id, log_dir=self.log_dir, run_id=self.run_id
         ) as client:
@@ -136,7 +135,7 @@ class TestbedEnvironment(RuntimeEnvironment):
             log_content += f"\n\n## Log:\n{response.output}\n"
 
         if response.test_results:
-            log_content += f"\n\n## Testbed test results:"
+            log_content += "\n\n## Testbed test results:"
             test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
             log_content += f"```json\n{test_results_json}\n```"
 
@@ -233,7 +232,7 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         return block
 
-    async def _relevant_files_from_trace(self, trace_items: List[TraceItem]) -> List[RankedFileSpan]:
+    async def _relevant_files_from_trace(self, trace_items: list[TraceItem]) -> list[RankedFileSpan]:
         ranked_file_spans = []
         seen_spans = set()
 
@@ -274,7 +273,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         filtered_out_lines = [line for line in lines if line.startswith("E ") or line.startswith("> ")]
         return hashlib.sha256("\n".join(filtered_out_lines).encode()).hexdigest()
 
-    async def _map_test_results_to_issues(self, test_results: List) -> List[TestResult]:
+    async def _map_test_results_to_issues(self, test_results: list) -> list[TestResult]:
         file_cache = {}
 
         def get_cached_file(file_path: str):

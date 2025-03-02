@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import Optional, Literal, List
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -93,7 +93,7 @@ class Message(BaseModel):
 
 class UserMessage(Message):
     role: Literal["user"] = Field(default="user", description="Role is always 'user' for user messages")
-    artifact_ids: Optional[List[str]] = Field(
+    artifact_ids: Optional[list[str]] = Field(
         default=None, description="List of artifact ids associated with the message"
     )
 
@@ -103,4 +103,4 @@ class AssistantMessage(Message):
         default="assistant",
         description="Role is always 'assistant' for assistant messages",
     )
-    actions: Optional[List[ActionView]] = Field(default=None, description="List of actions performed by the assistant")
+    actions: Optional[list[ActionView]] = Field(default=None, description="List of actions performed by the assistant")

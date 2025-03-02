@@ -11,7 +11,7 @@ class CodeActionValueMixin:
     """
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         base_criteria = Action.get_evaluation_criteria(trajectory_length)
         test_criteria = RunTests.get_evaluation_criteria(trajectory_length)
 
@@ -26,7 +26,7 @@ class CodeActionValueMixin:
         return base_criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length: int) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length: int) -> list[RewardScaleEntry]:
         return cls.generate_reward_scale_entries(
             [
                 (

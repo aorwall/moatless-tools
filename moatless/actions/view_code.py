@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from pydantic import Field, BaseModel, PrivateAttr, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from moatless.actions.action import Action
 from moatless.actions.identify_mixin import IdentifyMixin
@@ -10,9 +10,9 @@ from moatless.actions.schema import (
     Observation,
     RewardScaleEntry,
 )
-from moatless.completion.schema import FewShotExample
 from moatless.codeblocks import CodeBlockType
-from moatless.file_context import FileContext, ContextFile
+from moatless.completion.schema import FewShotExample
+from moatless.file_context import ContextFile, FileContext
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
@@ -45,7 +45,7 @@ class ViewCodeArgs(ActionArguments):
     """View the code in a file or a specific code span."""
 
     thoughts: str = Field(..., description="Your thoughts on the code change.")
-    files: List[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
+    files: list[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
 
     model_config = ConfigDict(title="ViewCode")
 
@@ -57,7 +57,7 @@ class ViewCodeArgs(ActionArguments):
             logs = []
             for i, file in enumerate(self.files):
                 logs.append(f"{i}=[{file.log_name}]")
-            return f"ViewCode(" + ", ".join(logs) + ")"
+            return "ViewCode(" + ", ".join(logs) + ")"
 
     def to_prompt(self):
         prompt = "Show the following code:\n"
@@ -77,7 +77,7 @@ class ViewCodeArgs(ActionArguments):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
@@ -154,7 +154,7 @@ class ViewCode(Action, IdentifyMixin):
                 found_span_ids = set()
                 if file_span.span_ids and not file.module:
                     logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
-                    message = self.create_retry_message(file, f"No span ids found. Is it empty?")
+                    message = self.create_retry_message(file, "No span ids found. Is it empty?")
                     properties["fail_reason"] = "invalid_file"
                     return Observation(
                         message=message,
@@ -205,7 +205,7 @@ class ViewCode(Action, IdentifyMixin):
         added_new_spans = file_context.add_file_context(view_context)
 
         if view_context.is_empty():
-            message = f"\nThe specified code spans wasn't found."
+            message = "\nThe specified code spans wasn't found."
             properties["fail_reason"] = "no_spans_found"
             summary = "The specified code spans wasn't found."
         else:
@@ -219,7 +219,7 @@ class ViewCode(Action, IdentifyMixin):
             )
 
             if added_new_spans:
-                summary = f"Showed the following code spans:\n" + view_context.create_summary()
+                summary = "Showed the following code spans:\n" + view_context.create_summary()
             else:
                 summary = "The specified code spans has already been viewed in a previous action."
 
@@ -276,7 +276,7 @@ class ViewCode(Action, IdentifyMixin):
         return list_str
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
         criteria = [
             "Relevance of Requested Context: Ensure that the requested context is directly related to the problem and necessary for making progress.",
             "Avoiding Hallucinations: Verify that the agent is requesting context for code that actually exists in the codebase.",
@@ -286,7 +286,7 @@ class ViewCode(Action, IdentifyMixin):
         return criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return [
             RewardScaleEntry(
                 min_value=75,

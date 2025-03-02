@@ -1,8 +1,7 @@
-from abc import ABC
 import logging
-from typing import List, Type, Tuple, Any, Dict, Optional, ClassVar
+from abc import ABC
+from typing import Any, ClassVar, Dict, List, Optional, Tuple, Type
 
-from moatless.telemetry import instrument
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from moatless.actions.schema import (
@@ -13,13 +12,14 @@ from moatless.actions.schema import (
     RewardScaleEntry,
 )
 from moatless.completion.base import BaseCompletionModel
+from moatless.completion.schema import FewShotExample
+from moatless.component import MoatlessComponent
 from moatless.file_context import FileContext
 from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.component import MoatlessComponent
+from moatless.telemetry import instrument
 from moatless.workspace import Workspace
-from moatless.completion.schema import FewShotExample
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class CompletionModelMixin:
 class Action(MoatlessComponent, ABC):
     """Base class for all actions."""
 
-    args_schema: ClassVar[Type[ActionArguments]]
+    args_schema: ClassVar[type[ActionArguments]]
     model_config = ConfigDict(arbitrary_types_allowed=True)
     _workspace: Workspace = PrivateAttr(default=None)
 
@@ -62,7 +62,7 @@ class Action(MoatlessComponent, ABC):
         return "moatless.actions"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return Action
 
     @instrument(name=lambda self: f"{self.name}")
@@ -115,7 +115,7 @@ class Action(MoatlessComponent, ABC):
         return cls.__name__
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
         if trajectory_length < 3:
             return [
                 "Exploratory Actions: Recognize that initial searches and information-gathering steps are essential and should not be heavily penalized if they don't yield immediate results.",
@@ -131,8 +131,8 @@ class Action(MoatlessComponent, ABC):
 
     @staticmethod
     def generate_reward_scale_entries(
-        descriptions: List[Tuple[int, int, str]],
-    ) -> List[RewardScaleEntry]:
+        descriptions: list[tuple[int, int, str]],
+    ) -> list[RewardScaleEntry]:
         """
         Generate a list of RewardScaleEntry objects based on the provided descriptions.
 
@@ -148,7 +148,7 @@ class Action(MoatlessComponent, ABC):
         ]
 
     @classmethod
-    def get_reward_range(cls, trajectory_length: int) -> Tuple[int, int]:
+    def get_reward_range(cls, trajectory_length: int) -> tuple[int, int]:
         """
         Get the minimum and maximum reward values for this action.
 
@@ -172,7 +172,7 @@ class Action(MoatlessComponent, ABC):
         return None
 
     @classmethod
-    def get_action_by_args_class(cls, args_class: Type[ActionArguments]) -> Optional[Type["Action"]]:
+    def get_action_by_args_class(cls, args_class: type[ActionArguments]) -> Optional[type["Action"]]:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -195,7 +195,7 @@ class Action(MoatlessComponent, ABC):
         return search_subclasses(cls)
 
     @classmethod
-    def get_action_by_name(cls, action_name: str) -> Type["Action"]:
+    def get_action_by_name(cls, action_name: str) -> type["Action"]:
         """
         Dynamically import and return the appropriate Action class for the given action name.
         """
@@ -211,7 +211,7 @@ class Action(MoatlessComponent, ABC):
             raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
         return action_class(**kwargs)
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
         dump["action_class"] = self.get_class_name()
         return dump
@@ -238,7 +238,7 @@ class Action(MoatlessComponent, ABC):
         )
 
     @classmethod
-    def get_available_actions(cls) -> List[ActionSchema]:
+    def get_available_actions(cls) -> list[ActionSchema]:
         """Get all available actions with their schema."""
         cls._initialize_components()
 

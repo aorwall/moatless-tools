@@ -21,7 +21,7 @@ class TestResult(BaseModel):
     file_path: Optional[str] = None
     span_id: Optional[str] = None
     line: Optional[int] = None
-    relevant_files: List[RankedFileSpan] = Field(
+    relevant_files: list[RankedFileSpan] = Field(
         default_factory=list,
         description="List of spans that are relevant to the issue",
     )
@@ -29,10 +29,10 @@ class TestResult(BaseModel):
 
 class RuntimeEnvironment(ABC):
     @abstractmethod
-    async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
         pass
 
 
 class NoEnvironment(RuntimeEnvironment):
-    async def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> list[TestResult]:
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
         return []

@@ -1,8 +1,8 @@
-from typing import List, Any
+from typing import Any, List
 
 from moatless.actions.schema import Observation
 from moatless.api.trajectory.schema import TimelineItemDTO, TimelineItemType
-from moatless.node import Node, ActionStep
+from moatless.node import ActionStep, Node
 
 
 def create_user_message_item(node: Node) -> TimelineItemDTO | None:
@@ -14,9 +14,9 @@ def create_user_message_item(node: Node) -> TimelineItemDTO | None:
     return None
 
 
-def create_user_artifact_items(node: Node) -> List[TimelineItemDTO]:
+def create_user_artifact_items(node: Node) -> list[TimelineItemDTO]:
     """Create timeline items for user artifacts."""
-    items: List[TimelineItemDTO] = []
+    items: list[TimelineItemDTO] = []
     if node.artifact_changes:
         for artifact in node.artifact_changes:
             if artifact.actor == "user":
@@ -26,8 +26,8 @@ def create_user_artifact_items(node: Node) -> List[TimelineItemDTO]:
     return items
 
 
-def create_assistant_artifact_items(observation: Observation) -> List[TimelineItemDTO]:
-    items: List[TimelineItemDTO] = []
+def create_assistant_artifact_items(observation: Observation) -> list[TimelineItemDTO]:
+    items: list[TimelineItemDTO] = []
     if observation and observation.artifact_changes:
         for artifact in observation.artifact_changes:
             if artifact.actor == "assistant":
@@ -70,7 +70,7 @@ def create_thought_item(thoughts: str) -> TimelineItemDTO | None:
     return None
 
 
-def create_thought_block_item(thoughts: List[dict]) -> TimelineItemDTO | None:
+def create_thought_block_item(thoughts: list[dict]) -> TimelineItemDTO | None:
     """Create timeline item for thought blocks."""
     if not thoughts:
         return None
@@ -80,7 +80,7 @@ def create_thought_block_item(thoughts: List[dict]) -> TimelineItemDTO | None:
         if thought["type"] == "thinking" and "thinking" in thought:
             thoughts_str += thought["thinking"]
         elif thought["type"] == "redacted_thinking":
-            thoughts_str += f"Redacted Thought\n"
+            thoughts_str += "Redacted Thought\n"
     if thoughts_str:
         return TimelineItemDTO(label="Thought", type=TimelineItemType.THOUGHT, content={"message": thoughts_str})
     return None
@@ -215,9 +215,9 @@ def create_reward_item(node: Node) -> TimelineItemDTO | None:
     return None
 
 
-def generate_timeline_items(node: Node) -> List[TimelineItemDTO]:
+def generate_timeline_items(node: Node) -> list[TimelineItemDTO]:
     """Generate timeline items for a node."""
-    items: List[TimelineItemDTO] = []
+    items: list[TimelineItemDTO] = []
 
     if user_item := create_user_message_item(node):
         items.append(user_item)

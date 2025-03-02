@@ -1,7 +1,8 @@
+import asyncio
+import builtins
 import logging
 import os
-from typing import Any, Dict, Optional, List
-import asyncio
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field
 
@@ -9,10 +10,10 @@ from moatless.completion.base import BaseCompletionModel
 from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import (
-    maybe_clone,
+    async_clone_and_checkout,
     checkout_commit,
     clone_and_checkout,
-    async_clone_and_checkout,
+    maybe_clone,
     maybe_clone_async,
 )
 
@@ -211,7 +212,7 @@ class GitRepository(FileRepository):
             return "No changes."
 
         if self.completion and self.generate_commit_message:
-            prompt = f"Generate a concise commit message for the following git diff"
+            prompt = "Generate a concise commit message for the following git diff"
             if file_path:
                 prompt += f" of file {file_path}"
             prompt += f":\n\n{diff}\n\nCommit message:"
@@ -226,7 +227,7 @@ class GitRepository(FileRepository):
 
         return "Automated commit by Moatless Tools"
 
-    def diff(self, ignore_paths: Optional[List[str]] = None):
+    def diff(self, ignore_paths: Optional[list[str]] = None):
         logger.info(f"Get diff between {self.initial_commit} and {self.current_commit}")
 
         if ignore_paths:
@@ -244,12 +245,12 @@ class GitRepository(FileRepository):
                 logger.error(f"Error getting diff: {e}")
 
             if self.current_diff:
-                logger.info(f"Returning cached diff")
+                logger.info("Returning cached diff")
                 return self.current_diff
             else:
                 return None
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> builtins.dict[str, Any]:
         dump = super().model_dump(**kwargs)
         dump.update(
             {

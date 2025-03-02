@@ -8,18 +8,19 @@ from fastapi import APIRouter
 from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
 from moatless.config.agent_config import (
+    create_agent,
+    delete_agent,
     get_agent,
     get_all_agents,
-    create_agent,
     update_agent,
-    delete_agent,
 )
+
 from .schema import (
     ActionConfigDTO,
-    AgentConfigDTO,
-    AgentConfigUpdateDTO,
-    AgentConfigsResponseDTO,
     ActionsResponseDTO,
+    AgentConfigDTO,
+    AgentConfigsResponseDTO,
+    AgentConfigUpdateDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,7 +86,7 @@ async def delete_agent_config_api(agent_id: str):
     delete_agent(agent_id)
 
 
-def _create_agent(agent_id: str, action_configs: List[ActionConfigDTO], system_prompt: str) -> ActionAgent:
+def _create_agent(agent_id: str, action_configs: list[ActionConfigDTO], system_prompt: str) -> ActionAgent:
     actions = []
     for action_config in action_configs:
         actions.append(Action.model_validate(action_config.properties))

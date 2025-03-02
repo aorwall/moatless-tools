@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action, FewShotExample
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
@@ -41,7 +41,7 @@ class CreateFileArgs(ActionArguments):
         return cls.format_xml_schema({"path": "file/path.py", "file_text": "\ncomplete file content\n"})
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Create a new Python file for handling user authentication",

@@ -87,7 +87,7 @@ class AgentConfigManager:
         else:
             raise ValueError(f"Agent config {agent_id} not found. Available configs: {self._configs.keys()}")
 
-    def get_all_agents(self) -> List[ActionAgent]:
+    def get_all_agents(self) -> list[ActionAgent]:
         agents = []
         for config in self._configs.values():
             try:

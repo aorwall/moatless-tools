@@ -1,25 +1,29 @@
+import asyncio
+import fcntl
 import json
 import logging
 import os
 import shutil
 import time
 import traceback
-import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional, Any, Dict, List
 import uuid
+from datetime import datetime, timezone
 from functools import wraps
-from redis import Redis
-import fcntl
-import litellm
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
+import litellm
+from dotenv import load_dotenv
+from opentelemetry import trace
+from redis import Redis
+from rq.job import Dependency
+
+from moatless.benchmark.report import BenchmarkResult, to_result
+from moatless.benchmark.swebench.utils import create_index_async, create_repository, create_repository_async
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
-from moatless.benchmark.report import BenchmarkResult, to_result
-from moatless.benchmark.swebench.utils import create_repository, create_repository_async, create_index_async
+from moatless.evaluation.schema import Evaluation, EvaluationEvent, EvaluationStatus, InstanceStatus
 from moatless.evaluation.utils import get_moatless_instance
-from moatless.evaluation.schema import Evaluation, EvaluationStatus, InstanceStatus, EvaluationEvent
 from moatless.events import event_bus
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import create_flow
@@ -27,12 +31,9 @@ from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.testbed import TestbedEnvironment
+from moatless.telemetry import run_async, setup_telemetry
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
 from moatless.workspace import Workspace
-from moatless.telemetry import run_async, setup_telemetry
-from dotenv import load_dotenv
-from opentelemetry import trace
-from rq.job import Dependency
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")
@@ -126,7 +127,7 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
         leaf_nodes = root_node.get_leaf_nodes()
         eval_result_path = trajectory_dir / "eval_result.json"
 
-        eval_result: Optional[Dict[str, Any]] = None
+        eval_result: Optional[dict[str, Any]] = None
         if os.path.exists(eval_result_path):
             try:
                 with open(eval_result_path) as f:

@@ -2,8 +2,7 @@ import json
 import logging
 from typing import List, Optional
 
-from moatless.workspace import Workspace
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -11,17 +10,18 @@ from moatless.actions.schema import (
     Observation,
     RewardScaleEntry,
 )
+from moatless.artifacts.artifact import ArtifactReference
 from moatless.artifacts.diagnostics.diagnostic import (
     Diagnostic,
-    DiagnosticHandler,
     DiagnosticArtifact,
+    DiagnosticHandler,
     DiagnosticSeverity,
-    Range,
     Position,
+    Range,
 )
-from moatless.artifacts.artifact import ArtifactReference
-from moatless.file_context import FileContext
 from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
+from moatless.file_context import FileContext
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class RunMyPyArgs(ActionArguments):
     """
 
     thoughts: str = Field(..., description="Your reasoning on what files to check with MyPy.")
-    files: List[str] = Field(..., description="The list of Python files or directories to check with MyPy")
+    files: list[str] = Field(..., description="The list of Python files or directories to check with MyPy")
 
     model_config = ConfigDict(title="RunMyPy")
 
@@ -41,7 +41,7 @@ class RunMyPyArgs(ActionArguments):
         return f"RunMyPy({', '.join(self.files)})"
 
     def to_prompt(self):
-        return f"Running MyPy type checking for the following files:\n" + "\n".join(f"* {file}" for file in self.files)
+        return "Running MyPy type checking for the following files:\n" + "\n".join(f"* {file}" for file in self.files)
 
 
 class RunMyPy(Action):
@@ -116,8 +116,8 @@ class RunMyPy(Action):
         return "\n\n".join(summary_parts)
 
     def _parse_mypy_json_output(
-        self, output: str, requested_files: Optional[List[str]] = None
-    ) -> List[DiagnosticArtifact]:
+        self, output: str, requested_files: Optional[list[str]] = None
+    ) -> list[DiagnosticArtifact]:
         """
         Parse MyPy JSON output and convert it to DiagnosticArtifact objects.
 

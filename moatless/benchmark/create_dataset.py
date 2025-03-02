@@ -21,11 +21,11 @@ def read_predictions(pred_path: str):
             all_preds = []
             try:
                 all_preds = json.loads(content)
-            except json.JSONDecodeError as e:
+            except json.JSONDecodeError:
                 try:
                     for line in content.split("\n"):
                         all_preds.append(json.loads(line))
-                except Exception as e:
+                except Exception:
                     logging.exception(f"Error reading predictions from {pred_path}")
 
             for prediction in all_preds:

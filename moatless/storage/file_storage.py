@@ -6,14 +6,15 @@ data to files on disk.
 """
 
 import json
-import os
 import logging
+import os
 from pathlib import Path
 from typing import List, Optional, Union
 
 import aiofiles
-from moatless.storage.base import BaseStorage
+
 from moatless.context_data import get_trajectory_dir
+from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)
 

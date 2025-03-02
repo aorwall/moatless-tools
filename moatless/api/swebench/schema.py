@@ -1,14 +1,13 @@
 from datetime import datetime
 from typing import List, Optional
 
-from moatless.completion.model import Usage
-from moatless.runner.runner import RunnerInfo
 from pydantic import BaseModel, Field
 
+from moatless.completion.manager import ModelConfig
+from moatless.completion.model import Usage
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, InstanceStatus
 from moatless.flow.schema import FlowConfig
-from moatless.completion.manager import ModelConfig
-from moatless.runner.runner import JobInfo
+from moatless.runner.runner import JobInfo, RunnerInfo
 
 
 class SWEBenchInstanceDTO(BaseModel):
@@ -38,7 +37,7 @@ class SWEBenchValidationResponseDTO(BaseModel):
 class SWEBenchInstancesResponseDTO(BaseModel):
     """Response containing all available SWEBench instances"""
 
-    instances: List[SWEBenchInstanceDTO] = Field(..., description="List of available instances")
+    instances: list[SWEBenchInstanceDTO] = Field(..., description="List of available instances")
 
 
 class EvaluationStatusSummaryDTO(BaseModel):
@@ -150,7 +149,7 @@ def get_instance_status(instance: EvaluationInstance) -> str:
 class EvaluationListResponseDTO(BaseModel):
     """Response containing list of evaluations"""
 
-    evaluations: List[EvaluationListItemDTO] = Field(..., description="List of evaluations")
+    evaluations: list[EvaluationListItemDTO] = Field(..., description="List of evaluations")
 
 
 class EvaluationInstanceDTO(BaseModel):
@@ -182,7 +181,7 @@ class EvaluationResponseDTO(BaseModel):
     completed_at: Optional[datetime] = None
     flow: FlowConfig
     model: ModelConfig
-    instances: List[EvaluationInstanceDTO]
+    instances: list[EvaluationInstanceDTO]
 
 
 class EvaluationRequestDTO(BaseModel):
@@ -208,14 +207,14 @@ class DatasetDTO(BaseModel):
 class DatasetsResponseDTO(BaseModel):
     """Response containing list of datasets"""
 
-    datasets: List[DatasetDTO]
+    datasets: list[DatasetDTO]
 
 
 class RunnerResponseDTO(BaseModel):
     """Response containing runner status"""
 
     info: RunnerInfo
-    jobs: List[JobInfo]
+    jobs: list[JobInfo]
 
 
 class JobStatusSummaryResponseDTO(BaseModel):

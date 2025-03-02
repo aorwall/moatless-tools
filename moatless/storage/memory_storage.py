@@ -23,7 +23,7 @@ class MemoryStorage(BaseStorage):
 
     def __init__(self):
         """Initialize an empty in-memory storage."""
-        self._data: Dict[str, dict] = {}
+        self._data: dict[str, dict] = {}
 
     async def read(self, key: str) -> dict:
         """Read binary data from memory."""

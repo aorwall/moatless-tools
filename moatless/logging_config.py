@@ -8,16 +8,16 @@ This module provides a state-of-the-art logging configuration with:
 - Environment-aware configuration
 """
 
+import json
 import logging
 import logging.handlers
-import json
 import os
 import sys
-from datetime import datetime
-from pathlib import Path
-from typing import Optional, Dict, Any
 import threading
 import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 
 class StructuredJsonFormatter(logging.Formatter):
@@ -142,7 +142,7 @@ def setup_logging(
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
-def get_logger(name: str, extra_fields: Optional[Dict[str, Any]] = None) -> logging.Logger:
+def get_logger(name: str, extra_fields: Optional[dict[str, Any]] = None) -> logging.Logger:
     """Get a logger with optional extra fields.
 
     Args:

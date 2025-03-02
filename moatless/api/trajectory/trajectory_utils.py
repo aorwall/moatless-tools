@@ -1,22 +1,22 @@
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from fastapi import HTTPException
 
 from moatless.api.trajectory.schema import (
-    RewardDTO,
-    TrajectoryDTO,
-    NodeDTO,
     ActionDTO,
-    ObservationDTO,
-    CompletionDTO,
     ActionStepDTO,
+    CompletionDTO,
     FileContextDTO,
-    UpdatedFileDTO,
-    UsageDTO,
     FileContextFileDTO,
     FileContextSpanDTO,
+    NodeDTO,
+    ObservationDTO,
+    RewardDTO,
+    TrajectoryDTO,
+    UpdatedFileDTO,
+    UsageDTO,
 )
 from moatless.api.trajectory.timeline_utils import generate_timeline_items
 from moatless.file_context import FileContext
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def convert_moatless_node_to_api_node(
-    node: Node, action_history: Dict[str, str], eval_instance: dict | None = None
+    node: Node, action_history: dict[str, str], eval_instance: dict | None = None
 ) -> NodeDTO:
     """Convert a Moatless Node to an API Node model."""
     action_steps = []
@@ -268,7 +268,7 @@ async def file_context_to_dto(file_context: FileContext, previous_context: FileC
     )
 
 
-async def get_updated_files(old_context: FileContext, new_context: FileContext) -> List[UpdatedFileDTO]:
+async def get_updated_files(old_context: FileContext, new_context: FileContext) -> list[UpdatedFileDTO]:
     """
     Compare two FileContexts and return information about files that have been updated.
     Updates include content changes, span additions/removals, and file additions.
@@ -329,7 +329,7 @@ async def get_updated_files(old_context: FileContext, new_context: FileContext) 
     return updated_files
 
 
-def calculate_token_metrics(trajectory_data: Dict[str, Any]) -> Dict[str, int]:
+def calculate_token_metrics(trajectory_data: dict[str, Any]) -> dict[str, int]:
     """Calculate token-related metrics from trajectory data."""
     prompt_tokens = trajectory_data.get("prompt_tokens", 0)
     completion_tokens = trajectory_data.get("completion_tokens", 0)
@@ -344,7 +344,7 @@ def calculate_token_metrics(trajectory_data: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
-def convert_nodes(root_node: Node) -> List[NodeDTO]:
+def convert_nodes(root_node: Node) -> list[NodeDTO]:
     """Convert nodes from trajectory data to NodeDTOs.
 
     If any node has multiple children, creates a tree structure at branch points.
@@ -367,7 +367,7 @@ def convert_nodes(root_node: Node) -> List[NodeDTO]:
 
         return node_dto
 
-    def process_flat(node: Node) -> List[NodeDTO]:
+    def process_flat(node: Node) -> list[NodeDTO]:
         """Process nodes into completely flat list"""
         result = [convert_moatless_node_to_api_node(node, action_history)]
         for child in node.children:
@@ -403,7 +403,7 @@ def load_trajectory_from_file(file_path: str) -> TrajectoryDTO:
     """Load trajectory data from a file and convert it to TrajectoryDTO."""
     try:
         logger.debug(f"Loading trajectory from file: {file_path}")
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             node = Node.from_file(file_path)
             return create_trajectory_dto(node)
     except FileNotFoundError:
@@ -417,7 +417,7 @@ def load_trajectory_from_file(file_path: str) -> TrajectoryDTO:
         raise HTTPException(status_code=500, detail=f"Error processing trajectory file: {str(e)}")
 
 
-def get_test_results_summary(test_results: List[Dict[str, Any]]) -> Dict[str, int]:
+def get_test_results_summary(test_results: list[dict[str, Any]]) -> dict[str, int]:
     """Compute summary of test results."""
     if not test_results:
         return None

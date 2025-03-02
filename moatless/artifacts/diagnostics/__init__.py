@@ -1,9 +1,9 @@
 from moatless.artifacts.diagnostics.diagnostic import (
-    DiagnosticHandler,
     DiagnosticArtifact,
+    DiagnosticHandler,
     DiagnosticSeverity,
-    Range,
     Position,
+    Range,
 )
 from moatless.artifacts.diagnostics.mypy_handler import MyPyArtifactHandler
 

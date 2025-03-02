@@ -288,25 +288,25 @@ class CodeBlock:
     type: CodeBlockType
     content: str
     identifier: Optional[str] = None
-    parameters: List["Parameter"] = field(default_factory=list)
-    relationships: List["Relationship"] = field(default_factory=list)
-    span_ids: Set[str] = field(default_factory=set)
+    parameters: list["Parameter"] = field(default_factory=list)
+    relationships: list["Relationship"] = field(default_factory=list)
+    span_ids: set[str] = field(default_factory=set)
     belongs_to_span: Optional["BlockSpan"] = None
     has_error: bool = False
     start_line: int = 0
     end_line: int = 0
-    properties: Dict = field(default_factory=dict)
+    properties: dict = field(default_factory=dict)
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    children: List["CodeBlock"] = field(default_factory=list)
-    validation_errors: List[str] = field(default_factory=list)
+    children: list["CodeBlock"] = field(default_factory=list)
+    validation_errors: list[str] = field(default_factory=list)
     parent: Optional["CodeBlock"] = None
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
 
-    _content_lines: Optional[List[str]] = field(default=None, init=False)
+    _content_lines: Optional[list[str]] = field(default=None, init=False)
 
     def __post_init__(self):
         self._content_lines = None
@@ -1114,13 +1114,11 @@ class CodeBlock:
         start_line: int,
         end_line: int | None = None,
         include_parents: bool = False,
-    ) -> List["CodeBlock"]:
+    ) -> list["CodeBlock"]:
         blocks = []
         block = self
         while block.next and (end_line is None or block.start_line <= end_line):
-            if include_parents and block.has_lines(start_line, end_line):
-                blocks.append(block)
-            elif block.start_line >= start_line:
+            if include_parents and block.has_lines(start_line, end_line) or block.start_line >= start_line:
                 blocks.append(block)
             block = block.next
 

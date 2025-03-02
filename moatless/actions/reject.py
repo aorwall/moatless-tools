@@ -1,6 +1,6 @@
-from typing import Type, ClassVar
+from typing import ClassVar, Type
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
@@ -22,7 +22,7 @@ class RejectArgs(ActionArguments):
 
 
 class Reject(Action):
-    args_schema: ClassVar[Type[ActionArguments]] = RejectArgs
+    args_schema: ClassVar[type[ActionArguments]] = RejectArgs
 
     async def execute(self, args: RejectArgs, file_context: FileContext | None = None):
         return Observation(message="Rejected", terminal=True)

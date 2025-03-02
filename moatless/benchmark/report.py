@@ -8,12 +8,12 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from moatless.evaluation.utils import (
-    has_identified_spans,
-    has_identified_files,
     count_identified_files,
     count_identified_spans,
     get_missing_files,
     get_moatless_instance,
+    has_identified_files,
+    has_identified_spans,
     read_search_trees,
 )
 from moatless.file_context import FileContext
@@ -38,7 +38,7 @@ class StateStats(BaseModel):
     found_files: int = 0
     result_spans: int = 0
     result_files: int = 0
-    found_spans_details: Dict[str, List[str]] = {}
+    found_spans_details: dict[str, list[str]] = {}
 
 
 class SearchStats(StateStats):
@@ -145,8 +145,8 @@ class BenchmarkResult(BaseModel):
 
     transitions: int = 0
 
-    trajectories: List[TrajectoryStats] = []
-    actions: Dict[str, int] = Field(default_factory=dict)
+    trajectories: list[TrajectoryStats] = []
+    actions: dict[str, int] = Field(default_factory=dict)
 
     # MCTS
     all_transitions: int = 0
@@ -373,7 +373,7 @@ def to_result(
         resolved = None
         best_stats = None
         best_node = None
-        actions_counter: Dict[str, int] = {}
+        actions_counter: dict[str, int] = {}
 
         if hasattr(node, "get_best_trajectory"):
             best_node = node.get_best_trajectory()
@@ -492,7 +492,7 @@ def to_result(
         if result.retries > 0:
             result.flags.append("has_retries")
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"Failed to generate report for instance {instance_id}")
 
     return result
@@ -562,20 +562,20 @@ def set_found_status(expected_spans, alternative_solutions, identified_spans, re
         result_stats.status = "missing_spans"
 
 
-def read_reports(report_path: str) -> List[BenchmarkResult]:
-    with open(report_path, "r") as f:
+def read_reports(report_path: str) -> list[BenchmarkResult]:
+    with open(report_path) as f:
         data = json.load(f)
 
     results = [BenchmarkResult.model_validate(item) for item in data]
     return results
 
 
-def trajs_to_df(trajectories: List[Node], report_mode: str | None = None) -> pd.DataFrame:
+def trajs_to_df(trajectories: list[Node], report_mode: str | None = None) -> pd.DataFrame:
     results = [to_result(None, trajectory) for trajectory in trajectories]
     return to_dataframe(results, report_mode)
 
 
-def to_trajectory_dataframe(results: List[BenchmarkResult]):
+def to_trajectory_dataframe(results: list[BenchmarkResult]):
     result_dicts = []
     for result in results:
         for traj_result in result.trajectories:
@@ -592,7 +592,7 @@ def to_trajectory_dataframe(results: List[BenchmarkResult]):
 
 
 def to_dataframe(
-    results: List[BenchmarkResult],
+    results: list[BenchmarkResult],
     report_mode: str | None = None,
     previous_report: dict = None,
 ) -> pd.DataFrame:
@@ -758,8 +758,8 @@ def to_dataframe(
     return df
 
 
-def read_results_from_json(file_path: str) -> List[BenchmarkResult]:
-    with open(file_path, "r") as f:
+def read_results_from_json(file_path: str) -> list[BenchmarkResult]:
+    with open(file_path) as f:
         data = json.load(f)
 
     results = [BenchmarkResult.validate(item) for item in data]
@@ -771,7 +771,7 @@ def generate_report(dir: str, split: str = "lite"):
 
     external_result = None
     if os.path.exists(result_path):
-        with open(result_path, "r") as f:
+        with open(result_path) as f:
             external_result = json.load(f)
 
     search_trees = read_search_trees(dir)
@@ -791,7 +791,7 @@ def generate_report(dir: str, split: str = "lite"):
         eval_result_file = os.path.join(dir, instance_id, "eval_result.json")
         try:
             if os.path.exists(eval_result_file):
-                with open(eval_result_file, "r") as f:
+                with open(eval_result_file) as f:
                     eval_report = json.load(f)
         except Exception as e:
             logger.exception(f"Failed to load eval report from {eval_result_file}: {e}")

@@ -15,11 +15,11 @@ from moatless.index import CodeIndex
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
 from moatless.utils.repo import (
-    setup_github_repo,
+    async_clone_and_checkout,
     get_repo_dir_name,
     retry_clone,
-    async_clone_and_checkout,
     run_git_command,
+    setup_github_repo,
 )
 
 logger = logging.getLogger(__name__)
@@ -300,7 +300,7 @@ async def create_repository_async(
             raise
     else:
         try:
-            logger.info(f"Fetching all from central repo")
+            logger.info("Fetching all from central repo")
             await run_git_command(["git", "fetch", "--all"], central_repo_path)
         except Exception as e:
             logger.error(f"Central repo is invalid: {e}")

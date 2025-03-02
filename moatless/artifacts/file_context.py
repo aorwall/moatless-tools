@@ -1,9 +1,10 @@
 from dataclasses import Field
 from typing import Dict
-from moatless.file_context import ContextFile, FileContext
+
 from pydantic import PrivateAttr
 
 from moatless.artifacts.artifact import Artifact, ArtifactHandler
+from moatless.file_context import ContextFile, FileContext
 from moatless.repository.repository import Repository
 
 
@@ -20,7 +21,7 @@ class FileContextArtifactHandler(ArtifactHandler):
 
     _repository: Repository = PrivateAttr(None)
 
-    context_by_node_id: Dict[str, FileContext] = PrivateAttr(default_factory=dict)
+    context_by_node_id: dict[str, FileContext] = PrivateAttr(default_factory=dict)
 
     def __init__(self, repository: Repository | None = None, **kwargs):
         super().__init__(**kwargs)

@@ -1,6 +1,6 @@
 import importlib
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +19,7 @@ class Repository(BaseModel, ABC):
     def is_directory(self, file_path: str) -> bool:
         return False
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
         dump["repository_class"] = f"{self.__class__.__module__}.{self.__class__.__name__}"
         return dump
@@ -43,7 +43,7 @@ class Repository(BaseModel, ABC):
         return super().model_validate(obj)
 
     @abstractmethod
-    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+    def list_directory(self, directory_path: str = "") -> dict[str, list[str]]:
         """
         Lists files and directories in the specified directory.
         Returns a dictionary with 'files' and 'directories' lists.
@@ -52,9 +52,9 @@ class Repository(BaseModel, ABC):
 
 
 class InMemRepository(Repository):
-    files: Dict[str, str] = Field(default_factory=dict)
+    files: dict[str, str] = Field(default_factory=dict)
 
-    def __init__(self, files: Dict[str, str] = None, **kwargs):
+    def __init__(self, files: dict[str, str] = None, **kwargs):
         files = files or {}
         super().__init__(files=files, **kwargs)
 
@@ -70,12 +70,12 @@ class InMemRepository(Repository):
     def is_directory(self, file_path: str) -> bool:
         return False
 
-    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+    def list_directory(self, directory_path: str = "") -> dict[str, list[str]]:
         return {"files": [], "directories": []}
 
-    def model_dump(self) -> Dict:
+    def model_dump(self) -> dict:
         return {"files": self.files}
 
     @classmethod
-    def model_validate(cls, obj: Dict):
+    def model_validate(cls, obj: dict):
         return cls(files=obj.get("files", {}))

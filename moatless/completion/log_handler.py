@@ -3,13 +3,11 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+
 import aiofiles
-
-from moatless.context_data import current_node_id
-from moatless.context_data import current_trajectory_id
-
 from litellm import CustomLogger
 
+from moatless.context_data import current_node_id, current_trajectory_id
 from moatless.utils.moatless import get_moatless_trajectories_dir, get_moatless_trajectory_dir
 
 logger = logging.getLogger("LiteLLM-Logger")
@@ -124,6 +122,6 @@ class LogHandler(CustomLogger):
             try:
                 cleaned_response = original_response.replace("\\\\", "\\")
                 original_response = json.loads(cleaned_response)
-            except Exception as e:
+            except Exception:
                 original_response = str(original_response)
         return original_response

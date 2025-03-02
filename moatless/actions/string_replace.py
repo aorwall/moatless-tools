@@ -125,7 +125,7 @@ class StringReplaceArgs(ActionArguments):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Update the error message in the validate_user method",
@@ -268,9 +268,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         new_str = args.new_str.expandtabs()
 
         if old_str == new_str:
-            logger.warning(f"The old_str and new_str are the same. No changes were made.")
+            logger.warning("The old_str and new_str are the same. No changes were made.")
             return Observation(
-                message=f"The old_str and new_str are the same. No changes were made.",
+                message="The old_str and new_str are the same. No changes were made.",
                 properties={"fail_reason": "no_changes"},
             )  # type: ignore
 
@@ -522,7 +522,7 @@ def find_match_when_ignoring_indentation(old_str, content):
             indentation_diffs = set()
 
             for i, (old_line, window_line) in enumerate(
-                zip(old_str_lines, content_lines[start_idx : start_idx + window_size])
+                zip(old_str_lines, content_lines[start_idx : start_idx + window_size], strict=False)
             ):
                 old_indent = len(old_line) - len(old_line.lstrip())
                 window_indent = len(window_line) - len(window_line.lstrip())

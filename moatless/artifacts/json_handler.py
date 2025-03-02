@@ -2,9 +2,10 @@ import json
 import logging
 import uuid
 from abc import abstractmethod
-from pydantic import PrivateAttr
 from pathlib import Path
-from typing import Dict, List, Type, TypeVar, Generic, Any, Optional, cast
+from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, cast
+
+from pydantic import PrivateAttr
 
 from moatless.artifacts.artifact import Artifact, ArtifactHandler, SearchCriteria
 from moatless.storage import BaseStorage
@@ -23,7 +24,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
     """
 
     _storage: BaseStorage = PrivateAttr()
-    _artifacts: Dict[str, T] = PrivateAttr(default={})
+    _artifacts: dict[str, T] = PrivateAttr(default={})
 
     def __init__(self, storage: BaseStorage | None = None, **kwargs):
         """
@@ -40,7 +41,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
 
     @classmethod
     @abstractmethod
-    def get_artifact_class(cls) -> Type[T]:
+    def get_artifact_class(cls) -> type[T]:
         """Return the Artifact class that this handler manages"""
         pass
 
@@ -125,7 +126,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         del self._artifacts[artifact_id]
         await self._save_artifacts()
 
-    async def search(self, criteria: List[SearchCriteria]) -> List[T]:
+    async def search(self, criteria: list[SearchCriteria]) -> list[T]:
         """
         Search for artifacts based on the provided criteria.
         Implements a simple filtering mechanism based on the criteria.
@@ -150,17 +151,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
                     search_value = search_value.lower()
 
                 # Apply the operator
-                if criterion.operator == "eq" and field_value == search_value:
-                    filtered_results.append(artifact)
-                elif criterion.operator == "contains" and search_value in field_value:
-                    filtered_results.append(artifact)
-                elif criterion.operator == "gt" and field_value > search_value:
-                    filtered_results.append(artifact)
-                elif criterion.operator == "lt" and field_value < search_value:
-                    filtered_results.append(artifact)
-                elif criterion.operator == "gte" and field_value >= search_value:
-                    filtered_results.append(artifact)
-                elif criterion.operator == "lte" and field_value <= search_value:
+                if criterion.operator == "eq" and field_value == search_value or criterion.operator == "contains" and search_value in field_value or (criterion.operator == "gt" and field_value > search_value or criterion.operator == "lt" and field_value < search_value) or (criterion.operator == "gte" and field_value >= search_value or criterion.operator == "lte" and field_value <= search_value):
                     filtered_results.append(artifact)
 
             results = filtered_results

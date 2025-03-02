@@ -28,7 +28,7 @@ class CompletionError(MoatlessError):
         self,
         message: str,
         last_completion: Any | None = None,
-        messages: List[dict] | None = None,
+        messages: list[dict] | None = None,
         accumulated_usage: Optional["Usage"] = None,
     ):
         super().__init__(message)

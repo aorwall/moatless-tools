@@ -52,13 +52,13 @@ class ModelConfigUpdateDTO(BaseModel):
 class ModelsResponseDTO(BaseModel):
     """Response model for listing all models"""
 
-    models: List[ModelConfig] = Field(..., description="List of model configurations")
+    models: list[ModelConfig] = Field(..., description="List of model configurations")
 
 
 class BaseModelsResponseDTO(BaseModel):
     """Response model for listing base models"""
 
-    models: List[ModelConfig] = Field(..., description="List of base model configurations")
+    models: list[ModelConfig] = Field(..., description="List of base model configurations")
 
 
 class AddModelFromBaseDTO(BaseModel):

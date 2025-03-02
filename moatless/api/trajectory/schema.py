@@ -1,10 +1,11 @@
 """Schema for trajectory data."""
 
 from enum import Enum
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
 
 from moatless.completion.model import Usage
-from pydantic import BaseModel, Field
 
 
 class UsageDTO(BaseModel):
@@ -32,7 +33,7 @@ class ObservationDTO(BaseModel):
 
     message: Optional[str] = None
     summary: Optional[str] = None
-    properties: Dict[str, Any] = {}
+    properties: dict[str, Any] = {}
     expectCorrection: bool = False
 
 
@@ -42,7 +43,7 @@ class ActionDTO(BaseModel):
     name: str
     shortSummary: str
     thoughts: Optional[str] = None
-    properties: Dict[str, Any] = {}
+    properties: dict[str, Any] = {}
 
 
 class ActionStepDTO(BaseModel):
@@ -52,8 +53,8 @@ class ActionStepDTO(BaseModel):
     action: ActionDTO
     observation: Optional[ObservationDTO] = None
     completion: Optional[CompletionDTO] = None
-    warnings: List[str] = []
-    errors: List[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
 
 
 class FileContextSpanDTO(BaseModel):
@@ -72,7 +73,7 @@ class FileContextFileDTO(BaseModel):
     file_path: str
     content: Optional[str] = None
     patch: Optional[str] = None
-    spans: List[FileContextSpanDTO] = []
+    spans: list[FileContextSpanDTO] = []
     show_all_spans: bool = False
     tokens: Optional[int] = None
     is_new: bool = False
@@ -91,12 +92,12 @@ class UpdatedFileDTO(BaseModel):
 class FileContextDTO(BaseModel):
     """File context information."""
 
-    testResults: Optional[List[Dict[str, Any]]] = None
+    testResults: Optional[list[dict[str, Any]]] = None
     patch: Optional[str] = None
-    files: List[FileContextFileDTO] = []
-    warnings: List[str] = []
-    errors: List[str] = []
-    updatedFiles: List[UpdatedFileDTO] = Field(
+    files: list[FileContextFileDTO] = []
+    warnings: list[str] = []
+    errors: list[str] = []
+    updatedFiles: list[UpdatedFileDTO] = Field(
         default_factory=list,
         description="List of files that have been updated since the last context",
     )
@@ -133,7 +134,7 @@ class TimelineItemDTO(BaseModel):
 
     label: str
     type: TimelineItemType
-    content: Dict[str, Any]
+    content: dict[str, Any]
 
 
 class RewardDTO(BaseModel):
@@ -147,29 +148,29 @@ class NodeDTO(BaseModel):
     """Node information in the tree."""
 
     nodeId: int
-    children: List["NodeDTO"] = Field(default_factory=list, description="Children nodes of this node")
+    children: list["NodeDTO"] = Field(default_factory=list, description="Children nodes of this node")
     executed: bool = Field(default=False, description="Whether this node has been executed")
     reward: Optional[RewardDTO] = None
     userMessage: Optional[str] = None
     assistantMessage: Optional[str] = None
     actionCompletion: Optional[CompletionDTO] = None
-    actionSteps: List[ActionStepDTO] = []
+    actionSteps: list[ActionStepDTO] = []
     fileContext: Optional[FileContextDTO] = None
     error: Optional[str] = None
-    warnings: List[str] = []
-    errors: List[str] = []
+    warnings: list[str] = []
+    errors: list[str] = []
     usage: Optional[Usage] = None
     terminal: bool = Field(default=False, description="Whether this node is in a terminal state")
-    allNodeErrors: List[str] = Field(
+    allNodeErrors: list[str] = Field(
         default_factory=list,
         description="All errors from this node, including action steps and file context",
     )
-    allNodeWarnings: List[str] = Field(
+    allNodeWarnings: list[str] = Field(
         default_factory=list,
         description="All warnings from this node, including action steps and file context",
     )
     testResultsSummary: Optional[TestResultsSummaryDTO] = None
-    items: List[TimelineItemDTO] = Field(default_factory=list, description="Timeline items for this node")
+    items: list[TimelineItemDTO] = Field(default_factory=list, description="Timeline items for this node")
 
 
 class TrajectoryDTO(BaseModel):
@@ -183,7 +184,7 @@ class TrajectoryDTO(BaseModel):
     promptTokens: Optional[int] = None
     completionTokens: Optional[int] = None
     cachedTokens: Optional[int] = None
-    flags: List[str] = []
+    flags: list[str] = []
     failedActions: int = 0
     duplicatedActions: int = 0
-    nodes: List[NodeDTO] = []
+    nodes: list[NodeDTO] = []

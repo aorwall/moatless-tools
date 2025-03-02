@@ -4,15 +4,15 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-import anyio
+from typing import Any, Dict, List, Optional
 
-from moatless.telemetry import instrument
+import anyio
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.module import Module
 from moatless.repository.repository import Repository
+from moatless.telemetry import instrument
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class FileRepository(Repository):
     def repo_dir(self):
         return self.repo_path
 
-    def model_dump(self) -> Dict:
+    def model_dump(self) -> dict:
         return {"type": "file", "repo_path": self.repo_path}
 
     def get_full_path(self, file_path: str) -> str:
@@ -203,7 +203,7 @@ class FileRepository(Repository):
             f.write(updated_content)
 
     @instrument()
-    async def matching_files(self, file_pattern: str) -> List[str]:
+    async def matching_files(self, file_pattern: str) -> list[str]:
         """
         Returns a list of files matching the given pattern within the repository.
 
@@ -260,14 +260,14 @@ class FileRepository(Repository):
                         continue
                     relative_path = str(path.relative_to(self.repo_path)).replace(os.sep, "/")
                     matched_files.append(relative_path)
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error finding files for pattern {file_pattern}:")
             return []
 
         return matched_files
 
     @instrument()
-    async def find_by_pattern(self, patterns: list[str]) -> List[str]:
+    async def find_by_pattern(self, patterns: list[str]) -> list[str]:
         """
         Returns a list of files matching the given patterns within the repository.
         Uses native async file operations via anyio.Path.
@@ -284,11 +284,11 @@ class FileRepository(Repository):
         return matched_files
 
     @classmethod
-    def model_validate(cls, obj: Dict):
+    def model_validate(cls, obj: dict):
         repo = cls(repo_path=obj["path"])
         return repo
 
-    async def find_exact_matches(self, search_text: str, file_pattern: Optional[str] = None) -> List[tuple[str, int]]:
+    async def find_exact_matches(self, search_text: str, file_pattern: Optional[str] = None) -> list[tuple[str, int]]:
         """
         Uses grep to search for exact text matches in files asynchronously.
         """
@@ -369,7 +369,7 @@ class FileRepository(Repository):
         logger.info(f"Returning {len(matches)} matches")
         return matches
 
-    def list_directory(self, directory_path: str = "") -> Dict[str, List[str]]:
+    def list_directory(self, directory_path: str = "") -> dict[str, list[str]]:
         """
         Lists files and directories in the specified directory.
         Returns a dictionary with 'files' and 'directories' lists.
@@ -398,7 +398,7 @@ class FileRepository(Repository):
 
     async def find_regex_matches(
         self, regex_pattern: str, include_pattern: Optional[str] = None, max_results: int = 100
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Uses grep to search for regex pattern matches in files asynchronously.
         Returns files sorted by modification time (most recent first).

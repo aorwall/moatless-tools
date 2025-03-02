@@ -1,18 +1,18 @@
 import json
+from collections.abc import Iterable
 from typing import (
     ClassVar,
-    Self,
-    Union,
-    TypedDict,
-    Literal,
-    Iterable,
-    Required,
-    Optional,
     List,
+    Literal,
+    Optional,
+    Required,
+    Self,
+    TypedDict,
+    Union,
 )
 
 from docstring_parser import parse
-from pydantic import BaseModel, ValidationError, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from moatless.completion.model import logger
 
@@ -94,7 +94,7 @@ class ChatCompletionMessage(TypedDict, total=False):
 
 class ChatCompletionAssistantMessage(ChatCompletionMessage, total=False):
     name: Optional[str]
-    tool_calls: Optional[List[ChatCompletionAssistantToolCall]]
+    tool_calls: Optional[list[ChatCompletionAssistantToolCall]]
     function_call: Optional[ChatCompletionToolCallFunctionChunk]
     cache_control: Optional[ChatCompletionCachedContent]
 
@@ -105,7 +105,7 @@ class ChatCompletionToolMessage(ChatCompletionMessage):
 
 class ChatCompletionSystemMessage(TypedDict, total=False):
     role: Required[Literal["system"]]
-    content: Required[Union[str, List]]
+    content: Required[Union[str, list]]
     name: str
     cache_control: Optional[ChatCompletionCachedContent]
 
@@ -304,9 +304,9 @@ class ResponseSchema(BaseModel):
             cleaned_json = json.dumps(cleaned_data)
             return super().model_validate_json(cleaned_json, **kwarg)
 
-        except (json.JSONDecodeError, ValidationError) as e:
+        except (json.JSONDecodeError, ValidationError):
             # If direct parsing fails, try more aggressive cleanup
-            logger.warning(f"Initial JSON parse failed, attempting alternate cleanup")
+            logger.warning("Initial JSON parse failed, attempting alternate cleanup")
 
             message = json_data
 
@@ -368,7 +368,7 @@ class ResponseSchema(BaseModel):
         Args:
             xml_fields: Dictionary mapping field names to their descriptions
         """
-        schema = [f"Requires the following XML format:"]
+        schema = ["Requires the following XML format:"]
 
         # Build example XML structure
         example = []
@@ -378,7 +378,7 @@ class ResponseSchema(BaseModel):
         return "\n".join(schema + example)
 
     @classmethod
-    def get_few_shot_examples(cls) -> List["FewShotExample"]:
+    def get_few_shot_examples(cls) -> list["FewShotExample"]:
         """
         Returns a list of few-shot examples specific to this action.
         Override this method in subclasses to provide custom examples.

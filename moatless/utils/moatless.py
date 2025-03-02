@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from moatless.context_data import moatless_dir, current_project_id
+from moatless.context_data import current_project_id, moatless_dir
 
 
 def get_moatless_dir() -> Path:

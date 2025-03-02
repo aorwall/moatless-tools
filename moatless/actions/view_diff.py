@@ -23,7 +23,7 @@ class ViewDiffArgs(ActionArguments):
     model_config = ConfigDict(title="ViewDiff")
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Show me the current changes in the workspace",

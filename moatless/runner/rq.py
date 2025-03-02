@@ -1,26 +1,25 @@
+import asyncio
 import json
 import logging
 import os
 import shutil
 import time
 import traceback
-import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Callable, Optional, Any, Dict, List
 import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
 from functools import wraps
-from redis import Redis
-
-from moatless.runner.runner import JobInfo, JobStatus, RunnerInfo, RunnerStatus, JobsStatusSummary
-from moatless.telemetry import extract_context_data, extract_trace_context
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from opentelemetry import trace
-
-from rq.job import Dependency, Job
-from rq import Queue
-from rq import Worker
+from redis import Redis
+from rq import Queue, Worker
 from rq.command import send_stop_job_command
+from rq.job import Dependency, Job
+
+from moatless.runner.runner import JobInfo, JobsStatusSummary, JobStatus, RunnerInfo, RunnerStatus
+from moatless.telemetry import extract_context_data, extract_trace_context
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner.rq")
@@ -122,7 +121,7 @@ class RQRunner:
                 return True
         return False
 
-    async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
+    async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
         """Get all jobs for a project.
 
         Args:
@@ -160,10 +159,10 @@ class RQRunner:
                         )
                     )
                 else:
-                    self.logger.warning(f"One of the jobs could not be fetched")
+                    self.logger.warning("One of the jobs could not be fetched")
 
             return result
-        except Exception as exc:
+        except Exception:
             self.logger.exception(f"Error getting jobs for project {project_id}")
             return []
 
@@ -217,7 +216,7 @@ class RQRunner:
                             self.logger.info(f"Canceling job {job.id} with status {status}")
                             job.cancel()
                         else:
-                            self.logger.warning(f"One of the jobs could not be fetched")
+                            self.logger.warning("One of the jobs could not be fetched")
                 except Exception as exc:
                     self.logger.exception(f"Error batch canceling jobs: {exc}")
         else:
@@ -273,7 +272,7 @@ class RQRunner:
         run_job_id = self._job_id(project_id, trajectory_id)
         return run_job_id in self.get_job_ids()
 
-    def get_job_ids(self) -> List[str]:
+    def get_job_ids(self) -> list[str]:
         queued_job_ids = self.queue.get_job_ids()
         started_job_ids = self.queue.started_job_registry.get_job_ids()
         return queued_job_ids + started_job_ids

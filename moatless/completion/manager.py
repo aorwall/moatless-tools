@@ -5,16 +5,16 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from moatless.completion.log_handler import LogHandler
 from pydantic import BaseModel, Field
 
 from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
+from moatless.completion.log_handler import LogHandler
+from moatless.completion.schema import FewShotExample, ResponseSchema
+from moatless.exceptions import CompletionRuntimeError
 from moatless.schema import MessageHistoryType
 from moatless.utils.moatless import get_moatless_dir
-from moatless.completion.schema import ResponseSchema, FewShotExample
-from moatless.exceptions import CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ class ModelConfig(BaseModel):
     few_shot_examples: bool = Field(..., description="Whether to use few-shot examples")
     response_format: LLMResponseFormat = Field(..., description="Format for model responses")
     message_history_type: MessageHistoryType = Field(..., description="Type of message history to use")
-    headers: Dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
+    headers: dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
+    params: dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
 
     @classmethod
     def model_validate(cls, data: Any) -> "ModelConfig":
@@ -45,7 +45,7 @@ class ModelConfig(BaseModel):
             data["message_history_type"] = MessageHistoryType(data["message_history_type"])
         return super().model_validate(data)
 
-    def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
         data["response_format"] = data["response_format"].value
         data["message_history_type"] = data["message_history_type"].value
@@ -72,7 +72,7 @@ class TestResponseSchema(ResponseSchema):
     success: bool = Field(..., description="Whether the model understood the request")
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="This is a test message. Please respond in the correct format to verify you understand the schema.",
@@ -87,7 +87,7 @@ class ModelConfigManager:
     def __init__(self):
         """Initialize the model config manager."""
         self._base_configs = self._load_base_configs()
-        self._user_configs: Dict[str, ModelConfig] = self._load_user_configs()
+        self._user_configs: dict[str, ModelConfig] = self._load_user_configs()
 
     def _get_base_config_path(self) -> Path:
         """Get the path to the base model config file."""
@@ -102,7 +102,7 @@ class ModelConfigManager:
             base_path = Path.cwd()
         return base_path / "models.json"
 
-    def _load_base_configs(self) -> Dict[str, ModelConfig]:
+    def _load_base_configs(self) -> dict[str, ModelConfig]:
         """Load base model configurations from JSON file."""
         config_path = self._get_base_config_path()
         with open(config_path) as f:
@@ -124,7 +124,7 @@ class ModelConfigManager:
 
         return configs
 
-    def _load_user_configs(self) -> Dict[str, ModelConfig]:
+    def _load_user_configs(self) -> dict[str, ModelConfig]:
         """Load user model configurations from JSON file."""
         path = self._get_user_config_path()
         if not path.exists():
@@ -187,7 +187,7 @@ class ModelConfigManager:
             return self._base_configs[model_id]
         raise ValueError(f"Model {model_id} not found")
 
-    def get_all_base_configs(self) -> List[ModelConfig]:
+    def get_all_base_configs(self) -> list[ModelConfig]:
         """Get all base model configurations.
 
         Returns:
@@ -196,7 +196,7 @@ class ModelConfigManager:
 
         return list(self._base_configs.values())
 
-    def get_all_configs(self) -> List[ModelConfig]:
+    def get_all_configs(self) -> list[ModelConfig]:
         """Get all model configurations.
 
         Returns:
@@ -205,7 +205,7 @@ class ModelConfigManager:
         return list(self._user_configs.values())
 
     def add_model_from_base(
-        self, base_model_id: str, new_model_id: str, updates: Optional[Dict[str, Any]] = None
+        self, base_model_id: str, new_model_id: str, updates: Optional[dict[str, Any]] = None
     ) -> ModelConfig:
         """Add a new model configuration based on a base model.
 
@@ -293,7 +293,7 @@ class ModelConfigManager:
 
         return BaseCompletionModel.create(**config.model_dump(), model_id=model_id)
 
-    async def test_model_setup(self, model_id: str) -> Dict[str, Any]:
+    async def test_model_setup(self, model_id: str) -> dict[str, Any]:
         """Test if a model configuration works correctly.
 
         This method creates a simple completion model with a basic schema and tests
@@ -349,7 +349,7 @@ class ModelConfigManager:
 
                 if test_response.success:
                     result["success"] = True
-                    result["message"] = f"Model setup test passed."
+                    result["message"] = "Model setup test passed."
                 else:
                     result["message"] = f"Model indicated failure. Message from LLM: {test_response.message}"
             else:

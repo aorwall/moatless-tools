@@ -1,17 +1,17 @@
 import logging
 from pathlib import Path
-from typing import Literal, Optional, List
+from typing import List, Literal, Optional
 
-from pydantic import Field, PrivateAttr, field_validator, ConfigDict, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from moatless.actions import RunTests, CreateFile
+from moatless.actions import CreateFile, RunTests
 from moatless.actions.action import Action
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan, ViewCode
+from moatless.actions.view_code import CodeSpan, ViewCode, ViewCodeArgs
 from moatless.completion import BaseCompletionModel
 from moatless.completion.schema import (
     ChatCompletionToolParam,
@@ -45,7 +45,7 @@ class EditActionArguments(ActionArguments):
     command: Command = Field(..., description="The edit command to execute")
     path: str = Field(..., description="The file path to edit")
     file_text: Optional[str] = Field(None, description="The text content for file creation")
-    view_range: Optional[List[int]] = Field(None, description="Range of lines to view [start, end]")
+    view_range: Optional[list[int]] = Field(None, description="Range of lines to view [start, end]")
     old_str: Optional[str] = Field(None, description="String to replace")
     new_str: Optional[str] = Field(None, description="Replacement string")
     insert_line: Optional[int] = Field(None, description="Line number for insertion")

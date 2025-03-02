@@ -1,20 +1,19 @@
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Any, List, Dict
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.events import BaseEvent
 from moatless.feedback import BaseFeedbackGenerator
+from moatless.runner.runner import JobStatus
 from moatless.schema import MessageHistoryType
 from moatless.selector import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-
-from moatless.runner.runner import JobStatus
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -197,7 +196,7 @@ class Evaluation(BaseModel):
     completed_at: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
     error: Optional[str] = Field(default=None, description="Error message if evaluation failed")
-    instances: List[EvaluationInstance] = Field(default_factory=list, description="Instances of the evaluation")
+    instances: list[EvaluationInstance] = Field(default_factory=list, description="Instances of the evaluation")
 
     def get_instance(self, instance_id: str) -> EvaluationInstance | None:
         for instance in self.instances:

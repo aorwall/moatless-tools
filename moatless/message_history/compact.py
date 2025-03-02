@@ -1,17 +1,17 @@
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan
+from moatless.actions.view_code import CodeSpan, ViewCodeArgs
 from moatless.actions.view_diff import ViewDiffArgs
 from moatless.completion.schema import (
+    AllMessageValues,
     ChatCompletionAssistantMessage,
     ChatCompletionToolMessage,
-    AllMessageValues,
 )
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
@@ -30,7 +30,7 @@ class NodeMessage(BaseModel):
 class CompactMessageHistoryGenerator(MessageHistoryGenerator):
     message_cache: bool = Field(default=False, description="Cache the message history if the LLM supports it")
 
-    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
         messages = []
 
         node_messages = await self.get_node_messages(node)
@@ -78,7 +78,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
         return messages
 
-    async def get_node_messages(self, node: "Node") -> List[NodeMessage]:
+    async def get_node_messages(self, node: "Node") -> list[NodeMessage]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
         Respects token limits while preserving ViewCode context.
@@ -126,7 +126,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
         last_test_status = None  # Track the last test status
 
         for i, previous_node in enumerate(reversed(previous_nodes)):
-            current_messages: List[NodeMessage] = []
+            current_messages: list[NodeMessage] = []
 
             user_message = previous_node.user_message
             assistant_message = previous_node.assistant_message
@@ -226,7 +226,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                             observations.append(prompt)
 
                         if code_spans:
-                            thought = f"Let's view the content in the updated files"
+                            thought = "Let's view the content in the updated files"
                             args = ViewCodeArgs(files=code_spans, thoughts=thought)
                             current_messages.append(NodeMessage(action=args, observation="\n\n".join(observations)))
 

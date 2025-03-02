@@ -1,14 +1,14 @@
 import json
 import logging
-from typing import List, Dict, Any, Type, Union, Optional
+from typing import Any, Dict, List, Optional, Type, Union
 
-from moatless.node import ThoughtBlock
 from pydantic import ValidationError
 
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
-from moatless.completion.schema import ResponseSchema, ChatCompletionToolMessage
+from moatless.completion.schema import ChatCompletionToolMessage, ResponseSchema
 from moatless.exceptions import CompletionRuntimeError
+from moatless.node import ThoughtBlock
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     4. Managing thought inclusion in tool calls
     """
 
-    def _get_completion_params(self, schema: List[Type[ResponseSchema]]) -> Dict[str, Union[str, Dict, List]]:
+    def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Union[str, dict, list]]:
         """Get tool call-specific completion parameters.
 
         This method:
@@ -53,7 +53,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str], list[dict]]:
         """Validate tool call completion response.
 
         Args:
@@ -154,7 +154,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         return structured_outputs, content, flags, thoughts
 
-    def _get_response_model(self, tool_name: str) -> Type[ResponseSchema]:
+    def _get_response_model(self, tool_name: str) -> type[ResponseSchema]:
         """Get the response model for a tool name.
 
         Args:

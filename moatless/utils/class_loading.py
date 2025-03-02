@@ -3,7 +3,7 @@ import logging
 import os
 import pkgutil
 import sys
-from typing import Dict, Type, Any
+from typing import Any, Dict, Type
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ class DynamicClassLoadingMixin:
     """Mixin providing dynamic class loading functionality"""
 
     @classmethod
-    def _load_classes(cls, base_package: str, base_class: Type) -> Dict[str, Type[Any]]:
+    def _load_classes(cls, base_package: str, base_class: type) -> dict[str, type[Any]]:
         """Load all subclasses from the specified package"""
         logger.debug(f"Loading classes for {base_class.__name__} from {base_package}")
 
@@ -54,11 +54,11 @@ class DynamicClassLoadingMixin:
         return registered_classes
 
     @classmethod
-    def _scan_for_classes(cls, paths, base_package: str, base_class: Type) -> Dict[str, Type[Any]]:
+    def _scan_for_classes(cls, paths, base_package: str, base_class: type) -> dict[str, type[Any]]:
         return cls._scan_classes_in_paths(paths, base_package, base_class)
 
     @classmethod
-    def _scan_classes_in_paths(cls, paths: list[str], package_prefix: str, base_class: Type) -> Dict[str, Type[Any]]:
+    def _scan_classes_in_paths(cls, paths: list[str], package_prefix: str, base_class: type) -> dict[str, type[Any]]:
         registered_classes = {}
         for finder, modname, ispkg in pkgutil.walk_packages(paths, prefix=package_prefix + "."):
             try:
@@ -76,6 +76,6 @@ class DynamicClassLoadingMixin:
                             logger.debug(f"Loaded {base_class.__name__}: {name} from {modname}")
                             registered_classes[name] = obj
 
-            except Exception as e:
+            except Exception:
                 logger.exception(f"Failed to load from module {modname}")
         return registered_classes

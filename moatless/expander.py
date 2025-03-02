@@ -1,4 +1,3 @@
-from typing import List
 import logging
 import random
 from typing import List
@@ -15,7 +14,7 @@ class Expander(BaseModel):
     random_settings: bool = Field(False, description="Whether to select agent settings randomly")
     max_expansions: int = Field(1, description="The maximum number of children to create for each node")
 
-    agent_settings: List[AgentSettings] = Field(
+    agent_settings: list[AgentSettings] = Field(
         [],
         description="The settings for the agent model",
     )
@@ -45,7 +44,7 @@ class Expander(BaseModel):
         logger.info(f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
-    def _get_agent_settings(self, node: Node) -> List[AgentSettings]:
+    def _get_agent_settings(self, node: Node) -> list[AgentSettings]:
         """Get agent settings for a single expansion."""
         if not self.agent_settings:
             return []

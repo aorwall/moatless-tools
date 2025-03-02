@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime, timezone
-from typing import Dict, Set, Optional
+from typing import Dict, Optional, Set
 
+from moatless.benchmark.swebench.utils import repository_exists
 from moatless.evaluation.schema import EvaluationInstance, InstanceStatus
 from moatless.evaluation.utils import get_moatless_instance
-from moatless.benchmark.swebench.utils import repository_exists
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class StateManager:
 
     def __init__(self):
         # Tracks which repos are currently being set up: repo_name -> set of instance_ids
-        self._active_repos: Dict[str, Set[str]] = {}
+        self._active_repos: dict[str, set[str]] = {}
 
     async def check_repository_exists(self, moatless_instance: dict, repo_base_dir: str) -> bool:
         return repository_exists(moatless_instance, repo_base_dir)

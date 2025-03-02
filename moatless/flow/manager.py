@@ -1,24 +1,21 @@
 """Tree search configuration management."""
 
-from datetime import datetime
+import asyncio
 import json
 import logging
-from pathlib import Path
-from typing import Dict, Any, Literal, Optional, List
 import os
-import asyncio
-from datetime import timezone
-
-from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.api.trajectory.trajectory_utils import convert_nodes
-from moatless.context_data import get_projects_dir, get_trajectory_dir
-from moatless.environment.local import LocalBashEnvironment
-from moatless.repository.git import GitRepository
-from moatless.runner.rq import RQRunner
-from moatless.runner.runner import JobStatus
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
 
 from moatless.agent.agent import ActionAgent
+from moatless.api.trajectory.schema import TrajectoryDTO
+from moatless.api.trajectory.trajectory_utils import convert_nodes
+from moatless.completion.manager import create_completion_model
+from moatless.config.agent_config import get_agent
+from moatless.context_data import get_projects_dir, get_trajectory_dir
 from moatless.discriminator.base import BaseDiscriminator
+from moatless.environment.local import LocalBashEnvironment
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
@@ -31,15 +28,13 @@ from moatless.flow.schema import (
     TrajectoryEventDTO,
     TrajectoryListItem,
     TrajectoryResponseDTO,
-    TrajectoryEventDTO,
-    TrajectoryListItem,
 )
+from moatless.repository.git import GitRepository
+from moatless.runner.rq import RQRunner
+from moatless.runner.runner import JobStatus
 from moatless.selector.base import BaseSelector
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectories_dir
 from moatless.value_function.base import BaseValueFunction
-
-from moatless.config.agent_config import get_agent
-from moatless.completion.manager import create_completion_model
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -68,7 +63,7 @@ class FlowManager:
         message: str | None = None,
         trajectory_id: str | None = None,
         persist_dir: str | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         **kwargs,
     ) -> AgenticFlow:
         """Create a SearchTree instance from this configuration.
@@ -189,7 +184,7 @@ class FlowManager:
                     try:
                         self._configs[config["id"]] = config
                         logger.info(f"Loaded flow config {config['id']}")
-                    except Exception as e:
+                    except Exception:
                         logger.exception(f"Failed to load flow config {config['id']} from {config_path}")
             else:
                 logger.info(f"No local flow configs found on path {config_path}")
@@ -220,7 +215,7 @@ class FlowManager:
         else:
             raise ValueError(f"Flow config {id} not found. Available configs: {list(self._configs.keys())}")
 
-    def get_all_configs(self) -> List[FlowConfig]:
+    def get_all_configs(self) -> list[FlowConfig]:
         """Get all flow configurations."""
 
         configs = []
@@ -355,8 +350,8 @@ class FlowManager:
 
     async def resume_trajectory(self, project_id: str, trajectory_id: str, request):
         """Resume a trajectory."""
-        from moatless.flow.runner import agentic_runner
         from moatless.flow.loop import AgenticLoop
+        from moatless.flow.runner import agentic_runner
 
         system = await agentic_runner.get_run(trajectory_id, project_id)
         if system:
@@ -406,13 +401,13 @@ class FlowManager:
 
     async def _setup_flow(self, trajectory_id: str, project_id: str):
         """Set up a flow for execution."""
-        from moatless.evaluation.utils import get_moatless_instance
-        from moatless.benchmark.swebench.utils import create_repository_async
         from moatless.benchmark.swebench import create_index_async
+        from moatless.benchmark.swebench.utils import create_repository_async
+        from moatless.evaluation.utils import get_moatless_instance
+        from moatless.flow.flow import AgenticFlow
         from moatless.runtime.testbed import TestbedEnvironment
         from moatless.utils.moatless import get_moatless_trajectory_dir
         from moatless.workspace import Workspace
-        from moatless.flow.flow import AgenticFlow
 
         moatless_instance = get_moatless_instance(trajectory_id)
         if moatless_instance:
@@ -448,7 +443,7 @@ class FlowManager:
 
         if events_path.exists():
             try:
-                with open(events_path, "r", encoding="utf-8") as f:
+                with open(events_path, encoding="utf-8") as f:
                     for line in f:
                         event_data = json.loads(line)
                         # Convert ISO timestamp to milliseconds, ensuring UTC
@@ -465,7 +460,7 @@ class FlowManager:
 
     def load_trajectory_from_file(self, file_path: Path) -> TrajectoryDTO:
         """Load trajectory data from a JSON file."""
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             data = json.load(f)
 
         # Convert nodes to DTO format

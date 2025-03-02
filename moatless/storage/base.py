@@ -1,7 +1,7 @@
 import abc
 import json
 import logging
-from typing import Any, List, Dict, Optional, TypeVar, Generic, Union
+from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
 
 logger = logging.getLogger(__name__)
 

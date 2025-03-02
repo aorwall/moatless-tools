@@ -1,9 +1,9 @@
 import json
 import logging
-from typing import Optional, Any, Union
+from typing import Any, Optional, Union
 
-from pydantic import BaseModel, model_validator, Field
 import litellm
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ class Usage(BaseModel):
         except Exception:
             # If cost calculation fails, fall back to calculating it manually
             try:
-                from litellm import cost_per_token, NotFoundError
+                from litellm import NotFoundError, cost_per_token
 
                 prompt_cost, completion_cost = cost_per_token(
                     model=model,
@@ -195,9 +195,7 @@ class Completion(BaseModel):
                     version = 1
                     retries = data.get("retries", 0)
 
-                if version == 1 and retries > 0:
-                    data["usage"] = Usage.from_completion_response(data["response"], data["model"])
-                elif "usage" not in data:
+                if version == 1 and retries > 0 or "usage" not in data:
                     data["usage"] = Usage.from_completion_response(data["response"], data["model"])
         return data
 

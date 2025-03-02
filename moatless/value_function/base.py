@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Completion
-from moatless.node import Node, Reward
 from moatless.component import MoatlessComponent
+from moatless.node import Node, Reward
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class BaseValueFunction(MoatlessComponent[VF]):
     }
 
     @abstractmethod
-    async def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
+    async def get_reward(self, node: Node) -> tuple[Reward, Optional[Completion]]:
         raise NotImplementedError("get_reward method must be implemented")
 
     @classmethod
@@ -34,5 +34,5 @@ class BaseValueFunction(MoatlessComponent[VF]):
         return "moatless.value_function"
 
     @classmethod
-    def _get_base_class(cls) -> Type["BaseValueFunction"]:
+    def _get_base_class(cls) -> type["BaseValueFunction"]:
         return BaseValueFunction

@@ -1,13 +1,13 @@
 import logging
 import os
 from fnmatch import fnmatch
-from typing import List, Optional, Tuple, Type, ClassVar
+from typing import ClassVar, List, Optional, Tuple, Type
 
 from pydantic import Field, model_validator
 
 from moatless.actions.schema import ActionArguments
-from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="I need to understand how the User class is structured in our authentication system. Let me find its definition.",
@@ -84,14 +84,14 @@ class FindCodeSnippetArgs(SearchBaseArgs):
 
 
 class FindCodeSnippet(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
+    args_schema: ClassVar[type[ActionArguments]] = FindCodeSnippetArgs
 
     max_hits: int = Field(
         10,
         description="The maximum number of search results to return. Default is 10.",
     )
 
-    async def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
+    async def _search_for_context(self, args: FindCodeSnippetArgs) -> tuple[FileContext, bool]:
         logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
 
         matches = await self._repository.find_exact_matches(

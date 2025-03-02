@@ -1,53 +1,50 @@
 """Main API module for Moatless."""
 
+import asyncio
+import gc
 import importlib.resources as pkg_resources
 import json
 import logging
 import os
+import tracemalloc
+from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Set
-from dotenv import load_dotenv
-from collections import defaultdict
+from typing import Any, Dict, List, Set
 
+from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
     HTTPException,
-    UploadFile,
     Request,
+    UploadFile,
     WebSocket,
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from moatless.api.swebench.schema import RunnerResponseDTO
-from moatless.runner.rq import RQRunner
-from moatless.runner.runner import JobsStatusSummary
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 from moatless.api.agents.api import router as agent_router
 from moatless.api.artifacts.api import router as artifact_router
 from moatless.api.loop.api import router as loop_router
 from moatless.api.models.api import router as model_router
-from moatless.api.swebench.api import router as swebench_router
 from moatless.api.settings.api import router as settings_router
+from moatless.api.swebench.api import router as swebench_router
+from moatless.api.swebench.schema import RunnerResponseDTO
 from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import (
-    load_trajectory_from_file,
     create_trajectory_dto,
+    load_trajectory_from_file,
 )
-from moatless.logging_config import setup_logging, get_logger
 from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
+from moatless.logging_config import get_logger, setup_logging
+from moatless.runner.rq import RQRunner
+from moatless.runner.runner import JobsStatusSummary
 from moatless.telemetry import setup_telemetry
 from moatless.workspace import Workspace
-
-import os
-import asyncio
-from datetime import datetime
-import gc
-import tracemalloc
-from collections import Counter
 
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -62,7 +59,7 @@ logger = get_logger(__name__)
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
         try:
@@ -191,19 +188,19 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     if workspace is not None:
 
-        @router.get("/artifacts", response_model=List[ArtifactListItem])
+        @router.get("/artifacts", response_model=list[ArtifactListItem])
         async def list_all_artifacts():
             """Get all artifacts across all types"""
             return workspace.get_all_artifacts()
 
-        @router.get("/artifacts/{type}", response_model=List[ArtifactListItem])
+        @router.get("/artifacts/{type}", response_model=list[ArtifactListItem])
         async def list_artifacts(type: str):
             try:
                 return workspace.get_artifacts_by_type(type)
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e))
 
-        @router.get("/artifacts/{type}/{id}", response_model=Dict[str, Any])
+        @router.get("/artifacts/{type}/{id}", response_model=dict[str, Any])
         async def get_artifact(type: str, id: str):
             try:
                 artifact = workspace.get_artifact(type, id)

@@ -6,19 +6,18 @@ import os
 from datetime import datetime, timezone
 from typing import List, Optional
 
-
 from fastapi import APIRouter, HTTPException
-from moatless.environment.local import LocalBashEnvironment
-from moatless.repository.git import GitRepository
 from pydantic import BaseModel, Field
 
 from moatless.api.loop.schema import LoopResponseDTO
 from moatless.artifacts.artifact import ArtifactChange
-from moatless.artifacts.file import FileArtifactHandler, FileArtifact
-from moatless.config.agent_config import get_agent
+from moatless.artifacts.file import FileArtifact, FileArtifactHandler
 from moatless.completion.manager import create_completion_model
+from moatless.config.agent_config import get_agent
+from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.loop import AgenticLoop
 from moatless.flow.runner import agentic_runner
+from moatless.repository.git import GitRepository
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
 
@@ -38,7 +37,7 @@ class LoopRequest(BaseModel):
     agent_id: str = Field(description="The agent to use for the loop")
     model_id: str = Field(description="The model to use for the loop")
     message: str = Field(description="The message to start the loop with")
-    attachments: Optional[List[AttachmentData]] = Field(
+    attachments: Optional[list[AttachmentData]] = Field(
         default=None, description="List of attachments with filename and base64 data"
     )
     repository_path: str = Field(description="The path to the repository to use for the loop")

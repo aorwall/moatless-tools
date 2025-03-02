@@ -1,12 +1,12 @@
 import asyncio
-import os
-import sys
-import time
-import threading
-from typing import Optional, Dict, List
-from collections import defaultdict
 import logging
+import os
 import re
+import sys
+import threading
+import time
+from collections import defaultdict
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +117,7 @@ class BlockingDetector:
         pattern = re.sub(r"[a-f0-9]{32,}", "@HASH@", pattern, flags=re.IGNORECASE)
         return pattern
 
-    def _get_frame_context(self, frame) -> Dict:
+    def _get_frame_context(self, frame) -> dict:
         """Extract relevant context from a frame."""
         context = {
             "filename": frame.f_code.co_filename,

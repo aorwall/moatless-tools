@@ -4,8 +4,8 @@ from typing import List
 
 from moatless.actions import (
     FindClass,
-    FindFunction,
     FindCodeSnippet,
+    FindFunction,
     SemanticSearch,
     ViewCode,
 )
@@ -21,13 +21,13 @@ from moatless.actions.string_replace import StringReplace
 from moatless.actions.verified_finish import VerifiedFinish
 from moatless.agent.agent import ActionAgent
 from moatless.agent.code_prompts import (
-    AGENT_ROLE,
-    generate_react_guidelines,
-    REACT_CORE_OPERATION_RULES,
     ADDITIONAL_NOTES,
-    generate_workflow_prompt,
+    AGENT_ROLE,
+    REACT_CORE_OPERATION_RULES,
     REACT_CORE_OPERATION_RULES_NO_THOUGHTS,
     generate_guideline_prompt,
+    generate_react_guidelines,
+    generate_workflow_prompt,
 )
 from moatless.completion.base import (
     BaseCompletionModel,
@@ -140,7 +140,7 @@ def create_base_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
-) -> List[Action]:
+) -> list[Action]:
     """Create the common base actions used across all action creators."""
     return [
         SemanticSearch(
@@ -168,7 +168,7 @@ def create_edit_code_actions(
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
     runtime: RuntimeEnvironment | None = None,
-) -> List[Action]:
+) -> list[Action]:
     """Create a list of simple code modification actions."""
     actions = create_base_actions(repository, code_index)
 
@@ -192,7 +192,7 @@ def create_claude_coding_actions(
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
     runtime: RuntimeEnvironment | None = None,
-) -> List[Action]:
+) -> list[Action]:
     actions = create_base_actions(repository, code_index)
     actions.append(
         ClaudeEditTool(
@@ -211,7 +211,7 @@ def create_all_actions(
     repository: Repository,
     code_index: CodeIndex | None = None,
     completion_model: BaseCompletionModel | None = None,
-) -> List[Action]:
+) -> list[Action]:
     actions = create_base_actions(repository, code_index)
     actions.extend(create_edit_code_actions(repository, code_index))
     actions.append(ClaudeEditTool(code_index=code_index, repository=repository))

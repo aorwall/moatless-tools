@@ -6,7 +6,6 @@ from typing import Any, List
 
 from moatless.events import BaseEvent, event_bus
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +31,7 @@ def run_async(coro):
     return loop.run_until_complete(coro)
 
 
-def setup_job_logging(job_type: str, trajectory_dir: Path) -> List[logging.Handler]:
+def setup_job_logging(job_type: str, trajectory_dir: Path) -> list[logging.Handler]:
     """Set up logging for a job and return the original handlers for cleanup.
 
     Args:
@@ -72,7 +71,7 @@ def setup_job_logging(job_type: str, trajectory_dir: Path) -> List[logging.Handl
     return original_handlers
 
 
-def cleanup_job_logging(original_handlers: List[logging.Handler]) -> None:
+def cleanup_job_logging(original_handlers: list[logging.Handler]) -> None:
     """Clean up job-specific logging and restore original handlers.
 
     Args:

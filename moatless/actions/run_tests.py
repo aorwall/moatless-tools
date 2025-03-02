@@ -1,7 +1,7 @@
 import logging
-from typing import List, Any
+from typing import Any, List
 
-from pydantic import Field, PrivateAttr, ConfigDict
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -23,7 +23,7 @@ class RunTestsArgs(ActionArguments):
     """
 
     thoughts: str = Field(..., description="Your reasoning on what tests to run.")
-    test_files: List[str] = Field(..., description="The list of test files to run")
+    test_files: list[str] = Field(..., description="The list of test files to run")
 
     model_config = ConfigDict(title="RunTests")
 
@@ -32,10 +32,10 @@ class RunTestsArgs(ActionArguments):
         return f"RunTests({', '.join(self.test_files)})"
 
     def to_prompt(self):
-        return f"Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
+        return "Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return []
 
 
@@ -111,7 +111,7 @@ class RunTests(Action):
         )
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         criteria = [
             "Test Result Evaluation: Analyze test results in conjunction with the proposed code changes.",
             "Test Failures Categorization: Differentiate between minor, foreseeable, and unforeseeable failures.",
@@ -125,7 +125,7 @@ class RunTests(Action):
         return criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return [
             RewardScaleEntry(
                 min_value=90,

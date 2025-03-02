@@ -58,7 +58,7 @@ class GrepToolArgs(ActionArguments):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Find all function definitions in JavaScript files",

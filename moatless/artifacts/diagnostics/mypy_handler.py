@@ -1,21 +1,21 @@
-import re
 import json
 import logging
+import re
 from pathlib import Path
-from typing import List, Optional, Dict, Any, ClassVar
+from typing import Any, ClassVar, Dict, List, Optional
 
-from moatless.storage.base import BaseStorage
 from pydantic import PrivateAttr
 
+from moatless.artifacts.artifact import ArtifactReference
 from moatless.artifacts.diagnostics.diagnostic import (
-    DiagnosticHandler,
     DiagnosticArtifact,
+    DiagnosticHandler,
     DiagnosticSeverity,
-    Range,
     Position,
+    Range,
 )
 from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
-from moatless.artifacts.artifact import ArtifactReference
+from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class MyPyArtifactHandler(DiagnosticHandler):
 
         self._environment = environment or BaseEnvironment.get_default_environment()
 
-    async def run_diagnostics(self, files: List[str] | None = None) -> List[DiagnosticArtifact]:
+    async def run_diagnostics(self, files: list[str] | None = None) -> list[DiagnosticArtifact]:
         """
         Run MyPy on the specified Python files and generate diagnostic artifacts.
 
@@ -101,7 +101,7 @@ class MyPyArtifactHandler(DiagnosticHandler):
                 logger.error(f"Failed to install MyPy: {e.stderr}")
                 raise RuntimeError(f"Failed to install MyPy: {e.stderr}") from e
 
-    def _parse_mypy_json_output(self, output: str) -> List[DiagnosticArtifact]:
+    def _parse_mypy_json_output(self, output: str) -> list[DiagnosticArtifact]:
         """
         Parse MyPy JSON output and convert it to DiagnosticArtifact objects.
 

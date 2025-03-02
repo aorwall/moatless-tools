@@ -4,9 +4,9 @@ from typing import List
 from pydantic import Field
 
 from moatless.completion.schema import (
+    AllMessageValues,
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
-    AllMessageValues,
 )
 from moatless.message_history.compact import CompactMessageHistoryGenerator
 from moatless.node import Node
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
     disable_thoughts: bool = Field(default=False, description="Do not include thoughts messages in the history")
 
-    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
         node_messages = await self.get_node_messages(node)
         logger.info(f"Node messages: {len(node_messages)}")
 

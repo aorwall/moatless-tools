@@ -6,10 +6,10 @@ import time
 from pathlib import Path
 
 from moatless.codeblocks.module import Module
+from moatless.flow import SearchTree
 from moatless.flow.loop import AgenticLoop
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
-from moatless.flow import SearchTree
 
 IGNORED_SPANS = ["docstring", "imports"]
 
@@ -446,7 +446,7 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
 
         for dataset_file in dataset_dir.glob("*_dataset.json"):
             try:
-                with open(dataset_file, "r") as f:
+                with open(dataset_file) as f:
                     data = json.load(f)
                     if "name" in data and "instance_ids" in data:
                         datasets[data.get("name", "")] = {

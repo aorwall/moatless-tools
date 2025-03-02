@@ -1,7 +1,9 @@
+import builtins
 from abc import abstractmethod
 from enum import Enum
+from typing import ClassVar, List, Optional, Type
+
 from pydantic import BaseModel, Field
-from typing import Optional, Type, List, ClassVar
 
 from moatless.artifacts.artifact import Artifact
 from moatless.artifacts.json_handler import JsonArtifactHandler
@@ -41,9 +43,9 @@ class DiagnosticArtifact(Artifact):
     """
 
     file_path: str = Field(description="The path to the file that the diagnostic is for")
-    diagnostics: List[Diagnostic] = Field(description="The list of diagnostics")
+    diagnostics: list[Diagnostic] = Field(description="The list of diagnostics")
 
-    def __init__(self, file_path: str, diagnostics: List[Diagnostic], **kwargs):
+    def __init__(self, file_path: str, diagnostics: list[Diagnostic], **kwargs):
         super().__init__(
             id=f"{file_path}-diagnostic", type="diagnostic", file_path=file_path, diagnostics=diagnostics, **kwargs
         )
@@ -69,6 +71,6 @@ class DiagnosticHandler(JsonArtifactHandler[DiagnosticArtifact]):
     type: ClassVar[str] = "diagnostic"
 
     @classmethod
-    def get_artifact_class(cls) -> Type[DiagnosticArtifact]:
+    def get_artifact_class(cls) -> builtins.type[DiagnosticArtifact]:
         """Return the DiagnosticArtifact class that this handler manages"""
         return DiagnosticArtifact

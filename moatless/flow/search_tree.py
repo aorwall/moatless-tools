@@ -1,31 +1,32 @@
 import json
 import logging
-from typing import Optional, Dict, Any, List, Callable
+from collections.abc import Callable
+from typing import Any, Dict, List, Optional
 
-from pydantic import Field, model_validator, ConfigDict
+from opentelemetry import trace
+from pydantic import ConfigDict, Field, model_validator
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.model import Usage
 from moatless.discriminator.base import BaseDiscriminator
-from moatless.exceptions import RuntimeError, RejectError
+from moatless.exceptions import RejectError, RuntimeError
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow
 from moatless.flow.events import (
-    NodeExpandedEvent,
     FeedbackGeneratedEvent,
+    FlowErrorEvent,
+    NodeExpandedEvent,
     NodeRewardEvent,
     NodeRewardFailureEvent,
     NodeSelectedEvent,
-    FlowErrorEvent,
 )
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.selector.base import BaseSelector
-from moatless.telemetry import instrument, add_span_event, set_span_status
+from moatless.telemetry import add_span_event, instrument, set_span_status
 from moatless.value_function.base import BaseValueFunction
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.search_tree")
@@ -361,7 +362,7 @@ class SearchTree(AgenticFlow):
 
         return None
 
-    def get_finished_nodes(self) -> List[Node]:
+    def get_finished_nodes(self) -> list[Node]:
         """Get all finished nodes in the search tree by uniqe parent node."""
         parent_ids = set()
         finished_nodes = []
@@ -379,7 +380,7 @@ class SearchTree(AgenticFlow):
             None,
         )
 
-    def get_leaf_nodes(self) -> List[Node]:
+    def get_leaf_nodes(self) -> list[Node]:
         """Get all leaf nodes in the search tree."""
         return [node for node in self.root.get_all_nodes() if node.is_leaf()]
 
@@ -434,7 +435,7 @@ class SearchTree(AgenticFlow):
             return super().model_validate(obj)
         return obj
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         """
         Generate a dictionary representation of the SearchTree.
 

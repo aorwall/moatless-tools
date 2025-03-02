@@ -6,20 +6,21 @@ from fastapi import APIRouter, HTTPException
 
 from moatless.completion.base import LLMResponseFormat
 from moatless.completion.manager import (
+    ModelConfig,
     ModelTestResult,
-    get_model_config,
+    _manager,
+    add_model_from_base,
+    create_model,
+    delete_model_config,
+    get_all_base_configs,
     get_all_configs,
     get_base_model_config,
-    get_all_base_configs,
-    add_model_from_base,
+    get_model_config,
     update_model_config,
-    delete_model_config,
-    ModelConfig,
-    _manager,
-    create_model,
 )
 from moatless.schema import MessageHistoryType
-from .schema import ModelConfigUpdateDTO, ModelsResponseDTO, BaseModelsResponseDTO, AddModelFromBaseDTO, CreateModelDTO
+
+from .schema import AddModelFromBaseDTO, BaseModelsResponseDTO, CreateModelDTO, ModelConfigUpdateDTO, ModelsResponseDTO
 
 logger = logging.getLogger(__name__)
 

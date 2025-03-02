@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Optional, Any, Dict, List
+from enum import Enum
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
-from enum import Enum
 
 
 class JobStatus(str, Enum):
@@ -25,7 +25,7 @@ class RunnerStatus(str, Enum):
 class RunnerInfo(BaseModel):
     runner_type: str
     status: RunnerStatus
-    data: Dict[str, Any]
+    data: dict[str, Any]
 
 
 class JobInfo(BaseModel):
@@ -44,7 +44,7 @@ class EvaluationJobStatus(BaseModel):
 
     evaluation_name: str
     status: str
-    instances: Dict[str, Dict[str, Any]]
+    instances: dict[str, dict[str, Any]]
     error: Optional[str] = None
     traceback: Optional[str] = None
 
@@ -52,12 +52,12 @@ class EvaluationJobStatus(BaseModel):
 class JobsCollection(BaseModel):
     """Collection of job IDs for an evaluation."""
 
-    run_jobs: List[str] = Field(default_factory=list)
-    eval_jobs: List[str] = Field(default_factory=list)
-    active_jobs: List[str] = Field(default_factory=list)
-    queued_jobs: List[str] = Field(default_factory=list)
-    finished_jobs: List[str] = Field(default_factory=list)
-    failed_jobs: List[str] = Field(default_factory=list)
+    run_jobs: list[str] = Field(default_factory=list)
+    eval_jobs: list[str] = Field(default_factory=list)
+    active_jobs: list[str] = Field(default_factory=list)
+    queued_jobs: list[str] = Field(default_factory=list)
+    finished_jobs: list[str] = Field(default_factory=list)
+    failed_jobs: list[str] = Field(default_factory=list)
     error: Optional[str] = None
     traceback: Optional[str] = None
 
@@ -66,8 +66,8 @@ class CancellationResult(BaseModel):
     """Result of cancelling jobs for an evaluation."""
 
     evaluation_name: str
-    cancelled_jobs: List[str] = Field(default_factory=list)
-    errors: List[Dict[str, str]] = Field(default_factory=list)
+    cancelled_jobs: list[str] = Field(default_factory=list)
+    errors: list[dict[str, str]] = Field(default_factory=list)
     error: Optional[str] = None
     traceback: Optional[str] = None
 
@@ -76,7 +76,7 @@ class RetryResult(BaseModel):
     """Result of retrying a job for an instance."""
 
     instance_id: str
-    requeued_jobs: List[str] = Field(default_factory=list)
+    requeued_jobs: list[str] = Field(default_factory=list)
     error: Optional[str] = None
     traceback: Optional[str] = None
 
@@ -102,7 +102,7 @@ class JobsStatusSummary(BaseModel):
     failed_jobs: int = 0
     canceled_jobs: int = 0
     pending_jobs: int = 0
-    job_ids: Dict[str, List[str]] = Field(
+    job_ids: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "queued": [],
             "running": [],
@@ -122,7 +122,7 @@ class Runner(ABC):
         pass
 
     @abstractmethod
-    async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
+    async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
         pass
 
     @abstractmethod

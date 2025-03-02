@@ -1,27 +1,27 @@
 import json
 import logging
-from datetime import datetime, timezone
 import os
-from pathlib import Path
-from typing import List, Optional, Dict, Any
+import random
+import traceback
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 import aiofiles
 import aiofiles.os
-import traceback
-import random
+from opentelemetry import trace
 
 from moatless.benchmark.report import BenchmarkResult, to_result
 from moatless.evaluation.run_instance import run_instance
-from moatless.evaluation.schema import EvaluationEvent, EvaluationStatus, InstanceStatus, Evaluation, EvaluationInstance
+from moatless.evaluation.schema import Evaluation, EvaluationEvent, EvaluationInstance, EvaluationStatus, InstanceStatus
 from moatless.evaluation.utils import get_moatless_instance
 from moatless.events import BaseEvent, event_bus
 from moatless.flow.flow import AgenticFlow
+from moatless.flow.manager import create_flow, get_flow_config
 from moatless.runner.rq import RQRunner
 from moatless.runner.runner import EvaluationJobStatus, JobInfo, JobStatus
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
-from moatless.flow.manager import get_flow_config, create_flow
-
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")
@@ -60,7 +60,7 @@ class EvaluationManager:
         model_id: str,
         evaluation_name: str | None = None,
         dataset_name: str | None = None,
-        instance_ids: Optional[List[str]] = None,
+        instance_ids: Optional[list[str]] = None,
     ) -> Evaluation:
         """Create a new evaluation and return its ID."""
         if not dataset_name and not instance_ids:
@@ -212,7 +212,7 @@ class EvaluationManager:
 
     async def _handle_event(self, event: BaseEvent):
         """Handle events from evaluation runners."""
-        if not event.scope in ["flow", "evaluation"]:
+        if event.scope not in ["flow", "evaluation"]:
             return
 
         if not event.project_id:
@@ -320,7 +320,7 @@ class EvaluationManager:
                     logger.debug(f"Evaluation result not found for instance: {instance.instance_id}")
                     return
 
-                with open(eval_result_path, "r") as f:
+                with open(eval_result_path) as f:
                     eval_result = json.load(f)
 
                 benchmark_result = to_result(node=flow.root, eval_report=eval_result, instance_id=instance.instance_id)
@@ -473,14 +473,14 @@ class EvaluationManager:
             evaluation = Evaluation.model_validate(data)
             return evaluation
 
-    async def list_evaluations(self) -> List[Evaluation]:
+    async def list_evaluations(self) -> list[Evaluation]:
         """List all evaluations with their metadata."""
         evaluations = []
         for eval_dir in self.evals_dir.glob("eval_*"):
             try:
                 eval_file = eval_dir / "evaluation.json"
                 if eval_file.exists():
-                    with open(eval_file, "r") as f:
+                    with open(eval_file) as f:
                         data = json.load(f)
                         evaluation = Evaluation.model_validate(data)
 
@@ -505,13 +505,13 @@ class EvaluationManager:
 
         await self._save_evaluation(evaluation)
 
-    def get_dataset_instance_ids(self, dataset_name: str) -> List[str]:
+    def get_dataset_instance_ids(self, dataset_name: str) -> list[str]:
         """Get instance IDs for a dataset."""
         dataset_path = Path(__file__).parent / "datasets" / f"{dataset_name}_dataset.json"
         if not dataset_path.exists():
             raise ValueError(f"Dataset {dataset_name} not found at {dataset_path}")
 
-        with open(dataset_path, "r") as f:
+        with open(dataset_path) as f:
             dataset = json.load(f)
             return dataset["instance_ids"]
 

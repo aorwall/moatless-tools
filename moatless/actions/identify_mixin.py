@@ -80,10 +80,10 @@ class IdentifyMixin(CompletionModelMixin):
         """Initialize the completion model with validation function for token limits"""
 
         async def validate_identified_code(
-            structured_outputs: List[ResponseSchema],
+            structured_outputs: list[ResponseSchema],
             text_response: Optional[str],
-            flags: List[str],
-        ) -> Tuple[List[ResponseSchema], Optional[str], List[str]]:
+            flags: list[str],
+        ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
             identified_context = FileContext(repo=self._repository)
 
             if not structured_outputs:
@@ -115,7 +115,7 @@ class IdentifyMixin(CompletionModelMixin):
 
     async def _identify_code(
         self, args: ActionArguments, view_context: FileContext, max_tokens: int
-    ) -> Tuple[FileContext, Completion]:
+    ) -> tuple[FileContext, Completion]:
         """Identify relevant code sections in a large context.
 
         Args:

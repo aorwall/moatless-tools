@@ -1,19 +1,19 @@
 import logging
 from abc import ABC
-from typing import List, Optional, Type, ClassVar, Tuple
+from typing import ClassVar, List, Optional, Tuple, Type
 
-from pydantic import Field, BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
+from moatless.completion.base import CompletionRetryError
 from moatless.completion.model import Completion
 from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
+    ResponseSchema,
 )
-from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
-from moatless.completion.base import CompletionRetryError
 from moatless.file_context import FileContext
 from moatless.index.types import SearchCodeResponse
 
@@ -79,7 +79,7 @@ class Identify(ResponseSchema):
 
 
 class SearchBaseAction(Action, CompletionModelMixin, ABC):
-    args_schema: ClassVar[Type[ActionArguments]] = SearchBaseArgs
+    args_schema: ClassVar[type[ActionArguments]] = SearchBaseArgs
 
     max_search_tokens: int = Field(
         2000,
@@ -103,10 +103,10 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         if self._completion_model:
 
             async def validate_identified_code(
-                structured_outputs: List[ResponseSchema],
+                structured_outputs: list[ResponseSchema],
                 text_response: Optional[str],
-                flags: List[str],
-            ) -> Tuple[List[ResponseSchema], Optional[str], List[str]]:
+                flags: list[str],
+            ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
                 view_context = FileContext(repo=self._repository)
 
                 if not structured_outputs:
@@ -219,7 +219,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
             execution_completion=completion,
         )
 
-    async def _search_for_context(self, args: SearchBaseArgs) -> Tuple[FileContext, bool]:
+    async def _search_for_context(self, args: SearchBaseArgs) -> tuple[FileContext, bool]:
         alternative_suggestion = False
         search_result = await self._search(args)
         if not search_result.hits:
@@ -240,9 +240,9 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         if not self.add_to_context:
-            return f"Here's the search result with the first line of codes in each code block. Use ViewCode to view specific code sections. "
+            return "Here's the search result with the first line of codes in each code block. Use ViewCode to view specific code sections. "
 
-        return f"The search result is too large. You must identify the relevant code sections in the search results to use them. "
+        return "The search result is too large. You must identify the relevant code sections in the search results to use them. "
 
     async def _search(self, args: SearchBaseArgs) -> SearchCodeResponse:
         raise NotImplementedError("Subclasses must implement this method.")
@@ -252,7 +252,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
     async def _identify_code(
         self, args: SearchBaseArgs, search_result_ctx: FileContext
-    ) -> Tuple[FileContext, Completion]:
+    ) -> tuple[FileContext, Completion]:
         search_result_str = search_result_ctx.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
@@ -287,7 +287,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         return view_context, completion_response.completion
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         evaluation_criteria = super().get_evaluation_criteria(trajectory_length)
         evaluation_criteria.extend(
             [
@@ -301,7 +301,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         return evaluation_criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         if trajectory_length <= 3:
             return cls.generate_reward_scale_entries(
                 [

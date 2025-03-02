@@ -1,12 +1,12 @@
+import json
 import logging
 from textwrap import dedent
-from typing import List, Dict, Any, Type, Optional
-import json
+from typing import Any, Dict, List, Optional, Type
 
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.json import JsonCompletionModel
-from moatless.completion.schema import ResponseSchema, ChatCompletionUserMessage
+from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +21,7 @@ class ReActCompletionModel(JsonCompletionModel):
     4. Validating action sequence format
     """
 
-    def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
+    def _prepare_system_prompt(self, system_prompt: str, response_schema: list[type[ResponseSchema]]) -> str:
         """Add ReAct format instructions to system prompt.
 
         This method appends the ReAct format instructions and available
@@ -60,7 +60,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 """)
         return system_prompt
 
-    def _get_completion_params(self, schema: ResponseSchema) -> Dict[str, str | Dict | List]:
+    def _get_completion_params(self, schema: ResponseSchema) -> dict[str, str | dict | list]:
         # params = super()._get_completion_params(schema)
         # params["stop"] = ["Observation:"]
         # return params
@@ -70,7 +70,6 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         if not isinstance(self._response_schema, list):
             return False
         for schema in self._response_schema:
-            from moatless.actions.schema import ActionArguments
 
             if not issubclass(schema, ActionArguments):
                 return False
@@ -79,7 +78,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
         """Validate and parse ReAct format responses.
 
         This method:
@@ -239,7 +238,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         return action_lines[0].strip(), action_lines[1].strip()
 
-    def _get_action_class(self, action_name: str) -> Optional[Type[ResponseSchema]]:
+    def _get_action_class(self, action_name: str) -> Optional[type[ResponseSchema]]:
         """Get the action class for an action name.
 
         Args:

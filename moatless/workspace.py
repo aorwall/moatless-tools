@@ -1,8 +1,7 @@
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
-from moatless.environment.base import BaseEnvironment
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.artifacts.artifact import (
@@ -11,14 +10,15 @@ from moatless.artifacts.artifact import (
     ArtifactListItem,
     SearchCriteria,
 )
+from moatless.environment.base import BaseEnvironment
 from moatless.index.code_index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 
 
 class Workspace(BaseModel):
-    artifacts: List[Artifact] = Field(default_factory=list)
-    artifact_handlers: Dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
+    artifacts: list[Artifact] = Field(default_factory=list)
+    artifact_handlers: dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
 
     _repository: Repository = PrivateAttr(default=None)
     _code_index: CodeIndex = PrivateAttr(default=None)
@@ -27,7 +27,7 @@ class Workspace(BaseModel):
 
     def __init__(
         self,
-        artifact_handlers: List[ArtifactHandler] | None = None,
+        artifact_handlers: list[ArtifactHandler] | None = None,
         repository: Repository | None = None,
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
@@ -77,11 +77,11 @@ class Workspace(BaseModel):
         handler = self.artifact_handlers[artifact_type]
         return handler.read(artifact_id)
 
-    def get_artifacts_by_type(self, artifact_type: str) -> List[Artifact]:
+    def get_artifacts_by_type(self, artifact_type: str) -> list[Artifact]:
         handler = self._get_handler(artifact_type)
         return handler.get_all_artifacts()
 
-    def search(self, artifact_type: str, criteria: List[SearchCriteria]) -> List[Artifact]:
+    def search(self, artifact_type: str, criteria: list[SearchCriteria]) -> list[Artifact]:
         """
         Search for artifacts of a specific type using the provided criteria
         """
@@ -91,7 +91,7 @@ class Workspace(BaseModel):
         handler = self.artifact_handlers[artifact_type]
         return handler.search(criteria)
 
-    def get_all_artifacts(self) -> List[ArtifactListItem]:
+    def get_all_artifacts(self) -> list[ArtifactListItem]:
         """Get all artifacts from all handlers as list items"""
         all_artifacts = []
         for handler in self.artifact_handlers.values():
@@ -121,7 +121,7 @@ class Workspace(BaseModel):
 
         self.artifact_handlers = {handler.type: handler for handler in self.artifact_handlers.values()}
 
-    def dump_handlers(self) -> Dict[str, Any]:
+    def dump_handlers(self) -> dict[str, Any]:
         """Dump artifact handlers to a serializable format"""
         return {key: handler.model_dump() for key, handler in self.artifact_handlers.items()}
 

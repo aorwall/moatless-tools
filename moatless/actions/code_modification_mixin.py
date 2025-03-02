@@ -42,7 +42,7 @@ class CodeModificationMixin:
 
     def validate_file_access(
         self, file_path: str, file_context: FileContext
-    ) -> Tuple[Optional[Path], Optional[Observation]]:
+    ) -> tuple[Optional[Path], Optional[Observation]]:
         """
         Validate file access and return either a valid Path object or an error Observation.
 
@@ -118,7 +118,7 @@ class CodeModificationMixin:
         response_msg += summary
 
         if not failure_details and not file_context.has_test_patch():
-            response_msg += f"\nConsider adding new test cases for the changes."
+            response_msg += "\nConsider adding new test cases for the changes."
 
         return response_msg
 

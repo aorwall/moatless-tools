@@ -5,7 +5,7 @@ import os
 import random
 import subprocess
 import time
-from contextlib import contextmanager, asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 
 import filelock

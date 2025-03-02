@@ -1,16 +1,16 @@
 """Simple vector store index."""
 
+import asyncio
 import json
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import aiofiles
 import faiss
 import fsspec
 import numpy as np
-import aiofiles
-import asyncio
 from dataclasses_json import DataClassJsonMixin
 from fsspec.implementations.local import LocalFileSystem
 from llama_index.core.bridge.pydantic import PrivateAttr

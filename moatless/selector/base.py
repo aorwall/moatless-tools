@@ -5,15 +5,15 @@ from typing import Any, List, Type
 
 from pydantic import BaseModel
 
-from moatless.node import Node
 from moatless.component import MoatlessComponent
+from moatless.node import Node
 
 logger = logging.getLogger(__name__)
 
 
 class BaseSelector(MoatlessComponent):
     @abstractmethod
-    async def select(self, expandable_nodes: List[Node]) -> Node | None:
+    async def select(self, expandable_nodes: list[Node]) -> Node | None:
         if not expandable_nodes:
             return None
 
@@ -28,5 +28,5 @@ class BaseSelector(MoatlessComponent):
         return "moatless.selector"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return BaseSelector

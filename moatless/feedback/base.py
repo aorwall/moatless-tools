@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import BaseCompletionModel
-from moatless.node import Node, FeedbackData
 from moatless.component import MoatlessComponent
+from moatless.node import FeedbackData, Node
 
 logger = logging.getLogger(__name__)
 
@@ -28,5 +28,5 @@ class BaseFeedbackGenerator(MoatlessComponent):
         return "moatless.feedback"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return BaseFeedbackGenerator

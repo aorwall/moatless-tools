@@ -1,6 +1,6 @@
 from typing import ClassVar, List, Type
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -40,7 +40,7 @@ class VerifiedFinishArgs(ActionArguments):
         return isinstance(other, VerifiedFinishArgs)
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Add input validation to the process_order function",
@@ -78,7 +78,7 @@ class VerifiedFinishArgs(ActionArguments):
 
 
 class VerifiedFinish(Action):
-    args_schema: ClassVar[Type[ActionArguments]] = VerifiedFinishArgs
+    args_schema: ClassVar[type[ActionArguments]] = VerifiedFinishArgs
 
     async def execute(
         self,
@@ -89,7 +89,7 @@ class VerifiedFinish(Action):
         return Observation(message=args.finish_reason, terminal=True)
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         return [
             "**Full Trajectory Review:** Evaluate the complete sequence of actions taken by the agent leading to this finish action. Assess whether the trajectory represents an efficient and logical path to the solution.",
             "**Solution Correctness and Quality:** Verify that all changes made throughout the trajectory logically address the problem statement. Ensure the changes fit contextually within the existing codebase without introducing new issues.",
@@ -103,7 +103,7 @@ class VerifiedFinish(Action):
         ]
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return cls.generate_reward_scale_entries(
             [
                 (

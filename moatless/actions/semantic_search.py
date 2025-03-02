@@ -1,10 +1,10 @@
-from typing import Optional, List, Type, ClassVar
+from typing import ClassVar, List, Optional, Type
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import ConfigDict, Field, model_validator
 
 from moatless.actions.schema import ActionArguments
-from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeResponse
 
 
@@ -51,7 +51,7 @@ class SemanticSearchArgs(SearchBaseArgs):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Find all implementations of database connection pooling in our codebase",
@@ -74,7 +74,7 @@ class SemanticSearchArgs(SearchBaseArgs):
 
 
 class SemanticSearch(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
+    args_schema: ClassVar[type[ActionArguments]] = SemanticSearchArgs
 
     async def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
         return await self._code_index.semantic_search(
@@ -95,7 +95,7 @@ class SemanticSearch(SearchBaseAction):
         return SearchCodeResponse()
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
         criteria = super().get_evaluation_criteria(trajectory_length)
         criteria.extend(
             [

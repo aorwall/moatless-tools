@@ -1,19 +1,26 @@
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import json
 import logging
 import mimetypes
 import os
 import shutil
 import tempfile
-from typing import Optional, TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, Optional
 
+import aiofiles
 import requests
-from moatless.codeblocks.module import Module
-from moatless.telemetry import instrument, set_attribute
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
+from llama_index.core.storage.docstore import SimpleDocumentStore
 from rapidfuzz import fuzz
 
 from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
+from moatless.codeblocks.module import Module
+from moatless.index.code_block_index import CodeBlockIndex
+from moatless.index.embed_model import get_embed_model
 from moatless.index.settings import IndexSettings
+from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
     SearchCodeHit,
@@ -22,18 +29,9 @@ from moatless.index.types import (
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
 from moatless.schema import FileWithSpans
+from moatless.telemetry import instrument, set_attribute
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
-from moatless.index.simple_faiss import SimpleFaissVectorStore
-from moatless.index.code_block_index import CodeBlockIndex
-
-import asyncio
-import aiofiles
-
-from llama_index.core import SimpleDirectoryReader
-from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-from llama_index.core.storage.docstore import SimpleDocumentStore
-from moatless.index.embed_model import get_embed_model
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +104,7 @@ class CodeIndex:
             matched_files = sorted(await self._code_block_index.match_glob_pattern(file_pattern))
             return matched_files
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error finding files for pattern {file_pattern}:")
             return []
 
@@ -131,8 +129,9 @@ class CodeIndex:
         # Use the async version of SimpleFaissVectorStore.from_persist_dir
         vector_store = await SimpleFaissVectorStore.from_persist_dir_async(persist_dir)
 
-        from moatless.index.embed_model import get_embed_model
         from llama_index.core.storage.docstore import SimpleDocumentStore
+
+        from moatless.index.embed_model import get_embed_model
 
         # These are still synchronous operations
         docstore, settings = await asyncio.gather(
@@ -154,9 +153,9 @@ class CodeIndex:
     @classmethod
     async def from_url_async(cls, url: str, persist_dir: str, file_repo: FileRepository):
         """Asynchronous version of from_url"""
-        import aiohttp
-        import aiofiles
         import asyncio
+
+        import aiohttp
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -244,7 +243,7 @@ class CodeIndex:
             try:
                 matching_files = await self.matching_files(file_pattern)
                 matching_files = [file for file in matching_files if not is_test(file)]
-            except Exception as e:
+            except Exception:
                 return SearchCodeResponse(
                     message=f"The file pattern {file_pattern} is invalid.",
                     hits=[],
@@ -784,8 +783,6 @@ class CodeIndex:
         num_workers: Optional[int] = None,
     ):
         # Import llama_index components only when needed
-        from llama_index.core import SimpleDirectoryReader
-        from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
 
         repo_path = repo_path or self._file_repo.path
 

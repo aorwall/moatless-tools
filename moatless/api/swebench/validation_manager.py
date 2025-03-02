@@ -3,15 +3,16 @@
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Dict, Optional, Callable, Awaitable
+from typing import Dict, Optional
 
 from moatless.benchmark.swebench import create_repository
-from moatless.evaluation.utils import get_moatless_instances
-from moatless.config.agent_config import get_agent
 from moatless.completion.manager import create_completion_model
-from moatless.index import CodeIndex
+from moatless.config.agent_config import get_agent
+from moatless.evaluation.utils import get_moatless_instances
 from moatless.flow.loop import AgenticLoop
+from moatless.index import CodeIndex
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.workspace import Workspace
 
@@ -35,7 +36,7 @@ class ValidationManager:
     """Manager for SWEBench validations."""
 
     def __init__(self):
-        self.validations: Dict[str, ValidationState] = {}
+        self.validations: dict[str, ValidationState] = {}
 
     def create_validation(self, instance_id: str, model_id: str, agent_id: str) -> str:
         """Create a new validation and return its ID."""

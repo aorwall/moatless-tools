@@ -5,14 +5,14 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from moatless.flow.schema import (
-    StartTrajectoryRequest,
-    RetryTrajectoryRequest,
-    ExecuteNodeRequest,
-    TrajectoryResponseDTO,
-    TrajectoryListItem,
-)
 from moatless.flow.manager import FlowManager
+from moatless.flow.schema import (
+    ExecuteNodeRequest,
+    RetryTrajectoryRequest,
+    StartTrajectoryRequest,
+    TrajectoryListItem,
+    TrajectoryResponseDTO,
+)
 
 _manager = FlowManager.get_instance()
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/", response_model=List[TrajectoryListItem])
+@router.get("/", response_model=list[TrajectoryListItem])
 async def get_trajectories():
     """Get all trajectories."""
     try:

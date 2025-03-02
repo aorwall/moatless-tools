@@ -1,10 +1,12 @@
-from abc import ABC
-from typing import Any, Dict, Type, ClassVar, TypeVar, Generic, cast, Mapping
 import importlib
 import logging
-import pkgutil
 import os
+import pkgutil
 import sys
+from abc import ABC
+from collections.abc import Mapping
+from typing import Any, ClassVar, Dict, Generic, Type, TypeVar, cast
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T", bound="MoatlessComponent")
 
 # ComponentType -> {QualifiedClassName -> ComponentClass}
-_GLOBAL_COMPONENT_CACHE: Dict[str, Dict[str, Type["MoatlessComponent"]]] = {}
+_GLOBAL_COMPONENT_CACHE: dict[str, dict[str, type["MoatlessComponent"]]] = {}
 
 
 class MoatlessComponent(BaseModel, ABC, Generic[T]):
@@ -41,7 +43,7 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
     """
 
     # We store components in a dict without a generic type
-    _components: ClassVar[Dict[str, Type["MoatlessComponent"]]] = {}
+    _components: ClassVar[dict[str, type["MoatlessComponent"]]] = {}
 
     @classmethod
     def model_validate(cls, obj: Any):
@@ -73,7 +75,7 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
 
         return obj
 
-    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
         data[f"{self.get_component_type()}_class"] = self.get_class_name()
         return data
@@ -88,38 +90,38 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
         raise NotImplementedError
 
     @classmethod
-    def get_component_by_name(cls, name: str) -> Type[T] | None:
+    def get_component_by_name(cls, name: str) -> type[T] | None:
         """Get a component class by its name."""
         cls._initialize_components()
         components = cls._get_components()
         if name in components:
-            return cast(Type[T], components[name])
+            return cast(type[T], components[name])
         for qualified_name, component in components.items():
             if qualified_name.endswith(f".{name}"):
-                return cast(Type[T], component)
+                return cast(type[T], component)
         return None
 
     @classmethod
-    def get_available_components(cls) -> Dict[str, Type[T]]:
+    def get_available_components(cls) -> dict[str, type[T]]:
         """Get all available component classes."""
         cls._initialize_components()
         components = cls._get_components()
-        return cast(Dict[str, Type[T]], components)
+        return cast(dict[str, type[T]], components)
 
     @classmethod
     def _initialize_components(cls):
         component_type = cls.get_component_type()
         if component_type not in _GLOBAL_COMPONENT_CACHE:
             result = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
-            _GLOBAL_COMPONENT_CACHE[component_type] = cast(Dict[str, Type["MoatlessComponent"]], result)
+            _GLOBAL_COMPONENT_CACHE[component_type] = cast(dict[str, type["MoatlessComponent"]], result)
         cls._components = _GLOBAL_COMPONENT_CACHE[component_type]
 
     @classmethod
-    def _get_components(cls) -> Dict[str, Type[T]]:
+    def _get_components(cls) -> dict[str, type[T]]:
         component_type = cls.get_component_type()
         if component_type not in _GLOBAL_COMPONENT_CACHE:
             cls._initialize_components()
-        return cast(Dict[str, Type[T]], _GLOBAL_COMPONENT_CACHE[component_type])
+        return cast(dict[str, type[T]], _GLOBAL_COMPONENT_CACHE[component_type])
 
     @classmethod
     def _get_package(cls) -> str:
@@ -127,14 +129,14 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
         raise NotImplementedError
 
     @classmethod
-    def _get_base_class(cls) -> Type[T]:
+    def _get_base_class(cls) -> type[T]:
         """Get the base class for this component type."""
         raise NotImplementedError
 
     @classmethod
-    def _scan_classes_in_paths(cls, package: str, base_class: Type[T]) -> Dict[str, Type[T]]:
+    def _scan_classes_in_paths(cls, package: str, base_class: type[T]) -> dict[str, type[T]]:
         """Scan for component classes in a package."""
-        registered_classes: Dict[str, Type[T]] = {}
+        registered_classes: dict[str, type[T]] = {}
         try:
             logger.debug(f"Scanning package {package} for {base_class.__name__} subclasses")
             package_module = importlib.import_module(package)

@@ -1,11 +1,10 @@
-import subprocess
-from typing import Optional, Dict
-
-from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
-
 import asyncio
 import logging
 import os
+import subprocess
+from typing import Dict, Optional
+
+from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +15,7 @@ class LocalBashEnvironment(BaseEnvironment):
     on the local machine using bash.
     """
 
-    def __init__(self, cwd: str | None = None, env: Dict[str, str] | None = None, shell: bool = True):
+    def __init__(self, cwd: str | None = None, env: dict[str, str] | None = None, shell: bool = True):
         """
         Initialize the LocalBashEnvironment.
 

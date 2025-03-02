@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -14,7 +14,7 @@ class StartTrajectoryRequest(BaseModel):
     agent_id: Optional[str] = Field(None, description="The agent to use for the loop")
     model_id: Optional[str] = Field(None, description="The model to use for the loop")
     message: str = Field(description="The message to start the loop with")
-    attachments: Optional[List[AttachmentData]] = Field(
+    attachments: Optional[list[AttachmentData]] = Field(
         default=None, description="List of attachments with filename and base64 data"
     )
 
@@ -38,4 +38,4 @@ class TrajectoryEventDTO(BaseModel):
     scope: Optional[str] = None
     event_type: str
     trajectory_id: str
-    data: Optional[Dict[str, Any]] = None
+    data: Optional[dict[str, Any]] = None

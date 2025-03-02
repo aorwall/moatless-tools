@@ -1,6 +1,6 @@
 from typing import ClassVar, List, Type
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -34,18 +34,18 @@ class FinishArgs(ActionArguments):
         return isinstance(other, FinishArgs)
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return []
 
 
 class Finish(Action):
-    args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
+    args_schema: ClassVar[type[ActionArguments]] = FinishArgs
 
     async def execute(self, args: FinishArgs, file_context: FileContext | None = None):
         return Observation(message="Finished", terminal=True)
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         return [
             "**Full Trajectory Review:** Evaluate the complete sequence of actions taken by the agent leading to this finish action. Assess whether the trajectory represents an efficient and logical path to the solution.",
             "**Solution Correctness and Quality:** Verify that all changes made throughout the trajectory logically address the problem statement. Ensure the changes fit contextually within the existing codebase without introducing new issues. Confirm syntactic correctness and that there are no syntax errors or typos.",
@@ -58,7 +58,7 @@ class Finish(Action):
         ]
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return cls.generate_reward_scale_entries(
             [
                 (

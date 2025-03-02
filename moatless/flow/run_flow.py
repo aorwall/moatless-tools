@@ -1,11 +1,11 @@
 import logging
 from pathlib import Path
 
+from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.flow import AgenticFlow
 from moatless.repository.git import GitRepository
-from moatless.runner.utils import emit_event, run_async, setup_job_logging, cleanup_job_logging
-from moatless.context_data import get_trajectory_dir
+from moatless.runner.utils import cleanup_job_logging, emit_event, run_async, setup_job_logging
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)

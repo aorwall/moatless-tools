@@ -1,16 +1,17 @@
+import logging
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, model_validator
+
 from moatless.api.trajectory.schema import NodeDTO
 from moatless.artifacts.artifact import ArtifactHandler
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Literal
-import logging
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from pydantic import model_validator
-from datetime import datetime, timezone
-from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class FlowConfig(BaseModel):
     max_iterations: int = Field(100, description="Maximum number of iterations")
     max_cost: float = Field(4.0, description="Maximum cost allowed in USD")
     agent_id: Optional[str] = Field(None, description="ID of the agent to use")
-    artifact_handlers: List[ArtifactHandler] = Field(
+    artifact_handlers: list[ArtifactHandler] = Field(
         default_factory=list, description="List of artifact handlers used by the flow"
     )
 
@@ -96,7 +97,7 @@ class FlowConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def validate_components(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_components(cls, data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(data, dict):
             data = data.copy()
 
@@ -115,7 +116,7 @@ class FlowConfig(BaseModel):
 
         return data
 
-    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
 
         if self.selector:
@@ -171,7 +172,7 @@ class RunAttempt(BaseModel):
     status: str = "running"  # running, error, completed
     error: Optional[str] = None
     error_trace: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class FlowStatusInfo(BaseModel):
@@ -182,10 +183,10 @@ class FlowStatusInfo(BaseModel):
     status: FlowStatus = FlowStatus.CREATED
     error: Optional[str] = None
     error_trace: Optional[str] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     restart_count: int = Field(default=0)
     last_restart: Optional[datetime] = None
-    run_history: List[RunAttempt] = Field(default_factory=list)
+    run_history: list[RunAttempt] = Field(default_factory=list)
     current_attempt: Optional[int] = None
 
     def start_new_attempt(self) -> RunAttempt:
@@ -221,7 +222,7 @@ class TrajectoryEventDTO(BaseModel):
     timestamp: float
     project_id: Optional[str] = None
     trajectory_id: Optional[str] = None
-    data: Dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class TrajectoryListItem(BaseModel):
@@ -236,7 +237,7 @@ class TrajectoryListItem(BaseModel):
     finished_at: Optional[datetime] = None
     last_restart: Optional[datetime] = None
     cost: Optional[float] = None
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StartTrajectoryRequest(BaseModel):
@@ -269,5 +270,5 @@ class TrajectoryResponseDTO(BaseModel):
     system_status: FlowStatusInfo
     agent_id: Optional[str] = None
     model_id: Optional[str] = None
-    events: List[TrajectoryEventDTO] = Field(default_factory=list)
-    nodes: List[NodeDTO] = Field(default_factory=list)
+    events: list[TrajectoryEventDTO] = Field(default_factory=list)
+    nodes: list[NodeDTO] = Field(default_factory=list)

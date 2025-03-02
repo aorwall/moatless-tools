@@ -2,9 +2,9 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Dict, List, Type, Any, Optional
+from typing import Any, Dict, List, Optional, Type
 
-from pydantic import Field, BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import Completion
@@ -13,7 +13,7 @@ from moatless.completion.schema import ResponseSchema
 logger = logging.getLogger(__name__)
 
 
-_action_args: Dict[str, Type["ActionArguments"]] = {}
+_action_args: dict[str, type["ActionArguments"]] = {}
 
 
 class ActionArguments(ResponseSchema, ABC):
@@ -69,7 +69,7 @@ class ActionArguments(ResponseSchema, ABC):
         return data
 
     @classmethod
-    def get_action_args(cls, action_name: str) -> Type["ActionArguments"]:
+    def get_action_args(cls, action_name: str) -> type["ActionArguments"]:
         """
         Dynamically import and return the appropriate ActionArguments class for the given action.
         """
@@ -127,9 +127,9 @@ class Observation(BaseModel):
         False,
         description="Indicates that a the action arguments was inccorect and we expect a correction",
     )
-    properties: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
+    properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
-    artifact_changes: Optional[List[ArtifactChange]] = Field(
+    artifact_changes: Optional[list[ArtifactChange]] = Field(
         default_factory=list, description="Artifact changes created when executing the action"
     )
 
@@ -156,4 +156,4 @@ class ActionSchema(BaseModel):
     description: str
     type: str = "object"
     action_class: str
-    properties: Dict[str, ActionProperty]
+    properties: dict[str, ActionProperty]

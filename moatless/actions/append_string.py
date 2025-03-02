@@ -1,7 +1,7 @@
 import re
 from typing import List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action, FewShotExample
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
@@ -33,7 +33,7 @@ class AppendStringArgs(ActionArguments):
         return cls.format_xml_schema({"path": "file/path.py", "new_str": "\ncontent to append at end of file\n"})
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Add a new helper function at the end of the utilities file",

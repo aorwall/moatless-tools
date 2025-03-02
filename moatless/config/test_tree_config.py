@@ -2,13 +2,13 @@ import json
 from pathlib import Path
 
 import pytest
-from moatless.flow.manager import TreeConfig, TreeConfigManager
-from swesearch.selector.selector import DepthFirstSelector
-
-from moatless.completion.base import BaseCompletionModel
 from swesearch.discriminator import AgentDiscriminator
 from swesearch.feedback.diff_agent import DiffAgent
+from swesearch.selector.selector import DepthFirstSelector
 from swesearch.value_function.coding import CodingValueFunction
+
+from moatless.completion.base import BaseCompletionModel
+from moatless.flow.manager import TreeConfig, TreeConfigManager
 
 
 @pytest.fixture

@@ -1,19 +1,21 @@
 """OpenTelemetry tracing for Moatless."""
 
+import asyncio
 import contextvars
 import logging
 import os
-import asyncio
-from contextlib import contextmanager, asynccontextmanager
-from typing import Optional, Dict, Any, Iterator, Callable, TypeVar, ParamSpec, Literal, Union, AsyncIterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
-from opentelemetry import trace, context
+from typing import Any, Dict, Literal, Optional, ParamSpec, TypeVar, Union
+
+from opentelemetry import context, trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
-from opentelemetry.propagate import inject, extract
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 try:
@@ -52,7 +54,7 @@ def setup_azure_monitor() -> None:
             "APPLICATIONINSIGHTS_CONNECTION_STRING environment variable not set. "
             "Please set it with your Azure Application Insights connection string."
         )
-    logger.info(f"Setting up Azure Monitor OpenTelemetry tracing")
+    logger.info("Setting up Azure Monitor OpenTelemetry tracing")
 
     # Configure with shorter timeout for batch span processor
     configure_azure_monitor(
@@ -64,12 +66,12 @@ def setup_azure_monitor() -> None:
     global _tracer
     _tracer = trace.get_tracer(__name__)
 
-    logger.info(f"Initialized Azure Monitor OpenTelemetry tracing")
+    logger.info("Initialized Azure Monitor OpenTelemetry tracing")
 
 
 def setup_telemetry() -> None:
     """Set up OpenTelemetry tracing."""
-    logger.info(f"Setting up OpenTelemetry tracing")
+    logger.info("Setting up OpenTelemetry tracing")
     otlp_endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     app_insights_conn_string = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
 
@@ -82,7 +84,7 @@ def setup_telemetry() -> None:
 
         # Set up tracer provider
         provider = TracerProvider(resource=resource)
-        logger.info(f"Setting up OpenTelemetry provider")
+        logger.info("Setting up OpenTelemetry provider")
 
         # Configure exporter
         if otlp_endpoint:
@@ -96,7 +98,7 @@ def setup_telemetry() -> None:
     global _tracer
     _tracer = trace.get_tracer(__name__)
 
-    logger.info(f"Initialized OpenTelemetry tracing")
+    logger.info("Initialized OpenTelemetry tracing")
 
 
 def get_tracer():
@@ -109,7 +111,7 @@ def get_tracer():
 @contextmanager
 def _sync_instrument_span(
     name: str,
-    attributes: Optional[Dict[str, Any]] = None,
+    attributes: Optional[dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ) -> Iterator[Span]:
     """Synchronous context manager for creating trace spans."""
@@ -126,7 +128,7 @@ def _sync_instrument_span(
 @asynccontextmanager
 async def _async_instrument_span(
     name: str,
-    attributes: Optional[Dict[str, Any]] = None,
+    attributes: Optional[dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ):
     """Asynchronous context manager for creating trace spans."""
@@ -146,7 +148,7 @@ async def _async_instrument_span(
 
 def instrument_span(
     name: str,
-    attributes: Optional[Dict[str, Any]] = None,
+    attributes: Optional[dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ) -> Union[Iterator[Span], AsyncIterator[Span]]:
     """Context manager for creating trace spans. Works with both sync and async code.
@@ -166,7 +168,7 @@ def instrument_span(
 
 def instrument(
     name: Optional[Union[str, Callable[..., str]]] = None,
-    attributes: Optional[Dict[str, Any]] = None,
+    attributes: Optional[dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator for tracing functions using OpenTelemetry.
@@ -249,7 +251,7 @@ def set_attribute(key: str, value: Any | None) -> None:
         span.set_attribute(key, value)
 
 
-def set_attributes(attributes: Dict[str, Any]) -> None:
+def set_attributes(attributes: dict[str, Any]) -> None:
     """Set multiple attributes on the current span.
     Does nothing if there is no active span.
 
@@ -275,7 +277,7 @@ def set_span_status(span: Span, success: bool, message: Optional[str] = None) ->
         span.set_status(Status(StatusCode.ERROR, message))
 
 
-def add_span_event(span: Span, name: str, attributes: Optional[Dict[str, Any]] = None) -> None:
+def add_span_event(span: Span, name: str, attributes: Optional[dict[str, Any]] = None) -> None:
     """Add an event to a span.
 
     Args:
@@ -286,7 +288,7 @@ def add_span_event(span: Span, name: str, attributes: Optional[Dict[str, Any]] =
     span.add_event(name, attributes=attributes)
 
 
-def add_span_attributes(span: Span, attributes: Dict[str, Any]) -> None:
+def add_span_attributes(span: Span, attributes: dict[str, Any]) -> None:
     """Add attributes to a span.
 
     Args:
@@ -296,7 +298,7 @@ def add_span_attributes(span: Span, attributes: Dict[str, Any]) -> None:
     span.set_attributes(attributes)
 
 
-def extract_trace_context() -> Dict[str, str]:
+def extract_trace_context() -> dict[str, str]:
     """Extract current trace context into carrier dict.
 
     This is useful for propagating trace context across process boundaries,
@@ -310,7 +312,7 @@ def extract_trace_context() -> Dict[str, str]:
     return carrier
 
 
-def restore_trace_context(carrier: Dict[str, str]) -> None:
+def restore_trace_context(carrier: dict[str, str]) -> None:
     """Restore trace context from carrier dict.
 
     This should be called in the worker process to restore the trace context
@@ -325,7 +327,7 @@ def restore_trace_context(carrier: Dict[str, str]) -> None:
 
 def wrap_with_trace(
     name: str,
-    attributes: Optional[Dict[str, Any]] = None,
+    attributes: Optional[dict[str, Any]] = None,
     kind: Optional[trace.SpanKind] = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Decorator that wraps a function with trace context handling and span creation.
@@ -391,7 +393,7 @@ def wrap_with_trace(
     return decorator
 
 
-def extract_context_data() -> Dict[str, Any]:
+def extract_context_data() -> dict[str, Any]:
     """Extract current context data into a dict.
 
     This is useful for propagating context data across process boundaries,
@@ -400,7 +402,7 @@ def extract_context_data() -> Dict[str, Any]:
     Returns:
         Dict containing context variable values
     """
-    from moatless.context_data import moatless_dir, current_node_id, current_trajectory_id, current_project_id
+    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
 
     context_data = {
         "moatless_dir": moatless_dir.get(),
@@ -431,7 +433,7 @@ def run_async(coro, span_name: Optional[str] = None):
     tracer = get_tracer()
 
     # Capture current context data
-    from moatless.context_data import moatless_dir, current_node_id, current_trajectory_id, current_project_id
+    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
 
     context_data = {
         "moatless_dir": moatless_dir.get(),

@@ -1,5 +1,5 @@
 import abc
-from typing import Optional, Dict, Type
+from typing import Dict, Optional, Type
 
 
 class EnvironmentExecutionError(Exception):

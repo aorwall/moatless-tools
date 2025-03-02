@@ -4,15 +4,15 @@ from typing import List, Optional, Type
 
 from pydantic import BaseModel
 
-from moatless.node import Node
 from moatless.component import MoatlessComponent
+from moatless.node import Node
 
 logger = logging.getLogger(__name__)
 
 
 class BaseDiscriminator(MoatlessComponent, ABC):
     @abstractmethod
-    def select(self, nodes: List[Node]) -> Optional[Node]:
+    def select(self, nodes: list[Node]) -> Optional[Node]:
         raise NotImplementedError
 
     @classmethod
@@ -24,5 +24,5 @@ class BaseDiscriminator(MoatlessComponent, ABC):
         return "moatless.discriminator"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return BaseDiscriminator

@@ -1,9 +1,10 @@
-import json
-import os
-import logging
-from typing import Dict, Set, List, Tuple, Optional
-import fnmatch
 import asyncio
+import fnmatch
+import json
+import logging
+import os
+from typing import Dict, List, Optional, Set, Tuple
+
 import aiofiles
 
 from moatless.telemetry import instrument
@@ -19,14 +20,14 @@ class CodeBlockIndex:
 
     def __init__(
         self,
-        blocks_by_class_name: Optional[Dict[str, List[Tuple[str, str]]]] = None,
-        blocks_by_function_name: Optional[Dict[str, List[Tuple[str, str]]]] = None,
+        blocks_by_class_name: Optional[dict[str, list[tuple[str, str]]]] = None,
+        blocks_by_function_name: Optional[dict[str, list[tuple[str, str]]]] = None,
     ):
         self._blocks_by_class_name = blocks_by_class_name or {}
         self._blocks_by_function_name = blocks_by_function_name or {}
 
         # Our tree index for file paths
-        self._file_tree: Dict = {}
+        self._file_tree: dict = {}
 
     async def _build_indexes(self):
         """Build the tree index from blocks."""
@@ -55,7 +56,7 @@ class CodeBlockIndex:
         # Mark the file by setting its value to None.
         node[parts[-1]] = None
 
-    def _search_tree(self, node: dict, parts: List[str], cur_path: str) -> Set[str]:
+    def _search_tree(self, node: dict, parts: list[str], cur_path: str) -> set[str]:
         """
         Recursively search the tree for files matching the given pattern parts.
         - If a part is '**', match zero or more directories.
@@ -92,7 +93,7 @@ class CodeBlockIndex:
             return results
 
     @instrument()
-    async def match_glob_pattern(self, file_pattern: str) -> Set[str]:
+    async def match_glob_pattern(self, file_pattern: str) -> set[str]:
         """
         Match files against a glob pattern using the tree index.
 
@@ -112,12 +113,12 @@ class CodeBlockIndex:
         return matches
 
     @instrument()
-    async def get_blocks_by_class(self, class_name: str) -> List[Tuple[str, str]]:
+    async def get_blocks_by_class(self, class_name: str) -> list[tuple[str, str]]:
         """Get all blocks for a given class name."""
         return self._blocks_by_class_name.get(class_name, [])
 
     @instrument()
-    async def get_blocks_by_function(self, function_name: str) -> List[Tuple[str, str]]:
+    async def get_blocks_by_function(self, function_name: str) -> list[tuple[str, str]]:
         """Get all blocks for a given function name."""
         return self._blocks_by_function_name.get(function_name, [])
 

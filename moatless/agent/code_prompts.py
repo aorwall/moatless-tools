@@ -1,6 +1,5 @@
 from typing import List
 
-
 AGENT_ROLE = """You are an autonomous AI assistant with superior programming skills. As you're working autonomously, 
 you cannot communicate with the user but must rely on information you can get from the available functions.
 """
@@ -129,7 +128,7 @@ After your function call, you will receive an Observation to inform your next st
 """
 
 
-def generate_workflow_prompt(actions: List[str], has_runtime: bool = False) -> str:
+def generate_workflow_prompt(actions: list[str], has_runtime: bool = False) -> str:
     """Generate the workflow prompt based on available actions."""
     search_actions = []
     modify_actions = []

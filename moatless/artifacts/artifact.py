@@ -3,17 +3,17 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Dict, Literal, Optional, Type, TypeVar, Generic, List, Any
+from typing import Any, ClassVar, Dict, Generic, List, Literal, Optional, Type, TypeVar
 
-from moatless.storage.base import BaseStorage
-from moatless.storage.file_storage import FileStorage
-from moatless.utils.moatless import get_moatless_trajectory_dir
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.artifacts.content import ContentStructure
 from moatless.completion.schema import MessageContentListBlock
 from moatless.component import MoatlessComponent
+from moatless.storage.base import BaseStorage
+from moatless.storage.file_storage import FileStorage
 from moatless.utils.class_loading import DynamicClassLoadingMixin
+from moatless.utils.moatless import get_moatless_trajectory_dir
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class ArtifactListItem(BaseModel):
     type: str
     name: str | None
     created_at: datetime
-    references: List[ArtifactReference]
+    references: list[ArtifactReference]
 
 
 class ArtifactResponse(BaseModel):
@@ -40,10 +40,10 @@ class ArtifactResponse(BaseModel):
     type: str
     name: Optional[str]
     created_at: datetime
-    references: List[ArtifactReference]
+    references: list[ArtifactReference]
     status: Literal["updated", "persisted", "new", "unchanged"]
     can_persist: bool = Field(default=False, description="Whether the artifact can be persisted")
-    data: Dict[str, Any]
+    data: dict[str, Any]
     content: Optional[ContentStructure] = None
 
 
@@ -52,7 +52,7 @@ class Artifact(BaseModel, ABC):
     type: str = Field(description="Type of artifact (e.g., 'receipt')")
     name: Optional[str] = Field(default=None, description="Name of the artifact")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="When the artifact was created")
-    references: List[ArtifactReference] = Field(default_factory=list, description="Reference to the artifacts")
+    references: list[ArtifactReference] = Field(default_factory=list, description="Reference to the artifacts")
     status: Literal["new", "updated", "persisted", "unchanged"] = Field(
         default="new", description="Status of the artifact"
     )
@@ -91,7 +91,7 @@ class Artifact(BaseModel, ABC):
             data=model_data,
         )
 
-    def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         """Override model_dump to customize serialization."""
         data = super().model_dump(*args, **kwargs)
         # Convert created_at to epoch milliseconds
@@ -151,7 +151,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         return "moatless.artifacts"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return ArtifactHandler
 
     @abstractmethod
@@ -189,11 +189,11 @@ class ArtifactHandler(MoatlessComponent[T]):
         """
         raise NotImplementedError("Persist is not supported for this artifact type")
 
-    async def get_all_artifacts(self) -> List[ArtifactListItem]:
+    async def get_all_artifacts(self) -> list[ArtifactListItem]:
         """Get all artifacts managed by this handler as list items"""
         raise NotImplementedError("Get all artifacts is not supported for this artifact type")
 
-    async def search(self, criteria: List[SearchCriteria]) -> List[T]:
+    async def search(self, criteria: list[SearchCriteria]) -> list[T]:
         """
         Search for artifacts based on the provided criteria.
         Each handler implements its own search logic.
@@ -201,7 +201,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         raise NotImplementedError("Search is not supported for this artifact type")
 
     @classmethod
-    def get_base_class(cls) -> Type:
+    def get_base_class(cls) -> type:
         return ArtifactHandler
 
     @classmethod
@@ -209,7 +209,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         return cls.type
 
     @classmethod
-    def initiate_handlers(cls, storage: BaseStorage | None = None) -> List["ArtifactHandler"]:
+    def initiate_handlers(cls, storage: BaseStorage | None = None) -> list["ArtifactHandler"]:
         registered_classes = cls.get_available_components()
         if not storage:
             storage = FileStorage()

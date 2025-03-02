@@ -1,29 +1,28 @@
 """API endpoints for model configuration management."""
 
 import logging
-from typing import List, Optional, Dict, Any
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
-from moatless.artifacts.artifact import ArtifactHandler
 from pydantic import BeforeValidator, Field, model_validator
-from typing import Annotated
 
 from moatless.actions.action import Action
-from moatless.flow.manager import get_all_configs, get_flow_config, update_flow_config, create_flow_config
+from moatless.artifacts.artifact import ArtifactHandler
+from moatless.feedback.base import BaseFeedbackGenerator
+from moatless.flow.manager import create_flow_config, get_all_configs, get_flow_config, update_flow_config
 from moatless.flow.schema import FlowConfig
-
-from .schema import FlowConfigUpdateDTO
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from moatless.feedback.base import BaseFeedbackGenerator
+
+from .schema import FlowConfigUpdateDTO
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get("/flows", response_model=List[FlowConfig])
-async def list_flow_configs() -> List[FlowConfig]:
+@router.get("/flows", response_model=list[FlowConfig])
+async def list_flow_configs() -> list[FlowConfig]:
     """Get all flow configurations"""
     return get_all_configs()
 

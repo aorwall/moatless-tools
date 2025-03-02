@@ -4,10 +4,10 @@ from typing import List
 from pydantic import BaseModel, Field, PrivateAttr, model_serializer
 
 from moatless.completion.schema import (
+    AllMessageValues,
     ChatCompletionTextObject,
     ChatCompletionThinkingObject,
     ChatCompletionUserMessage,
-    AllMessageValues,
 )
 from moatless.node import Node
 from moatless.schema import MessageHistoryType
@@ -32,7 +32,7 @@ class MessageHistoryGenerator(BaseModel):
 
     _workspace: Workspace | None = PrivateAttr(default=None)
 
-    async def generate_messages(self, node: Node) -> List[AllMessageValues]:  # type: ignore
+    async def generate_messages(self, node: Node) -> list[AllMessageValues]:  # type: ignore
         previous_nodes = node.get_trajectory()
 
         messages = []

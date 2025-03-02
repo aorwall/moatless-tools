@@ -2,8 +2,8 @@ import logging
 from typing import List
 
 from moatless.completion.schema import (
-    ChatCompletionUserMessage,
     AllMessageValues,
+    ChatCompletionUserMessage,
 )
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class SummaryMessageHistoryGenerator(MessageHistoryGenerator):
-    async def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
         previous_nodes = node.get_trajectory()
 
-        formatted_history: List[str] = []
+        formatted_history: list[str] = []
         counter = 0
 
         content = node.get_root().message

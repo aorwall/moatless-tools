@@ -1,18 +1,18 @@
 import base64
-import base64
+import builtins
 import io
 import json
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any, Type
+from typing import Any, Dict, Optional, Tuple, Type
 
-from moatless.artifacts.json_handler import JsonArtifactHandler
 import pymupdf as fitz
 from PIL import Image, ImageEnhance
 from pydantic import Field, PrivateAttr
 
 from moatless.artifacts.artifact import Artifact, ArtifactHandler, ArtifactResponse
+from moatless.artifacts.json_handler import JsonArtifactHandler
 from moatless.completion.schema import (
     ChatCompletionImageUrlObject,
     ChatCompletionTextObject,
@@ -109,7 +109,7 @@ class TextFileArtifact(FileArtifact):
     def to_prompt_message_content(self) -> MessageContentListBlock:
         return ChatCompletionTextObject(type="text", text=self.content)
 
-    def to_ui_representation(self) -> Dict[str, Any]:
+    def to_ui_representation(self) -> dict[str, Any]:
         """Convert text file to UI representation"""
         base_repr = super().to_ui_representation()
         base_repr["data"].update(
@@ -130,7 +130,7 @@ class ImageFileArtifact(FileArtifact):
             image_url={"url": f"data:{self.mime_type};base64,{self.base64_image}"},
         )
 
-    def to_ui_representation(self) -> Dict[str, Any]:
+    def to_ui_representation(self) -> dict[str, Any]:
         """Convert image to UI representation"""
         base_repr = super().to_ui_representation()
         base_repr["data"].update({"mime_type": self.mime_type, "content": self.base64_image})
@@ -140,10 +140,10 @@ class ImageFileArtifact(FileArtifact):
 class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
     type: str = "file"
 
-    max_image_size: Tuple[int, int] = Field(default=(1024, 1024), description="Maximum size of the image to save")
+    max_image_size: tuple[int, int] = Field(default=(1024, 1024), description="Maximum size of the image to save")
     quality: int = Field(default=85, description="Quality of the image to save")
 
-    _artifacts: Dict[str, FileArtifact] = PrivateAttr(default={})
+    _artifacts: dict[str, FileArtifact] = PrivateAttr(default={})
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -159,7 +159,7 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
     def get_file_path(self, artifact_id: str) -> Path:
         return self.trajectory_dir / "files" / artifact_id
 
-    def get_artifact_class(self) -> Type[FileArtifact]:
+    def get_artifact_class(self) -> builtins.type[FileArtifact]:
         return FileArtifact
 
     async def read(self, artifact_id: str) -> FileArtifact:
@@ -250,7 +250,7 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
         image.save(output, format="JPEG", quality=self.quality, optimize=True)
         return output.getvalue()
 
-    def read_pdf(self, file_path: str, file_content: bytes) -> Tuple[bytes, str]:
+    def read_pdf(self, file_path: str, file_content: bytes) -> tuple[bytes, str]:
         """Extract text content from PDF and return both raw PDF and parsed text"""
         file_name = Path(file_path).name
         pdf_content = f"Contents of file {file_name}:\n\n"

@@ -1,11 +1,11 @@
 import logging
-from typing import List, Type, ClassVar
+from typing import ClassVar, List, Type
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import ConfigDict, Field, model_validator
 
 from moatless.actions.schema import ActionArguments
-from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeResponse
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class FindClassArgs(SearchBaseArgs):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="I need to see the implementation of the DatabaseManager class to understand how it handles transactions",
@@ -67,7 +67,7 @@ class FindClassArgs(SearchBaseArgs):
 
 
 class FindClass(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = FindClassArgs
+    args_schema: ClassVar[type[ActionArguments]] = FindClassArgs
 
     def to_prompt(self):
         prompt = f"Searching for class: {self.args.class_name}"
@@ -81,8 +81,8 @@ class FindClass(SearchBaseAction):
 
     def _select_span_instructions(self, search_result: SearchCodeResponse) -> str:
         return (
-            f"Here's the class structure."
-            f"Use the function ViewCode and specify the SpanIDs of the relevant functions to view them.\n"
+            "Here's the class structure."
+            "Use the function ViewCode and specify the SpanIDs of the relevant functions to view them.\n"
         )
 
     async def _search_for_alternative_suggestion(self, args: FindClassArgs) -> SearchCodeResponse:
@@ -91,7 +91,7 @@ class FindClass(SearchBaseAction):
         return SearchCodeResponse()
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         criteria = super().get_evaluation_criteria(trajectory_length)
         criteria.extend(
             [

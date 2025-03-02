@@ -1,9 +1,8 @@
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.schema import CompletionModelSettings
-from moatless.schema import MessageHistoryType
+from moatless.schema import CompletionModelSettings, MessageHistoryType
 
 
 class AgentSettings(BaseModel):
@@ -13,7 +12,7 @@ class AgentSettings(BaseModel):
         ..., description="Completion model to be used for generating completions"
     )
     system_prompt: Optional[str] = Field(None, description="System prompt to be used for generating completions")
-    actions: List[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
     message_history_type: MessageHistoryType = Field(
         default=MessageHistoryType.MESSAGES,
         description="Determines how message history is generated",
@@ -41,7 +40,7 @@ class AgentSettings(BaseModel):
             and self.message_history_type == other.message_history_type
         )
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
         dump["message_history_type"] = self.message_history_type.value
         return dump

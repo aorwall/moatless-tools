@@ -34,14 +34,14 @@ class TextBlock(BaseBlock):
 
 class ListBlock(BaseBlock):
     type: BlockType = BlockType.list
-    items: List[str]
+    items: list[str]
     variant: Optional[ListVariant] = ListVariant.unordered
 
 
 class TableBlock(BaseBlock):
     type: BlockType = BlockType.table
-    headers: List[str]
-    rows: List[List[Union[str, int]]]
+    headers: list[str]
+    rows: list[list[Union[str, int]]]
 
 
 ContentBlock = Union[TextBlock, ListBlock, TableBlock]
@@ -50,10 +50,10 @@ ContentBlock = Union[TextBlock, ListBlock, TableBlock]
 class ContentSection(BaseModel):
     id: str
     title: str
-    blocks: List[ContentBlock]
-    sections: Optional[List["ContentSection"]] = None
+    blocks: list[ContentBlock]
+    sections: Optional[list["ContentSection"]] = None
 
 
 class ContentStructure(BaseModel):
     title: str | None = None
-    sections: List[ContentSection]
+    sections: list[ContentSection]

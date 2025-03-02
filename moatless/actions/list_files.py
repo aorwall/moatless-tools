@@ -1,6 +1,6 @@
 from typing import List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -30,7 +30,7 @@ class ListFilesArgs(ActionArguments):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Show me what files are in the tests directory",
@@ -94,7 +94,7 @@ class ListFiles(Action):
             )
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         return [
             "Directory Path Validity: Ensure the requested directory path exists and is valid.",
             "Usefulness: Assess if listing the directory contents is helpful for the current task.",

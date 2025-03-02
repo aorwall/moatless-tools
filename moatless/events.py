@@ -1,15 +1,17 @@
 import asyncio
 import json
 import logging
+import os
+from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Any, Callable, Optional
-import os
+from typing import Any, List, Optional
 
 import aiofiles
 from pydantic import BaseModel, Field, field_validator
 
 from moatless.utils.moatless import get_moatless_trajectory_dir
+
 from . import context_data
 
 logger = logging.getLogger(__name__)
@@ -82,7 +84,7 @@ class EventBus:
     _redis_available = False
 
     def __init__(self):
-        self._subscribers: List[Callable[[str, BaseEvent], None]] = []
+        self._subscribers: list[Callable[[str, BaseEvent], None]] = []
         self._lock = asyncio.Lock()
         self._pubsub = None
         self._subscriber_tasks = set()
@@ -241,7 +243,7 @@ class EventBus:
         """Helper method to run a single async callback"""
         await callback(event)
 
-    async def read_events(self, project_id: str, trajectory_id: str) -> List[BaseEvent]:
+    async def read_events(self, project_id: str, trajectory_id: str) -> list[BaseEvent]:
         """Read events from trajectory-specific events.jsonl"""
         traj_dir = get_moatless_trajectory_dir(project_id=project_id, trajectory_id=trajectory_id)
         events_path = traj_dir / "events.jsonl"

@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from typing import List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
@@ -46,7 +46,7 @@ class InsertLinesArgs(ActionArguments):
 </new_str>"""
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Add a new import statement at the beginning of the file",

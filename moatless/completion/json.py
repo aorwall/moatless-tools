@@ -1,7 +1,7 @@
 import json
 import logging
 from textwrap import dedent
-from typing import List, Any, Type, Optional
+from typing import Any, List, Optional, Type
 
 from pydantic import ValidationError
 
@@ -21,7 +21,7 @@ class JsonCompletionModel(BaseCompletionModel):
     3. Validating and parsing JSON responses
     """
 
-    def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
+    def _prepare_system_prompt(self, system_prompt: str, response_schema: list[type[ResponseSchema]]) -> str:
         """Add JSON schema instructions to system prompt.
 
         This method appends the JSON schema and format instructions
@@ -48,7 +48,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
 
     async def _validate_completion(
         self, completion_response: Any
-    ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
         """Validate and parse JSON completion response.
 
         This method:

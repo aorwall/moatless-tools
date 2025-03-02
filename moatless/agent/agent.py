@@ -2,38 +2,36 @@ import importlib
 import json
 import logging
 import traceback
-from typing import List, Type, Dict, Any
+from typing import Any, Dict, List, Type
 
-from moatless.telemetry import instrument, set_attribute
+from opentelemetry import trace
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
-from moatless.actions.action import Action
-from moatless.actions.action import CompletionModelMixin
+from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
 )
-from moatless.agent.events import AgentEvent, RunAgentEvent, ActionCreatedEvent, ActionExecutedEvent, AgentErrorEvent
+from moatless.agent.events import ActionCreatedEvent, ActionExecutedEvent, AgentErrorEvent, AgentEvent, RunAgentEvent
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
+from moatless.completion.manager import create_completion_model
 from moatless.completion.model import Completion
 from moatless.component import MoatlessComponent
 from moatless.events import event_bus
 from moatless.exceptions import (
     CompletionError,
+    CompletionRejectError,
     RejectError,
     RuntimeError,
-    CompletionRejectError,
 )
 from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
-from moatless.node import Node, ActionStep
+from moatless.node import ActionStep, Node
 from moatless.repository.repository import Repository
+from moatless.telemetry import instrument, set_attribute
 from moatless.workspace import Workspace
-
-from moatless.completion.manager import create_completion_model
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.agent")
@@ -42,24 +40,24 @@ tracer = trace.get_tracer("moatless.agent")
 class ActionAgent(MoatlessComponent):
     agent_id: str = Field(..., description="Agent ID")
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
-    actions: List[Action] = Field(default_factory=list)
+    actions: list[Action] = Field(default_factory=list)
 
     _completion_model: BaseCompletionModel | None = PrivateAttr(default=None)
     _message_generator: MessageHistoryGenerator | None = PrivateAttr(default=None)
-    _action_map: dict[Type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
+    _action_map: dict[type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
     _workspace: Workspace | None = PrivateAttr(default=None)
 
     def __init__(
         self,
         agent_id: str,
-        actions: List[Action],
+        actions: list[Action],
         system_prompt: str,
         completion_model: BaseCompletionModel | None = None,
         repository: Repository | None = None,
         code_index: CodeIndex | None = None,
         runtime: Any | None = None,
         workspace: Workspace | None = None,
-        artifact_handlers: List[ArtifactHandler] | None = None,
+        artifact_handlers: list[ArtifactHandler] | None = None,
         **data,
     ):
         super().__init__(
@@ -85,7 +83,7 @@ class ActionAgent(MoatlessComponent):
         self.completion_model = completion_model
 
     @classmethod
-    def from_agent_settings(cls, agent_settings: AgentSettings, actions: List[Action] | None = None):
+    def from_agent_settings(cls, agent_settings: AgentSettings, actions: list[Action] | None = None):
         if agent_settings.actions:
             actions = [action for action in actions if action.__class__.__name__ in agent_settings.actions]
 
@@ -104,7 +102,7 @@ class ActionAgent(MoatlessComponent):
         return "moatless.agent"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return ActionAgent
 
     @property
@@ -334,7 +332,7 @@ class ActionAgent(MoatlessComponent):
             node.terminal = True
             raise e
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
 
         dump["actions"] = []

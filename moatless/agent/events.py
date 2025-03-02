@@ -1,4 +1,4 @@
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 from moatless.events import BaseEvent
 
@@ -29,7 +29,7 @@ class ActionEvent(AgentEvent):
 
     scope: str = "action"
     action_name: Optional[str] = None
-    action_params: Optional[Dict] = None
+    action_params: Optional[dict] = None
 
 
 class ActionCreatedEvent(ActionEvent):

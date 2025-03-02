@@ -1,12 +1,12 @@
-from typing import Optional, List, Type, ClassVar
+from typing import ClassVar, List, Optional, Type
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import ConfigDict, Field, model_validator
 
 from moatless.actions.schema import ActionArguments
-from moatless.completion.schema import FewShotExample
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logger
 from moatless.codeblocks import CodeBlockType, get_parser_by_path
-from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
+from moatless.completion.schema import FewShotExample
+from moatless.index.types import SearchCodeHit, SearchCodeResponse, SpanHit
 
 
 class FindFunctionArgs(SearchBaseArgs):
@@ -55,7 +55,7 @@ class FindFunctionArgs(SearchBaseArgs):
         return f"{self.name}({param_str})"
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Find the calculate_interest function in our financial module to review its logic",
@@ -77,7 +77,7 @@ class FindFunctionArgs(SearchBaseArgs):
 
 
 class FindFunction(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = FindFunctionArgs
+    args_schema: ClassVar[type[ActionArguments]] = FindFunctionArgs
 
     async def _search(self, args: FindFunctionArgs) -> SearchCodeResponse:
         logger.info(
@@ -122,7 +122,7 @@ class FindFunction(SearchBaseAction):
         return SearchCodeResponse()
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         criteria = super().get_evaluation_criteria(trajectory_length)
         criteria.extend(
             [

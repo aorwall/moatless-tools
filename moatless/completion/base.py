@@ -2,32 +2,30 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Optional, List, Union, Any, Dict, Type, Callable, Tuple, Awaitable
-
-from moatless.telemetry import set_attribute
-import tenacity
-from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import litellm
+import tenacity
 from litellm import BadRequestError, RateLimitError
-from tenacity import retry, wait_exponential, stop_after_attempt
+from opentelemetry import trace
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from moatless.completion.model import Completion, Usage
 from moatless.completion.schema import (
+    AllMessageValues,
+    ChatCompletionCachedContent,
     ChatCompletionTextObject,
     ChatCompletionToolMessage,
     ChatCompletionUserMessage,
     ResponseSchema,
-    AllMessageValues,
-    ChatCompletionCachedContent,
 )
-from moatless.events import BaseEvent
-from moatless.events import event_bus
+from moatless.events import BaseEvent, event_bus
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
-
-from opentelemetry import trace
+from moatless.telemetry import set_attribute
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -51,7 +49,7 @@ class CompletionRetryError(Exception):
         self,
         message: str,
         retry_message: AllMessageValues | None = None,
-        retry_messages: List[AllMessageValues] | None = None,
+        retry_messages: list[AllMessageValues] | None = None,
     ):
         super().__init__(message)
         if retry_message:
@@ -72,17 +70,17 @@ class LLMResponseFormat(str, Enum):
 class CompletionResponse(BaseModel):
     """Container for completion responses that can include multiple structured outputs and text"""
 
-    structured_outputs: List[ResponseSchema] = Field(default_factory=list)
+    structured_outputs: list[ResponseSchema] = Field(default_factory=list)
     text_response: Optional[str] = Field(default=None)
     completion: Optional[Completion] = Field(default=None)
-    thoughts: Optional[List[dict]] = Field(default=None)
-    flags: List[str] = Field(default_factory=list)
+    thoughts: Optional[list[dict]] = Field(default=None)
+    flags: list[str] = Field(default_factory=list)
 
     @classmethod
     def create(
         cls,
         text: str | None = None,
-        output: List[ResponseSchema] | ResponseSchema | None = None,
+        output: list[ResponseSchema] | ResponseSchema | None = None,
         completion: Completion | None = None,
     ) -> "CompletionResponse":
         if isinstance(output, ResponseSchema):
@@ -106,7 +104,7 @@ class CompletionResponse(BaseModel):
 
 
 ValidationFunction = Callable[
-    [List[ResponseSchema], Optional[str], List[str]], Awaitable[Tuple[List[ResponseSchema], Optional[str], List[str]]]
+    [list[ResponseSchema], Optional[str], list[str]], Awaitable[tuple[list[ResponseSchema], Optional[str], list[str]]]
 ]
 
 
@@ -137,24 +135,24 @@ class BaseCompletionModel(BaseModel, ABC):
         default=MessageHistoryType.MESSAGES,
         description="The type of message history to use",
     )
-    headers: Dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
-    params: Dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
+    headers: dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
+    params: dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
     merge_same_role_messages: bool = Field(
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
 
-    _response_schema: Optional[List[type[ResponseSchema]]] = PrivateAttr(default=None)
+    _response_schema: Optional[list[type[ResponseSchema]]] = PrivateAttr(default=None)
     _system_prompt: Optional[str] = PrivateAttr(default=None)
     _few_shot_prompt: Optional[str] = PrivateAttr(default=None)
     _post_validation_fn: Optional[ValidationFunction] = PrivateAttr(default=None)
 
-    _completion_params: Optional[Dict[str, Union[str, Dict, List]]] = None
+    _completion_params: Optional[dict[str, Union[str, dict, list]]] = None
     _initialized: bool = False
 
     def initialize(
         self,
-        response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]],
+        response_schema: Union[list[type[ResponseSchema]], type[ResponseSchema]],
         system_prompt: str | None = None,
         post_validation_fn: Optional[ValidationFunction] = None,
     ) -> None:
@@ -212,7 +210,7 @@ class BaseCompletionModel(BaseModel, ABC):
     @tracer.start_as_current_span("BaseCompletionModel.create_completion")
     async def create_completion(
         self,
-        messages: List[dict],
+        messages: list[dict],
         system_prompt: str | None = None,
     ) -> CompletionResponse:
         set_attribute("model", self.model)
@@ -239,7 +237,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def _prepare_system_prompt(
         self,
         system_prompt: str,
-        response_schema: Union[List[type[ResponseSchema]], type[ResponseSchema]],
+        response_schema: Union[list[type[ResponseSchema]], type[ResponseSchema]],
     ) -> str:
         """Prepare the system prompt by adding format-specific instructions.
 
@@ -277,7 +275,7 @@ class BaseCompletionModel(BaseModel, ABC):
         prompt = "\n\n# Examples\nExamples of how to use the available actions:\n\n"
         return prompt
 
-    def _prepare_messages(self, messages: List[dict], system_prompt: str) -> List[dict]:
+    def _prepare_messages(self, messages: list[dict], system_prompt: str) -> list[dict]:
         """Prepare messages with system prompt and few-shot examples"""
         messages = messages.copy()
 
@@ -287,7 +285,7 @@ class BaseCompletionModel(BaseModel, ABC):
         messages.insert(0, {"role": "system", "content": system_prompt})
         return messages
 
-    def _get_completion_params(self, schema: List[Type[ResponseSchema]]) -> dict[str, Union[str, dict, list]]:
+    def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Union[str, dict, list]]:
         """Get format-specific parameters for the LLM API call.
 
         This method configures how the LLM should structure its response by providing
@@ -310,7 +308,7 @@ class BaseCompletionModel(BaseModel, ABC):
     @tracer.start_as_current_span("BaseCompletionModel._create_completion_with_retries")
     async def _create_completion_with_retries(
         self,
-        messages: List[dict],
+        messages: list[dict],
     ) -> CompletionResponse:
         """Execute completion with retries for validation errors"""
         retry_count = 0
@@ -318,7 +316,7 @@ class BaseCompletionModel(BaseModel, ABC):
         completion_response = None
 
         @tenacity.retry(
-            retry=tenacity.retry_if_exception_type((CompletionRetryError)),
+            retry=tenacity.retry_if_exception_type(CompletionRetryError),
             stop=tenacity.stop_after_attempt(3),
             wait=tenacity.wait_fixed(0),
             reraise=True,
@@ -450,7 +448,7 @@ class BaseCompletionModel(BaseModel, ABC):
     @tracer.start_as_current_span("BaseCompletionModel._execute_completion")
     async def _execute_completion(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
     ) -> Any:
         """Execute a single completion attempt with LiteLLM.
 
@@ -527,7 +525,7 @@ class BaseCompletionModel(BaseModel, ABC):
     def _get_schema_names(self):
         return [schema.__name__ for schema in self._response_schema] if self._response_schema else ["None"]
 
-    def _inject_prompt_caching(self, messages: List[Dict[str, str]]) -> None:
+    def _inject_prompt_caching(self, messages: list[dict[str, str]]) -> None:
         """Set cache breakpoints for Claude 3.5 message history.
 
         This method:
@@ -561,13 +559,13 @@ class BaseCompletionModel(BaseModel, ABC):
                         del content["cache_control"]
 
                 content = None
-            except Exception as e:
+            except Exception:
                 logger.exception(f"Error injecting prompt caching on message: {message}")
 
     @abstractmethod
     async def _validate_completion(
         self, completion_response: Any
-    ) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str], list[dict]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:
@@ -651,7 +649,7 @@ class BaseCompletionModel(BaseModel, ABC):
             self.model_api_key = os.getenv("CUSTOM_LLM_API_KEY")
         return self
 
-    def _merge_same_role_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    def _merge_same_role_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Merge consecutive messages with the 'user' role into a single message.
 
         Args:
@@ -664,7 +662,7 @@ class BaseCompletionModel(BaseModel, ABC):
             return messages
 
         merged = []
-        current_content: List[str] = []
+        current_content: list[str] = []
 
         for message in messages:
             if message["role"] == "user":

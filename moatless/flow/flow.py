@@ -3,31 +3,29 @@ import logging
 import traceback
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Callable, Type, Union
+from typing import Any, Dict, List, Optional, Type, Union
 
-from moatless.flow.schema import FlowStatus, FlowStatusInfo
-from pydantic import BaseModel, Field, ConfigDict, PrivateAttr
+from opentelemetry import trace
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
-from moatless.context_data import current_trajectory_id
-from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent, FlowErrorEvent
-from moatless.events import event_bus
+from moatless.context_data import current_trajectory_id, get_trajectory_dir
+from moatless.events import BaseEvent, FlowCompletedEvent, FlowErrorEvent, FlowStartedEvent, event_bus
 from moatless.file_context import FileContext
 from moatless.flow.events import FlowErrorEvent
+from moatless.flow.schema import FlowStatus, FlowStatusInfo
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.context_data import get_trajectory_dir
 from moatless.workspace import Workspace
-
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.flow")
@@ -40,7 +38,7 @@ class AgenticFlow(MoatlessComponent):
     trajectory_id: str = Field(..., description="The trajectory ID.")
 
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     persist_path: Optional[str] = Field(None, description="Path to persist the system state.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
@@ -59,7 +57,7 @@ class AgenticFlow(MoatlessComponent):
         return "moatless.flow"
 
     @classmethod
-    def _get_base_class(cls) -> Type:
+    def _get_base_class(cls) -> type:
         return AgenticFlow
 
     @property
@@ -81,7 +79,7 @@ class AgenticFlow(MoatlessComponent):
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
         workspace: Workspace | None = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: Optional[dict[str, Any]] = None,
         persist_path: Optional[str] = None,
         persist_dir: Union[str, Path] | None = None,
         max_iterations: int = 10,
@@ -314,7 +312,7 @@ class AgenticFlow(MoatlessComponent):
         flow_settings = self.model_dump(exclude_none=True)
         self._save_file(persist_dir / "settings.json", flow_settings)
 
-    def _save_file(self, file_path: Path, data: Dict[str, Any]):
+    def _save_file(self, file_path: Path, data: dict[str, Any]):
         with open(file_path, "w") as f:
             try:
                 json.dump(data, f, indent=2)
@@ -367,12 +365,12 @@ class AgenticFlow(MoatlessComponent):
 
         status_path = trajectory_dir / "status.json"
         if status_path.exists():
-            with open(status_path, "r") as f:
+            with open(status_path) as f:
                 status = FlowStatusInfo.model_validate_json(f.read())
         else:
             status = FlowStatusInfo(status=FlowStatus.CREATED)
 
-        with open(settings_path, "r") as f:
+        with open(settings_path) as f:
             settings = json.load(f)
 
         flow = cls.model_validate(settings)
@@ -402,7 +400,7 @@ class AgenticFlow(MoatlessComponent):
 
         return cls.from_dir(trajectory_dir, workspace)
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""
         data = super().model_dump(exclude={"agent", "root", "persist_dir", "persist_path"})
         data["agent"] = self.agent.model_dump(**kwargs)

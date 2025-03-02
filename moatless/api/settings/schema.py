@@ -1,5 +1,6 @@
+from typing import List, Optional
+
 from pydantic import BaseModel
-from typing import Optional, List
 
 from moatless.flow.schema import FlowConfig
 
@@ -9,4 +10,4 @@ class FlowConfigUpdateDTO(BaseModel):
 
 
 class FlowConfigsResponseDTO(BaseModel):
-    configs: List[FlowConfig]
+    configs: list[FlowConfig]

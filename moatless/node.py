@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Literal, Optional, List, Dict, Any, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -9,8 +9,8 @@ from moatless.actions.schema import ActionArguments, Observation
 from moatless.agent.settings import AgentSettings
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.model import (
-    Usage,
     Completion,
+    Usage,
 )
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
@@ -78,9 +78,9 @@ class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
 
     parent: Optional["Node"] = Field(None, description="The parent node")
-    children: List["Node"] = Field(default_factory=list, description="The child nodes")
+    children: list["Node"] = Field(default_factory=list, description="The child nodes")
 
-    artifact_changes: List[ArtifactChange] = Field(
+    artifact_changes: list[ArtifactChange] = Field(
         default_factory=list,
         description="The artifact changes associated with the node",
     )
@@ -88,17 +88,17 @@ class Node(BaseModel):
     user_message: Optional[str] = Field(None, description="The user message for this node")
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
 
-    thoughts: Optional[List[dict]] = Field(default=None, description="The thoughts associated with the node")
+    thoughts: Optional[list[dict]] = Field(default=None, description="The thoughts associated with the node")
 
-    action_steps: List[ActionStep] = Field(
+    action_steps: list[ActionStep] = Field(
         default_factory=list,
         description="The sequence of actions and observations for this node",
     )
 
     file_context: Optional[FileContext] = Field(None, description="The file context state associated with the node")
     # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
-    completions: Dict[str, Completion] = Field(default_factory=dict, description="The completions used in this node")
-    possible_actions: List[str] = Field(default_factory=list, description="List of possible action types for this node")
+    completions: dict[str, Completion] = Field(default_factory=dict, description="The completions used in this node")
+    possible_actions: list[str] = Field(default_factory=list, description="List of possible action types for this node")
     is_duplicate: Optional[bool] = Field(None, description="Flag to indicate if the node is a duplicate")
     terminal: bool = Field(False, description="Flag to indicate if the node is a terminal node")
     error: Optional[str] = Field(None, description="Error when running node")
@@ -206,13 +206,13 @@ class Node(BaseModel):
 
         return None
 
-    def get_sibling_nodes(self) -> List["Node"]:
+    def get_sibling_nodes(self) -> list["Node"]:
         if not self.parent:
             return []
 
         return [child for child in self.parent.children if child.node_id != self.node_id]
 
-    def get_trajectory(self) -> List["Node"]:
+    def get_trajectory(self) -> list["Node"]:
         nodes = []
         current_node = self
         while current_node is not None:
@@ -221,7 +221,7 @@ class Node(BaseModel):
 
         return nodes
 
-    def get_expandable_descendants(self) -> List["Node"]:
+    def get_expandable_descendants(self) -> list["Node"]:
         """Get all expandable descendants of this node, including self if expandable."""
         expandable_nodes = []
         if self.is_expandable():
@@ -230,7 +230,7 @@ class Node(BaseModel):
             expandable_nodes.extend(child.get_expandable_descendants())
         return expandable_nodes
 
-    def get_expanded_descendants(self) -> List["Node"]:
+    def get_expanded_descendants(self) -> list["Node"]:
         """Get all expanded descendants of this node, including self if expanded."""
         expanded_nodes = []
         if self.expanded_count() > 0:
@@ -239,7 +239,7 @@ class Node(BaseModel):
             expanded_nodes.extend(child.get_expanded_descendants())
         return expanded_nodes
 
-    def get_all_nodes(self) -> List["Node"]:
+    def get_all_nodes(self) -> list["Node"]:
         if self.parent:
             node = self.get_root()
         else:
@@ -256,11 +256,11 @@ class Node(BaseModel):
                 return node
         return None
 
-    def get_leaf_nodes(self) -> List["Node"]:
+    def get_leaf_nodes(self) -> list["Node"]:
         """Get all leaf nodes ."""
         return [node for node in self.get_root().get_all_nodes() if node.is_leaf()]
 
-    def _get_all_nodes(self) -> List["Node"]:
+    def _get_all_nodes(self) -> list["Node"]:
         nodes = []
         nodes.append(self)
         for child in self.children:
@@ -318,7 +318,7 @@ class Node(BaseModel):
         if not self.action_steps and other.action_steps:
             return False
 
-        for self_step, other_step in zip(self.action_steps, other.action_steps):
+        for self_step, other_step in zip(self.action_steps, other.action_steps, strict=False):
             if self_step.action.name != other_step.action.name:
                 return False
 
@@ -338,7 +338,7 @@ class Node(BaseModel):
             self.file_context = self.parent.file_context.clone()
         self.children = []
 
-    def model_dump(self, **kwargs) -> Dict[str, Any]:
+    def model_dump(self, **kwargs) -> dict[str, Any]:
         """
         Generate a dictionary representation of the node and its descendants.
 
@@ -380,14 +380,14 @@ class Node(BaseModel):
     @classmethod
     def _reconstruct_node(
         cls,
-        node_data: Dict[str, Any],
+        node_data: dict[str, Any],
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
         """Update reconstruction to handle both old and new formats"""
 
         # Handle legacy format conversion
-        if "action" in node_data and not "action_steps" in node_data:
+        if "action" in node_data and "action_steps" not in node_data:
             action = node_data.get("action")
             observation = node_data.get("output")
             completions = node_data.get("completions", {})
@@ -401,7 +401,7 @@ class Node(BaseModel):
                     }
                 ]
 
-        if not "user_message" in node_data and node_data.get("message"):
+        if "user_message" not in node_data and node_data.get("message"):
             node_data["user_message"] = node_data.pop("message")
 
         if node_data.get("action_steps"):
@@ -414,7 +414,7 @@ class Node(BaseModel):
                 if step.observation and step.observation.terminal:
                     node_data["terminal"] = True
 
-        if not "terminal" in node_data:
+        if "terminal" not in node_data:
             node_data["terminal"] = False
 
         if node_data.get("file_context"):
@@ -450,7 +450,7 @@ class Node(BaseModel):
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             data = json.load(f)
 
         if "root" in data:
@@ -463,7 +463,7 @@ class Node(BaseModel):
     @classmethod
     def reconstruct(
         cls,
-        data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        data: Union[dict[str, Any], list[dict[str, Any]]],
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
@@ -488,7 +488,7 @@ class Node(BaseModel):
     @classmethod
     def _reconstruct_from_list(
         cls,
-        node_list: List[Dict],
+        node_list: list[dict],
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
     ) -> "Node":
@@ -525,7 +525,7 @@ class Node(BaseModel):
             logger.debug(f"Reconstructed tree:\n{tree}")
         return root_nodes[0]
 
-    def dump_as_list(self, **kwargs) -> List[Dict[str, Any]]:
+    def dump_as_list(self, **kwargs) -> list[dict[str, Any]]:
         """
         Dump all nodes as a flat list structure.
         """
@@ -551,7 +551,7 @@ class Node(BaseModel):
         Returns:
             Node: Root node of the tree
         """
-        with open(file_path, "r") as f:
+        with open(file_path) as f:
             data = json.load(f)
 
         if isinstance(data, list):

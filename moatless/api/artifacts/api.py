@@ -36,18 +36,18 @@ async def fortnox_callback(code: str, state: str, type: str):
         await fortnox_auth.save_tokens(tokens)
         logger.info(f"Fortnox account connected successfully for handler {type}")
         return {"success": True}
-    except Exception as e:
+    except Exception:
         logger.exception(f"Failed to connect Fortnox account for handler {type}")
         raise HTTPException(status_code=400, detail="Failed to connect Fortnox account")
 
 
-@router.get("/{trajectory_id}", response_model=List[ArtifactListItem])
+@router.get("/{trajectory_id}", response_model=list[ArtifactListItem])
 async def list_artifacts(trajectory_id: str):
     workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
     return workspace.get_all_artifacts()
 
 
-@router.get("/{trajectory_id}/{type}", response_model=List[ArtifactListItem])
+@router.get("/{trajectory_id}/{type}", response_model=list[ArtifactListItem])
 async def list_artifacts(trajectory_id: str, type: str):
     workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
     return workspace.get_artifacts_by_type(type)

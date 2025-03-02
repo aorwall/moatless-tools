@@ -3,8 +3,9 @@ import io
 import json
 import logging
 import os
+from collections.abc import Awaitable
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set, Tuple, Awaitable
+from typing import Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
@@ -20,8 +21,7 @@ from moatless.codeblocks.codeblocks import (
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment, TestResult
-from moatless.runtime.runtime import TestStatus
+from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
@@ -63,7 +63,7 @@ class ContextFile(BaseModel):
         None,
         description="Git-formatted patch representing the latest changes applied in this ContextFile.",
     )
-    spans: List[ContextSpan] = Field(
+    spans: list[ContextSpan] = Field(
         default_factory=list,
         description="List of context spans associated with this file.",
     )
@@ -247,9 +247,7 @@ class ContextFile(BaseModel):
         for patched_file in patch_set:
             patched_file_path = patched_file.path
             # Correctly strip 'a/' or 'b/' prefixes
-            if patched_file_path.startswith("a/"):
-                patched_file_path = patched_file_path[2:]
-            elif patched_file_path.startswith("b/"):
+            if patched_file_path.startswith("a/") or patched_file_path.startswith("b/"):
                 patched_file_path = patched_file_path[2:]
             if os.path.normpath(patched_file_path) == os.path.normpath(self.file_path):
                 patched_content = self._apply_patched_file(patched_content, patched_file)
@@ -483,7 +481,7 @@ class ContextFile(BaseModel):
             # Check if adding this block would exceed max_tokens
             if max_tokens:
                 if current_tokens + child.tokens > max_tokens:
-                    logger.debug(f"Stopping at child block as it would exceed max_tokens")
+                    logger.debug("Stopping at child block as it would exceed max_tokens")
                     break
 
             show_new_span_id = False
@@ -607,7 +605,7 @@ class ContextFile(BaseModel):
 
     def add_spans(
         self,
-        span_ids: Set[str],
+        span_ids: set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -736,7 +734,7 @@ class ContextFile(BaseModel):
     def remove_all_spans(self):
         self.spans = [span for span in self.spans if span.pinned]
 
-    def get_spans(self) -> List[BlockSpan]:
+    def get_spans(self) -> list[BlockSpan]:
         block_spans = []
         for span in self.spans:
             if not self.module:
@@ -766,15 +764,15 @@ class ContextFile(BaseModel):
 
 class TestFile(BaseModel):
     file_path: str = Field(..., description="The path to the test file.")
-    test_results: List[TestResult] = Field(default_factory=list, description="List of test results.")
+    test_results: list[TestResult] = Field(default_factory=list, description="List of test results.")
 
 
 class FileContext(BaseModel):
     _repo: Repository | None = PrivateAttr(None)
     _runtime: RuntimeEnvironment | None = PrivateAttr(None)
 
-    _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
-    _test_files: Dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
+    _files: dict[str, ContextFile] = PrivateAttr(default_factory=dict)
+    _test_files: dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -822,7 +820,7 @@ class FileContext(BaseModel):
     @classmethod
     def from_dict(
         cls,
-        data: Dict,
+        data: dict,
         repo_dir: str | None = None,
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
@@ -902,12 +900,12 @@ class FileContext(BaseModel):
         self._test_files.clear()
         self.load_files_from_dict(snapshot.get("files", []))
 
-    def to_files_with_spans(self) -> List[FileWithSpans]:
+    def to_files_with_spans(self) -> list[FileWithSpans]:
         return [
             FileWithSpans(file_path=file_path, span_ids=list(file.span_ids)) for file_path, file in self._files.items()
         ]
 
-    def add_files_with_spans(self, files_with_spans: List[FileWithSpans]):
+    def add_files_with_spans(self, files_with_spans: list[FileWithSpans]):
         for file_with_spans in files_with_spans:
             self.add_spans_to_context(file_with_spans.file_path, set(file_with_spans.span_ids))
 
@@ -957,7 +955,7 @@ class FileContext(BaseModel):
     def add_spans_to_context(
         self,
         file_path: str,
-        span_ids: Set[str],
+        span_ids: set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -997,7 +995,7 @@ class FileContext(BaseModel):
         start_line: int,
         end_line: int | None = None,
         add_extra: bool = True,
-    ) -> List[str]:
+    ) -> list[str]:
         if not self.has_file(file_path):
             context_file = self.add_file(file_path, add_extra=add_extra)
         else:
@@ -1042,7 +1040,7 @@ class FileContext(BaseModel):
 
         return context_file
 
-    def get_context_files(self) -> List[ContextFile]:
+    def get_context_files(self) -> list[ContextFile]:
         file_paths = list(self._files.keys())
         for file_path in file_paths:
             yield self.get_context_file(file_path)
@@ -1291,7 +1289,7 @@ class FileContext(BaseModel):
             span_ids.extend(file.span_ids)
         return len(span_ids)
 
-    def get_test_counts(self) -> Tuple[int, int, int]:
+    def get_test_counts(self) -> tuple[int, int, int]:
         """
         Returns counts of passed, failed, and errored tests.
 
@@ -1308,7 +1306,7 @@ class FileContext(BaseModel):
 
         return (passed_count, failure_count, error_count)
 
-    async def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
+    async def run_tests(self, test_files: list[str] | None = None) -> list[TestFile]:
         """
         Runs tests using the runtime environment and groups results by file.
         Preserves all test files in context, even those without results.
@@ -1392,7 +1390,7 @@ class FileContext(BaseModel):
 
         return test_file
 
-    def get_updated_test_results(self, previous_context: "FileContext") -> Set[str]:
+    def get_updated_test_results(self, previous_context: "FileContext") -> set[str]:
         """
         Gets test files that have different results from the previous context.
 
@@ -1411,7 +1409,7 @@ class FileContext(BaseModel):
 
         return updated_files
 
-    def get_test_summary(self, test_files: Optional[List[str]] = None) -> str:
+    def get_test_summary(self, test_files: Optional[list[str]] = None) -> str:
         """
         Returns a summary of test results, optionally filtered by specified test files.
         If test_files is provided, only shows results for those files.
@@ -1467,7 +1465,7 @@ class FileContext(BaseModel):
         return summary
 
     def get_test_failure_details(
-        self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[List[str]] = None
+        self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[list[str]] = None
     ) -> str:
         """
         Returns detailed output for each failed or errored test result.
@@ -1559,7 +1557,7 @@ class FileContext(BaseModel):
         """
         return any(file.was_edited for file in self._files.values())
 
-    def get_edited_files(self) -> List[str]:
+    def get_edited_files(self) -> list[str]:
         """
         Returns a list of file paths that have been edited in the context.
         A file is considered edited if it has changes (patch) but is not new.
@@ -1569,7 +1567,7 @@ class FileContext(BaseModel):
         """
         return [file_path for file_path, file in self._files.items() if file.was_edited and not file.is_new]
 
-    def get_created_files(self) -> List[str]:
+    def get_created_files(self) -> list[str]:
         """
         Returns a list of file paths that have been newly created in the context.
 
