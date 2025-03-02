@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.flow import AgenticFlow
 from moatless.repository.git import GitRepository
 from moatless.runner.utils import emit_event, run_async, setup_job_logging, cleanup_job_logging
@@ -8,6 +9,8 @@ from moatless.context_data import get_trajectory_dir
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+
+
 
 def run_flow(project_id: str, trajectory_id: str) -> None:
     """Run an instance's agentic flow."""
@@ -19,9 +22,9 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
     
     try:
         repository = GitRepository(repo_path=str(Path.cwd()))
-        workspace = Workspace(repository=repository)
+        workspace = Workspace(repository=repository, environment=LocalBashEnvironment())
 
-        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir, workspace=workspace)
+        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
         
         if flow.is_finished():
             logger.warning(f"Flow already finished for instance {trajectory_id}")
@@ -29,7 +32,7 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
         
         logger.info(f"Flow created for instance {trajectory_id}")
 
-        run_async(flow.run())
+        run_async(flow.run(workspace=workspace))
         
         logger.info(f"Flow completed for instance {trajectory_id}")
 

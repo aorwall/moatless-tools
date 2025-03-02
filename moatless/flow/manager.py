@@ -12,6 +12,8 @@ from datetime import timezone
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes
 from moatless.context_data import get_projects_dir, get_trajectory_dir
+from moatless.environment.local import LocalBashEnvironment
+from moatless.repository.git import GitRepository
 from moatless.runner.rq import RQRunner
 from moatless.runner.runner import JobStatus
 
@@ -22,6 +24,7 @@ from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
+    ExecuteNodeRequest,
     FlowConfig,
     FlowStatus, 
     FlowStatusInfo,
@@ -37,6 +40,7 @@ from moatless.value_function.base import BaseValueFunction
 
 from moatless.config.agent_config import get_agent
 from moatless.completion.manager import create_completion_model
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -391,15 +395,13 @@ class FlowManager:
         logger.info(f"Started retry for trajectory {trajectory_id}")
         return agentic_flow
 
-    async def execute_node(self, project_id: str, trajectory_id: str, request):
+    async def execute_node(self, project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
         """Execute a specific node in a trajectory."""
-        from moatless.flow.runner import agentic_runner
         
-        system = await agentic_runner.get_run(trajectory_id, project_id)
-        if system:
-            raise ValueError("Flow is already running")
-        
-        agentic_flow = await self._setup_flow(trajectory_id, project_id)
+        agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
+        # TODO: This is for testing purposes, the node should be executed by a worker!
+        workspace = Workspace(repository=GitRepository(repo_path=str(Path.cwd())), environment=LocalBashEnvironment())
+        await agentic_flow.agent.initialize(workspace)
 
         node = agentic_flow.root.get_node_by_id(request.node_id)
         if not node:

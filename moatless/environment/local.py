@@ -42,7 +42,7 @@ class LocalBashEnvironment(BaseEnvironment):
             EnvironmentExecutionError: If the command execution fails
         """
         try:
-            logger.info(f"Executing command: {command}")
+            logger.info(f"$ {command}")
             
             # Prepare environment variables
             process_env = os.environ.copy()
@@ -67,16 +67,21 @@ class LocalBashEnvironment(BaseEnvironment):
                 )
                 
             stdout, stderr = await process.communicate()
+            output = stdout.decode()
+            error = stderr.decode()
             return_code = process.returncode
-            
-            if return_code != 0:
-                raise EnvironmentExecutionError(
-                    f"Command failed with return code {return_code}: {command}",
-                    return_code,
-                    stderr.decode()
-                )
-            
-            return stdout.decode()
+
+            if output.strip():
+                logger.info("Command output:")
+                for line in output.splitlines():
+                    logger.info(f"  {line}")
+            if error.strip():
+                logger.warning("Command stderr:")
+                for line in error.splitlines():
+                    logger.warning(f"  {line}")
+            logger.info(f"Command return code: {return_code}")
+                
+            return output
             
         except asyncio.CancelledError:
             # Handle cancellation

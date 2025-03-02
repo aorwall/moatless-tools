@@ -183,6 +183,10 @@ class ActionAgent(MoatlessComponent):
         
         node.possible_actions = [action.name for action in self.actions]
 
+        # TODO: This is a hack to get the file context to work, remove when we got rid of the legacy file_context..
+        if node.file_context and not node.file_context._repo and self._workspace:
+            node.file_context._repo = self._workspace.repository
+
         try:
             await self._emit_event(RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id))
             messages = await self._message_generator.generate_messages(node)

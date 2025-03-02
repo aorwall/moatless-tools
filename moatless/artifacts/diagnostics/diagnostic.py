@@ -5,7 +5,7 @@ from typing import Optional, Type, List, ClassVar
 
 from moatless.artifacts.artifact import Artifact
 from moatless.artifacts.json_handler import JsonArtifactHandler
-from moatless.completion.schema import MessageContentListBlock
+from moatless.completion.schema import ChatCompletionTextObject, MessageContentListBlock
 
 class Position(BaseModel):
     line: int
@@ -21,22 +21,35 @@ class DiagnosticSeverity(str, Enum):
     INFO = "info"
     HINT = "hint"
 
-class DiagnosticArtifact(Artifact):
-    type: str = "diagnostic"
-
+class Diagnostic(BaseModel):
     severity: DiagnosticSeverity = Field(description="The severity of the diagnostic")
     range: Range = Field(description="The range at which the message applies.")
     source: str = Field(description="A human-readable string describing the source of this diagnostic, e.g. 'typescript' or 'super lint'.")
     message: str = Field(description="The diagnostic's message.")
     code: str = Field(description="The diagnostic's code, which might appear in the user interface.")
     
+
+class DiagnosticArtifact(Artifact):
+    """
+    An artifact that contains a list of diagnostics.
+    """
+    file_path: str = Field(description="The path to the file that the diagnostic is for")
+    diagnostics: List[Diagnostic] = Field(description="The list of diagnostics")
+
+    def __init__(self, file_path: str, diagnostics: List[Diagnostic], **kwargs):
+        super().__init__(id=f"{file_path}-diagnostic", type="diagnostic", file_path=file_path, diagnostics=diagnostics, **kwargs)
+
     def to_prompt_message_content(self) -> MessageContentListBlock:
         """Convert the diagnostic to a message content block for prompts"""
-        return {
-            "type": "text",
-            "text": f"{self.severity.upper()} [{self.source}] {self.message} (code: {self.code}) at line {self.range.start.line}, column {self.range.start.column}"
-        }
-
+        diagnostics_text = "\n".join([
+            f"{diag.severity.upper()} [{diag.source}] {diag.message} (code: {diag.code}) at line {diag.range.start.line}, column {diag.range.start.column}"
+            for diag in self.diagnostics
+        ])
+        
+        return ChatCompletionTextObject(
+            type="text",
+            text=f"File: {self.file_path}\n{diagnostics_text}"
+        )  # type: ignore
 
 class DiagnosticHandler(JsonArtifactHandler[DiagnosticArtifact]):
     """

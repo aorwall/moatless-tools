@@ -236,7 +236,7 @@ class RetryTrajectoryRequest(BaseModel):
 
 class ExecuteNodeRequest(BaseModel):
     """Request to execute a node."""
-    node_id: str
+    node_id: int
 
 class TrajectoryResponseDTO(BaseModel):
     """Data transfer object for trajectory responses."""

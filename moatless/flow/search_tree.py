@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.search_tree")
 
 class SearchTree(AgenticFlow):
-    selector: Optional[BaseSelector] = Field(..., description="Selector for node selection.")
-    expander: Optional[Expander] = Field(None, description="Expander for expanding nodes.")
+    selector: BaseSelector = Field(..., description="Selector for node selection.")
+    expander: Expander = Field(..., description="Expander for expanding nodes.")
     value_function: Optional[BaseValueFunction] = Field(None, description="Value function for reward calculation.")
     feedback_generator: Optional[BaseFeedbackGenerator] = Field(None, description="Feedback generator.")
     discriminator: Optional[BaseDiscriminator] = Field(
@@ -69,7 +69,7 @@ class SearchTree(AgenticFlow):
         max_depth: Optional[int] = None,
         **kwargs,
     ):
-        expander = expander or Expander(max_expansions=max_expansions)
+        expander = expander or Expander(max_expansions=max_expansions) # type: ignore
 
         return super().create(
             selector=selector,
@@ -188,6 +188,8 @@ class SearchTree(AgenticFlow):
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
             return None
+        
+        self.maybe_persist()
 
         await self.emit_event(
             NodeExpandedEvent(
@@ -397,17 +399,6 @@ class SearchTree(AgenticFlow):
             raise RuntimeError("SearchTree agent must have actions.")
 
         return True
-
-    @classmethod
-    def from_file(cls, file_path: str, persist_path: str | None = None, **kwargs) -> "SearchTree":
-        with open(file_path, "r") as f:
-            data = json.load(f)
-
-        # Remove root/nodes from loaded data since we'll provide it at runtime
-        data.pop("root", None)
-        data.pop("nodes", None)
-
-        return cls.from_dict(data, persist_path=persist_path or file_path, **kwargs)
 
     @model_validator(mode="after")
     def set_depth(self):

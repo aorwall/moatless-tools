@@ -28,15 +28,15 @@ class ChatCompletionToolParamFunctionChunk(TypedDict, total=False):
 
 
 class ChatCompletionToolParam(TypedDict, total=False):
-    cache_control: ChatCompletionCachedContent
     type: Union[Literal["function"], str]
     function: ChatCompletionToolParamFunctionChunk
+    cache_control: Optional[ChatCompletionCachedContent]
 
 
 class ChatCompletionTextObject(TypedDict):
     type: Literal["text"]
     text: str
-    cache_control: ChatCompletionCachedContent
+    cache_control: Optional[ChatCompletionCachedContent]
 
 
 class ChatCompletionThinkingObject(TypedDict):
@@ -107,7 +107,7 @@ class ChatCompletionSystemMessage(TypedDict, total=False):
     role: Required[Literal["system"]]
     content: Required[Union[str, List]]
     name: str
-    cache_control: ChatCompletionCachedContent
+    cache_control: Optional[ChatCompletionCachedContent]
 
 
 AllMessageValues = Union[

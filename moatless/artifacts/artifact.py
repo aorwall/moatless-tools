@@ -54,6 +54,9 @@ class Artifact(BaseModel, ABC):
     references: List[ArtifactReference] = Field(default_factory=list, description="Reference to the artifacts")
     status: Literal["new", "updated", "persisted", "unchanged"] = Field(default="new", description="Status of the artifact")
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
     @abstractmethod
     def to_prompt_message_content(self) -> MessageContentListBlock:
         pass

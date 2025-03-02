@@ -38,7 +38,7 @@ class Expander(BaseModel):
             file_context=node.file_context.clone() if node.file_context else None,
             max_expansions=self.max_expansions,
             agent_settings=settings_to_use[0] if settings_to_use else None,
-        )
+        )  # type: ignore
 
         node.add_child(child_node)
 

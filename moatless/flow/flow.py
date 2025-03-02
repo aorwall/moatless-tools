@@ -149,10 +149,16 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
-    async def run(self, message: str | None = None) -> Node:
+    async def run(self, message: str | None = None, workspace: Workspace | None = None) -> Node:
         """Run the system with optional root node."""
         if not self.root:
             raise ValueError("Root node is not set")
+
+        if workspace:
+            await self.agent.initialize(workspace)
+
+        if not self.agent.workspace:
+            raise ValueError("Agent workspace is not set")
 
         with tracer.start_as_current_span(f"flow_{self.trajectory_id}") as span:
             try:
