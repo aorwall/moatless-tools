@@ -643,9 +643,6 @@ def _append_ascii_node(
         # Include all action names from action steps
         action_names = [step.action.name for step in node.action_steps if step.action]
         state_params.extend(action_names)
-        # Check if any action step expects correction
-        if any(step.observation and step.observation.expect_correction for step in node.action_steps):
-            state_params.append("expect_correction")
 
     # Build reward string
     if not node.reward:
@@ -738,10 +735,6 @@ def _append_ascii_node(
             tree_lines.append(f"{content_prefix}│  Prompt: {step.action.to_prompt()}")
             if step.observation:
                 tree_lines.append(f"{content_prefix}│  Output: {step.observation.message}")
-                if step.observation.extra:
-                    tree_lines.append(f"{content_prefix}│  Extra: {step.observation.extra}")
-                if step.observation.expect_correction:
-                    tree_lines.append(f"{content_prefix}│  Expects Correction: True")
 
     # Process children with updated parameters
     child_prefix = prefix + ("    " if is_last else "│   ")

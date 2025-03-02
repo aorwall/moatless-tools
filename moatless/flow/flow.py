@@ -85,6 +85,7 @@ class AgenticFlow(MoatlessComponent):
         max_iterations: int = 10,
         max_expansions: Optional[int] = None,
         max_cost: Optional[float] = None,
+        shadow_mode: bool = False,
         **kwargs,
     ) -> "AgenticFlow":
         if not root and not message:
@@ -110,6 +111,7 @@ class AgenticFlow(MoatlessComponent):
             file_context = FileContext(
                 repo=agent.workspace.repository if agent.workspace else None,
                 runtime=agent.workspace.runtime if agent.workspace else None,
+                shadow_mode=shadow_mode,
             )
 
         if not root:

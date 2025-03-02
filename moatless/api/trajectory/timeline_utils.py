@@ -100,11 +100,7 @@ def create_action_item(step: ActionStep) -> TimelineItemDTO | None:
         return TimelineItemDTO(
             label=action_name,
             type=TimelineItemType.ACTION,
-            content={
-                **model_dump,
-                "errors": step.observation.properties.get("errors", []) if step.observation else [],
-                "warnings": step.observation.properties.get("warnings", []) if step.observation else [],
-            },
+            content={**model_dump},
         )
     return None
 

@@ -1,7 +1,7 @@
 import logging
-from typing import List, Optional
+from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.identify_mixin import IdentifyMixin
@@ -13,7 +13,6 @@ from moatless.actions.schema import (
 from moatless.codeblocks import CodeBlockType
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import ContextFile, FileContext
-from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -136,12 +135,12 @@ class ViewCode(Action, IdentifyMixin):
             if not file:
                 message = f"The requested file {file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
                 properties["fail_reason"] = "file_not_found"
-                return Observation(message=message, properties=properties, expect_correction=False)
+                return Observation.create(message=message, properties=properties)
 
             if self._repository.is_directory(file_path):
                 message = f"The requested file {file_path} is a directory and not a file. Use the search functions to search for the code if you are unsure of the file path."
                 properties["fail_reason"] = "is_directory"
-                return Observation(message=message, properties=properties, expect_correction=False)
+                return Observation.create(message=message, properties=properties)
 
         view_context = FileContext(repo=self._repository)
         completion = None
@@ -156,11 +155,7 @@ class ViewCode(Action, IdentifyMixin):
                     logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
                     message = self.create_retry_message(file, "No span ids found. Is it empty?")
                     properties["fail_reason"] = "invalid_file"
-                    return Observation(
-                        message=message,
-                        properties=properties,
-                        expect_correction=True,
-                    )
+                    return Observation.create(message=message, properties=properties)
 
                 for span_id in file_span.span_ids:
                     block_span = file.module.find_span_by_id(span_id)
@@ -226,7 +221,7 @@ class ViewCode(Action, IdentifyMixin):
         if not added_new_spans:
             properties["flags"] = ["no_spans_added"]
 
-        return Observation(
+        return Observation.create(
             message=message,
             summary=summary,
             properties=properties,

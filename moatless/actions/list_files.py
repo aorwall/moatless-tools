@@ -80,17 +80,16 @@ class ListFiles(Action):
             if not result["directories"] and not result["files"]:
                 message += "Directory is empty or does not exist."
 
-            return Observation(
+            return Observation.create(
                 message=message,
-                summary=message,  # f"Listed contents of directory '{args.directory or '(root)'}'",
+                summary=message,
                 properties=result,
-                expect_correction=False,
             )
 
         except Exception as e:
-            return Observation(
+            return Observation.create(
                 message=f"Error listing directory: {str(e)}",
-                expect_correction=True,
+                properties={"fail_reason": "error_listing_directory"},
             )
 
     @classmethod

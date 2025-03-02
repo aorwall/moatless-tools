@@ -34,7 +34,6 @@ class ObservationDTO(BaseModel):
     message: Optional[str] = None
     summary: Optional[str] = None
     properties: dict[str, Any] = {}
-    expectCorrection: bool = False
 
 
 class ActionDTO(BaseModel):

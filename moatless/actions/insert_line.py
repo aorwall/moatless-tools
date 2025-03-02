@@ -123,7 +123,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"Line {args.insert_line} is not in the visible portion of file {path}. Please provide a line number within the visible code, use ViewCode to see the code.",
                 properties={"fail_reason": "lines_not_in_context"},
-                expect_correction=True,
             )
 
         file_text = context_file.content.expandtabs()
@@ -135,7 +134,6 @@ class InsertLine(Action, CodeActionValueMixin, CodeModificationMixin):
             return Observation(
                 message=f"Invalid `insert_line` parameter: {args.insert_line}. It should be within the range of lines of the file: [0, {n_lines_file}]",
                 properties={"fail_reason": "invalid_line_number"},
-                expect_correction=True,
             )
 
         new_str_lines = new_str.split("\n")

@@ -96,6 +96,7 @@ class FlowManager:
                 max_cost=config.max_cost,
                 persist_dir=persist_dir,
                 metadata=metadata,
+                shadow_mode=False,
                 **kwargs,
             )
         elif config.flow_type == "tree":

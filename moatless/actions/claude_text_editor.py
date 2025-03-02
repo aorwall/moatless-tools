@@ -183,11 +183,7 @@ class ClaudeEditTool(Action, CodeModificationMixin):
 
         validation_error = self.validate_path(file_context, args.command, path)
         if validation_error:
-            return Observation(
-                message=validation_error,
-                properties={"fail_reason": "invalid_path"},
-                expect_correction=True,
-            )
+            return Observation(message=validation_error, properties={"fail_reason": "invalid_path"})
 
         if args.command == "view":
             return await self._view(file_context, path, args)
@@ -326,7 +322,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             return Observation(
                 message=f"Invalid `insert_line` parameter: {insert_line}. It should be within the range of lines of the file: {[0, n_lines_file]}",
                 properties={"fail_reason": "invalid_line_number"},
-                expect_correction=True,
             )
 
         new_str_lines = new_str.split("\n")

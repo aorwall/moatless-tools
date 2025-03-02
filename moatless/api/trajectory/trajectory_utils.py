@@ -60,21 +60,18 @@ def convert_moatless_node_to_api_node(
 
         # Convert observation
         observation = None
-        if step.observation:
-            if node and node.observation and node.observation.properties.get("fail_reason"):
-                errors.append(node.observation.properties["fail_reason"])
+        if step.observation and step.observation.properties:
+            if step.observation.properties.get("fail_reason"):
+                errors.append(step.observation.properties["fail_reason"])
 
             # Add flags as warnings if they exist
-            if node and node.observation and node.observation.properties.get("flags"):
-                warnings.extend(node.observation.properties["flags"])
+            if step.observation.properties.get("flags"):
+                warnings.extend(step.observation.properties["flags"])
 
             observation = ObservationDTO(
                 message=step.observation.message,
                 summary=step.observation.summary,
-                properties=step.observation.properties if hasattr(step.observation, "properties") else {},
-                expectCorrection=step.observation.expect_correction
-                if hasattr(step.observation, "expect_correction")
-                else False,
+                properties=step.observation.properties,
             )
 
         # Check for Finish action specific errors/warnings

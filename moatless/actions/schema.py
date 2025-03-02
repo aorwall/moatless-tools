@@ -123,10 +123,7 @@ class Observation(BaseModel):
         description="Summary of the observation, will be displayed in summarised message history.",
     )
     terminal: bool = Field(False, description="Indicates if this action results in a terminal state")
-    expect_correction: bool = Field(
-        False,
-        description="Indicates that a the action arguments was inccorect and we expect a correction",
-    )
+
     properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
     artifact_changes: Optional[list[ArtifactChange]] = Field(
@@ -134,8 +131,23 @@ class Observation(BaseModel):
     )
 
     @classmethod
-    def create(cls, message: str, terminal: bool = False):
-        return cls(message=message, terminal=terminal)
+    def create(
+        cls,
+        message: str,
+        summary: Optional[str] = None,
+        terminal: bool = False,
+        properties: Optional[dict[str, Any]] = None,
+        execution_completion: Optional[Completion] = None,
+        artifact_changes: Optional[list[ArtifactChange]] = None,
+    ):
+        return cls(
+            message=message,
+            terminal=terminal,
+            summary=summary,
+            properties=properties,
+            execution_completion=execution_completion,
+            artifact_changes=artifact_changes,
+        )
 
 
 class RewardScaleEntry(BaseModel):

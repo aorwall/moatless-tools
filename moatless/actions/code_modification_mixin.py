@@ -35,24 +35,6 @@ class CodeModificationMixin:
             file_path = file_path[1:]
         return file_path
 
-    def save(self, context_file: ContextFile):
-        if self.persist_files and isinstance(self.workspace.repository, GitRepository):
-            logger.info(f"Saving file {context_file.file_path}")
-            self.workspace.repository.save_file(context_file.file_path, context_file.content)
-            diff = self.workspace.repository.file_diff(context_file.file_path)
-            logger.info(f"Diff: {diff}")
-            if diff:
-                context_file.set_patch(diff)
-        else:
-            context_file.apply_changes(context_file.content)
-
-    def persist(self, file_context: FileContext):
-        """Persist the modified files"""
-        if not self.persist_files:
-            return
-
-        file_context.persist()
-
     def validate_file_access(
         self, file_path: str, file_context: FileContext
     ) -> tuple[Optional[Path], Optional[Observation]]:

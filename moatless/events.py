@@ -124,7 +124,7 @@ class EventBus:
 
             logger.info(f"Initializing Redis connection to {redis_url}")
 
-            self._redis = Redis(url=redis_url, decode_responses=True)
+            self._redis = Redis.from_url(url=redis_url, decode_responses=True)
             self._pubsub = self._redis.pubsub()
 
             logger.info(f"Successfully initialized Redis connection to {redis_url}")
@@ -210,7 +210,7 @@ class EventBus:
         if not event.project_id:
             event.project_id = context_data.current_project_id.get()
 
-        logger.info(
+        logger.debug(
             f"Publishing event [{event.scope}:{event.event_type}] for trajectory {event.trajectory_id} and project {event.project_id}"
         )
 
@@ -231,7 +231,14 @@ class EventBus:
             traj_dir = get_moatless_trajectory_dir(project_id=event.project_id, trajectory_id=event.trajectory_id)
             events_path = traj_dir / "events.jsonl"
 
-            async with self._lock:
+            if not os.path.exists(events_path):
+                logger.info(f"Creating events file {events_path}")
+                with open(events_path, "w") as f:
+                    f.write(json.dumps(event.to_dict()) + "\n")
+                    f.flush()
+            else:
+                logger.info(f"Appending event to {events_path}")
+
                 async with aiofiles.open(events_path, mode="a", encoding="utf-8") as f:
                     await f.write(json.dumps(event.to_dict()) + "\n")
                     await f.flush()

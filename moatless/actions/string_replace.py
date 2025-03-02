@@ -375,10 +375,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         message += "Please update old_str to match the exact line breaks and other special characters as shown above."
 
                     logger.info(f"Returning observation with message: {message}")
-                    return Observation(
+                    return Observation.create(
                         message=message,
                         properties={"flags": [match["diff_reason"]]},
-                        expect_correction=True,
                     )
                 elif len(potential_matches) > 1:
                     matches_info = "\n".join(
@@ -386,10 +385,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                         for m in potential_matches
                     )
                     logger.info(f"Multiple potential matches found with different formatting:\n{matches_info}")
-                    return Observation(
+                    return Observation.create(
                         message=f"Multiple potential matches found with different formatting:\n{matches_info}\nTry including more surrounding context to create a unique match.",
                         properties={"flags": ["multiple_potential_occurrences"]},
-                        expect_correction=True,
                     )
 
                 # If no matches found at all
@@ -397,25 +395,23 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
                     new_str_occurrences = file_content.count(new_str)
                     if new_str_occurrences > 0:
                         logger.info(f"Found {new_str_occurrences} occurrences of new_str in {path}")
-                        return Observation(
+                        return Observation.create(
                             message=f"New string '{new_str}' already exists in {path}. No changes were made.",
                             properties={"fail_reason": "string_already_exists"},
                         )
                 logger.info(f"string not found in {path}")
-                return Observation(
+                return Observation.create(
                     message=f"String '{old_str}' not found in {path}.\n\nRemember to write out the exact string you want to replace with the same indentation and no placeholders.",
                     properties={"fail_reason": "string_not_found"},
-                    expect_correction=True,
                 )
         elif len(exact_matches) > 1:
             matches_info = "\n".join(
                 f"- Lines {m['start_line']}-{m['end_line']}:\n```\n{m['content']}\n```" for m in exact_matches
             )
             logger.info(f"Multiple occurrences of string found: {matches_info}")
-            return Observation(
+            return Observation.create(
                 message=f"Multiple occurrences of string found:\n{matches_info}\nTry including more surrounding lines to create a unique match.",
                 properties={"flags": ["multiple_occurrences"]},
-                expect_correction=True,
             )
 
         start_line = exact_matches[0]["start_line"]
@@ -441,7 +437,7 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         else:
             new_file_content = file_content.replace(args.old_str, args.new_str)
 
-        self.save(context_file)
+        context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section
         snippet_start_line = max(0, start_line - SNIPPET_LINES - 1)

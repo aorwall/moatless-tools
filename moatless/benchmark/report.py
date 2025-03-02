@@ -104,7 +104,6 @@ class TrajectoryStats(BaseModel):
     edits: int = 0
     test_edits: int = 0
     failed_actions: int = 0
-    expect_corrections: int = 0
     max_repeated_actions: int = 0
     flags: list[str] = []
 
@@ -164,7 +163,6 @@ class BenchmarkResult(BaseModel):
     edits: int = 0
     test_edits: int = 0
     failed_actions: int = 0
-    expect_corrections: int = 0
     max_repeated_actions: int = 0
     flags: list[str] = []
 
@@ -240,9 +238,6 @@ def create_trajectory_stats(
                 result.actions[action_name] = 0
 
             result.actions[action_name] += 1
-
-            if node.observation and node.observation.expect_correction:
-                result.expect_corrections += 1
 
             if node.file_context and node.file_context.test_files:
                 passed, failed, errored = node.file_context.get_test_counts()
@@ -467,7 +462,6 @@ def to_result(
                 result.test_edits += 1
 
             result.failed_actions += traj.failed_actions
-            result.expect_corrections += traj.expect_corrections
 
             for flag in traj.flags:
                 if flag not in result.flags:

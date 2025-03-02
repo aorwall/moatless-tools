@@ -90,7 +90,6 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
                     "Please use StringReplace action to add content at the beginning of files."
                 ),
                 properties={"fail_reason": "wrong_action_for_imports"},
-                expect_correction=True,
             )
 
         # Normal append logic

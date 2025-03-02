@@ -21,6 +21,7 @@ from moatless.codeblocks.codeblocks import (
 )
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
+from moatless.repository.git import GitRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
 from moatless.schema import FileWithSpans
@@ -69,26 +70,22 @@ class ContextFile(BaseModel):
         description="List of context spans associated with this file.",
     )
     show_all_spans: bool = Field(False, description="Flag to indicate whether to display all context spans.")
+    shadow_mode: bool = Field(default=True)
+
     was_edited: bool = Field(default=False, exclude=True)
     was_viewed: bool = Field(default=False, exclude=True)
 
-    # Private attributes
-    _initial_patch: Optional[str] = PrivateAttr(None)
     _cached_base_content: Optional[str] = PrivateAttr(None)
     _cached_content: Optional[str] = PrivateAttr(None)
     _cached_module: Optional[Module] = PrivateAttr(None)
 
     _repo: Repository = PrivateAttr()
 
-    _cache_valid: bool = PrivateAttr(False)
-
     _is_new: bool = PrivateAttr(False)
 
     def __init__(
         self,
         repo: Optional[Repository],
-        file_path: str,
-        initial_patch: Optional[str] = None,
         **data,
     ):
         """
@@ -96,14 +93,10 @@ class ContextFile(BaseModel):
 
         Args:
             repo (Optional[Repository]): The repository instance, can be None when reconstructing from dict
-            file_path (str): The path to the file within the repository
-            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes
-            **data: Additional keyword arguments
         """
-        super().__init__(file_path=file_path, **data)
+        super().__init__(**data)
         self._repo = repo
-        self._initial_patch = initial_patch
-        self._is_new = False if repo is None else not repo.file_exists(file_path)
+        self._is_new = False if repo is None else not repo.file_exists(self.file_path)
 
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
@@ -136,13 +129,7 @@ class ContextFile(BaseModel):
         else:
             original_content = self._repo.get_file_content(self.file_path)
 
-        if self._initial_patch:
-            try:
-                self._cached_base_content = self.apply_patch_to_content(original_content, self._initial_patch)
-            except Exception as e:
-                raise Exception(f"Failed to apply initial patch: {e}")
-        else:
-            self._cached_base_content = original_content
+        self._cached_base_content = original_content
 
         return self._cached_base_content
 
@@ -172,7 +159,7 @@ class ContextFile(BaseModel):
             return self._cached_content
 
         base_content = self.get_base_content()
-        if self.patch:
+        if self.patch and self.shadow_mode:
             try:
                 self._cached_content = self.apply_patch_to_content(base_content, self.patch)
             except Exception as e:
@@ -195,19 +182,27 @@ class ContextFile(BaseModel):
         """
         self.was_edited = True
 
-        base_content = self.get_base_content()
-        new_patch = self.generate_patch(base_content, updated_content)
-        self.patch = new_patch
+        if not self.shadow_mode:
+            logger.info(f"Saving file {self.file_path} to disk")
+            self._repo.save_file(self.file_path, updated_content)
+            self._cached_content = None
+
+            if isinstance(self._repo, GitRepository):
+                self.patch = self._repo.file_diff(self.file_path)
+
+        else:
+            base_content = self.get_base_content()
+            self.patch = self.generate_patch(base_content, updated_content)
 
         new_span_ids = set()
 
         # If no patch was generated (content identical), return empty set
-        if not new_patch:
+        if not self.patch:
             return new_span_ids
 
         try:
             # Track modified lines from patch
-            patch_set = PatchSet(io.StringIO(new_patch))
+            patch_set = PatchSet(io.StringIO(self.patch))
             for patched_file in patch_set:
                 for hunk in patched_file:
                     # Get the line range for this hunk's changes
@@ -252,7 +247,6 @@ class ContextFile(BaseModel):
                         span_ids = self.add_line_span(line_num)
                         new_span_ids.update(span_ids)
 
-        # Invalidate cached content
         self._cached_content = None
         self._cached_module = None
 
@@ -671,16 +665,6 @@ class ContextFile(BaseModel):
 
         return header + "\n".join(content) + "\n"
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        # Ensure these fields are excluded even if exclude=True is not in kwargs
-        data.pop("was_edited", None)
-        data.pop("was_viewed", None)
-        # Ensure 'patch' is always included, even if it's None
-        if "patch" not in data:
-            data["patch"] = None
-        return data
-
     @property
     def span_ids(self):
         return {span.span_id for span in self.spans}
@@ -1080,6 +1064,8 @@ class TestFile(BaseModel):
 
 
 class FileContext(BaseModel):
+    shadow_mode: bool = Field(default=True)
+
     _repo: Repository | None = PrivateAttr(None)
     _runtime: RuntimeEnvironment | None = PrivateAttr(None)
 
@@ -1139,7 +1125,12 @@ class FileContext(BaseModel):
     ):
         if not repo and repo_dir:
             repo = FileRepository(repo_path=repo_dir)
-        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo, runtime=runtime)
+        instance = cls(
+            max_tokens=data.get("max_tokens", 8000),
+            repo=repo,
+            runtime=runtime,
+            shadow_mode=data.get("shadow_mode", True),
+        )
         instance.load_files_from_dict(data.get("files", []), test_files=data.get("test_files", []))
         return instance
 
@@ -1163,6 +1154,7 @@ class FileContext(BaseModel):
                 show_all_spans=show_all_spans,
                 patch=file_data.get("patch"),
                 repo=self._repo,
+                shadow_mode=self.shadow_mode,
             )
 
         # Load test files
@@ -1185,6 +1177,7 @@ class FileContext(BaseModel):
             "max_tokens": self.__dict__["_max_tokens"],
             "files": files,
             "test_files": test_files,
+            "shadow_mode": self.shadow_mode,
         }
 
     @property
@@ -1208,11 +1201,6 @@ class FileContext(BaseModel):
         self.repository = workspace.repository
         self._runtime = workspace.runtime
 
-    def snapshot(self):
-        dict = self.model_dump()
-        del dict["max_tokens"]
-        return dic
-
     def to_files_with_spans(self) -> list[FileWithSpans]:
         return [
             FileWithSpans(file_path=file_path, span_ids=list(file.span_ids)) for file_path, file in self._files.items()
@@ -1229,6 +1217,7 @@ class FileContext(BaseModel):
                 spans=[],
                 show_all_spans=show_all_spans,
                 repo=self._repo,
+                shadow_mode=self.shadow_mode,
             )
             if add_extra:
                 self._files[file_path]._add_import_span()
@@ -1430,7 +1419,7 @@ class FileContext(BaseModel):
 
     def clone(self):
         dump = self.model_dump(exclude={"files": {"__all__": {"was_edited", "was_viewed"}}})
-        cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
+        cloned_context = FileContext(repo=self._repo, runtime=self._runtime, shadow_mode=self.shadow_mode)
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
@@ -1508,6 +1497,7 @@ class FileContext(BaseModel):
                     diff_context._files[file_path] = ContextFile(
                         file_path=file_path,
                         repo=self._repo,
+                        shadow_mode=self.shadow_mode,
                     )
                     diff_context._files[file_path].spans.extend(
                         [span for span in current_file.spans if span.span_id in new_spans]
