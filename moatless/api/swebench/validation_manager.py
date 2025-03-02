@@ -110,7 +110,6 @@ class ValidationManager:
             agent.workspace = workspace
             agent.completion_model = completion_model
 
-
             # Create and run loop with progress callback
             loop = AgenticLoop.create(
                 f"<task>\n{instance['problem_statement']}\n</task>",

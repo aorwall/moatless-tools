@@ -44,7 +44,7 @@ class AgenticFlow(MoatlessComponent):
     persist_path: Optional[str] = Field(None, description="Path to persist the system state.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
-    
+
     _persist_dir: Optional[Path] = PrivateAttr(default=None)
     _root: Optional[Node] = PrivateAttr(default=None)
     _status: FlowStatusInfo = PrivateAttr(default_factory=FlowStatusInfo)
@@ -61,11 +61,11 @@ class AgenticFlow(MoatlessComponent):
     @classmethod
     def _get_base_class(cls) -> Type:
         return AgenticFlow
-    
+
     @property
     def root(self) -> Node:
         return self._root
-    
+
     @classmethod
     def create(
         cls,
@@ -105,11 +105,11 @@ class AgenticFlow(MoatlessComponent):
             if not workspace and repository:
                 workspace = Workspace(repository=repository, runtime=runtime, code_index=code_index)
             agent.workspace = workspace
-        
+
         if not file_context:
             file_context = FileContext(
-                repo=agent.workspace.repository if agent.workspace else None, 
-                runtime=agent.workspace.runtime if agent.workspace else None
+                repo=agent.workspace.repository if agent.workspace else None,
+                runtime=agent.workspace.runtime if agent.workspace else None,
             )
 
         if not root:
@@ -140,11 +140,11 @@ class AgenticFlow(MoatlessComponent):
         instance._root = root
         instance._persist_dir = persist_dir
         return instance
-    
+
     @property
     def workspace(self) -> Workspace:
         return self.agent.workspace
-    
+
     @workspace.setter
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
@@ -166,7 +166,7 @@ class AgenticFlow(MoatlessComponent):
                 self._initialize_run_state()
                 await event_bus.publish(FlowStartedEvent())
                 node, finish_reason = await self._run(message)
-                
+
                 # Complete attempt successfully
                 self._status.complete_current_attempt("completed")
                 self._status.status = FlowStatus.COMPLETED
@@ -197,20 +197,20 @@ class AgenticFlow(MoatlessComponent):
 
     def reset_node(self, node_id: int):
         """Reset a specific node.
-        
+
         Args:
             node_id (int): ID of the node to retry from
-            
+
         Returns:
             Node: The retried node with new execution results
-            
+
         Raises:
             ValueError: If node_id is not found
         """
         node = self.get_node_by_id(node_id)
         if not node:
             raise ValueError(f"Node with ID {node_id} not found")
-        
+
         if not node.parent:
             node.reset()
         else:
@@ -220,25 +220,25 @@ class AgenticFlow(MoatlessComponent):
         """Emit an event."""
         logger.info(f"Emit event {event.event_type}")
         await event_bus.publish(event)
-        
+
     async def _handle_agent_event(self, event: BaseEvent):
         """Handle agent events and propagate them to system event handlers"""
         await self.emit_event(event)
 
     def _initialize_run_state(self):
         """Initialize or restore system run state and logging"""
-        if not self._persist_dir:            
+        if not self._persist_dir:
             return
 
         if not self._persist_dir.exists():
             self._persist_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize or restore status
-        status_path = self._persist_dir / 'status.json'
+        status_path = self._persist_dir / "status.json"
         if status_path.exists():
             try:
                 existing_status = FlowStatusInfo.model_validate_json(status_path.read_text())
-                
+
                 # Resume previous run
                 self._status = existing_status
                 self._status.status = FlowStatus.RUNNING
@@ -246,7 +246,7 @@ class AgenticFlow(MoatlessComponent):
                 self._status.error = None
                 self._status.error_trace = None
                 self._status.last_restart = datetime.now(timezone.utc)
-                
+
                 # Mark any incomplete attempts as error
                 current_attempt = self._status.get_current_attempt()
                 if current_attempt and current_attempt.status == "running":
@@ -254,10 +254,10 @@ class AgenticFlow(MoatlessComponent):
                     current_attempt.error = "System interrupted"
                     current_attempt.finished_at = datetime.now(timezone.utc)
                     self._status.current_attempt = None
-            
+
             except Exception as e:
                 logger.error(f"Error loading existing status: {e}")
-        
+
         if not self._status:
             self._status = FlowStatusInfo()
 
@@ -269,16 +269,15 @@ class AgenticFlow(MoatlessComponent):
         attempt = self._status.start_new_attempt()
 
         # TODO: Log restart/resume event
-        #if self._status.restart_count > 0:
+        # if self._status.restart_count > 0:
         #    event_bus.publish(self.trajectory_id, BaseEvent(event_type="flow_restarted"))
 
         self._save_status()
 
-
     def _save_status(self):
         """Save current status to status.json"""
         if self._persist_dir:
-            status_path = self._persist_dir / 'status.json'
+            status_path = self._persist_dir / "status.json"
             self._status.metadata = self.metadata
             status_path.write_text(self._status.model_dump_json(indent=2))
 
@@ -314,7 +313,7 @@ class AgenticFlow(MoatlessComponent):
 
         flow_settings = self.model_dump(exclude_none=True)
         self._save_file(persist_dir / "settings.json", flow_settings)
-    
+
     def _save_file(self, file_path: Path, data: Dict[str, Any]):
         with open(file_path, "w") as f:
             try:
@@ -361,11 +360,11 @@ class AgenticFlow(MoatlessComponent):
         settings_path = trajectory_dir / "settings.json"
         if not settings_path.exists():
             raise FileNotFoundError(f"Settings file not found in {trajectory_dir}")
-        
+
         trajectory_path = trajectory_dir / "trajectory.json"
         if not trajectory_path.exists():
             raise FileNotFoundError(f"Trajectory file not found in {trajectory_dir}")
-        
+
         status_path = trajectory_dir / "status.json"
         if status_path.exists():
             with open(status_path, "r") as f:
@@ -375,9 +374,13 @@ class AgenticFlow(MoatlessComponent):
 
         with open(settings_path, "r") as f:
             settings = json.load(f)
-        
+
         flow = cls.model_validate(settings)
-        flow._root = Node.from_file(trajectory_path, repo=workspace.repository if workspace else None, runtime=workspace.runtime if workspace else None)
+        flow._root = Node.from_file(
+            trajectory_path,
+            repo=workspace.repository if workspace else None,
+            runtime=workspace.runtime if workspace else None,
+        )
 
         if workspace:
             flow.workspace = workspace
@@ -389,16 +392,16 @@ class AgenticFlow(MoatlessComponent):
     def is_finished(self) -> str | None:
         raise NotImplementedError("Subclass must implement is_finished method")
 
-
     @classmethod
-    def from_trajectory_id(cls, trajectory_id: str, project_id: str | None = None, workspace: Workspace | None = None) -> "AgenticFlow":
+    def from_trajectory_id(
+        cls, trajectory_id: str, project_id: str | None = None, workspace: Workspace | None = None
+    ) -> "AgenticFlow":
         trajectory_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
         if not workspace:
             workspace = Workspace(trajectory_dir=trajectory_dir)
 
         return cls.from_dir(trajectory_dir, workspace)
-        
-    
+
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """Generate a dictionary representation of the system."""
         data = super().model_dump(exclude={"agent", "root", "persist_dir", "persist_path"})

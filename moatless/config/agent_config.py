@@ -32,7 +32,7 @@ class AgentConfigManager:
     def _load_configs(self):
         """Load configurations from JSON file."""
         config_path = self._get_config_path()
-        
+
         # Copy global config to local path if it doesn't exist
         if not config_path.exists():
             try:
@@ -42,7 +42,7 @@ class AgentConfigManager:
                     config_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        with open(config_path, 'w') as local_f:
+                        with open(config_path, "w") as local_f:
                             json.dump(global_config, local_f, indent=2)
                     logger.info("Copied global config to local path")
                 else:

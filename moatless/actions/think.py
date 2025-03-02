@@ -8,6 +8,7 @@ from moatless.actions.schema import ActionArguments, Observation
 
 # https://github.com/sierra-research/tau-bench/blob/14bf0ef52e595922d597a38f32d3e8c0dce3a8f8/tau_bench/envs/retail/tools/think.py
 
+
 class ThinkArgs(ActionArguments):
     """Use the tool to think about something. It will not obtain new information or change the database,
     but just append the thought to the log. Use it when complex reasoning is needed.
@@ -28,8 +29,9 @@ class ThinkArgs(ActionArguments):
     def get_few_shot_examples(cls) -> List[FewShotExample]:
         return []
 
+
 class Think(Action):
     args_schema = ThinkArgs
-    
+
     async def execute(self, args: ThinkArgs, file_context: FileContext):
         return Observation(message="The thought was logged")

@@ -9,6 +9,7 @@ import os
 
 logger = logging.getLogger(__name__)
 
+
 class LocalBashEnvironment(BaseEnvironment):
     """
     A concrete implementation of BaseEnvironment that executes commands
@@ -18,7 +19,7 @@ class LocalBashEnvironment(BaseEnvironment):
     def __init__(self, cwd: str | None = None, env: Dict[str, str] | None = None, shell: bool = True):
         """
         Initialize the LocalBashEnvironment.
-        
+
         Args:
             cwd: Current working directory for the command
             env: Environment variables for the command
@@ -27,45 +28,45 @@ class LocalBashEnvironment(BaseEnvironment):
         self.cwd = cwd
         self.env = env
         self.shell = shell
-    
+
     async def execute(self, command: str) -> str:
         """
         Execute a command on the local machine.
-        
+
         Args:
             command: The command to execute
-            
+
         Returns:
             The standard output of the command as a string
-            
+
         Raises:
             EnvironmentExecutionError: If the command execution fails
         """
         try:
             logger.info(f"$ {command}")
-            
+
             # Prepare environment variables
             process_env = os.environ.copy()
             if self.env:
                 process_env.update(self.env)
-            
+
             if self.shell:
                 process = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=self.cwd,
-                    env=process_env
-                )   
+                    env=process_env,
+                )
             else:
                 process = await asyncio.create_subprocess_exec(
                     *command.split(),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=self.cwd,
-                    env=process_env
+                    env=process_env,
                 )
-                
+
             stdout, stderr = await process.communicate()
             output = stdout.decode()
             error = stderr.decode()
@@ -80,9 +81,9 @@ class LocalBashEnvironment(BaseEnvironment):
                 for line in error.splitlines():
                     logger.warning(f"  {line}")
             logger.info(f"Command return code: {return_code}")
-                
+
             return output
-            
+
         except asyncio.CancelledError:
             # Handle cancellation
             raise
@@ -96,17 +97,15 @@ class LocalBashEnvironment(BaseEnvironment):
                 cwd=self.cwd,
                 env=self.env,
                 shell=self.shell,
-                universal_newlines=True
+                universal_newlines=True,
             )
-            
+
             stdout, stderr = process.communicate()
             return_code = process.returncode
-            
+
             if return_code != 0:
                 raise EnvironmentExecutionError(
-                    f"Command failed with return code {return_code}: {command}",
-                    return_code,
-                    stderr
+                    f"Command failed with return code {return_code}: {command}", return_code, stderr
                 )
-            
+
             return stdout

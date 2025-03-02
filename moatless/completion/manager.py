@@ -18,8 +18,8 @@ from moatless.exceptions import CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
-class ModelConfig(BaseModel):
 
+class ModelConfig(BaseModel):
     id: str = Field(..., description="Unique identifier for the model")
     model: str = Field(..., description="Model identifier used in LiteLLM")
     model_base_url: Optional[str] = Field(None, description="Base URL for the model API")
@@ -44,16 +44,17 @@ class ModelConfig(BaseModel):
         if "message_history_type" in data:
             data["message_history_type"] = MessageHistoryType(data["message_history_type"])
         return super().model_validate(data)
-    
+
     def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
         data["response_format"] = data["response_format"].value
         data["message_history_type"] = data["message_history_type"].value
         return data
 
+
 class ModelTestResult(BaseModel):
     """Result of a model configuration test"""
-    
+
     success: bool = Field(..., description="Whether the model test passed")
     message: str = Field(..., description="Human-readable test result message")
     model_id: str = Field(..., description="ID of the tested model")
@@ -63,9 +64,10 @@ class ModelTestResult(BaseModel):
     response_time_ms: Optional[float] = Field(None, description="Response time in milliseconds")
     test_timestamp: str = Field(..., description="ISO timestamp when test was performed")
 
+
 class TestResponseSchema(ResponseSchema):
     """A simple schema for testing model configurations."""
-    
+
     message: str = Field(..., description="A test message from the model")
     success: bool = Field(..., description="Whether the model understood the request")
 
@@ -74,12 +76,10 @@ class TestResponseSchema(ResponseSchema):
         return [
             FewShotExample.create(
                 user_input="This is a test message. Please respond in the correct format to verify you understand the schema.",
-                action=TestResponseSchema(
-                    message="I understand the format and can respond correctly",
-                    success=True
-                )
+                action=TestResponseSchema(message="I understand the format and can respond correctly", success=True),
             )
         ]
+
 
 class ModelConfigManager:
     """Manages model configurations and their runtime overrides."""
@@ -111,7 +111,7 @@ class ModelConfigManager:
         # Convert string response formats to enum
         base_config = config_data["base_config"]
         models_config = config_data["models"]
-        
+
         configs = {}
         for model_id, model_config in models_config.items():
             if "response_format" in model_config:
@@ -132,7 +132,7 @@ class ModelConfigManager:
         try:
             with open(path) as f:
                 models_configs = json.load(f)
-            
+
             configs = {}
             for model_config in models_configs:
                 configs[model_config["id"]] = ModelConfig(**model_config)
@@ -194,8 +194,6 @@ class ModelConfigManager:
             List of all base model configurations.
         """
 
-        
-
         return list(self._base_configs.values())
 
     def get_all_configs(self) -> List[ModelConfig]:
@@ -206,7 +204,9 @@ class ModelConfigManager:
         """
         return list(self._user_configs.values())
 
-    def add_model_from_base(self, base_model_id: str, new_model_id: str, updates: Optional[Dict[str, Any]] = None) -> ModelConfig:
+    def add_model_from_base(
+        self, base_model_id: str, new_model_id: str, updates: Optional[Dict[str, Any]] = None
+    ) -> ModelConfig:
         """Add a new model configuration based on a base model.
 
         Args:
@@ -227,7 +227,7 @@ class ModelConfigManager:
 
         config = self._base_configs[base_model_id].model_copy()
         config.id = new_model_id
-        #if updates:
+        # if updates:
         #    config = config.model_copy(update=updates)
 
         self._user_configs[new_model_id] = config
@@ -288,7 +288,7 @@ class ModelConfigManager:
             raise ValueError(f"Model {model_id} not found")
 
         # Convert string enums to proper enum types
-        
+
         logger.debug(f"Creating completion model for {model_id} with config: {config}")
 
         return BaseCompletionModel.create(**config.model_dump(), model_id=model_id)
@@ -315,37 +315,38 @@ class ModelConfigManager:
             "error_type": None,
             "error_details": None,
             "response_time_ms": None,
-            "test_timestamp": datetime.utcnow().isoformat()
+            "test_timestamp": datetime.utcnow().isoformat(),
         }
-        
+
         try:
             import litellm
-            litellm.set_verbose=True
+
+            litellm.set_verbose = True
             log_dir = Path.cwd() / "logs"
-            if not log_dir.exists():        
+            if not log_dir.exists():
                 log_dir.mkdir(parents=True, exist_ok=True)
-            
+
             litellm.callbacks = [LogHandler(log_dir=log_dir)]
             model = self.create_completion_model(model_id)
-            
+
             model.initialize(
                 response_schema=TestResponseSchema,
-                system_prompt="You are a helpful AI assistant. Please respond to this test message to verify you can understand and follow the required response format."
+                system_prompt="You are a helpful AI assistant. Please respond to this test message to verify you can understand and follow the required response format.",
             )
-            
+
             messages = [
                 {
                     "role": "user",
-                    "content": "This is a test message. Please respond in the correct format to verify you understand the schema."
+                    "content": "This is a test message. Please respond in the correct format to verify you understand the schema.",
                 }
             ]
-            
+
             response = await model.create_completion(messages=messages)
-            
+
             if response and isinstance(response.structured_output, TestResponseSchema):
                 test_response = response.structured_output
                 result["model_response"] = test_response.message
-                
+
                 if test_response.success:
                     result["success"] = True
                     result["message"] = f"Model setup test passed."
@@ -355,22 +356,26 @@ class ModelConfigManager:
                 result["message"] = str(response)
                 result["error_type"] = "ValidationError"
                 result["error_details"] = "Response did not match expected schema"
-            
+
         except CompletionRuntimeError as e:
-            result.update({
-                "message": f"Runtime error during test: {str(e)}",
-                "error_type": "CompletionRuntimeError",
-                "error_details": str(e)
-            })
+            result.update(
+                {
+                    "message": f"Runtime error during test: {str(e)}",
+                    "error_type": "CompletionRuntimeError",
+                    "error_details": str(e),
+                }
+            )
         except Exception as e:
-            result.update({
-                "message": f"Unexpected error during test: {str(e)}",
-                "error_type": type(e).__name__,
-                "error_details": str(e)
-            })
+            result.update(
+                {
+                    "message": f"Unexpected error during test: {str(e)}",
+                    "error_type": type(e).__name__,
+                    "error_details": str(e),
+                }
+            )
         finally:
             result["response_time_ms"] = (time.time() - start_time) * 1000
-            
+
         return result
 
     def create_model(self, model_config: ModelConfig) -> ModelConfig:
@@ -391,6 +396,7 @@ class ModelConfigManager:
         self._save_user_configs()
         return model_config
 
+
 # Create singleton instance
 _manager = ModelConfigManager()
 
@@ -403,6 +409,7 @@ add_model_from_base = _manager.add_model_from_base
 update_model_config = _manager.update_model_config
 delete_model_config = _manager.delete_model_config
 create_completion_model = _manager.create_completion_model
+
 
 def create_model(model_config: ModelConfig) -> ModelConfig:
     """Create a new model configuration from scratch.

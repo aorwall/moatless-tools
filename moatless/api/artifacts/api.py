@@ -13,14 +13,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-
-
-
-
 @router.get("/{type}/connect")
-async def connect_artifact(
-    type: str
-):
+async def connect_artifact(type: str):
     from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
 
     fortnox_auth = FortnoxAuth()
@@ -30,12 +24,9 @@ async def connect_artifact(
     logger.info(f"Create Fortnox connection for handler {type} with authorization URL: {authorization_url}")
     return {"authorization_url": authorization_url}
 
+
 @router.get("/{type}/callback")
-async def fortnox_callback(
-    code: str,
-    state: str,
-    type: str
-):
+async def fortnox_callback(code: str, state: str, type: str):
     from bookkeeper.fortnox.fortnox_auth import FortnoxAuth
 
     fortnox_auth = FortnoxAuth()
@@ -55,17 +46,20 @@ async def list_artifacts(trajectory_id: str):
     workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
     return workspace.get_all_artifacts()
 
+
 @router.get("/{trajectory_id}/{type}", response_model=List[ArtifactListItem])
 async def list_artifacts(trajectory_id: str, type: str):
     workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
     return workspace.get_artifacts_by_type(type)
-    
+
+
 @router.get("/{trajectory_id}/{type}/{id}", response_model=ArtifactResponse)
 async def get_artifact(trajectory_id: str, type: str, id: str):
     logger.info(f"Getting artifact {id} of type {type} for trajectory {trajectory_id}")
     workspace = Workspace(trajectory_dir=get_moatless_trajectory_dir(trajectory_id))
     artifact = workspace.get_artifact(artifact_type=type, artifact_id=id)
     return artifact.to_ui_representation()
+
 
 @router.post("/{trajectory_id}/{type}/{id}/persist", response_model=ArtifactResponse)
 async def persist_artifact(trajectory_id: str, type: str, id: str):
@@ -79,11 +73,5 @@ async def persist_artifact(trajectory_id: str, type: str, id: str):
         logger.exception(f"Failed to persist artifact {id} of type {type}")
         # Return more specific error details
         raise HTTPException(
-            status_code=500,
-            detail={
-                "message": str(e),
-                "type": type,
-                "id": id,
-                "error_type": e.__class__.__name__
-            }
+            status_code=500, detail={"message": str(e), "type": type, "id": id, "error_type": e.__class__.__name__}
         )

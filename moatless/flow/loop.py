@@ -19,7 +19,7 @@ class AgenticLoop(AgenticFlow):
         """Run the agentic loop until completion or max iterations."""
 
         current_node = self.root.get_all_nodes()[-1]
-        if message: # Assume to continue with a new node if a message is provided
+        if message:  # Assume to continue with a new node if a message is provided
             current_node = self._create_next_node(current_node)
             current_node.user_message = message
 
@@ -36,7 +36,9 @@ class AgenticLoop(AgenticFlow):
             try:
                 if current_node.is_expandable() and current_node.is_executed():
                     child_node = self._create_next_node(current_node)
-                    await self.emit_event(NodeExpandedEvent(node_id=current_node.node_id, child_node_id=child_node.node_id))
+                    await self.emit_event(
+                        NodeExpandedEvent(node_id=current_node.node_id, child_node_id=child_node.node_id)
+                    )
                     current_node = child_node
 
                 if current_node.is_executed():
@@ -54,13 +56,15 @@ class AgenticLoop(AgenticFlow):
             finally:
                 self.maybe_persist()
 
-        logger.info(f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost")
+        logger.info(
+            f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost"
+        )
 
         return self.get_last_node(), finish_reason
-    
+
     def _create_next_node(self, parent: Node) -> Node:
         """Create a new node as a child of the parent node."""
-        child_node = Node( # type: ignore
+        child_node = Node(  # type: ignore
             node_id=self._generate_unique_id(),
             parent=parent,
             file_context=parent.file_context.clone() if parent.file_context else None,

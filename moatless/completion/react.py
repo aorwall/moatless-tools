@@ -61,15 +61,17 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         return system_prompt
 
     def _get_completion_params(self, schema: ResponseSchema) -> Dict[str, str | Dict | List]:
-        #params = super()._get_completion_params(schema)
-        #params["stop"] = ["Observation:"]
-        #return params
+        # params = super()._get_completion_params(schema)
+        # params["stop"] = ["Observation:"]
+        # return params
         return {}
+
     def _supports_react_format(self) -> bool:
         if not isinstance(self._response_schema, list):
             return False
         for schema in self._response_schema:
             from moatless.actions.schema import ActionArguments
+
             if not issubclass(schema, ActionArguments):
                 return False
         return True
@@ -103,7 +105,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         # Fall back to JSON completion model if the action is not an ActionArguments
         if not self._supports_react_format():
             return await super()._validate_completion(completion_response)
-        
+
         try:
             response_text = completion_response.choices[0].message.content
 
@@ -171,7 +173,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         if not self.disable_thoughts:
             # Find the starting lines for each section
-            thought_line = next((i for i, line in enumerate(lines) if line.lower().startswith(("thought:", "thoughts:"))), -1)
+            thought_line = next(
+                (i for i, line in enumerate(lines) if line.lower().startswith(("thought:", "thoughts:"))), -1
+            )
             action_line = next((i for i, line in enumerate(lines) if line.lower().startswith("action:")), -1)
 
             # Check if sections are in correct order
@@ -197,9 +201,8 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             # Find the first occurrence of either "thought:" or "thoughts:" case-insensitive
             response_lower = response_text.lower()
             thought_start = min(
-                (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:"))
-                if pos != -1),
-                default=-1
+                (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:")) if pos != -1),
+                default=-1,
             )
             action_start = response_lower.find("action:")
 
@@ -209,12 +212,12 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             # Find the actual length of the thought prefix to skip
             thought_prefix_end = response_text.find(":", thought_start) + 1
             thought = response_text[thought_prefix_end:action_start].strip()
-            action_input = response_text[action_start + 7:].strip()
+            action_input = response_text[action_start + 7 :].strip()
         else:
             action_start = response_text.lower().find("action:")
             if action_start == -1:
                 raise ValueError("Missing Action section")
-            action_input = response_text[action_start + 7:].strip()
+            action_input = response_text[action_start + 7 :].strip()
 
         return thought, action_input
 
@@ -265,7 +268,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         base_prompt = super()._generate_few_shot_examples()
         if not base_prompt:
             return ""
-            
+
         few_shot_examples = []
         for schema in self._response_schema:
             if hasattr(schema, "get_few_shot_examples"):
@@ -275,12 +278,12 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                         prompt = f"\n**Example {i + 1}**"
                         action_data = example.action.model_dump()
                         thoughts = action_data.pop("thoughts", "")
-                        
+
                         prompt += f"\nTask: {example.user_input}\n"
                         if not self.disable_thoughts:
                             prompt += f"\nThoughts: {thoughts}\n"
                         prompt += f"Action: {example.action.name}\n"
-                        
+
                         # Handle special action types
                         # TODO: Move to the action implementations
                         if example.action.__class__.__name__ in [
@@ -304,7 +307,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                                 prompt += f"<code_snippet>{action_data['code_snippet']}</code_snippet>\n"
                         else:
                             prompt += f"{json.dumps(action_data)}\n"
-                            
+
                         few_shot_examples.append(prompt)
-                        
+
         return base_prompt + "\n".join(few_shot_examples)

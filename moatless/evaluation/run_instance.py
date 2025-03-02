@@ -19,12 +19,7 @@ from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.benchmark.report import BenchmarkResult, to_result
 from moatless.benchmark.swebench.utils import create_repository, create_repository_async, create_index_async
 from moatless.evaluation.utils import get_moatless_instance
-from moatless.evaluation.schema import (
-    Evaluation,
-    EvaluationStatus,
-    InstanceStatus,
-    EvaluationEvent
-)
+from moatless.evaluation.schema import Evaluation, EvaluationStatus, InstanceStatus, EvaluationEvent
 from moatless.events import event_bus
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import create_flow
@@ -34,10 +29,7 @@ from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
 from moatless.workspace import Workspace
-from moatless.telemetry import (
-    run_async,
-    setup_telemetry
-)
+from moatless.telemetry import run_async, setup_telemetry
 from dotenv import load_dotenv
 from opentelemetry import trace
 from rq.job import Dependency
@@ -48,6 +40,7 @@ tracer = trace.get_tracer("moatless.evaluation.runner")
 load_dotenv()
 setup_telemetry()
 
+
 def run_instance(project_id: str, trajectory_id: str) -> None:
     """Run an instance's agentic flow."""
     print(f"Running instance {trajectory_id} for project {project_id}")
@@ -55,9 +48,9 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
     trajectory_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
     print(f"Setting up job logging for run in {trajectory_dir}")
     original_handlers = setup_job_logging("run", trajectory_dir)
-    
+
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
-    
+
     try:
         swebench_instance = get_moatless_instance(instance_id=trajectory_id)
         repository = create_repository(swebench_instance, repo_base_dir="/tmp/moatless_repos")
@@ -71,20 +64,17 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
             log_dir=testbed_log_dir,
             enable_cache=True,
         )
-                    
-        flow = run_async(_run_instance(
-            evaluation_name=project_id, 
-            instance_id=trajectory_id,
-            repository=repository, 
-            runtime=runtime, 
-            swebench_instance=swebench_instance
-        ))
-        evaluate_instance(
-            evaluation_name=project_id, 
-            instance_id=trajectory_id, 
-            root_node=flow.root, 
-            runtime=runtime
+
+        flow = run_async(
+            _run_instance(
+                evaluation_name=project_id,
+                instance_id=trajectory_id,
+                repository=repository,
+                runtime=runtime,
+                swebench_instance=swebench_instance,
+            )
         )
+        evaluate_instance(evaluation_name=project_id, instance_id=trajectory_id, root_node=flow.root, runtime=runtime)
     except Exception as e:
         logger.exception(f"Error running instance {trajectory_id}")
         _emit_event(
@@ -92,32 +82,27 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
             instance_id=trajectory_id,
             scope="evaluation",
             event_type="error",
-            data={
-                "error": str(e)
-            }
+            data={"error": str(e)},
         )
         raise e
     finally:
         cleanup_job_logging(original_handlers)
 
-async def _run_instance(evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict) -> None:
+
+async def _run_instance(
+    evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict
+) -> None:
     current_project_id.set(evaluation_name)
     current_trajectory_id.set(instance_id)
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
-    with tracer.start_as_current_span(f"run_instance_{instance_id}") as span:    
-        
+    with tracer.start_as_current_span(f"run_instance_{instance_id}") as span:
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
         print(f"Setting up job logging for run in {trajectory_dir}")
         litellm.callbacks = [LogHandler(trajectory_dir=trajectory_dir)]
 
         code_index = await create_index_async(swebench_instance, repository=repository)
 
-        workspace = Workspace(
-            repository=repository,
-            code_index=code_index,
-            runtime=runtime,
-            legacy_workspace=True
-        )
+        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir, workspace=workspace)
 
@@ -132,6 +117,7 @@ async def _run_instance(evaluation_name: str, instance_id: str, repository: Repo
         logger.info(f"Flow completed for instance {instance_id}")
 
         return flow
+
 
 def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, runtime: TestbedEnvironment) -> None:
     """Evaluate an instance's results."""
@@ -162,19 +148,12 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
                 "status": "started",
                 "start_time": datetime.now(timezone.utc).isoformat(),
             }
-        unevaluated_nodes = [
-            node for node in leaf_nodes if str(node.node_id) not in eval_result["node_results"]
-        ]
+        unevaluated_nodes = [node for node in leaf_nodes if str(node.node_id) not in eval_result["node_results"]]
         if not unevaluated_nodes:
             logger.info(f"All leaf nodes evaluated for instance {instance_id}")
             return eval_result
 
-        _emit_event(
-            evaluation_name,
-            instance_id,
-            "evaluation",
-            "started"
-        )
+        _emit_event(evaluation_name, instance_id, "evaluation", "started")
 
         for i, leaf_node in enumerate(unevaluated_nodes):
             logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(unevaluated_nodes)})")
@@ -196,23 +175,14 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
                 with open(eval_result_path, "w") as f:
                     json.dump(eval_result, f, indent=2)
 
-        _emit_event(
-            evaluation_name,
-            instance_id,
-            "evaluation",
-            "completed"
-        )
+        _emit_event(evaluation_name, instance_id, "evaluation", "completed")
+
 
 def _emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):
     """Emit evaluation event."""
     event = EvaluationEvent(
-        project_id=evaluation_name,
-        trajectory_id=instance_id,
-        scope=scope,
-        event_type=event_type,
-        data=data
+        project_id=evaluation_name, trajectory_id=instance_id, scope=scope, event_type=event_type, data=data
     )
-
 
     try:
         run_async(event_bus.publish(event))

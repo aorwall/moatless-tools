@@ -26,7 +26,7 @@ def get_repo_async_lock_path(repo_url: str) -> str:
     url_hash = hashlib.sha256(repo_url.encode()).hexdigest()[:16]
     lock_dir = Path("/tmp/repo_locks")
     lock_dir.mkdir(parents=True, exist_ok=True)
-    
+
     pid = os.getpid()
     return str(lock_dir / f"repo_{url_hash}_async_{pid}.lock")
 
@@ -49,7 +49,7 @@ async def repo_operation_async_lock(repo_url: str):
     """Async context manager for thread-safe git operations."""
     lock_path = get_repo_async_lock_path(repo_url)
     lock = filelock.FileLock(lock_path, timeout=300)  # Increase timeout to 5 minutes
-    
+
     try:
         # Add exponential backoff retry logic
         max_attempts = 3
@@ -61,7 +61,7 @@ async def repo_operation_async_lock(repo_url: str):
                 if attempt == max_attempts - 1:
                     logger.error(f"Failed to acquire lock for {repo_url} after {max_attempts} attempts")
                     raise
-                wait_time = (2 ** attempt) + (random.random())
+                wait_time = (2**attempt) + (random.random())
                 logger.warning(f"Lock acquisition failed, retrying in {wait_time:.1f}s (attempt {attempt + 1})")
                 await asyncio.sleep(wait_time)
         yield
@@ -149,10 +149,7 @@ def clone_and_checkout(repo_url, repo_dir, commit):
         try:
             logger.info(f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}")
             subprocess.run(
-                [
-                    "git", "clone", "--depth", "1", "--no-single-branch",
-                    repo_url, repo_dir
-                ],
+                ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir],
                 check=True,
                 text=True,
                 capture_output=True,
@@ -213,15 +210,13 @@ async def async_clone_and_checkout(repo_url, repo_dir, commit):
             logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
             if os.path.exists(repo_dir):
                 import shutil
+
                 shutil.rmtree(repo_dir)
 
     try:
         if repo_url.startswith("file://"):
             logger.info(f"Starting shallow clone from local repo {repo_url} to {repo_dir}")
-            await run_git_command([
-                "git", "clone", "--depth", "1", "--no-single-branch",
-                repo_url, repo_dir
-            ])
+            await run_git_command(["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir])
             await run_git_command(["git", "fetch", "origin", commit], repo_dir)
         else:
             logger.info(f"Starting full clone of {repo_url} to {repo_dir}")
@@ -237,6 +232,7 @@ async def async_clone_and_checkout(repo_url, repo_dir, commit):
         logger.error(f"Git operation failed: {e}")
         if os.path.exists(repo_dir):
             import shutil
+
             shutil.rmtree(repo_dir)
         raise
 
@@ -265,26 +261,18 @@ async def run_git_command(command, cwd=None):
     """Run a git command asynchronously with timeout."""
     try:
         process = await asyncio.create_subprocess_exec(
-            *command,
-            cwd=cwd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            *command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        
+
         # Add timeout to prevent hanging
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=300)
         except asyncio.TimeoutError:
             process.kill()
             raise TimeoutError(f"Git command timed out after 300s: {' '.join(command)}")
-            
+
         if process.returncode != 0:
-            raise subprocess.CalledProcessError(
-                process.returncode,
-                command,
-                stdout.decode(),
-                stderr.decode()
-            )
+            raise subprocess.CalledProcessError(process.returncode, command, stdout.decode(), stderr.decode())
         return stdout.decode()
     except Exception as e:
         logger.error(f"Git command failed: {command} - {str(e)}")
@@ -300,13 +288,14 @@ async def maybe_clone_async(repo_url, repo_dir):
                 if repo_url.startswith("file://") and not os.path.exists(repo_url[7:]):
                     repo_url = f"https://github.com/{repo_url.split('/')[-1]}.git"
                     logger.info(f"Converting to GitHub URL: {repo_url}")
-                
+
                 await run_git_command(["git", "clone", repo_url, repo_dir])
                 logger.info(f"Repo '{repo_url}' was cloned to '{repo_dir}'")
             except Exception as e:
                 logger.error(f"Clone failed: {e}")
                 if os.path.exists(repo_dir):
                     import shutil
+
                     shutil.rmtree(repo_dir)
                 raise ValueError(f"Failed to clone repo '{repo_url}' to '{repo_dir}'")
 

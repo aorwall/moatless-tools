@@ -23,6 +23,7 @@ from moatless.completion.schema import FewShotExample
 
 logger = logging.getLogger(__name__)
 
+
 class CompletionModelMixin:
     """Mixin to provide completion model functionality to actions that need it"""
 
@@ -47,18 +48,19 @@ class CompletionModelMixin:
 
 class Action(MoatlessComponent, ABC):
     """Base class for all actions."""
+
     args_schema: ClassVar[Type[ActionArguments]]
     model_config = ConfigDict(arbitrary_types_allowed=True)
     _workspace: Workspace = PrivateAttr(default=None)
-    
+
     @classmethod
     def get_component_type(cls) -> str:
         return "action"
-        
+
     @classmethod
     def _get_package(cls) -> str:
         return "moatless.actions"
-        
+
     @classmethod
     def _get_base_class(cls) -> Type:
         return Action
@@ -81,7 +83,6 @@ class Action(MoatlessComponent, ABC):
         if not self._workspace:
             raise ValueError("Workspace is not set")
         return self._workspace
-    
 
     async def initialize(self, workspace: Workspace):
         self._workspace = workspace
@@ -200,7 +201,7 @@ class Action(MoatlessComponent, ABC):
         """
         cls._initialize_components()
         return cls._get_components().get(action_name)
-    
+
     @classmethod
     def create_by_name(cls, name: str, **kwargs) -> "Action":
         cls._initialize_components()
@@ -220,23 +221,20 @@ class Action(MoatlessComponent, ABC):
         """Generate an ActionSchema for this action."""
         schema = cls.model_json_schema()
         properties = {}
-        for prop_name, prop_data in schema.get('properties', {}).items():
+        for prop_name, prop_data in schema.get("properties", {}).items():
             properties[prop_name] = ActionProperty(
-                type=prop_data.get('type', 'string'),
-                title=prop_data.get('title', prop_name),
-                description=prop_data.get('description', ''),
-                default=prop_data.get('default')
+                type=prop_data.get("type", "string"),
+                title=prop_data.get("title", prop_name),
+                description=prop_data.get("description", ""),
+                default=prop_data.get("default"),
             )
 
-        description = schema.get('description', '')
+        description = schema.get("description", "")
         if not description:
-            description = cls.args_schema.model_json_schema().get('description', '')
+            description = cls.args_schema.model_json_schema().get("description", "")
 
         return ActionSchema(
-            title=cls.__name__,
-            description=description,
-            properties=properties,
-            action_class=cls.get_class_name()
+            title=cls.__name__, description=description, properties=properties, action_class=cls.get_class_name()
         )
 
     @classmethod
@@ -244,12 +242,8 @@ class Action(MoatlessComponent, ABC):
         """Get all available actions with their schema."""
         cls._initialize_components()
 
-        return [
-            action_class.get_action_schema() 
-            for action_class in cls._get_components().values()
-        ]
+        return [action_class.get_action_schema() for action_class in cls._get_components().values()]
 
     @classmethod
     def get_class_name(cls) -> str:
         return f"{cls.__module__}.{cls.__name__}"
-    

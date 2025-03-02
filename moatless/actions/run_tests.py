@@ -75,7 +75,9 @@ class RunTests(Action):
                 logger.warning(f"File {test_file} does not exist in repository")
                 non_existent_files.append(test_file)
             elif self._repository.is_directory(test_file):
-                logger.warning(f"Directory {test_file} provided instead of file, please use ListFiles to get the list of files in the directory and specify which files to run tests on")
+                logger.warning(
+                    f"Directory {test_file} provided instead of file, please use ListFiles to get the list of files in the directory and specify which files to run tests on"
+                )
                 directories.append(test_file)
             else:
                 test_files.append(test_file)

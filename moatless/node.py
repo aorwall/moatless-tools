@@ -66,11 +66,13 @@ class Reward(BaseModel):
         le=100,
     )
 
+
 class ThoughtBlock(BaseModel):
     type: Literal["thinking", "redacted_thinking"] = Field(..., description="The type of the thought block")
     text: str = Field(..., description="The text of the thought block")
     signature: Optional[str] = Field(None, description="The signature of the thought block")
     data: Optional[str] = Field(None, description="The data of the thought block")
+
 
 class Node(BaseModel):
     node_id: int = Field(..., description="The unique identifier of the node")
@@ -244,10 +246,10 @@ class Node(BaseModel):
             node = self
 
         return node._get_all_nodes()
-    
+
     def get_last_node(self) -> "Node":
         return self.get_all_nodes()[-1]
-    
+
     def get_node_by_id(self, node_id: int) -> Optional["Node"]:
         for node in self.get_all_nodes():
             if node.node_id == node_id:
@@ -315,7 +317,7 @@ class Node(BaseModel):
 
         if not self.action_steps and other.action_steps:
             return False
-        
+
         for self_step, other_step in zip(self.action_steps, other.action_steps):
             if self_step.action.name != other_step.action.name:
                 return False
@@ -442,10 +444,12 @@ class Node(BaseModel):
             return cls.model_validate(node_data)
 
     @classmethod
-    def from_file(cls, file_path: Path, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None, **kwargs) -> "Node":
+    def from_file(
+        cls, file_path: Path, repo: Repository | None = None, runtime: RuntimeEnvironment | None = None, **kwargs
+    ) -> "Node":
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        
+
         with open(file_path, "r") as f:
             data = json.load(f)
 
@@ -516,7 +520,7 @@ class Node(BaseModel):
         if not root_nodes:
             raise ValueError("No root node found in data")
 
-        if logger.isEnabledFor(logging.DEBUG):  
+        if logger.isEnabledFor(logging.DEBUG):
             tree = generate_ascii_tree(root_nodes[0])
             logger.debug(f"Reconstructed tree:\n{tree}")
         return root_nodes[0]

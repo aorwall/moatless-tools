@@ -202,7 +202,6 @@ def create_index(
     return code_index
 
 
-
 async def create_index_async(
     instance: dict,
     repository: Repository | None = None,
@@ -222,10 +221,11 @@ async def create_index_async(
     )
     return code_index
 
+
 def repository_exists(instance: dict, repo_base_dir: str):
     instance_repo_path = os.path.normpath(os.path.join(repo_base_dir, f"swe-bench_{instance['instance_id']}"))
     return os.path.exists(instance_repo_path)
-        
+
 
 async def create_repository_async(
     instance: Optional[dict] = None,
@@ -255,10 +255,7 @@ async def create_repository_async(
     if os.path.exists(instance_repo_path):
         logger.info(f"Checking if instance repo at {instance_repo_path} is valid")
         try:
-            result = await run_git_command(
-                ["git", "cat-file", "-e", instance["base_commit"]],
-                instance_repo_path
-            )
+            result = await run_git_command(["git", "cat-file", "-e", instance["base_commit"]], instance_repo_path)
             logger.info(f"Found existing valid repo at {instance_repo_path}")
             return GitRepository(repo_path=instance_repo_path)
         except Exception:
@@ -266,7 +263,7 @@ async def create_repository_async(
             shutil.rmtree(instance_repo_path)
 
     logger.info(f"Setting up central repo at {central_repo_path}")
-    
+
     # Handle both central repo setup and instance repo creation under the same lock
     # async with repo_operation_async_lock(central_repo_path):
     # First handle central repo
@@ -283,24 +280,16 @@ async def create_repository_async(
             except asyncio.TimeoutError:
                 logger.error("Git clone operation timed out after 5 minutes")
                 # Get hanging processes
-                ps_result = await run_git_command(
-                    ["ps", "-ef", "|", "grep", "git-clone"],
-                    working_dir="/"
-                )
+                ps_result = await run_git_command(["ps", "-ef", "|", "grep", "git-clone"], working_dir="/")
                 logger.error(f"Hanging git processes: {ps_result}")
                 raise
 
-            fetch_task = asyncio.create_task(
-                run_git_command(["git", "fetch", "--all"], central_repo_path)
-            )
+            fetch_task = asyncio.create_task(run_git_command(["git", "fetch", "--all"], central_repo_path))
             try:
                 await asyncio.wait_for(fetch_task, timeout=300)
             except asyncio.TimeoutError:
-                logger.error("Git fetch operation timed out after 5 minutes") 
-                ps_result = await run_git_command(
-                    ["ps", "-ef", "|", "grep", "git-fetch"],
-                    working_dir="/"
-                )
+                logger.error("Git fetch operation timed out after 5 minutes")
+                ps_result = await run_git_command(["ps", "-ef", "|", "grep", "git-fetch"], working_dir="/")
                 logger.error(f"Hanging git processes: {ps_result}")
                 raise
 
@@ -324,10 +313,7 @@ async def create_repository_async(
     try:
         await async_clone_and_checkout(central_repo_path, instance_repo_path, instance["base_commit"])
         logger.info(f"Cloned from central repo {central_repo_path} to {instance_repo_path}")
-        repo = GitRepository(
-            repo_path=instance_repo_path,
-            commit=instance["base_commit"]
-        )
+        repo = GitRepository(repo_path=instance_repo_path, commit=instance["base_commit"])
     except Exception as e:
         logger.error(f"Failed to create instance repo: {e}")
         if os.path.exists(instance_repo_path):
@@ -342,11 +328,8 @@ async def cleanup_hanging_git_processes(repo_path: str):
     """Force cleanup any hanging git processes for a specific repo."""
     try:
         # Find all git processes related to this repo
-        ps_result = await run_git_command(
-            ["ps", "-ef", "|", "grep", repo_path, "|", "grep", "git"],
-            working_dir="/"
-        )
-        
+        ps_result = await run_git_command(["ps", "-ef", "|", "grep", repo_path, "|", "grep", "git"], working_dir="/")
+
         # Kill hanging processes
         for line in ps_result.splitlines():
             if "grep" not in line:  # Skip the grep process itself
@@ -356,6 +339,6 @@ async def cleanup_hanging_git_processes(repo_path: str):
                     logger.info(f"Terminated hanging git process {pid}")
                 except ProcessLookupError:
                     pass  # Process already terminated
-                
+
     except Exception as e:
         logger.error(f"Error during cleanup: {e}")

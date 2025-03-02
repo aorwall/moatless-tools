@@ -101,16 +101,17 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
     def _initialize_completion_model(self):
         """Override mixin method to customize initialization"""
         if self._completion_model:
+
             async def validate_identified_code(
                 structured_outputs: List[ResponseSchema],
                 text_response: Optional[str],
                 flags: List[str],
             ) -> Tuple[List[ResponseSchema], Optional[str], List[str]]:
                 view_context = FileContext(repo=self._repository)
-                
+
                 if not structured_outputs:
                     return structured_outputs, text_response, flags
-                    
+
                 for identified_code in structured_outputs:
                     if identified_code.identified_spans:
                         for identified_spans in identified_code.identified_spans:
@@ -127,10 +128,12 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                         f"The identified code sections are too large ({tokens} tokens). Maximum allowed is {self.max_identify_tokens} tokens. "
                         f"Please identify a smaller subset of the most relevant code sections."
                     )
-                    
+
                 return structured_outputs, text_response, flags
 
-            self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
+            self._completion_model.initialize(
+                Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code
+            )
 
     async def execute(self, args: SearchBaseArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
@@ -154,9 +157,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         completion = None
 
         if search_result_context.span_count() == 1 and context_size > self.max_identify_tokens:
-            logger.warning(
-                f"{self.name}: Conext is too large ({context_size} tokens)."
-            )
+            logger.warning(f"{self.name}: Conext is too large ({context_size} tokens).")
             properties["fail_reason"] = "search_too_large"
             return Observation(
                 message="Search too large. Found a single code section that is too large to view. Please refine the search query.",
@@ -252,7 +253,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
     async def _identify_code(
         self, args: SearchBaseArgs, search_result_ctx: FileContext
     ) -> Tuple[FileContext, Completion]:
-        search_result_str =  search_result_ctx.create_prompt(
+        search_result_str = search_result_ctx.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
             exclude_comments=False,

@@ -41,11 +41,7 @@ class FinishArgs(ActionArguments):
 class Finish(Action):
     args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
 
-    async def execute(
-        self,
-        args: FinishArgs,
-        file_context: FileContext | None = None
-    ):
+    async def execute(self, args: FinishArgs, file_context: FileContext | None = None):
         return Observation(message="Finished", terminal=True)
 
     @classmethod

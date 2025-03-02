@@ -49,7 +49,7 @@ class SimpleVectorStoreData:
         return {
             "text_id_to_ref_doc_id": self.text_id_to_ref_doc_id,
             "vector_id_to_text_id": {str(k): v for k, v in self.vector_id_to_text_id.items()},
-            "metadata_dict": self.metadata_dict
+            "metadata_dict": self.metadata_dict,
         }
 
     @classmethod
@@ -57,7 +57,7 @@ class SimpleVectorStoreData:
         return cls(
             text_id_to_ref_doc_id=data["text_id_to_ref_doc_id"],
             vector_id_to_text_id={int(k): v for k, v in data["vector_id_to_text_id"].items()},
-            metadata_dict=data["metadata_dict"]
+            metadata_dict=data["metadata_dict"],
         )
 
 
@@ -293,17 +293,15 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             raise NotImplementedError("FAISS only supports local storage for now.")
 
         loop = asyncio.get_event_loop()
-        
+
         # Load FAISS index in a thread
-        faiss_index = await loop.run_in_executor(
-            None, faiss.read_index, f"{persist_dir}/vector_index.faiss"
-        )
+        faiss_index = await loop.run_in_executor(None, faiss.read_index, f"{persist_dir}/vector_index.faiss")
 
         logger.debug(f"Loading {__name__} from {persist_dir}.")
-        
+
         async with aiofiles.open(f"{persist_dir}/vector_index.json", "rb") as f:
             content = await f.read()
-        
+
         # Parse JSON in a thread to avoid blocking
         data_dict = await loop.run_in_executor(None, json.loads, content)
         data = SimpleVectorStoreData.from_dict(data_dict)

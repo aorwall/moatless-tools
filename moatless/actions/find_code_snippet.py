@@ -94,7 +94,9 @@ class FindCodeSnippet(SearchBaseAction):
     async def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
         logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
 
-        matches = await self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
+        matches = await self._repository.find_exact_matches(
+            search_text=args.code_snippet, file_pattern=args.file_pattern
+        )
 
         if args.file_pattern:
             # Normalize the pattern to handle both **/*.py and *.py cases

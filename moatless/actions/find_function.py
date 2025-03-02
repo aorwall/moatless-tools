@@ -54,7 +54,6 @@ class FindFunctionArgs(SearchBaseArgs):
             param_str += f", class_name={self.class_name}"
         return f"{self.name}({param_str})"
 
-
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
         return [
@@ -75,6 +74,7 @@ class FindFunctionArgs(SearchBaseArgs):
                 ),
             ),
         ]
+
 
 class FindFunction(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = FindFunctionArgs

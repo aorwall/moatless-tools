@@ -119,7 +119,7 @@ class CodeIndex:
         for pattern in patterns:
             matches = await self._code_block_index.match_glob_pattern(f"**/{pattern}")
             matched_files.update(matches)
-        
+
         return sorted(matched_files)
 
     @classmethod
@@ -127,7 +127,7 @@ class CodeIndex:
         """Asynchronous version of from_persist_dir"""
         # Run CPU-intensive synchronous operations in a thread pool
         loop = asyncio.get_event_loop()
-        
+
         # Use the async version of SimpleFaissVectorStore.from_persist_dir
         vector_store = await SimpleFaissVectorStore.from_persist_dir_async(persist_dir)
 
@@ -137,7 +137,7 @@ class CodeIndex:
         # These are still synchronous operations
         docstore, settings = await asyncio.gather(
             loop.run_in_executor(None, SimpleDocumentStore.from_persist_dir, persist_dir),
-            loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir)
+            loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir),
         )
 
         inverted_index = await CodeBlockIndex.from_persist_dir(persist_dir)
@@ -150,7 +150,7 @@ class CodeIndex:
             code_block_index=inverted_index,
             **kwargs,
         )
-    
+
     @classmethod
     async def from_url_async(cls, url: str, persist_dir: str, file_repo: FileRepository):
         """Asynchronous version of from_url"""
@@ -167,7 +167,7 @@ class CodeIndex:
                         temp_zip_file = os.path.join(temp_dir, url.split("/")[-1])
 
                         # Download file in chunks
-                        async with aiofiles.open(temp_zip_file, 'wb') as data:
+                        async with aiofiles.open(temp_zip_file, "wb") as data:
                             async for chunk in response.content.iter_chunked(8192):
                                 await data.write(chunk)
 
@@ -214,7 +214,7 @@ class CodeIndex:
 
     def dict(self):
         return {"index_name": self._index_name}
-    
+
     async def get_module(self, file_path: str, content: str) -> Module | None:
         parser = get_parser_by_path(file_path)
         if parser:
@@ -408,7 +408,7 @@ class CodeIndex:
             paths = await self._code_block_index.get_blocks_by_function(function_name)
         else:
             raise ValueError("At least one of class_name or function_name must be provided.")
-        
+
         logger.info(f"find_by_name() Found {len(paths)} paths.")
 
         if file_pattern:
@@ -450,7 +450,6 @@ class CodeIndex:
         invalid_blocks = 0
 
         if category and category != "test":
-
             filtered_paths = []
             for file_path, block_path in paths:
                 if not is_test(file_path):

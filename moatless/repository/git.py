@@ -9,8 +9,8 @@ from moatless.completion.base import BaseCompletionModel
 from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
 from moatless.utils.repo import (
-    maybe_clone, 
-    checkout_commit, 
+    maybe_clone,
+    checkout_commit,
     clone_and_checkout,
     async_clone_and_checkout,
     maybe_clone_async,
@@ -29,9 +29,10 @@ class GitRepository(FileRepository):
 
     def __init__(self, **data):
         super().__init__(**data)
-        
+
         try:
             from git import Repo
+
             self._repo = Repo(path=self.repo_path)
 
             if not self._repo.heads:
@@ -42,7 +43,7 @@ class GitRepository(FileRepository):
 
             self.current_commit = self._repo.head.commit.hexsha
             self.initial_commit = self.current_commit
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize GitRepository: {e}")
             raise
@@ -69,12 +70,13 @@ class GitRepository(FileRepository):
                 repo = cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
                 if commit:
                     # Verify the commit exists
-                    repo._repo.git.cat_file('-e', commit)
+                    repo._repo.git.cat_file("-e", commit)
                 logger.info(f"Using existing repository at {repo_path}")
                 return repo
             except Exception as e:
                 logger.warning(f"Existing repo at {repo_path} is invalid, removing: {e}")
                 import shutil
+
                 shutil.rmtree(repo_path)
 
         try:
@@ -88,17 +90,17 @@ class GitRepository(FileRepository):
 
             # Create and verify repository instance
             repo = cls(repo_path=repo_path, git_repo_url=git_repo_url, commit=commit)
-            
+
             # Double check the commit is available
             if commit:
                 try:
-                    repo._repo.git.cat_file('-e', commit)
+                    repo._repo.git.cat_file("-e", commit)
                 except Exception as e:
                     logger.error(f"Commit {commit} not found after clone: {e}")
                     if os.path.exists(repo_path):
                         shutil.rmtree(repo_path)
                     raise
-                
+
             return repo
 
         except Exception as e:
@@ -106,6 +108,7 @@ class GitRepository(FileRepository):
             # Clean up failed repo
             if os.path.exists(repo_path):
                 import shutil
+
                 shutil.rmtree(repo_path)
             raise
 

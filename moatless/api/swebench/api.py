@@ -32,7 +32,7 @@ from .schema import (
     DatasetsResponseDTO,
     JobStatusSummaryResponseDTO,
     CancelJobsResponseDTO,
-    get_instance_status
+    get_instance_status,
 )
 from moatless.flow.manager import get_flow_config
 from moatless.completion.manager import get_model_config
@@ -40,6 +40,7 @@ from moatless.completion.manager import get_model_config
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
 
 @router.post("/evaluations", response_model=EvaluationResponseDTO)
 async def create_evaluation(request: EvaluationRequestDTO):
@@ -52,7 +53,7 @@ async def create_evaluation(request: EvaluationRequestDTO):
             flow_id=request.flow_id,
             model_id=request.model_id,
         )
-        
+
         return map_to_evaluation_response(evaluation)
 
     except ValueError as e:
@@ -61,22 +62,24 @@ async def create_evaluation(request: EvaluationRequestDTO):
         logger.exception(f"Failed to create evaluation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/evaluations/{evaluation_name}", response_model=EvaluationResponseDTO)
 async def get_evaluation(evaluation_name: str):
     """Get evaluation status and results."""
     manager = await EvaluationManager.get_instance()
     evaluation = await manager.get_evaluation(evaluation_name)
-    
+
     if not evaluation:
         raise HTTPException(status_code=404, detail=f"Evaluation {evaluation_name} not found")
     return map_to_evaluation_response(evaluation)
+
 
 @router.get("/evaluations/{evaluation_name}/clone", response_model=EvaluationResponseDTO)
 async def clone_evaluation(evaluation_name: str):
     """Clone an existing evaluation."""
     manager = await EvaluationManager.get_instance()
     evaluation = await manager.clone_evaluation(evaluation_name)
-    
+
     if not evaluation:
         raise HTTPException(status_code=404, detail=f"Evaluation {evaluation_name} not found")
     return map_to_evaluation_response(evaluation)
@@ -88,51 +91,47 @@ async def list_evaluations():
     try:
         manager = await EvaluationManager.get_instance()
         evaluations = await manager.list_evaluations()
-        
-        response_items = [
-            EvaluationListItemDTO.from_evaluation(eval)
-            for eval in evaluations
-        ]
-        
+
+        response_items = [EvaluationListItemDTO.from_evaluation(eval) for eval in evaluations]
+
         return EvaluationListResponseDTO(evaluations=response_items)
-        
+
     except Exception as e:
         logger.exception(f"Failed to list evaluations: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/evaluations/{evaluation_name}/start", response_model=EvaluationResponseDTO)
 async def start_evaluation(evaluation_name: str):
     """Start an existing evaluation."""
     try:
         manager = await EvaluationManager.get_instance()
-        evaluation = await manager.start_evaluation(
-            evaluation_name=evaluation_name
-        )
+        evaluation = await manager.start_evaluation(evaluation_name=evaluation_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     except Exception as e:
         logger.exception(f"Failed to start evaluation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+
     return map_to_evaluation_response(evaluation)
+
 
 @router.post("/evaluations/{evaluation_name}/process", response_model=EvaluationResponseDTO)
 async def process_evaluation_results(evaluation_name: str):
     """Process all instances in an evaluation to ensure results are in sync."""
     try:
         manager = await EvaluationManager.get_instance()
-        evaluation = await manager.process_evaluation_results(
-            evaluation_name=evaluation_name
-        )
+        evaluation = await manager.process_evaluation_results(evaluation_name=evaluation_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     except Exception as e:
         logger.exception(f"Failed to process evaluation results: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+
     return map_to_evaluation_response(evaluation)
+
 
 @router.get("/evaluations/{evaluation_name}/instances/{instance_id}", response_model=TrajectoryResponseDTO)
 async def get_evaluation_instance(evaluation_name: str, instance_id: str):
@@ -141,7 +140,7 @@ async def get_evaluation_instance(evaluation_name: str, instance_id: str):
         manager = await EvaluationManager.get_instance()
         instance = await manager.get_evaluation_instance(evaluation_name=evaluation_name, instance_id=instance_id)
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
-        trajectory_path = trajectory_dir / 'trajectory.json'
+        trajectory_path = trajectory_dir / "trajectory.json"
         if not trajectory_path.exists():
             raise HTTPException(status_code=404, detail="Trajectory not found")
         try:
@@ -150,9 +149,9 @@ async def get_evaluation_instance(evaluation_name: str, instance_id: str):
         except FileNotFoundError:
             raise HTTPException(status_code=404, detail="Trajectory not found")
 
-        system_status = None # load_trajectory_status(trajectory_dir)
+        system_status = None  # load_trajectory_status(trajectory_dir)
 
-        events = None # load_trajectory_events(trajectory_dir)
+        events = None  # load_trajectory_events(trajectory_dir)
 
         return TrajectoryResponseDTO(
             id=instance_id,
@@ -162,20 +161,21 @@ async def get_evaluation_instance(evaluation_name: str, instance_id: str):
             agent_id=system_status.metadata.get("agent_id"),
             model_id=system_status.metadata.get("model_id"),
             events=events,
-            **trajectory.model_dump()
+            **trajectory.model_dump(),
         )
     except Exception as e:
         logger.exception(f"Failed to get evaluation instance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/evaluations/{evaluation_name}/runner", response_model=RunnerResponseDTO)
 async def get_runner_status(evaluation_name: str):
     """Get the status of the runner."""
     manager = await EvaluationManager.get_instance()
     return RunnerResponseDTO(
-        info=await manager.runner.get_runner_info(),
-        jobs=await manager.runner.get_jobs(evaluation_name)
+        info=await manager.runner.get_runner_info(), jobs=await manager.runner.get_jobs(evaluation_name)
     )
+
 
 @router.get("/evaluations/{evaluation_name}/jobs/status", response_model=JobStatusSummaryResponseDTO)
 async def get_evaluation_jobs_status(evaluation_name: str):
@@ -191,43 +191,42 @@ async def get_evaluation_jobs_status(evaluation_name: str):
             completed_jobs=summary.completed_jobs,
             failed_jobs=summary.failed_jobs,
             canceled_jobs=summary.canceled_jobs,
-            pending_jobs=summary.pending_jobs
+            pending_jobs=summary.pending_jobs,
         )
     except Exception as e:
         logger.exception(f"Failed to get job status summary: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/evaluations/{evaluation_name}/jobs/cancel", response_model=CancelJobsResponseDTO)
 async def cancel_evaluation_jobs(evaluation_name: str):
     """Cancel all jobs for an evaluation."""
     try:
         manager = await EvaluationManager.get_instance()
-        
+
         # Get job status summary first to know what we're canceling
         summary = await manager.runner.get_job_status_summary(evaluation_name)
-        
+
         # Cancel all jobs and set evaluation status to PAUSED
         await manager.cancel_evaluation(evaluation_name)
-        
+
         return CancelJobsResponseDTO(
             project_id=evaluation_name,
             canceled_queued_jobs=summary.queued_jobs,
             canceled_running_jobs=summary.running_jobs,
-            message=f"Successfully canceled {summary.queued_jobs + summary.running_jobs} jobs for evaluation {evaluation_name}"
+            message=f"Successfully canceled {summary.queued_jobs + summary.running_jobs} jobs for evaluation {evaluation_name}",
         )
     except Exception as e:
         logger.exception(f"Failed to cancel jobs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/evaluations/{evaluation_name}/instances/{instance_id}/start", response_model=EvaluationResponseDTO)
 async def start_instance(evaluation_name: str, instance_id: str):
     """Start a specific instance within an evaluation."""
     try:
         manager = await EvaluationManager.get_instance()
-        evaluation = await manager.start_instance(
-            evaluation_name=evaluation_name,
-            instance_id=instance_id
-        )
+        evaluation = await manager.start_instance(evaluation_name=evaluation_name, instance_id=instance_id)
         return map_to_evaluation_response(evaluation)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -235,28 +234,27 @@ async def start_instance(evaluation_name: str, instance_id: str):
         logger.exception(f"Failed to start instance: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/instances", response_model=SWEBenchInstancesResponseDTO)
-async def list_instances(page: int = 1, limit: int = 20, sort_by: str = 'instance_id', order: str = 'asc', search: Optional[str] = None):
+async def list_instances(
+    page: int = 1, limit: int = 20, sort_by: str = "instance_id", order: str = "asc", search: Optional[str] = None
+):
     """List all available SWEBench instances with pagination, sorting, and search."""
     try:
         instances = get_moatless_instances()
-        
+
         # Filter instances by search query
         if search:
             instances = {k: v for k, v in instances.items() if search.lower() in v["instance_id"].lower()}
-        
+
         # Sort instances
-        sorted_instances = sorted(
-            instances.values(),
-            key=lambda x: x[sort_by],
-            reverse=(order == 'desc')
-        )
-        
+        sorted_instances = sorted(instances.values(), key=lambda x: x[sort_by], reverse=(order == "desc"))
+
         # Apply pagination
         start = (page - 1) * limit
         end = start + limit
         paginated_instances = sorted_instances[start:end]
-        
+
         return SWEBenchInstancesResponseDTO(
             instances=[
                 SWEBenchInstanceDTO(
@@ -277,18 +275,18 @@ async def list_datasets():
     """List all available datasets with their descriptions and instance counts."""
     try:
         datasets = get_moatless_dataset_splits()
-        return DatasetsResponseDTO(datasets=[
-            DatasetDTO(**dataset) for dataset in datasets.values()
-        ])
+        return DatasetsResponseDTO(datasets=[DatasetDTO(**dataset) for dataset in datasets.values()])
     except Exception as e:
         logger.exception(f"Failed to list datasets: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 def get_resolved_by(instance: EvaluationInstance) -> int:
     moatless_instance = get_moatless_instance(instance.instance_id)
     return len(moatless_instance.get("resolved_by", []))
 
-def map_to_evaluation_response(evaluation: Evaluation) -> EvaluationResponseDTO:   
+
+def map_to_evaluation_response(evaluation: Evaluation) -> EvaluationResponseDTO:
     flow = get_flow_config(evaluation.flow_id)
     model = get_model_config(evaluation.model_id)
 
@@ -314,8 +312,8 @@ def map_to_evaluation_response(evaluation: Evaluation) -> EvaluationResponseDTO:
                 resolved=instance.resolved,
                 resolved_by=get_resolved_by(instance),
                 reward=instance.reward,
-                usage=instance.usage
+                usage=instance.usage,
             )
             for instance in evaluation.instances
-        ]
+        ],
     )

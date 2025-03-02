@@ -10,11 +10,11 @@ def get_moatless_dir() -> Path:
         dir_path = Path(os.getenv("MOATLESS_DIR", ".moatless"))
     else:
         dir_path = Path(moatless_dir.get())
-        
+
     if not dir_path.exists():
         dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
-    
+
 
 def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     """Get the moatless trajectories directory."""
@@ -30,7 +30,7 @@ def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:
     else:
         # Otherwise use default trajs directory
         trajectories_dir = get_moatless_dir() / "projects" / "default" / "trajs"
-    
+
     if not trajectories_dir.exists():
         trajectories_dir.mkdir(parents=True, exist_ok=True)
     return trajectories_dir
@@ -45,4 +45,3 @@ def get_moatless_trajectory_dir(trajectory_id: str | None = None, project_id: st
     if not trajectory_dir.exists():
         trajectory_dir.mkdir(parents=True, exist_ok=True)
     return trajectory_dir
-

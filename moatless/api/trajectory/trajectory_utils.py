@@ -26,7 +26,9 @@ from moatless.runtime.runtime import TestStatus
 logger = logging.getLogger(__name__)
 
 
-def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str], eval_instance: dict | None = None) -> NodeDTO:
+def convert_moatless_node_to_api_node(
+    node: Node, action_history: Dict[str, str], eval_instance: dict | None = None
+) -> NodeDTO:
     """Convert a Moatless Node to an API Node model."""
     action_steps = []
     all_warnings = []
@@ -198,19 +200,19 @@ def convert_moatless_node_to_api_node(node: Node, action_history: Dict[str, str]
         actionSteps=action_steps,
         executed=node.is_executed(),
         usage=node.usage(),
-        #assistantMessage=node.assistant_message,
+        # assistantMessage=node.assistant_message,
         userMessage=node.user_message,
-        #actionCompletion=action_completion,
-        #fileContext=file_context_to_dto(node.file_context, node.parent.file_context if node.parent else None)
-        #if node.file_context
-        #else None,
+        # actionCompletion=action_completion,
+        # fileContext=file_context_to_dto(node.file_context, node.parent.file_context if node.parent else None)
+        # if node.file_context
+        # else None,
         error=node.error,
         warnings=all_warnings,
         errors=all_errors,
         terminal=node.is_terminal(),
         allNodeErrors=all_errors,
         allNodeWarnings=all_warnings,
-        #testResultsSummary=test_results_summary,
+        # testResultsSummary=test_results_summary,
         items=timeline_items,
     )
 
@@ -255,7 +257,7 @@ async def file_context_to_dto(file_context: FileContext, previous_context: FileC
         updated_files = await get_updated_files(previous_context, file_context)
 
     return FileContextDTO(
-        #summary=file_context.create_summary(),
+        # summary=file_context.create_summary(),
         testResults=[result.model_dump() for test_file in file_context.test_files for result in test_file.test_results]
         if file_context.test_files
         else None,
@@ -344,27 +346,27 @@ def calculate_token_metrics(trajectory_data: Dict[str, Any]) -> Dict[str, int]:
 
 def convert_nodes(root_node: Node) -> List[NodeDTO]:
     """Convert nodes from trajectory data to NodeDTOs.
-    
+
     If any node has multiple children, creates a tree structure at branch points.
     Otherwise returns a completely flat list.
     """
     action_history = {}  # Track action dumps to detect duplicates
-    
+
     def has_branch_nodes(node: Node) -> bool:
         """Check if this node or any descendants have multiple children"""
         if len(node.children) > 1:
             return True
         return any(has_branch_nodes(child) for child in node.children)
-    
+
     def process_tree(node: Node) -> NodeDTO:
         """Process nodes preserving tree structure at branch points"""
         node_dto = convert_moatless_node_to_api_node(node, action_history)
 
         for child in node.children:
             node_dto.children.append(process_tree(child))
-        
+
         return node_dto
-            
+
     def process_flat(node: Node) -> List[NodeDTO]:
         """Process nodes into completely flat list"""
         result = [convert_moatless_node_to_api_node(node, action_history)]
@@ -381,7 +383,7 @@ def convert_nodes(root_node: Node) -> List[NodeDTO]:
 
 def create_trajectory_dto(node: Node) -> TrajectoryDTO:
     """Create TrajectoryDTO from trajectory data loaded from a file."""
-    
+
     nodes = convert_nodes(node)
 
     logger.debug(f"Loading trajectory with {len(nodes)} nodes")
@@ -395,7 +397,6 @@ def create_trajectory_dto(node: Node) -> TrajectoryDTO:
         cachedTokens=node.total_usage().cache_read_tokens,
         promptTokens=node.total_usage().prompt_tokens,
     )
-
 
 
 def load_trajectory_from_file(file_path: str) -> TrajectoryDTO:

@@ -9,6 +9,7 @@ class ActionConfigDTO(BaseModel):
     title: str = Field(..., description="The name of the action")
     properties: Dict = Field(..., description="The properties of the action")
 
+
 class AgentConfigDTO(BaseModel):
     """Data transfer object for agent configuration."""
 
@@ -23,11 +24,11 @@ class AgentConfigUpdateDTO(BaseModel):
     system_prompt: str | None = Field(None, description="System prompt to be used for generating completions")
     actions: List[ActionConfigDTO] = Field(default_factory=list, description="List of action names to enable")
 
+
 class AgentConfigsResponseDTO(BaseModel):
     """Response containing all agent configurations."""
 
     configs: List[AgentConfigDTO] = Field(..., description="List of agent configurations")
-
 
 
 class ActionsResponseDTO(BaseModel):

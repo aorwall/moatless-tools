@@ -32,9 +32,11 @@ from opentelemetry import trace
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
+
 class CompletionEvent(BaseEvent):
     scope: str = "completion"
     model: str
+
 
 class CompletionRetryEvent(CompletionEvent):
     event_type: str = "retry"
@@ -102,13 +104,13 @@ class CompletionResponse(BaseModel):
             )
         return self.structured_outputs[0] if self.structured_outputs else None
 
+
 ValidationFunction = Callable[
-    [List[ResponseSchema], Optional[str], List[str]], 
-    Awaitable[Tuple[List[ResponseSchema], Optional[str], List[str]]]
+    [List[ResponseSchema], Optional[str], List[str]], Awaitable[Tuple[List[ResponseSchema], Optional[str], List[str]]]
 ]
 
-class BaseCompletionModel(BaseModel, ABC):
 
+class BaseCompletionModel(BaseModel, ABC):
     model_id: str = Field(..., description="The ID of the model")
     model: str = Field(..., description="The model to use for completion")
     temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
@@ -191,11 +193,10 @@ class BaseCompletionModel(BaseModel, ABC):
         if self._system_prompt and self._system_prompt != system_prompt:
             raise ValueError("System prompt cannot be changed after initialization")
 
-
         self._response_schema = schemas
         self._completion_params = self._get_completion_params(self._response_schema)
         self._post_validation_fn = post_validation_fn
-        
+
         if self.few_shot_examples:
             self._few_shot_prompt = self._generate_few_shot_examples()
 
@@ -220,16 +221,12 @@ class BaseCompletionModel(BaseModel, ABC):
         set_attribute("max_tokens", self.max_tokens)
         set_attribute("timeout", self.timeout)
         set_attribute("model_base_url", self.model_base_url)
-        
+
         if not self._initialized:
-            raise ValueError(
-                "Model must be initialized with response schema before creating completion"
-            )
+            raise ValueError("Model must be initialized with response schema before creating completion")
 
         if not system_prompt and not self._system_prompt:
-            raise ValueError(
-                "No system prompt provided"
-            )
+            raise ValueError("No system prompt provided")
 
         if system_prompt:
             system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
@@ -238,7 +235,6 @@ class BaseCompletionModel(BaseModel, ABC):
 
         prepared_messages = self._prepare_messages(messages, system_prompt or self._system_prompt)
         return await self._create_completion_with_retries(messages=prepared_messages)
-
 
     def _prepare_system_prompt(
         self,
@@ -261,33 +257,33 @@ class BaseCompletionModel(BaseModel, ABC):
 
     def _generate_few_shot_examples(self) -> str:
         """Generate few-shot examples in the model's format.
-        
+
         Returns:
             Formatted few-shot examples string
         """
         if not self._response_schema:
             return ""
-            
+
         few_shot_examples = []
         for schema in self._response_schema:
             if hasattr(schema, "get_few_shot_examples"):
                 examples = schema.get_few_shot_examples()
                 if examples:
                     few_shot_examples.extend(examples)
-                    
+
         if not few_shot_examples:
             return ""
-            
+
         prompt = "\n\n# Examples\nExamples of how to use the available actions:\n\n"
         return prompt
 
     def _prepare_messages(self, messages: List[dict], system_prompt: str) -> List[dict]:
         """Prepare messages with system prompt and few-shot examples"""
         messages = messages.copy()
-        
+
         if self._few_shot_prompt:
             system_prompt = system_prompt + "\n\n" + self._few_shot_prompt
-                
+
         messages.insert(0, {"role": "system", "content": system_prompt})
         return messages
 
@@ -326,7 +322,7 @@ class BaseCompletionModel(BaseModel, ABC):
             stop=tenacity.stop_after_attempt(3),
             wait=tenacity.wait_fixed(0),
             reraise=True,
-            before_sleep=lambda retry_state: logger.info(f"Retrying completion with {len(messages)} messages")
+            before_sleep=lambda retry_state: logger.info(f"Retrying completion with {len(messages)} messages"),
         )
         async def _do_completion_with_validation():
             nonlocal retry_count, accumulated_usage, completion_response
@@ -374,29 +370,35 @@ class BaseCompletionModel(BaseModel, ABC):
                 await self._send_retry_event(retry_count, str(e))
 
                 tool_call_id = None
-                if hasattr(completion_response.choices[0].message, "thinking") and completion_response.choices[0].message.thinking:
+                if (
+                    hasattr(completion_response.choices[0].message, "thinking")
+                    and completion_response.choices[0].message.thinking
+                ):
                     content = []
                     content.extend(completion_response.choices[0].message.thinking)
                     if completion_response.choices[0].message.content:
-                        content.append(ChatCompletionTextObject(type="text", text=completion_response.choices[0].message.content))
+                        content.append(
+                            ChatCompletionTextObject(type="text", text=completion_response.choices[0].message.content)
+                        )
 
                     message_dump = completion_response.choices[0].message.model_dump()
                     message_dump["content"] = content
                     messages.append(message_dump)
                 else:
-                    
                     if completion_response.choices[0].message.tool_calls:
                         # TODO: Support multiple tool calls
                         tool_call_id = completion_response.choices[0].message.tool_calls[0].id
 
                     messages.append(completion_response.choices[0].message.model_dump())
-                
+
                 logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
                 if e.retry_messages:
                     messages.extend(e.retry_messages)
                 else:
                     if tool_call_id:
-                        messages.append(ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id))
+                        messages.append(
+                            ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)
+                        )
                     else:
                         messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
                 raise e
@@ -409,7 +411,7 @@ class BaseCompletionModel(BaseModel, ABC):
                 model=self.model,
                 retries=retry_count,
                 usage=accumulated_usage,  # Use accumulated usage here
-                flags=flags
+                flags=flags,
             )
 
             return CompletionResponse(
@@ -490,11 +492,10 @@ class BaseCompletionModel(BaseModel, ABC):
                     params["api_base"] = self.model_base_url
                 if self.model_api_key:
                     params["api_key"] = self.model_api_key
-                
+
                 if self.headers:
                     params["headers"] = self.headers
 
-                
                 return await litellm.acompletion(
                     model=self.model,
                     max_tokens=self.max_tokens,
@@ -511,19 +512,13 @@ class BaseCompletionModel(BaseModel, ABC):
                 else:
                     response_text = None
 
-                logger.exception(
-                    f"LiteLLM completion failed. Model: {self.model}, "
-                    f"Response: {response_text}"
-                )
+                logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Response: {response_text}")
 
                 raise CompletionRuntimeError(message=str(e), messages=messages) from e
             except RateLimitError:
                 raise  # Let tenacity handle the retry
             except Exception as e:
-                logger.exception(
-                    f"LiteLLM completion failed. Model: {self.model}, "
-                    f"Error: {e}"
-                )
+                logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Error: {e}")
 
                 raise CompletionRuntimeError(message=str(e), messages=messages) from e
 
@@ -551,15 +546,13 @@ class BaseCompletionModel(BaseModel, ABC):
         breakpoints_remaining = 3
         for message in reversed(messages):
             try:
-                
                 if isinstance(message.get("content"), list):
                     content = next((m for m in message["content"] if m.get("type") == "text"), None)
                 elif message.get("role") == "assistant" and not message.get("content") and message.get("tool_calls"):
                     content = message["tool_calls"][-1]
                 else:
                     content = message
-        
-        
+
                 if content:
                     if breakpoints_remaining:
                         content["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
@@ -572,7 +565,9 @@ class BaseCompletionModel(BaseModel, ABC):
                 logger.exception(f"Error injecting prompt caching on message: {message}")
 
     @abstractmethod
-    async def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
+    async def _validate_completion(
+        self, completion_response: Any
+    ) -> tuple[List[ResponseSchema], Optional[str], List[str], List[dict]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:
@@ -712,29 +707,33 @@ class BaseCompletionModel(BaseModel, ABC):
     def __str__(self) -> str:
         """Return a nice string representation of the completion model."""
         components = []
-        
-        components.extend([
-            f"Model: {self.model}",
-            f"Response format: {self.response_format.value}",
-            f"Temperature: {self.temperature}",
-            f"Max tokens: {self.max_tokens}",
-            f"Timeout: {self.timeout}s"
-        ])
+
+        components.extend(
+            [
+                f"Model: {self.model}",
+                f"Response format: {self.response_format.value}",
+                f"Temperature: {self.temperature}",
+                f"Max tokens: {self.max_tokens}",
+                f"Timeout: {self.timeout}s",
+            ]
+        )
 
         if self.model_base_url:
             components.append(f"Base URL: {self.model_base_url}")
-            
+
         if self.metadata:
             components.append(f"Metadata: {self.metadata}")
-            
-        components.extend([
-            f"Message cache: {self.message_cache}",
-            f"Thoughts in action: {self.thoughts_in_action}",
-            f"Disable thoughts: {self.disable_thoughts}",
-            f"Few shot examples: {self.few_shot_examples}",
-            f"Message history type: {self.message_history_type.value}",
-            f"Merge same role messages: {self.merge_same_role_messages}"
-        ])
+
+        components.extend(
+            [
+                f"Message cache: {self.message_cache}",
+                f"Thoughts in action: {self.thoughts_in_action}",
+                f"Disable thoughts: {self.disable_thoughts}",
+                f"Few shot examples: {self.few_shot_examples}",
+                f"Message history type: {self.message_history_type.value}",
+                f"Merge same role messages: {self.merge_same_role_messages}",
+            ]
+        )
 
         if self._response_schema:
             schema_names = [schema.__name__ for schema in self._response_schema]

@@ -21,13 +21,16 @@ class RunnerStatus(str, Enum):
     STOPPED = "stopped"
     ERROR = "error"
 
+
 class RunnerInfo(BaseModel):
     runner_type: str
     status: RunnerStatus
     data: Dict[str, Any]
 
+
 class JobInfo(BaseModel):
     """Information about a job in RQ."""
+
     id: str
     status: JobStatus
     enqueued_at: Optional[datetime] = None
@@ -38,6 +41,7 @@ class JobInfo(BaseModel):
 
 class EvaluationJobStatus(BaseModel):
     """Status of all jobs for an evaluation."""
+
     evaluation_name: str
     status: str
     instances: Dict[str, Dict[str, Any]]
@@ -47,6 +51,7 @@ class EvaluationJobStatus(BaseModel):
 
 class JobsCollection(BaseModel):
     """Collection of job IDs for an evaluation."""
+
     run_jobs: List[str] = Field(default_factory=list)
     eval_jobs: List[str] = Field(default_factory=list)
     active_jobs: List[str] = Field(default_factory=list)
@@ -59,6 +64,7 @@ class JobsCollection(BaseModel):
 
 class CancellationResult(BaseModel):
     """Result of cancelling jobs for an evaluation."""
+
     evaluation_name: str
     cancelled_jobs: List[str] = Field(default_factory=list)
     errors: List[Dict[str, str]] = Field(default_factory=list)
@@ -68,6 +74,7 @@ class CancellationResult(BaseModel):
 
 class RetryResult(BaseModel):
     """Result of retrying a job for an instance."""
+
     instance_id: str
     requeued_jobs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
@@ -76,6 +83,7 @@ class RetryResult(BaseModel):
 
 class RestartResult(BaseModel):
     """Result of restarting failed jobs for an evaluation."""
+
     evaluation_name: str
     status: str
     message: str
@@ -85,6 +93,7 @@ class RestartResult(BaseModel):
 
 class JobsStatusSummary(BaseModel):
     """Summary of job status counts for a project."""
+
     project_id: str
     total_jobs: int = 0
     queued_jobs: int = 0
@@ -93,47 +102,49 @@ class JobsStatusSummary(BaseModel):
     failed_jobs: int = 0
     canceled_jobs: int = 0
     pending_jobs: int = 0
-    job_ids: Dict[str, List[str]] = Field(default_factory=lambda: {
-        "queued": [],
-        "running": [],
-        "completed": [],
-        "failed": [],
-        "canceled": [],
-        "pending": []
-    })
+    job_ids: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "queued": [],
+            "running": [],
+            "completed": [],
+            "failed": [],
+            "canceled": [],
+            "pending": [],
+        }
+    )
 
 
 class Runner(ABC):
     """Runner for managing jobs."""
-    
+
     @abstractmethod
     async def start_job(self, project_id: str, trajectory_id: str) -> bool:
         pass
-    
+
     @abstractmethod
     async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
         pass
-    
+
     @abstractmethod
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
         pass
-    
+
     @abstractmethod
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
         pass
-    
+
     @abstractmethod
     async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
         pass
-    
+
     @abstractmethod
     async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         pass
-    
+
     @abstractmethod
     async def get_runner_info(self) -> RunnerInfo:
         pass
-    
+
     @abstractmethod
     async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
         pass

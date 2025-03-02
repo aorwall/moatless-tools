@@ -22,7 +22,6 @@ class ViewDiffArgs(ActionArguments):
 
     model_config = ConfigDict(title="ViewDiff")
 
-
     @classmethod
     def get_few_shot_examples(cls) -> List[FewShotExample]:
         return [
@@ -31,6 +30,7 @@ class ViewDiffArgs(ActionArguments):
                 action=ViewDiffArgs(thoughts="Viewing current git diff of all changes"),
             )
         ]
+
 
 class ViewDiff(Action):
     """

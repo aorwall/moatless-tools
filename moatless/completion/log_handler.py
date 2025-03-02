@@ -20,9 +20,9 @@ IGNORE_KWARGS = ["original_response", "messages", "api_key", "additional_args", 
 class LogHandler(CustomLogger):
     def __init__(self, log_dir: str | None = None, trajectory_dir: str | None = None):
         super().__init__()
-        
+
         self.trajectory_dir = trajectory_dir
-        
+
         if log_dir:
             self.log_dir = Path(log_dir)
         else:

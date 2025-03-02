@@ -17,6 +17,7 @@ from moatless.utils.class_loading import DynamicClassLoadingMixin
 
 logger = logging.getLogger(__name__)
 
+
 class ArtifactReference(BaseModel):
     id: str
     type: str
@@ -52,7 +53,9 @@ class Artifact(BaseModel, ABC):
     name: Optional[str] = Field(default=None, description="Name of the artifact")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="When the artifact was created")
     references: List[ArtifactReference] = Field(default_factory=list, description="Reference to the artifacts")
-    status: Literal["new", "updated", "persisted", "unchanged"] = Field(default="new", description="Status of the artifact")
+    status: Literal["new", "updated", "persisted", "unchanged"] = Field(
+        default="new", description="Status of the artifact"
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -68,7 +71,9 @@ class Artifact(BaseModel, ABC):
 
     def to_list_item(self) -> ArtifactListItem:
         """Convert artifact to a list item representation"""
-        return ArtifactListItem(id=self.id, type=self.type, name=self.name, created_at=self.created_at, references=self.references)
+        return ArtifactListItem(
+            id=self.id, type=self.type, name=self.name, created_at=self.created_at, references=self.references
+        )
 
     def to_ui_representation(self) -> ArtifactResponse:
         """Convert artifact to a UI-friendly representation with all necessary data for display.
@@ -85,20 +90,20 @@ class Artifact(BaseModel, ABC):
             can_persist=self.can_persist and self.status in ["updated", "new"],
             data=model_data,
         )
-    
+
     def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
         """Override model_dump to customize serialization."""
         data = super().model_dump(*args, **kwargs)
         # Convert created_at to epoch milliseconds
-        if 'created_at' in data:
-            data['created_at'] = int(self.created_at.timestamp() * 1000)
+        if "created_at" in data:
+            data["created_at"] = int(self.created_at.timestamp() * 1000)
         return data
-    
+
     @classmethod
     def model_validate(cls, data: Any):
         """Override model_validate to customize deserialization."""
-        if 'created_at' in data:
-            data['created_at'] = datetime.fromtimestamp(data['created_at'] / 1000)
+        if "created_at" in data:
+            data["created_at"] = datetime.fromtimestamp(data["created_at"] / 1000)
         return super().model_validate(data)
 
 
@@ -122,6 +127,7 @@ class SearchCriteria(BaseModel):
     operator: Literal["eq", "contains", "gt", "lt", "gte", "lte"] = "eq"
     case_sensitive: bool = False
 
+
 class ArtifactHandler(MoatlessComponent[T]):
     """
     Defines how to load, save, update, and delete artifacts of a certain type.
@@ -131,7 +137,7 @@ class ArtifactHandler(MoatlessComponent[T]):
     type: ClassVar[str]
 
     _storage: BaseStorage | None = PrivateAttr(default=None)
-    
+
     def __init__(self, storage: BaseStorage | None = None, **data):
         super().__init__(**data)
         self._storage = storage
@@ -139,15 +145,15 @@ class ArtifactHandler(MoatlessComponent[T]):
     @classmethod
     def get_component_type(cls) -> str:
         return "artifact_handler"
-    
+
     @classmethod
     def _get_package(cls) -> str:
         return "moatless.artifacts"
-    
+
     @classmethod
     def _get_base_class(cls) -> Type:
         return ArtifactHandler
-    
+
     @abstractmethod
     async def read(self, artifact_id: str) -> T:
         """
@@ -175,7 +181,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         Delete an existing artifact but do not persist it to the storage.
         """
         raise NotImplementedError("Delete is not supported for this artifact type")
-    
+
     async def persist(self, artifact_id: str) -> None:
         """
         Finalize and save the artifact to its permanent storage (e.g., disk, remote server).
@@ -201,7 +207,7 @@ class ArtifactHandler(MoatlessComponent[T]):
     @classmethod
     def get_name(cls) -> str:
         return cls.type
-    
+
     @classmethod
     def initiate_handlers(cls, storage: BaseStorage | None = None) -> List["ArtifactHandler"]:
         registered_classes = cls.get_available_components()

@@ -5,7 +5,13 @@ from typing import List
 
 from fastapi import APIRouter, HTTPException
 
-from moatless.flow.schema import StartTrajectoryRequest, RetryTrajectoryRequest, ExecuteNodeRequest, TrajectoryResponseDTO, TrajectoryListItem
+from moatless.flow.schema import (
+    StartTrajectoryRequest,
+    RetryTrajectoryRequest,
+    ExecuteNodeRequest,
+    TrajectoryResponseDTO,
+    TrajectoryListItem,
+)
 from moatless.flow.manager import FlowManager
 
 _manager = FlowManager.get_instance()
@@ -15,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 @router.get("/", response_model=List[TrajectoryListItem])
 async def get_trajectories():
     """Get all trajectories."""
@@ -23,6 +30,7 @@ async def get_trajectories():
     except Exception as e:
         logger.exception(f"Error getting trajectories: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/{project_id}/{trajectory_id}", response_model=TrajectoryResponseDTO)
 async def get_trajectory(project_id: str, trajectory_id: str):
@@ -35,6 +43,7 @@ async def get_trajectory(project_id: str, trajectory_id: str):
     except Exception as e:
         logger.exception(f"Error getting trajectory data: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/{project_id}/{trajectory_id}/start")
 async def start_trajectory(project_id: str, trajectory_id: str):
@@ -49,6 +58,7 @@ async def start_trajectory(project_id: str, trajectory_id: str):
         logger.exception(f"Error starting trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/{project_id}/{trajectory_id}/resume")
 async def resume_trajectory(project_id: str, trajectory_id: str, request: StartTrajectoryRequest):
     """Resume a trajectory."""
@@ -61,6 +71,7 @@ async def resume_trajectory(project_id: str, trajectory_id: str, request: StartT
     except Exception as e:
         logger.exception(f"Error resuming trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/{project_id}/{trajectory_id}/retry")
 async def retry_trajectory(project_id: str, trajectory_id: str, request: RetryTrajectoryRequest):
@@ -75,6 +86,7 @@ async def retry_trajectory(project_id: str, trajectory_id: str, request: RetryTr
         logger.exception(f"Error retrying trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/{project_id}/{trajectory_id}/execute")
 async def execute_node(project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
     """Execute a run."""
@@ -87,5 +99,3 @@ async def execute_node(project_id: str, trajectory_id: str, request: ExecuteNode
     except Exception as e:
         logger.exception(f"Error executing node: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-

@@ -26,13 +26,13 @@ from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
     ExecuteNodeRequest,
     FlowConfig,
-    FlowStatus, 
+    FlowStatus,
     FlowStatusInfo,
     TrajectoryEventDTO,
     TrajectoryListItem,
-    TrajectoryResponseDTO, 
-    TrajectoryEventDTO, 
-    TrajectoryListItem
+    TrajectoryResponseDTO,
+    TrajectoryEventDTO,
+    TrajectoryListItem,
 )
 from moatless.selector.base import BaseSelector
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectories_dir
@@ -44,13 +44,14 @@ from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
+
 class FlowManager:
     """Manages tree search configurations."""
 
     @classmethod
     def get_instance(cls):
         """Get the singleton instance of the FlowManager."""
-        if not hasattr(cls, '_instance'):
+        if not hasattr(cls, "_instance"):
             cls._instance = cls()
         return cls._instance
 
@@ -60,21 +61,22 @@ class FlowManager:
         self._load_configs()
         self._runner = RQRunner()
 
-    def create_flow(self,
-                    id: str, 
-                    model_id: str,
-                    message: str | None = None,
-                    trajectory_id: str | None = None,
-                    persist_dir: str | None = None,
-                    metadata: Dict[str, Any] | None = None,
-                    **kwargs) -> AgenticFlow:
-        
+    def create_flow(
+        self,
+        id: str,
+        model_id: str,
+        message: str | None = None,
+        trajectory_id: str | None = None,
+        persist_dir: str | None = None,
+        metadata: Dict[str, Any] | None = None,
+        **kwargs,
+    ) -> AgenticFlow:
         """Create a SearchTree instance from this configuration.
-        
+
         Args:
-            root_node: Optional root node for the search tree. If not provided, 
+            root_node: Optional root node for the search tree. If not provided,
                       the tree will need to be initialized with a root node later.
-        
+
         Returns:
             SearchTree: A configured search tree instance
         """
@@ -95,7 +97,7 @@ class FlowManager:
                 max_cost=config.max_cost,
                 persist_dir=persist_dir,
                 metadata=metadata,
-                **kwargs
+                **kwargs,
             )
         elif config.flow_type == "tree":
             expander = config.expander or Expander(max_expansions=config.max_expansions)
@@ -129,16 +131,14 @@ class FlowManager:
                 max_depth=config.max_depth,
                 persist_dir=persist_dir,
                 metadata=metadata,
-                **kwargs
+                **kwargs,
             )
-        
+
         return tree
-    
-    def create_loop(self,
-                    agent_id: str,
-                    model_id: str,
-                    message: str | None = None,
-                    trajectory_id: str | None = None) -> AgenticLoop:
+
+    def create_loop(
+        self, agent_id: str, model_id: str, message: str | None = None, trajectory_id: str | None = None
+    ) -> AgenticLoop:
         agent = get_agent(agent_id=agent_id)
         completion_model = create_completion_model(model_id)
         agent.completion_model = completion_model
@@ -146,11 +146,7 @@ class FlowManager:
         trajectory_id = f"loop_{agent_id}_{model_id}_{date_str}"
 
         return AgenticLoop.create(
-                message=message,
-                trajectory_id=trajectory_id,
-                agent=agent,
-                max_iterations=20,
-                max_cost=1.0
+            message=message, trajectory_id=trajectory_id, agent=agent, max_iterations=20, max_cost=1.0
         )
 
     def _get_config_path(self) -> Path:
@@ -162,10 +158,9 @@ class FlowManager:
         return Path(__file__).parent / "flows.json"
 
     def _load_configs(self):
-        
         """Load configurations from JSON file."""
         config_path = self._get_config_path()
-        
+
         # Copy global config to local path if it doesn't exist
         if not config_path.exists():
             try:
@@ -175,7 +170,7 @@ class FlowManager:
                     config_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        with open(config_path, 'w') as local_f:
+                        with open(config_path, "w") as local_f:
                             json.dump(global_config, local_f, indent=2)
                     logger.info("Copied global config to local path")
                 else:
@@ -266,23 +261,23 @@ class FlowManager:
         del self._configs[id]
         self._save_configs()
 
-    async def get_trajectory(self, project_id: str, trajectory_id: str) -> 'TrajectoryResponseDTO':
+    async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
-        
+
         try:
             trajectory_dir = get_trajectory_dir(project_id=project_id, trajectory_id=trajectory_id)
             flow = AgenticFlow.from_dir(trajectory_dir)
             if not flow:
                 logger.error(f"Trajectory not found: {trajectory_dir}")
                 raise ValueError("Trajectory not found")
-            
+
             nodes = convert_nodes(flow.root)
             flow_status_info = flow.get_status()
 
             if not flow.is_finished():
                 job_status = await self._runner.get_job_status(project_id, trajectory_id)
                 if job_status == JobStatus.RUNNING:
-                    flow_status =FlowStatus.RUNNING
+                    flow_status = FlowStatus.RUNNING
                 elif job_status == JobStatus.QUEUED:
                     flow_status = FlowStatus.PENDING
                 elif len(flow.root.children) == 0:
@@ -293,7 +288,7 @@ class FlowManager:
                 flow_status = FlowStatus.ERROR
             else:
                 flow_status = flow_status_info.status
-            
+
             events = self.load_trajectory_events(trajectory_dir)
 
             return TrajectoryResponseDTO(
@@ -305,7 +300,7 @@ class FlowManager:
                 agent_id=flow_status_info.metadata.get("agent_id"),
                 model_id=flow_status_info.metadata.get("model_id"),
                 events=events,
-                nodes=nodes
+                nodes=nodes,
             )
         except Exception as e:
             logger.exception(f"Error getting trajectory data: {str(e)}")
@@ -313,7 +308,7 @@ class FlowManager:
 
     async def list_trajectories(self, project_id: str | None = None) -> list:
         """Get all trajectories."""
-        
+
         moatless_dir = get_moatless_dir()
         trajectories = []
         logger.info(f"Listing trajectories in {moatless_dir}")
@@ -334,70 +329,63 @@ class FlowManager:
                             if status:
                                 # Create TrajectoryListItem from status
                                 trajectory_item = TrajectoryListItem(
-                                    **status.model_dump(),
-                                    project_id=project_id,
-                                    trajectory_id=trajectory_id
+                                    **status.model_dump(), project_id=project_id, trajectory_id=trajectory_id
                                 )
                                 trajectories.append(trajectory_item)
                         except Exception as e:
                             logger.error(f"Error loading trajectory {trajectory_id}: {e}")
-                        
+
         return trajectories
 
     async def start_trajectory(self, project_id: str, trajectory_id: str):
         """Start a trajectory."""
 
         flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
-        
+
         job_status = await self._runner.get_job_status(project_id, trajectory_id)
         if job_status == JobStatus.RUNNING:
             raise ValueError("Flow is already running")
-        
+
         if flow.root.get_last_node() and flow.root.get_last_node().error:
             logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
             flow.root.get_last_node().reset()
             flow.persist()
-        
+
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
 
     async def resume_trajectory(self, project_id: str, trajectory_id: str, request):
         """Resume a trajectory."""
         from moatless.flow.runner import agentic_runner
         from moatless.flow.loop import AgenticLoop
-        
+
         system = await agentic_runner.get_run(trajectory_id, project_id)
         if system:
             raise ValueError("Flow is already running")
-        
-        agentic_flow = AgenticLoop.from_trajectory_id(
-            trajectory_id, 
-            project_id, 
-            request.agent_id, 
-            request.model_id
-        )
-        
+
+        agentic_flow = AgenticLoop.from_trajectory_id(trajectory_id, project_id, request.agent_id, request.model_id)
+
         await agentic_runner.start(agentic_flow, message=request.message)
         return agentic_flow
 
     async def retry_trajectory(self, project_id: str, trajectory_id: str, request):
         """Retry a trajectory."""
         from moatless.flow.runner import agentic_runner
-        
+
         system = await agentic_runner.get_run(trajectory_id, project_id)
         if system:
             raise ValueError("Flow is already running")
-        
+
         agentic_flow = await self._setup_flow(trajectory_id, project_id)
         agentic_flow.reset_node(request.node_id)
-        
+
         await agentic_runner.start(agentic_flow)
-        
+
         logger.info(f"Started retry for trajectory {trajectory_id}")
         return agentic_flow
 
     async def execute_node(self, project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
         """Execute a specific node in a trajectory."""
-        
+
         agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
         # TODO: This is for testing purposes, the node should be executed by a worker!
         workspace = Workspace(repository=GitRepository(repo_path=str(Path.cwd())), environment=LocalBashEnvironment())
@@ -406,7 +394,7 @@ class FlowManager:
         node = agentic_flow.root.get_node_by_id(request.node_id)
         if not node:
             raise ValueError("Node not found")
-        
+
         # Clone file context from parent node to reset file context
         if node.parent and node.parent.file_context:
             node.file_context = node.parent.file_context.clone()
@@ -425,11 +413,11 @@ class FlowManager:
         from moatless.utils.moatless import get_moatless_trajectory_dir
         from moatless.workspace import Workspace
         from moatless.flow.flow import AgenticFlow
-        
+
         moatless_instance = get_moatless_instance(trajectory_id)
         if moatless_instance:
             logger.info(f"Setting up swebench for trajectory {trajectory_id}")
-            
+
             repository = await create_repository_async(moatless_instance)
             code_index = await create_index_async(moatless_instance, repository=repository)
 
@@ -439,58 +427,52 @@ class FlowManager:
                 log_dir=str(get_moatless_trajectory_dir(trajectory_id) / "testbed_logs"),
                 enable_cache=True,
             )
-            workspace = Workspace(
-                repository=repository,
-                code_index=code_index,
-                runtime=runtime,
-                legacy_workspace=True
-            )
+            workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
             return AgenticFlow.from_trajectory_id(trajectory_id, project_id, workspace=workspace)
         else:
             return AgenticFlow.from_trajectory_id(trajectory_id, project_id)
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
-        return get_trajectory_dir(project_id, trajectory_id) / 'trajectory.json'
+        return get_trajectory_dir(project_id, trajectory_id) / "trajectory.json"
 
     def get_trajectory_dir(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory directory for a run."""
         return get_trajectory_dir(project_id, trajectory_id)
 
-
     def load_trajectory_events(self, trajectory_dir: Path) -> list:
         """Load events from events.jsonl file."""
-        
-        events_path = trajectory_dir / 'events.jsonl'
+
+        events_path = trajectory_dir / "events.jsonl"
         events = []
-        
+
         if events_path.exists():
             try:
-                with open(events_path, 'r', encoding='utf-8') as f:
+                with open(events_path, "r", encoding="utf-8") as f:
                     for line in f:
                         event_data = json.loads(line)
                         # Convert ISO timestamp to milliseconds, ensuring UTC
-                        dt = datetime.fromisoformat(event_data['timestamp'])
+                        dt = datetime.fromisoformat(event_data["timestamp"])
                         if dt.tzinfo is None:
                             # If timestamp has no timezone, assume UTC
                             dt = dt.replace(tzinfo=timezone.utc)
-                        event_data['timestamp'] = int(dt.timestamp() * 1000)
+                        event_data["timestamp"] = int(dt.timestamp() * 1000)
                         events.append(TrajectoryEventDTO(**event_data))
             except Exception as e:
                 logger.error(f"Error reading events file: {e}")
-                
+
         return events
 
     def load_trajectory_from_file(self, file_path: Path) -> TrajectoryDTO:
         """Load trajectory data from a JSON file."""
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            
+
         # Convert nodes to DTO format
-        root_node = data.get('root', {})
+        root_node = data.get("root", {})
         if root_node:
-            data['root'] = convert_nodes(root_node)
-            
+            data["root"] = convert_nodes(root_node)
+
         return TrajectoryDTO(**data)
 
 

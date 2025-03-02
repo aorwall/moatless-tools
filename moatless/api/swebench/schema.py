@@ -10,6 +10,7 @@ from moatless.flow.schema import FlowConfig
 from moatless.completion.manager import ModelConfig
 from moatless.runner.runner import JobInfo
 
+
 class SWEBenchInstanceDTO(BaseModel):
     """Schema for a SWEBench instance"""
 
@@ -27,8 +28,10 @@ class SWEBenchValidationRequestDTO(BaseModel):
     max_iterations: int = Field(15, description="Maximum number of iterations")
     max_cost: Optional[float] = Field(1.0, description="Maximum cost of the validation")
 
+
 class SWEBenchValidationResponseDTO(BaseModel):
     """Schema for validation response"""
+
     run_id: str = Field(..., description="Unique identifier for the validation")
 
 
@@ -46,6 +49,7 @@ class EvaluationStatusSummaryDTO(BaseModel):
     error: int = 0
     resolved: int = 0
     failed: int = 0
+
 
 class EvaluationListItemDTO(BaseModel):
     evaluation_name: str
@@ -78,11 +82,11 @@ class EvaluationListItemDTO(BaseModel):
 
         # Create status summary
         summary = EvaluationStatusSummaryDTO()
-        
+
         for instance in evaluation.instances:
             # Get status using the helper function
             status = get_instance_status(instance)
-            
+
             # Update status summary counters
             if status == "pending":
                 summary.pending += 1
@@ -94,7 +98,7 @@ class EvaluationListItemDTO(BaseModel):
                 summary.completed += 1
             elif status == "error":
                 summary.error += 1
-            
+
             # Count resolved/failed instances
             if instance.resolved is True:
                 summary.resolved += 1
@@ -127,8 +131,9 @@ class EvaluationListItemDTO(BaseModel):
             completion_tokens=completion_tokens,
             cached_tokens=cached_tokens,
             resolved_count=resolved_count,
-            failed_count=failed_count
+            failed_count=failed_count,
         )
+
 
 def get_instance_status(instance: EvaluationInstance) -> str:
     """Get the status of an instance, including resolved/failed states."""
@@ -141,12 +146,16 @@ def get_instance_status(instance: EvaluationInstance) -> str:
     else:
         return instance.status.value
 
+
 class EvaluationListResponseDTO(BaseModel):
     """Response containing list of evaluations"""
+
     evaluations: List[EvaluationListItemDTO] = Field(..., description="List of evaluations")
+
 
 class EvaluationInstanceDTO(BaseModel):
     """DTO for evaluation instance details"""
+
     instance_id: str
     status: str
     job_status: Optional[str] = None
@@ -161,8 +170,10 @@ class EvaluationInstanceDTO(BaseModel):
     reward: Optional[int] = None
     usage: Optional[Usage] = None
 
+
 class EvaluationResponseDTO(BaseModel):
     """Response containing evaluation details"""
+
     evaluation_name: str
     dataset_name: str
     status: str
@@ -173,8 +184,10 @@ class EvaluationResponseDTO(BaseModel):
     model: ModelConfig
     instances: List[EvaluationInstanceDTO]
 
+
 class EvaluationRequestDTO(BaseModel):
     """Request for creating an evaluation"""
+
     flow_id: str
     model_id: str
     name: str
@@ -183,24 +196,31 @@ class EvaluationRequestDTO(BaseModel):
     max_iterations: int = 10
     max_expansions: int = 1
 
+
 class DatasetDTO(BaseModel):
     """DTO for dataset information"""
+
     name: str
     description: str
     instance_count: int
 
+
 class DatasetsResponseDTO(BaseModel):
     """Response containing list of datasets"""
+
     datasets: List[DatasetDTO]
 
 
 class RunnerResponseDTO(BaseModel):
     """Response containing runner status"""
+
     info: RunnerInfo
     jobs: List[JobInfo]
 
+
 class JobStatusSummaryResponseDTO(BaseModel):
     """Response DTO for job status summary."""
+
     project_id: str
     total_jobs: int
     queued_jobs: int
@@ -213,6 +233,7 @@ class JobStatusSummaryResponseDTO(BaseModel):
 
 class CancelJobsResponseDTO(BaseModel):
     """Response DTO for canceling jobs."""
+
     project_id: str
     canceled_queued_jobs: int
     canceled_running_jobs: int

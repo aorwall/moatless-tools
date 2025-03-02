@@ -18,6 +18,7 @@ _moatless_instances = {}
 
 _moatless_datasets = {}
 
+
 def load_moatless_datasets(split: str | None = None):
     global _moatless_instances
 
@@ -46,6 +47,7 @@ def get_moatless_instances(split: str | None = None):
 
 def get_moatless_instance(instance_id: str, split: str | None = None):
     return get_swebench_instance(instance_id, split)
+
 
 def get_swebench_instance(instance_id: str, split: str | None = None):
     global _moatless_instances
@@ -296,7 +298,6 @@ def find_identified_spans(
     return None
 
 
-
 def has_identified_files(
     expected_solutions: list[dict[str, list[str]]],
     actual_files_with_spans: dict[str, list[str]] | list[str],
@@ -324,7 +325,10 @@ def find_identified_files(
             return expected_file_with_spans
     return None
 
-def missing_expected_test_files(expected_test_files: list[str], actual_files_with_spans: dict[str, list[str]]) -> list[str]:
+
+def missing_expected_test_files(
+    expected_test_files: list[str], actual_files_with_spans: dict[str, list[str]]
+) -> list[str]:
     if not actual_files_with_spans:
         return []
 
@@ -333,6 +337,7 @@ def missing_expected_test_files(expected_test_files: list[str], actual_files_wit
         if expected_file not in actual_files_with_spans:
             missing_files.append(expected_file)
     return missing_files
+
 
 def calculate_estimated_context_window(instance, results):
     patch = instance.get("patch") or instance.get("golden_patch")
@@ -438,14 +443,14 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
     if not _moatless_datasets:
         datasets = {}
         dataset_dir = Path(__file__).parent / "datasets"
-        
+
         for dataset_file in dataset_dir.glob("*_dataset.json"):
             try:
-                with open(dataset_file, 'r') as f:
+                with open(dataset_file, "r") as f:
                     data = json.load(f)
                     if "name" in data and "instance_ids" in data:
                         datasets[data.get("name", "")] = {
-                            "name": data.get("name", ""),   
+                            "name": data.get("name", ""),
                             "description": data.get("description", ""),
                             "instance_count": len(data.get("instance_ids", [])),
                             "instance_ids": data.get("instance_ids", []),
@@ -455,7 +460,7 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
                 continue
 
         _moatless_datasets = datasets
-            
+
     return _moatless_datasets
 
 

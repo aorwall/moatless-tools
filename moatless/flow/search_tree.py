@@ -11,8 +11,14 @@ from moatless.exceptions import RuntimeError, RejectError
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow
-from moatless.flow.events import NodeExpandedEvent, FeedbackGeneratedEvent, NodeRewardEvent, NodeRewardFailureEvent, \
-    NodeSelectedEvent, FlowErrorEvent
+from moatless.flow.events import (
+    NodeExpandedEvent,
+    FeedbackGeneratedEvent,
+    NodeRewardEvent,
+    NodeRewardFailureEvent,
+    NodeSelectedEvent,
+    FlowErrorEvent,
+)
 from moatless.node import Node, generate_ascii_tree
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
@@ -23,6 +29,7 @@ from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.search_tree")
+
 
 class SearchTree(AgenticFlow):
     selector: BaseSelector = Field(..., description="Selector for node selection.")
@@ -69,7 +76,7 @@ class SearchTree(AgenticFlow):
         max_depth: Optional[int] = None,
         **kwargs,
     ):
-        expander = expander or Expander(max_expansions=max_expansions) # type: ignore
+        expander = expander or Expander(max_expansions=max_expansions)  # type: ignore
 
         return super().create(
             selector=selector,
@@ -150,7 +157,7 @@ class SearchTree(AgenticFlow):
 
         if finish_reason:
             node.terminal = True
-        
+
         return self.get_best_trajectory(), finish_reason
 
     @tracer.start_as_current_span("SearchTree._select")
@@ -188,7 +195,7 @@ class SearchTree(AgenticFlow):
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
             return None
-        
+
         self.maybe_persist()
 
         await self.emit_event(
@@ -199,9 +206,7 @@ class SearchTree(AgenticFlow):
         )
         # Only add feedback if this is the second expansion from this node
         if self.feedback_generator:
-            feedback_data = await self.feedback_generator.generate_feedback(
-                child_node
-            )
+            feedback_data = await self.feedback_generator.generate_feedback(child_node)
 
             if feedback_data:
                 child_node.feedback_data = feedback_data
@@ -212,7 +217,7 @@ class SearchTree(AgenticFlow):
                         node_id=child_node.node_id,
                     )
                 )
-                
+
         self.log(logger.info, f"Expanded Node{node.node_id} to new Node{child_node.node_id}")
         return child_node
 
@@ -242,7 +247,7 @@ class SearchTree(AgenticFlow):
                         logger.info,
                         f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
                     )
-                    
+
                     await self.emit_event(
                         NodeRewardEvent(
                             node_id=node.node_id,
@@ -407,10 +412,7 @@ class SearchTree(AgenticFlow):
         return self
 
     @classmethod
-    def model_validate(
-        cls,
-        obj: Any
-    ):
+    def model_validate(cls, obj: Any):
         if isinstance(obj, dict):
             obj = obj.copy()
 

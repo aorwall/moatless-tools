@@ -15,29 +15,19 @@ from swesearch.value_function.coding import CodingValueFunction
 def test_config_path(tmp_path):
     return tmp_path / "test_trees.json"
 
+
 @pytest.fixture
 def test_completion_model():
-    return BaseCompletionModel(
-        model_id="test-model",
-        api_key="test-key"
-    )
+    return BaseCompletionModel(model_id="test-model", api_key="test-key")
+
 
 def test_tree_config_save_load(test_config_path, test_completion_model):
     # Create components
     selector = DepthFirstSelector(max_trajectory_depth=25)
-    feedback_generator = DiffAgent(
-        finished_nodes_only=True,
-        max_trajectory_depth=20
-    )
-    discriminator = AgentDiscriminator(
-        completion=test_completion_model,
-        n_agents=3,
-        n_rounds=2
-    )
+    feedback_generator = DiffAgent(finished_nodes_only=True, max_trajectory_depth=20)
+    discriminator = AgentDiscriminator(completion=test_completion_model, n_agents=3, n_rounds=2)
 
-    value_function = CodingValueFunction(
-
-    )
+    value_function = CodingValueFunction()
 
     # Create config
     config = TreeConfig(
@@ -52,7 +42,7 @@ def test_tree_config_save_load(test_config_path, test_completion_model):
         max_finished_nodes=20,
         selector=selector,
         feedback_generator=feedback_generator,
-        discriminator=discriminator
+        discriminator=discriminator,
     )
 
     # Create manager with custom path
@@ -66,12 +56,12 @@ def test_tree_config_save_load(test_config_path, test_completion_model):
 
     # Verify file was created and contains expected data
     assert test_config_path.exists()
-    
+
     with open(test_config_path) as f:
         saved_configs = json.load(f)
     assert len(saved_configs) == 1
     saved_config = saved_configs[0]
-    
+
     # Verify key fields
     assert saved_config["config_id"] == "test_tree"
     assert saved_config["model_id"] == "gpt-4"
@@ -94,7 +84,7 @@ def test_tree_config_save_load(test_config_path, test_completion_model):
 
     # Load config back
     loaded_config = manager.get_tree_config("test_tree")
-    
+
     # Verify loaded config matches original
     assert loaded_config.config_id == config.config_id
     assert loaded_config.model_id == config.model_id
@@ -114,4 +104,4 @@ def test_tree_config_save_load(test_config_path, test_completion_model):
     assert loaded_config.feedback_generator.max_trajectory_depth == 20
 
     assert isinstance(loaded_config.discriminator, AgentDiscriminator)
-    assert loaded_config.discriminator.completion.model_id == "test-model" 
+    assert loaded_config.discriminator.completion.model_id == "test-model"

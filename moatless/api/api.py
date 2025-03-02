@@ -89,21 +89,22 @@ class ConnectionManager:
         if not self.active_connections:
             logger.debug("No active connections, skipping broadcast")
             return
-            
+
         logger.debug(f"Broadcasting message to {len(self.active_connections)} clients")
-        
+
         connections = self.active_connections.copy()
         disconnected = set()
-        
+
         for connection in connections:
             try:
                 await connection.send_text(json.dumps(message))
             except Exception as e:
                 logger.error(f"Failed to send message to client: {e}")
                 disconnected.add(connection)
-    
+
         for connection in disconnected:
             await self.disconnect(connection)
+
 
 manager = ConnectionManager()
 
@@ -117,13 +118,14 @@ async def handle_event(event: BaseEvent):
     if event.scope == "flow" or event.scope == "evaluation":
         await manager.broadcast_message(event.to_dict())
 
+
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
 
     load_dotenv()
 
     api = FastAPI(title="Moatless API")
-    
+
     @api.on_event("startup")
     async def startup_event():
         logger.info("Subscribing to system events")
@@ -147,7 +149,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8000",
     ]
-    
+
     api.add_middleware(
         CORSMiddleware,
         allow_origins=origins,  # Replace "*" with specific origins
@@ -163,19 +165,19 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     async def websocket_endpoint(websocket: WebSocket):
         try:
             await manager.connect(websocket)
-            
+
             while True:
                 try:
                     # Receive and process messages
                     message = await websocket.receive_text()
                     data = json.loads(message)
-                    
+
                     # Handle ping message
-                    if data.get('type') == 'ping':
-                        await websocket.send_json({'type': 'pong'})
+                    if data.get("type") == "ping":
+                        await websocket.send_json({"type": "pong"})
                     else:
                         logger.info(f"Received message: {data}")
-                    
+
                 except WebSocketDisconnect:
                     break
                 except Exception as e:
@@ -230,28 +232,29 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             return create_trajectory_dto(trajectory_data, trajectory_id=file.filename)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
-        
+
     @router.get("/runner", response_model=RunnerResponseDTO)
     async def get_runner() -> RunnerResponseDTO:
         """Get the runner"""
-        return RunnerResponseDTO(
-            info=await runner.get_runner_info(),
-            jobs=await runner.get_jobs()
-        )
+        return RunnerResponseDTO(info=await runner.get_runner_info(), jobs=await runner.get_jobs())
 
     @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
     async def get_job_status_summary(project_id: str) -> JobsStatusSummary:
         """Get a summary of job statuses for a project"""
         return await runner.get_job_status_summary(project_id)
-    
+
     @router.post("/runner/jobs/{project_id}/cancel")
     async def cancel_jobs(project_id: str, request: Request):
         """Cancel jobs for a project"""
-        data = await request.json() if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0 else None
+        data = (
+            await request.json()
+            if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0
+            else None
+        )
         trajectory_id = data.get("trajectory_id") if data else None
         await runner.cancel_job(project_id, trajectory_id)
         return {"status": "success", "message": "Job(s) canceled successfully"}
-    
+
     @router.post("/runner/jobs/{project_id}/{trajectory_id}/retry")
     async def retry_job(project_id: str, trajectory_id: str):
         """Retry a failed job"""
@@ -259,7 +262,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         if success:
             return {"status": "success", "message": "Job requeued successfully"}
         else:
-            raise HTTPException(status_code=400, detail="Failed to retry job, it may not exist or not be in a failed state")
+            raise HTTPException(
+                status_code=400, detail="Failed to retry job, it may not exist or not be in a failed state"
+            )
 
     # Include model, agent, and loop configuration routers
     router.include_router(settings_router, prefix="/settings", tags=["settings"])
@@ -290,11 +295,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             @api.get("/")
             async def serve_root(request: Request):
                 scope = request.scope
-                scope.update({
-                    "path": "/index.html",
-                    "method": "GET",
-                    "type": "http"
-                })
+                scope.update({"path": "/index.html", "method": "GET", "type": "http"})
                 return await html_app.get_response("index.html", scope)
 
             # Mount static files for assets
@@ -329,11 +330,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                     @api.get("/")
                     async def serve_root(request: Request):
                         scope = request.scope
-                        scope.update({
-                            "path": "/index.html",
-                            "method": "GET",
-                            "type": "http"
-                        })
+                        scope.update({"path": "/index.html", "method": "GET", "type": "http"})
                         return await html_app.get_response("index.html", scope)
 
                     # Mount static files for assets
@@ -365,16 +362,13 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     return api
 
+
 def main():
     import uvicorn
+
     api = create_api()
-    uvicorn.run(
-        api,
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="info"
-    )
+    uvicorn.run(api, host="0.0.0.0", port=8000, reload=False, log_level="info")
+
 
 if __name__ == "__main__":
     main()

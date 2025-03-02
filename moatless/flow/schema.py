@@ -14,26 +14,30 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+
 class FlowConfig(BaseModel):
     """Configuration for a tree search instance."""
+
     id: str = Field(..., description="Unique identifier for the flow")
     description: Optional[str] = Field(None, description="Optional description of the flow")
-    
+
     flow_type: Literal["tree", "loop"] = Field(..., description="Type of flow - tree or loop")
-    
+
     # Common fields for both types
     max_iterations: int = Field(100, description="Maximum number of iterations")
     max_cost: float = Field(4.0, description="Maximum cost allowed in USD")
     agent_id: Optional[str] = Field(None, description="ID of the agent to use")
-    artifact_handlers: List[ArtifactHandler] = Field(default_factory=list, description="List of artifact handlers used by the flow")
-    
+    artifact_handlers: List[ArtifactHandler] = Field(
+        default_factory=list, description="List of artifact handlers used by the flow"
+    )
+
     # Tree-specific fields
     max_expansions: Optional[int] = Field(3, description="Maximum number of expansions per iteration")
     max_depth: Optional[int] = Field(20, description="Maximum depth of the tree")
     min_finished_nodes: Optional[int] = Field(None, description="Minimum number of finished nodes required")
     max_finished_nodes: Optional[int] = Field(None, description="Maximum number of finished nodes allowed")
     reward_threshold: Optional[float] = Field(None, description="Minimum reward threshold for accepting nodes")
-    
+
     # Component references
     selector: Optional[BaseSelector] = None
     expander: Optional[Expander] = None
@@ -47,18 +51,13 @@ class FlowConfig(BaseModel):
         if self.description:
             components.append(f"Description: {self.description}")
 
-        components.extend([
-            f"Type: {self.flow_type}",
-            f"Max iterations: {self.max_iterations}",
-            f"Max cost: ${self.max_cost:.2f}"
-        ])
+        components.extend(
+            [f"Type: {self.flow_type}", f"Max iterations: {self.max_iterations}", f"Max cost: ${self.max_cost:.2f}"]
+        )
 
         if self.flow_type == "tree":
-            components.extend([
-                f"Max expansions: {self.max_expansions}",
-                f"Max depth: {self.max_depth}"
-            ])
-            
+            components.extend([f"Max expansions: {self.max_expansions}", f"Max depth: {self.max_depth}"])
+
             if self.min_finished_nodes:
                 components.append(f"Min finished nodes: {self.min_finished_nodes}")
             if self.max_finished_nodes:
@@ -95,12 +94,12 @@ class FlowConfig(BaseModel):
         }
     }
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def validate_components(cls, data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(data, dict):
             data = data.copy()
-            
+
             if "selector" in data and data["selector"]:
                 data["selector"] = BaseSelector.model_validate(data["selector"])
             if "value_function" in data and data["value_function"]:
@@ -110,40 +109,50 @@ class FlowConfig(BaseModel):
             if "discriminator" in data and data["discriminator"]:
                 data["discriminator"] = BaseDiscriminator.model_validate(data["discriminator"])
             if "artifact_handlers" in data and data["artifact_handlers"]:
-                data["artifact_handlers"] = [ArtifactHandler.model_validate(handler) for handler in data["artifact_handlers"]]
+                data["artifact_handlers"] = [
+                    ArtifactHandler.model_validate(handler) for handler in data["artifact_handlers"]
+                ]
 
         return data
 
     def model_dump(self, *args, **kwargs) -> Dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
-        
+
         if self.selector:
             selector_data = self.selector.model_dump()
             selector_data["selector_class"] = f"{self.selector.__class__.__module__}.{self.selector.__class__.__name__}"
             data["selector"] = selector_data
-            
+
         if self.value_function:
             value_data = self.value_function.model_dump()
-            value_data["value_function_class"] = f"{self.value_function.__class__.__module__}.{self.value_function.__class__.__name__}"
+            value_data["value_function_class"] = (
+                f"{self.value_function.__class__.__module__}.{self.value_function.__class__.__name__}"
+            )
             data["value_function"] = value_data
-            
+
         if self.feedback_generator:
             feedback_data = self.feedback_generator.model_dump()
-            feedback_data["feedback_generator_class"] = f"{self.feedback_generator.__class__.__module__}.{self.feedback_generator.__class__.__name__}"
+            feedback_data["feedback_generator_class"] = (
+                f"{self.feedback_generator.__class__.__module__}.{self.feedback_generator.__class__.__name__}"
+            )
             data["feedback_generator"] = feedback_data
 
         if self.discriminator:
             discriminator_data = self.discriminator.model_dump()
-            discriminator_data["discriminator_class"] = f"{self.discriminator.__class__.__module__}.{self.discriminator.__class__.__name__}"
+            discriminator_data["discriminator_class"] = (
+                f"{self.discriminator.__class__.__module__}.{self.discriminator.__class__.__name__}"
+            )
             data["discriminator"] = discriminator_data
 
         if self.artifact_handlers:
             data["artifact_handlers"] = [handler.model_dump() for handler in self.artifact_handlers]
-            
+
         return data
+
 
 class FlowStatus(str, Enum):
     """Enum for system status values."""
+
     CREATED = "created"
     PENDING = "pending"
     RUNNING = "running"
@@ -152,8 +161,10 @@ class FlowStatus(str, Enum):
     CANCELLED = "cancelled"
     ERROR = "error"
 
+
 class RunAttempt(BaseModel):
     """Information about a single run attempt"""
+
     attempt_id: int
     started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: Optional[datetime] = None
@@ -165,6 +176,7 @@ class RunAttempt(BaseModel):
 
 class FlowStatusInfo(BaseModel):
     """System status information"""
+
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     status: FlowStatus = FlowStatus.CREATED
@@ -178,10 +190,7 @@ class FlowStatusInfo(BaseModel):
 
     def start_new_attempt(self) -> RunAttempt:
         """Start a new run attempt"""
-        attempt = RunAttempt(
-            attempt_id=len(self.run_history),
-            metadata=self.metadata
-        )
+        attempt = RunAttempt(attempt_id=len(self.run_history), metadata=self.metadata)
         self.run_history.append(attempt)
         self.current_attempt = attempt.attempt_id
         return attempt
@@ -192,7 +201,9 @@ class FlowStatusInfo(BaseModel):
             return self.run_history[self.current_attempt]
         return None
 
-    def complete_current_attempt(self, status: str = "completed", error: Optional[str] = None, error_trace: Optional[str] = None):
+    def complete_current_attempt(
+        self, status: str = "completed", error: Optional[str] = None, error_trace: Optional[str] = None
+    ):
         """Complete the current attempt"""
         if attempt := self.get_current_attempt():
             attempt.finished_at = datetime.now(timezone.utc)
@@ -203,6 +214,7 @@ class FlowStatusInfo(BaseModel):
 
 class TrajectoryEventDTO(BaseModel):
     """Data transfer object for trajectory events."""
+
     id: str
     scope: str
     event_type: str
@@ -211,8 +223,10 @@ class TrajectoryEventDTO(BaseModel):
     trajectory_id: Optional[str] = None
     data: Dict[str, Any] = Field(default_factory=dict)
 
+
 class TrajectoryListItem(BaseModel):
     """List item for trajectories."""
+
     project_id: str
     trajectory_id: str
     status: str
@@ -224,22 +238,30 @@ class TrajectoryListItem(BaseModel):
     cost: Optional[float] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+
 class StartTrajectoryRequest(BaseModel):
     """Request to start a trajectory."""
+
     agent_id: str
     model_id: str
     message: Optional[str] = None
 
+
 class RetryTrajectoryRequest(BaseModel):
     """Request to retry a trajectory."""
+
     node_id: str
+
 
 class ExecuteNodeRequest(BaseModel):
     """Request to execute a node."""
+
     node_id: int
+
 
 class TrajectoryResponseDTO(BaseModel):
     """Data transfer object for trajectory responses."""
+
     id: str
     trajectory_id: str
     project_id: str

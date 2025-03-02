@@ -47,21 +47,21 @@ class FileArtifact(Artifact):
                 data={
                     "mime_type": self.mime_type,
                     "content": None,
-                    "parsed_content": self.parsed_content if hasattr(self, 'parsed_content') else None,
-                    "file_path": str(file_path)
-                }
+                    "parsed_content": self.parsed_content if hasattr(self, "parsed_content") else None,
+                    "file_path": str(file_path),
+                },
             )
 
         # For PDFs, return raw bytes as base64
-        if self.mime_type == 'application/pdf':
-            content_b64 = base64.b64encode(content).decode('utf-8')
-        elif self.mime_type.startswith('image/'):
+        if self.mime_type == "application/pdf":
+            content_b64 = base64.b64encode(content).decode("utf-8")
+        elif self.mime_type.startswith("image/"):
             # For images, optimize before sending
             try:
                 image = Image.open(io.BytesIO(content))
                 # Convert RGBA to RGB if needed
-                if image.mode in ('RGBA', 'LA'):
-                    background = Image.new('RGB', image.size, (255, 255, 255))
+                if image.mode in ("RGBA", "LA"):
+                    background = Image.new("RGB", image.size, (255, 255, 255))
                     background.paste(image, mask=image.split()[-1])
                     image = background
                 # Optimize size if needed
@@ -69,22 +69,22 @@ class FileArtifact(Artifact):
                 image.thumbnail(max_size, Image.Resampling.LANCZOS)
                 # Save as optimized JPEG
                 output = io.BytesIO()
-                image.save(output, format='JPEG', quality=85, optimize=True)
-                content_b64 = base64.b64encode(output.getvalue()).decode('utf-8')
+                image.save(output, format="JPEG", quality=85, optimize=True)
+                content_b64 = base64.b64encode(output.getvalue()).decode("utf-8")
             except Exception as e:
                 logger.warning(f"Failed to optimize image {self.id}: {e}")
-                content_b64 = base64.b64encode(content).decode('utf-8')
-        elif self.mime_type.startswith('text/'):
+                content_b64 = base64.b64encode(content).decode("utf-8")
+        elif self.mime_type.startswith("text/"):
             # For text files, decode and return as UTF-8
             try:
-                text_content = content.decode('utf-8')
-                content_b64 = base64.b64encode(text_content.encode('utf-8')).decode('utf-8')
+                text_content = content.decode("utf-8")
+                content_b64 = base64.b64encode(text_content.encode("utf-8")).decode("utf-8")
             except UnicodeDecodeError:
                 # Fallback to raw bytes if not valid UTF-8
-                content_b64 = base64.b64encode(content).decode('utf-8')
+                content_b64 = base64.b64encode(content).decode("utf-8")
         else:
             # Default handling for other file types
-            content_b64 = base64.b64encode(content).decode('utf-8')
+            content_b64 = base64.b64encode(content).decode("utf-8")
 
         return ArtifactResponse(
             id=self.id,
@@ -97,9 +97,9 @@ class FileArtifact(Artifact):
             data={
                 "mime_type": self.mime_type,
                 "content": content_b64,
-                "parsed_content": self.parsed_content if hasattr(self, 'parsed_content') else None,
-                "file_path": str(file_path)
-            }
+                "parsed_content": self.parsed_content if hasattr(self, "parsed_content") else None,
+                "file_path": str(file_path),
+            },
         )
 
 
@@ -158,7 +158,7 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
 
     def get_file_path(self, artifact_id: str) -> Path:
         return self.trajectory_dir / "files" / artifact_id
-    
+
     def get_artifact_class(self) -> Type[FileArtifact]:
         return FileArtifact
 
@@ -254,7 +254,7 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
         """Extract text content from PDF and return both raw PDF and parsed text"""
         file_name = Path(file_path).name
         pdf_content = f"Contents of file {file_name}:\n\n"
-        
+
         try:
             with fitz.open(stream=file_content, filetype="pdf") as doc:
                 # Add metadata if available
@@ -272,10 +272,10 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
                     text = page.get_text().strip()
                     if text:
                         pdf_content += f"\n--- Page {page_num} ---\n{text}\n"
-                
+
                 # Add page count
                 pdf_content += f"\nTotal Pages: {len(doc)}\n"
-                
+
         except Exception as e:
             logger.error(f"Error processing PDF {file_name}: {str(e)}")
             pdf_content += f"\nError: Failed to fully process PDF content. Error: {str(e)}"

@@ -129,7 +129,9 @@ class Observation(BaseModel):
     )
     properties: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
-    artifact_changes: Optional[List[ArtifactChange]] = Field(default_factory=list, description="Artifact changes created when executing the action")
+    artifact_changes: Optional[List[ArtifactChange]] = Field(
+        default_factory=list, description="Artifact changes created when executing the action"
+    )
 
     @classmethod
     def create(cls, message: str, terminal: bool = False):
@@ -140,7 +142,6 @@ class RewardScaleEntry(BaseModel):
     min_value: int
     max_value: int
     description: str
-
 
 
 class ActionProperty(BaseModel):
@@ -156,4 +157,3 @@ class ActionSchema(BaseModel):
     type: str = "object"
     action_class: str
     properties: Dict[str, ActionProperty]
-

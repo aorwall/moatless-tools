@@ -49,24 +49,29 @@ class ModelConfigUpdateDTO(BaseModel):
     )
 
 
-
 class ModelsResponseDTO(BaseModel):
     """Response model for listing all models"""
 
     models: List[ModelConfig] = Field(..., description="List of model configurations")
 
+
 class BaseModelsResponseDTO(BaseModel):
     """Response model for listing base models"""
+
     models: List[ModelConfig] = Field(..., description="List of base model configurations")
+
 
 class AddModelFromBaseDTO(BaseModel):
     """Request model for adding a new model from a base model"""
+
     base_model_id: str = Field(..., description="ID of the base model to copy from")
     new_model_id: str = Field(..., description="ID for the new model")
     updates: Optional[ModelConfigUpdateDTO] = Field(None, description="Optional configuration updates to apply")
 
+
 class CreateModelDTO(BaseModel):
     """Request model for creating a new model from scratch"""
+
     id: str = Field(..., description="ID for the new model")
     model: str = Field(..., description="LiteLLM model identifier (e.g. deepseek-chat)")
     model_base_url: Optional[str] = Field(None, description="Base URL for the model API (optional)")

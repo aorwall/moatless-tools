@@ -1,4 +1,3 @@
-
 from dataclasses import Field
 from typing import Dict
 from moatless.file_context import ContextFile, FileContext
@@ -9,7 +8,6 @@ from moatless.repository.repository import Repository
 
 
 class ContextFileArtifact(Artifact):
-
     file_context: FileContext = Field()
 
 
@@ -17,6 +15,7 @@ class FileContextArtifactHandler(ArtifactHandler):
     """
     Handle the legacy file context
     """
+
     type: str = "file_context"
 
     _repository: Repository = PrivateAttr(None)
@@ -32,9 +31,11 @@ class FileContextArtifactHandler(ArtifactHandler):
         current_node_id = current_node_id.get()
         if not current_node_id:
             raise RuntimeError("No current node id found")
-        
+
         if current_node_id not in self.context_by_node_id:
-            self.context_by_node_id[current_node_id] = FileContext.from_dir(self._repository.get_node(current_node_id).path)
+            self.context_by_node_id[current_node_id] = FileContext.from_dir(
+                self._repository.get_node(current_node_id).path
+            )
 
         return ContextFileArtifact(context_file=self.context_by_node_id[current_node_id])
 
@@ -43,4 +44,3 @@ class FileContextArtifactHandler(ArtifactHandler):
 
     async def update(self, artifact: ContextFileArtifact) -> None:
         pass
-

@@ -88,7 +88,6 @@ class Usage(BaseModel):
         cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
 
         try:
-
             cost = litellm.completion_cost(completion_response=completion_response, model=model)
         except Exception:
             # If cost calculation fails, fall back to calculating it manually

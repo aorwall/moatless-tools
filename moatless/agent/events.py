@@ -9,11 +9,13 @@ class AgentEvent(BaseEvent):
     scope: str = "agent"
     agent_id: str
     node_id: int
-    
+
+
 class RunAgentEvent(AgentEvent):
     """Emitted when an agent starts processing"""
 
     event_type: str = "run"
+
 
 class AgentErrorEvent(AgentEvent):
     """Emitted when an agent fails to create an action"""
@@ -28,6 +30,7 @@ class ActionEvent(AgentEvent):
     scope: str = "action"
     action_name: Optional[str] = None
     action_params: Optional[Dict] = None
+
 
 class ActionCreatedEvent(ActionEvent):
     """Emitted when an agent creates an action"""

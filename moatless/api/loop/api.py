@@ -26,28 +26,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # You can use an environment variable to override this path if needed.
-ARTIFACTS_DIR = os.getenv('ARTIFACTS_DIR', './artifacts')
+ARTIFACTS_DIR = os.getenv("ARTIFACTS_DIR", "./artifacts")
+
 
 class AttachmentData(BaseModel):
     name: str = Field(description="Original filename of the attachment")
     data: str = Field(description="Base64-encoded data URI of the attachment")
+
 
 class LoopRequest(BaseModel):
     agent_id: str = Field(description="The agent to use for the loop")
     model_id: str = Field(description="The model to use for the loop")
     message: str = Field(description="The message to start the loop with")
     attachments: Optional[List[AttachmentData]] = Field(
-        default=None,
-        description="List of attachments with filename and base64 data"
+        default=None, description="List of attachments with filename and base64 data"
     )
     repository_path: str = Field(description="The path to the repository to use for the loop")
+
 
 @router.post("", response_model=LoopResponseDTO)
 async def start_loop(request: LoopRequest):
     try:
         run_id = f"loop_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         trajectory_dir = get_moatless_trajectory_dir(run_id)
-        
+
         repository = None
         environment = None
         if request.repository_path:
@@ -56,21 +58,21 @@ async def start_loop(request: LoopRequest):
 
         workspace = Workspace(repository=repository, environment=environment)
         file_handler = FileArtifactHandler(trajectory_dir=trajectory_dir)
-        
+
         artifact_changes = []
 
         if request.attachments:
             for attachment in request.attachments:
-                file_data = attachment.data.split(',')[1]  # Remove the data URI prefix
+                file_data = attachment.data.split(",")[1]  # Remove the data URI prefix
                 file_bytes = base64.b64decode(file_data)
                 mime_type = mimetypes.guess_type(attachment.name)[0]
-                
+
                 artifact = FileArtifact(
                     id=attachment.name,
                     name=attachment.name,
                     file_path=attachment.name,
                     content=file_bytes,
-                    mime_type=mime_type
+                    mime_type=mime_type,
                 )
                 await file_handler.create(artifact)
                 artifact_changes.append(
@@ -91,14 +93,14 @@ async def start_loop(request: LoopRequest):
         agent.completion_model = completion_model
 
         trajectory_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         loop = AgenticLoop.create(
             message=request.message,
             trajectory_id=trajectory_id,
             project_id=f"{request.agent_id}_{request.model_id}",
             agent=agent,
             max_iterations=15,
-            max_cost=1.0
+            max_cost=1.0,
         )
 
         loop.persist()
@@ -106,4 +108,4 @@ async def start_loop(request: LoopRequest):
         return LoopResponseDTO(trajectory_id=trajectory_id, project_id=f"{request.agent_id}_{request.model_id}")
     except Exception as e:
         logger.exception(f"Failed to start loop: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

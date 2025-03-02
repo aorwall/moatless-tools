@@ -303,7 +303,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         view_code_args = ViewCodeArgs(thoughts=args.thoughts, files=[codespan])
         return await self._view_code.execute(view_code_args, file_context=file_context)
 
-
     async def _insert(self, file_context: FileContext, path: Path, insert_line: int, new_str: str) -> Observation:
         context_file = file_context.get_context_file(str(path))
         if not context_file:
@@ -376,7 +375,6 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         for span_id in span_ids:
             list_str += f" * {span_id}\n"
         return list_str
-
 
 
 TRUNCATED_MESSAGE: str = "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"

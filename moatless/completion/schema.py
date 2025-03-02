@@ -124,6 +124,7 @@ class NameDescriptor:
             return cls.model_config["title"]
         return cls.__name__
 
+
 class ResponseSchema(BaseModel):
     name: ClassVar[NameDescriptor] = NameDescriptor()
 

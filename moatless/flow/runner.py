@@ -44,4 +44,5 @@ class AgenticRunner:
             return None
         return entry[0]
 
+
 agentic_runner = AgenticRunner.get_instance()

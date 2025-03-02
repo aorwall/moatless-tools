@@ -27,18 +27,21 @@ logger = logging.getLogger(__name__)
 
 def _convert_to_dto(agent_id: str, agent: ActionAgent) -> AgentConfigDTO:
     """Convert a config dict to a DTO."""
-    actions = [ActionConfigDTO(title=action.name, properties=action.model_dump(exclude={"action_class"})) for action in agent.actions]
+    actions = [
+        ActionConfigDTO(title=action.name, properties=action.model_dump(exclude={"action_class"}))
+        for action in agent.actions
+    ]
     return AgentConfigDTO(id=agent_id, system_prompt=agent.system_prompt, actions=actions)
 
 
 router = APIRouter()
+
 
 @router.get("/available-actions", response_model=ActionsResponseDTO)
 async def list_available_actions():
     """Get all available actions with their schema."""
     actions = Action.get_available_actions()
     return ActionsResponseDTO(actions=actions)
-
 
 
 @router.get("", response_model=AgentConfigsResponseDTO)
@@ -74,7 +77,6 @@ async def update_agent_config_api(agent_id: str, update: AgentConfigUpdateDTO):
     logger.info(f"Updating agent config {agent_id} with {len(update.actions)} actions")
     agent = _create_agent(agent_id=agent_id, action_configs=update.actions, system_prompt=update.system_prompt)
     update_agent(agent)
-   
 
 
 @router.delete("/{agent_id}")

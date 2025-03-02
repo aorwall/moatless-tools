@@ -1,7 +1,6 @@
 from typing import Any, List, Optional
 
 
-
 class MoatlessError(Exception):
     """Base exception class for all Moatless exceptions."""
 

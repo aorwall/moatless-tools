@@ -22,7 +22,7 @@ class Workspace(BaseModel):
 
     _repository: Repository = PrivateAttr(default=None)
     _code_index: CodeIndex = PrivateAttr(default=None)
-    _runtime: RuntimeEnvironment = PrivateAttr(default=None) # TODO: Replace this with BaseEnvironment
+    _runtime: RuntimeEnvironment = PrivateAttr(default=None)  # TODO: Replace this with BaseEnvironment
     _environment: BaseEnvironment = PrivateAttr(default=None)
 
     def __init__(
@@ -32,12 +32,12 @@ class Workspace(BaseModel):
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
         environment: BaseEnvironment | None = None,
-        **data
+        **data,
     ):
         super().__init__(**data)
 
         if not artifact_handlers:
-            artifact_handlers = ArtifactHandler.initiate_handlers()           
+            artifact_handlers = ArtifactHandler.initiate_handlers()
             self.artifact_handlers = {handler.type: handler for handler in artifact_handlers}
 
         self._environment = environment
@@ -76,7 +76,6 @@ class Workspace(BaseModel):
 
         handler = self.artifact_handlers[artifact_type]
         return handler.read(artifact_id)
-
 
     def get_artifacts_by_type(self, artifact_type: str) -> List[Artifact]:
         handler = self._get_handler(artifact_type)

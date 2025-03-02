@@ -46,7 +46,9 @@ You must respond with only a JSON object that match the following json_schema:\n
 Make sure to return an instance of the JSON, not the schema itself.""")
         return system_prompt
 
-    async def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    async def _validate_completion(
+        self, completion_response: Any
+    ) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
         """Validate and parse JSON completion response.
 
         This method:

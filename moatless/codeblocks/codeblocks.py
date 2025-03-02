@@ -86,7 +86,7 @@ class CodeBlockType(Enum):
     def from_string(cls, tag: str) -> Optional["CodeBlockType"]:
         if not tag.startswith("definition"):
             return None
-            
+
         return TAG_TO_BLOCK_TYPE.get(tag)
 
 

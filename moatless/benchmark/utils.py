@@ -18,6 +18,7 @@ _moatless_instances = {}
 
 _moatless_datasets = {}
 
+
 def load_moatless_datasets(split: str | None = None):
     global _moatless_instances
 
@@ -186,7 +187,6 @@ def get_file_spans_from_patch(repository: FileRepository, patch: str) -> dict[st
 
         if file is None:
             continue
-        
 
         if file.file_path not in expected_files_with_spans:
             expected_files_with_spans[file.file_path] = []
@@ -402,14 +402,14 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
     if not _moatless_datasets:
         datasets = {}
         dataset_dir = Path(__file__).parent / "datasets"
-        
+
         for dataset_file in dataset_dir.glob("*_dataset.json"):
             try:
-                with open(dataset_file, 'r') as f:
+                with open(dataset_file, "r") as f:
                     data = json.load(f)
                     if "name" in data and "instance_ids" in data:
                         datasets[data.get("name", "")] = {
-                            "name": data.get("name", ""),   
+                            "name": data.get("name", ""),
                             "description": data.get("description", ""),
                             "instance_count": len(data.get("instance_ids", [])),
                             "instance_ids": data.get("instance_ids", []),
@@ -419,7 +419,7 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
                 continue
 
         _moatless_datasets = datasets
-            
+
     return _moatless_datasets
 
 

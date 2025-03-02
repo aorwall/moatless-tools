@@ -8,8 +8,10 @@ from moatless.benchmark.swebench.utils import repository_exists
 
 logger = logging.getLogger(__name__)
 
+
 class InvalidStateTransition(Exception):
     pass
+
 
 class StateManager:
     """
@@ -56,10 +58,7 @@ class StateManager:
         logger.info(f"Unregistered repo setup for instance {instance_id} on repo {repo}")
 
     async def set_status(
-        self, 
-        instance: EvaluationInstance, 
-        new_status: InstanceStatus, 
-        error: Optional[str] = None
+        self, instance: EvaluationInstance, new_status: InstanceStatus, error: Optional[str] = None
     ) -> None:
         """
         Central method to handle instance state transitions, with built-in validation.
@@ -69,9 +68,7 @@ class StateManager:
         allowed = self.ALLOWED_TRANSITIONS.get(old_status, set())
         if new_status not in allowed and old_status not in (InstanceStatus.EVALUATED, InstanceStatus.ERROR):
             # EVALUATED / ERROR are effectively terminal, so we rarely move from there
-            raise InvalidStateTransition(
-                f"Cannot transition {old_status} -> {new_status}. Allowed: {allowed}"
-            )
+            raise InvalidStateTransition(f"Cannot transition {old_status} -> {new_status}. Allowed: {allowed}")
 
         instance.status = new_status
 

@@ -13,10 +13,10 @@ from moatless.component import MoatlessComponent
 logger = logging.getLogger(__name__)
 
 # TypeVar for ValueFunction types
-VF = TypeVar('VF', bound='BaseValueFunction')
+VF = TypeVar("VF", bound="BaseValueFunction")
+
 
 class BaseValueFunction(MoatlessComponent[VF]):
-
     model_config = {
         "from_attributes": True,
     }
@@ -34,5 +34,5 @@ class BaseValueFunction(MoatlessComponent[VF]):
         return "moatless.value_function"
 
     @classmethod
-    def _get_base_class(cls) -> Type['BaseValueFunction']:
+    def _get_base_class(cls) -> Type["BaseValueFunction"]:
         return BaseValueFunction

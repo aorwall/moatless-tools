@@ -172,7 +172,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
         base_prompt = super()._generate_few_shot_examples()
         if not base_prompt:
             return ""
-            
+
         few_shot_examples = []
         for schema in self._response_schema:
             if hasattr(schema, "get_few_shot_examples"):
@@ -185,5 +185,5 @@ class ToolCallCompletionModel(BaseCompletionModel):
                         }
                         prompt = f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
                         few_shot_examples.append(prompt)
-                        
+
         return base_prompt + "\n".join(few_shot_examples)

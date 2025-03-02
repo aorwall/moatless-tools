@@ -203,7 +203,7 @@ class ViewCode(Action, IdentifyMixin):
             view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
 
         added_new_spans = file_context.add_file_context(view_context)
-        
+
         if view_context.is_empty():
             message = f"\nThe specified code spans wasn't found."
             properties["fail_reason"] = "no_spans_found"

@@ -16,6 +16,7 @@ from moatless.value_function.base import BaseValueFunction
 
 from moatless.runner.runner import JobStatus
 
+
 class DateTimeEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
@@ -106,6 +107,7 @@ class EvaluationStatus(str, Enum):
 
 class EvaluationEvent(BaseEvent):
     """Event emitted by the evaluation process"""
+
     scope: str = "evaluation"
     data: Any
 
@@ -172,6 +174,7 @@ class EvaluationInstance(BaseModel):
             data["benchmark_result"] = self.benchmark_result.model_dump(**kwargs)
         return data
 
+
 class Evaluation(BaseModel):
     model_config = ConfigDict(
         json_encoders={
@@ -182,14 +185,14 @@ class Evaluation(BaseModel):
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
-        
+
     flow_id: str = Field(..., description="ID of the flow configuration to use for the evaluation")
     model_id: str = Field(..., description="ID of the model to use for the evaluation")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the evaluation was created",
     )
-    
+
     started_at: Optional[datetime] = Field(default=None, description="When the evaluation started")
     completed_at: Optional[datetime] = Field(default=None, description="When the evaluation finished")
     status: EvaluationStatus = Field(default=EvaluationStatus.PENDING, description="Current status of the evaluation")
@@ -221,14 +224,15 @@ class Evaluation(BaseModel):
                 "evaluated": evaluated,
                 "pending": pending,
                 "errors": errors,
-                "total": len(self.instances)
-            }
+                "total": len(self.instances),
+            },
         }
 
     def model_dump(self, *args, **kwargs) -> dict:
         data = super().model_dump(*args, **kwargs)
         data["instances"] = [i.model_dump(**kwargs) for i in self.instances]
         return data
+
 
 class EvaluationDatasetSplit(BaseModel):
     model_config = ConfigDict(
@@ -241,4 +245,3 @@ class EvaluationDatasetSplit(BaseModel):
     name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
     description: str = Field(description="Description of what this split represents")
     instance_ids: list[str] = Field(description="List of instance IDs that belong to this split")
-

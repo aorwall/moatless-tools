@@ -72,6 +72,7 @@ class SemanticSearchArgs(SearchBaseArgs):
             ),
         ]
 
+
 class SemanticSearch(SearchBaseAction):
     args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
 
@@ -103,4 +104,3 @@ class SemanticSearch(SearchBaseAction):
             ]
         )
         return criteria
-

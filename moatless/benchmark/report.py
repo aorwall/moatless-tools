@@ -363,7 +363,6 @@ def to_result(
     instance_id: str | None = None,
     external_result: dict | None = None,
 ) -> BenchmarkResult:
-
     instance = get_moatless_instance(instance_id)
 
     if not eval_report:

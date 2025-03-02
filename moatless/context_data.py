@@ -18,14 +18,16 @@ def get_moatless_dir() -> Path:
         dir_path = Path(os.getenv("MOATLESS_DIR", ".moatless"))
     else:
         dir_path = Path(dir_value)
-        
+
     if not dir_path.exists():
         dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
 
+
 def get_projects_dir() -> Path:
     """Get the moatless projects directory."""
     return get_moatless_dir() / "projects"
+
 
 def get_project_dir(project_id: str | None = None) -> Path:
     """Get the moatless project directory."""
@@ -39,7 +41,7 @@ def get_project_dir(project_id: str | None = None) -> Path:
         project_dir = get_moatless_dir() / "projects" / project_id
     else:
         project_dir = get_moatless_dir() / "projects" / "default"
-    
+
     if not project_dir.exists():
         project_dir.mkdir(parents=True, exist_ok=True)
     return project_dir
@@ -59,4 +61,3 @@ def get_trajectory_dir(trajectory_id: str | None = None, project_id: str | None 
     if not trajectory_dir.exists():
         trajectory_dir.mkdir(parents=True, exist_ok=True)
     return trajectory_dir
-

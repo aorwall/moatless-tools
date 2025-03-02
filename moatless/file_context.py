@@ -887,7 +887,7 @@ class FileContext(BaseModel):
             raise ValueError("Repository is not set")
         return self._repo
 
-    @workspace.setter 
+    @workspace.setter
     def workspace(self, workspace: Workspace):
         self._repo = workspace.repository
         self._runtime = workspace.runtime
@@ -1268,12 +1268,11 @@ class FileContext(BaseModel):
                 context_file = self.get_context_file(file_path)
 
             if context_file:
-
                 # Copy show_all_spans flag if either context has it enabled
                 if not context_file.show_all_spans and other_file.show_all_spans:
                     added_new_spans = True
                     context_file.show_all_spans = other_file.show_all_spans
-                else: 
+                else:
                     for span in other_file.spans:
                         if context_file.add_span(span.span_id):
                             added_new_spans = True
@@ -1445,12 +1444,12 @@ class FileContext(BaseModel):
         for file_path, test_file in included_test_files.items():
             file_results = test_file.test_results
             all_results.extend(file_results)
-            
+
             # Calculate stats for this file
             file_failure_count = sum(1 for r in file_results if r.status == TestStatus.FAILED)
             file_error_count = sum(1 for r in file_results if r.status == TestStatus.ERROR)
             file_passed_count = len(file_results) - file_failure_count - file_error_count
-            
+
             # Add to per-file summary
             per_file_summary.append(
                 f"* {file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors"
@@ -1460,14 +1459,16 @@ class FileContext(BaseModel):
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         passed_count = len(all_results) - failure_count - error_count
-        
+
         # Combine per-file summary with overall summary
         summary = "\n".join(per_file_summary)
         summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors."
-        
+
         return summary
 
-    def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[List[str]] = None) -> str:
+    def get_test_failure_details(
+        self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[List[str]] = None
+    ) -> str:
         """
         Returns detailed output for each failed or errored test result.
         For long messages, shows the first and last portions with middle truncated.
