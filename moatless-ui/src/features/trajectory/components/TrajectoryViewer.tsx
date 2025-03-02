@@ -1,6 +1,12 @@
-import { useStartTrajectory } from "@/features/trajectory/hooks/useStartTrajectory.ts";
-import { Chat } from "@/lib/components/chat/Chat.tsx";
+import { Artifacts } from "@/features/trajectory/components/Artifacts.tsx";
 import { Timeline } from "@/features/trajectory/components/index.ts";
+import { TimelineItemDetails } from "@/features/trajectory/components/TimelineItemDetails.tsx";
+import { TrajectoryError } from "@/features/trajectory/components/TrajectoryError.tsx";
+import { TrajectoryEvents } from "@/features/trajectory/components/TrajectoryEvents.tsx";
+import { TrajectoryLogs } from "@/features/trajectory/components/TrajectoryLogs.tsx";
+import { TrajectoryStatus } from "@/features/trajectory/components/TrajectoryStatus.tsx";
+import { useTrajectorySubscription } from "@/features/trajectory/hooks/useTrajectorySubscription";
+import { Chat } from "@/lib/components/chat/Chat.tsx";
 import { Button } from "@/lib/components/ui/button.tsx";
 import {
   ResizableHandle,
@@ -9,28 +15,18 @@ import {
 } from "@/lib/components/ui/resizable.tsx";
 import { ScrollArea } from "@/lib/components/ui/scroll-area.tsx";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/lib/components/ui/tabs.tsx";
-import { useWebSocketStore } from "@/lib/stores/websocketStore.ts";
 import { Trajectory } from "@/lib/types/trajectory.ts";
 import { cn } from "@/lib/utils.ts";
-import { Artifacts } from "@/features/trajectory/components/Artifacts.tsx";
-import { TimelineItemDetails } from "@/features/trajectory/components/TimelineItemDetails.tsx";
-import { TrajectoryError } from "@/features/trajectory/components/TrajectoryError.tsx";
-import { TrajectoryEvents } from "@/features/trajectory/components/TrajectoryEvents.tsx";
-import { TrajectoryLogs } from "@/features/trajectory/components/TrajectoryLogs.tsx";
-import { TrajectoryStatus } from "@/features/trajectory/components/TrajectoryStatus.tsx";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, ChevronDown, ChevronUp, Clock, List, MessageSquare, Package, Terminal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 interface TrajectoryViewerProps {
   trajectory: Trajectory;
-  startInstance?: () => void;
 }
 
-export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewerProps) {
+export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
-  const { subscribe } = useWebSocketStore();
-  const startTrajectory = useStartTrajectory();
   const [showBottomPanel, setShowBottomPanel] = useState(() => {
     // Try to get from localStorage, default to true if not found
     const saved = localStorage.getItem('trajectoryViewerShowBottomPanel');
@@ -51,24 +47,21 @@ export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewer
     localStorage.setItem('trajectoryViewerActiveTab', activeBottomTab);
   }, [activeBottomTab]);
 
-  // Function to start the trajectory
-  const handleStartTrajectory = async () => {
-    startTrajectory.mutate({
-      projectId: trajectory.project_id,
-      trajectoryId: trajectory.trajectory_id
-    });
-  };
-
-  // Handle websocket subscription
-  useEffect(() => {
-    const unsubscribe = subscribe(`trajectory.${trajectory.id}`, (message) => {
-      if (message.type === 'event') {
-        queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
-      }
-    });
-
-    return () => unsubscribe();
-  }, [trajectory.id, subscribe, queryClient]);
+  // Subscribe to updates for this trajectory and its project
+  useTrajectorySubscription(
+    trajectory.id,
+    trajectory.project_id,
+    {
+      onEvent: (message) => {
+        if (message.type === 'event') {
+          queryClient.invalidateQueries({ queryKey: ["trajectory", trajectory.id] });
+        }
+      },
+      // Enable toasts only in development environment
+      showToasts: process.env.NODE_ENV === 'development',
+      queryInvalidation: true
+    }
+  );
 
   interface TabItem {
     id: string
@@ -106,7 +99,6 @@ export function TrajectoryViewer({ trajectory, startInstance }: TrajectoryViewer
       {/* Status Bar */}
       <TrajectoryStatus
         trajectory={trajectory}
-        startInstance={startInstance || (trajectory.status !== "running" ? handleStartTrajectory : undefined)}
       />
 
       {/* Main Content Area with two columns */}

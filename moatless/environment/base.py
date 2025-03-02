@@ -29,12 +29,9 @@ class BaseEnvironment(abc.ABC):
 
         Args:
             command: The command to execute
-            cwd: Current working directory for the command
-            env: Environment variables for the command
-            shell: Whether to run the command in a shell
 
         Returns:
-            The standard output of the command as a string
+            The output of the command as a string
 
         Raises:
             EnvironmentExecutionError: If the command execution fails

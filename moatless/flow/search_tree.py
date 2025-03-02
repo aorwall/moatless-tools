@@ -128,7 +128,6 @@ class SearchTree(AgenticFlow):
                     await self._simulate(new_node)
                     self._backpropagate(new_node)
                     node = new_node
-                    self.maybe_persist()
                 else:
                     self.log(logger.warning, f"No node expanded from Node{node.node_id}")
                     await self.emit_event(

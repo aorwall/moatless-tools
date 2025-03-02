@@ -355,7 +355,7 @@ class BaseCompletionModel(BaseModel, ABC):
 
             try:
                 # Validate the response - may raise CompletionRetryError
-                structured_outputs, text_response, flags, thoughts = await self._validate_completion(
+                structured_outputs, text_response, flags = await self._validate_completion(
                     completion_response=completion_response,
                 )
 
@@ -417,7 +417,6 @@ class BaseCompletionModel(BaseModel, ABC):
                 text_response=text_response,
                 completion=completion,
                 flags=flags or [],
-                thoughts=thoughts,
             )
 
         try:
@@ -565,7 +564,7 @@ class BaseCompletionModel(BaseModel, ABC):
     @abstractmethod
     async def _validate_completion(
         self, completion_response: Any
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str], list[dict]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:
@@ -582,7 +581,6 @@ class BaseCompletionModel(BaseModel, ABC):
             - List of validated ResponseSchema instances
             - Optional text response string
             - List of flags indicating any special conditions
-            - List of ThoughtBlock instances
         Raises:
             CompletionRejectError: If the response fails validation and should be retried
             CompletionRuntimeError: If the response indicates a fundamental problem

@@ -5,6 +5,7 @@ import logging
 import os
 from collections.abc import Awaitable
 from dataclasses import dataclass
+from math import log
 from typing import Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -124,7 +125,8 @@ class ContextFile(BaseModel):
             Exception: If applying the initial_patch fails.
         """
         if not self._repo:
-            return None
+            logger.warning("No repo set")
+            raise RuntimeError("No repository set on file context")
 
         if self._cached_base_content is not None:
             return self._cached_base_content
@@ -199,27 +201,56 @@ class ContextFile(BaseModel):
 
         new_span_ids = set()
 
-        # Track modified lines from patch
-        patch_set = PatchSet(io.StringIO(new_patch))
-        for patched_file in patch_set:
-            for hunk in patched_file:
-                # Get the line range for this hunk's changes
-                modified_start = None
-                modified_end = None
+        # If no patch was generated (content identical), return empty set
+        if not new_patch:
+            return new_span_ids
 
-                for line in hunk:
-                    if line.is_added or line.is_removed:
-                        # Convert to 0-based line numbers
-                        current_line = line.target_line_no if line.is_added else line.source_line_no
-                        if current_line is not None:
-                            if modified_start is None:
-                                modified_start = current_line
-                            modified_end = current_line
+        try:
+            # Track modified lines from patch
+            patch_set = PatchSet(io.StringIO(new_patch))
+            for patched_file in patch_set:
+                for hunk in patched_file:
+                    # Get the line range for this hunk's changes
+                    modified_start = None
+                    modified_end = None
 
-                if modified_start is not None:
-                    # Add the modified line span to context
-                    span_ids = self.add_line_span(modified_start, modified_end)
-                    new_span_ids.update(span_ids)
+                    for line in hunk:
+                        if line.is_added or line.is_removed:
+                            # Convert to 0-based line numbers
+                            current_line = line.target_line_no if line.is_added else line.source_line_no
+                            if current_line is not None:
+                                if modified_start is None:
+                                    modified_start = current_line
+                                modified_end = current_line
+
+                    if modified_start is not None:
+                        # Add the modified line span to context
+                        span_ids = self.add_line_span(modified_start, modified_end)
+                        new_span_ids.update(span_ids)
+        except Exception as e:
+            # If parsing still fails despite our improved patch generation,
+            # fall back to a simple line-by-line comparison to identify changes
+            logger.warning(f"Failed to parse patch for {self.file_path}: {e}")
+
+            # Directly compare old and new content to find changed lines
+            if base_content and updated_content:
+                old_lines = base_content.splitlines()
+                new_lines = updated_content.splitlines()
+
+                # Find line numbers where content differs
+                for i, (old_line, new_line) in enumerate(zip(old_lines, new_lines)):
+                    if old_line != new_line:
+                        # Add 1 to convert to 1-based line numbers
+                        line_num = i + 1
+                        span_ids = self.add_line_span(line_num)
+                        new_span_ids.update(span_ids)
+
+                # Handle case where file was lengthened
+                if len(new_lines) > len(old_lines):
+                    for i in range(len(old_lines), len(new_lines)):
+                        line_num = i + 1
+                        span_ids = self.add_line_span(line_num)
+                        new_span_ids.update(span_ids)
 
         # Invalidate cached content
         self._cached_content = None
@@ -241,21 +272,31 @@ class ContextFile(BaseModel):
         Raises:
             Exception: If the patch does not contain changes for the specified file or if a context mismatch occurs.
         """
-        patch_set = PatchSet(io.StringIO(patch))
-        patched_content = content
+        if not patch.strip():
+            return content
 
-        for patched_file in patch_set:
-            patched_file_path = patched_file.path
-            # Correctly strip 'a/' or 'b/' prefixes
-            if patched_file_path.startswith("a/") or patched_file_path.startswith("b/"):
-                patched_file_path = patched_file_path[2:]
-            if os.path.normpath(patched_file_path) == os.path.normpath(self.file_path):
-                patched_content = self._apply_patched_file(patched_content, patched_file)
-                break
-        else:
-            raise Exception(f"Patch does not contain changes for file {self.file_path}")
+        try:
+            # Try using the unidiff library first
+            patch_set = PatchSet(io.StringIO(patch))
+            patched_content = content
 
-        return patched_content
+            for patched_file in patch_set:
+                patched_file_path = patched_file.path
+                # Correctly strip 'a/' or 'b/' prefixes
+                if patched_file_path.startswith("a/") or patched_file_path.startswith("b/"):
+                    patched_file_path = patched_file_path[2:]
+                if os.path.normpath(patched_file_path) == os.path.normpath(self.file_path):
+                    patched_content = self._apply_patched_file(patched_content, patched_file)
+                    break
+            else:
+                raise Exception(f"Patch does not contain changes for file {self.file_path}")
+
+            return patched_content
+
+        except Exception as e:
+            logger.warning(f"Failed to apply patch using unidiff: {e}")
+            # Fallback to a simple manual patch application
+            return self._apply_patch_manually(content, patch)
 
     def _apply_patched_file(self, content: str, patched_file) -> str:
         """
@@ -315,6 +356,131 @@ class ContextFile(BaseModel):
 
         return "".join(new_content_lines)
 
+    def _apply_patch_manually(self, content: str, patch: str) -> str:
+        """
+        Apply a patch manually when unidiff fails.
+        This is a fallback mechanism for problematic patches.
+        """
+        # If the patch doesn't look like a valid diff, return original content
+        if not patch.startswith("---") or "+++" not in patch or "@@" not in patch:
+            logger.warning("Patch doesn't look like a valid diff, returning original content")
+            return content
+
+        content_lines = content.splitlines()
+        result_lines = content_lines.copy()
+
+        # Find all hunks in the patch
+        hunks = []
+        current_hunk = None
+        hunk_start_line = 0
+        target_lines = []
+
+        for line in patch.splitlines():
+            if line.startswith("@@"):
+                # Parse the hunk header to extract line numbers
+                try:
+                    # Parse something like "@@ -27,11 +27,11 @@"
+                    hunk_header = line.split("@@")[1].strip()
+                    old_range = hunk_header.split(" ")[0]
+                    hunk_start_line = int(old_range.split(",")[0].lstrip("-"))
+
+                    # Start a new hunk
+                    if current_hunk:
+                        hunks.append((hunk_start_line, current_hunk))
+                    current_hunk = []
+                    target_lines = []
+                except Exception as e:
+                    logger.warning(f"Failed to parse hunk header: {e}")
+                    continue
+            elif current_hunk is not None:
+                if line.startswith("+"):
+                    # Added line
+                    target_lines.append(line[1:])
+                elif line.startswith("-"):
+                    # Removed line - keep track for context matching
+                    current_hunk.append(line[1:])
+                elif not line.startswith("\\"):
+                    # Context line - should match in both versions
+                    current_hunk.append(line)
+                    target_lines.append(line)
+
+        # Add the last hunk
+        if current_hunk:
+            hunks.append((hunk_start_line, current_hunk))
+
+        # Apply hunks in reverse order to avoid line number shifting
+        for start_line, hunk_lines in sorted(hunks, reverse=True):
+            # Find the best match for this hunk in the content
+            best_match_idx = self._find_best_match_for_hunk(content_lines, hunk_lines, start_line - 1)
+
+            if best_match_idx >= 0:
+                # Replace content at the matched position
+                hunk_target_idx = hunks.index((start_line, hunk_lines))
+                target_content = target_lines[hunk_target_idx]
+
+                # Delete old lines
+                del result_lines[best_match_idx : best_match_idx + len(hunk_lines)]
+
+                # Insert new content
+                for i, line in enumerate(target_content):
+                    result_lines.insert(best_match_idx + i, line)
+            else:
+                logger.warning(f"Could not find match for hunk at line {start_line}")
+
+        return "\n".join(result_lines)
+
+    def _find_best_match_for_hunk(self, content_lines, hunk_lines, expected_line_idx):
+        """
+        Find the best position in content_lines that matches the hunk lines.
+        Uses both the expected line index and a fuzzy matching approach.
+        """
+        if not hunk_lines:
+            return -1
+
+        # First try exact match at the expected position
+        if expected_line_idx < len(content_lines):
+            # Check if hunk can be applied at expected position
+            if all(
+                i + expected_line_idx < len(content_lines)
+                and (
+                    hl == content_lines[i + expected_line_idx]
+                    or hl.strip() == content_lines[i + expected_line_idx].strip()
+                )
+                for i, hl in enumerate(hunk_lines)
+            ):
+                return expected_line_idx
+
+        # If exact match failed, try fuzzy matching
+        # Look for the first line of the hunk
+        if not hunk_lines[0].strip():
+            # Skip empty lines for matching
+            first_line = next((line for line in hunk_lines if line.strip()), "")
+        else:
+            first_line = hunk_lines[0]
+
+        if not first_line:
+            return -1
+
+        # Try to find this line in the content
+        for i, line in enumerate(content_lines):
+            if first_line == line or first_line.strip() == line.strip():
+                # Check if subsequent lines also match
+                matches = True
+                for j, hunk_line in enumerate(hunk_lines):
+                    if i + j >= len(content_lines):
+                        matches = False
+                        break
+                    content_line = content_lines[i + j]
+                    if hunk_line != content_line and hunk_line.strip() != content_line.strip():
+                        matches = False
+                        break
+
+                if matches:
+                    return i
+
+        # If no good match found, return -1
+        return -1
+
     def generate_full_patch(self) -> str:
         """
         Generates a full Git-formatted patch from the original content to the current content.
@@ -339,25 +505,171 @@ class ContextFile(BaseModel):
         Returns:
             str: The generated patch as a string.
         """
+        # Handle empty content cases
+        if old_content is None:
+            old_content = ""
+        if new_content is None:
+            new_content = ""
 
+        # If content is identical, return empty patch
+        if old_content == new_content:
+            return ""
+
+        # Pre-process both strings to ensure consistent line endings
+        # This is especially important to handle consecutive empty lines
         old_lines = old_content.splitlines(keepends=True)
         new_lines = new_content.splitlines(keepends=True)
 
-        # Ensure that new content end with a newline
+        # Ensure both old and new content end with a newline to prevent issues
+        if old_lines and not old_lines[-1].endswith("\n"):
+            old_lines[-1] += "\n"
         if new_lines and not new_lines[-1].endswith("\n"):
             new_lines[-1] += "\n"
 
-        diff_lines = list(
-            difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile="a/" + self.file_path,
-                tofile="b/" + self.file_path,
-                # lineterm=''
-            )
-        )
+        # Try progressively larger context sizes if needed
+        for context_lines in [3, 5, 7]:
+            try:
+                # Generate the unified diff with specified context lines
+                diff_lines = list(
+                    difflib.unified_diff(
+                        old_lines,
+                        new_lines,
+                        fromfile="a/" + self.file_path,
+                        tofile="b/" + self.file_path,
+                        lineterm="",  # We'll add newlines manually
+                        n=context_lines,
+                    )
+                )
 
-        return "".join(diff_lines)
+                # Early return if no differences
+                if not diff_lines:
+                    return ""
+
+                # Process the diff to ensure consistent formatting for unidiff
+                processed_diff = self._process_diff_for_unidiff(diff_lines)
+
+                # Validate by test-parsing the patch
+                PatchSet(io.StringIO(processed_diff))
+
+                # If we got here, the patch is valid
+                return processed_diff
+
+            except Exception as e:
+                logger.debug(f"Failed to generate valid patch with context={context_lines}: {e}")
+                continue
+
+        # If all attempts failed, try with a very large context to capture all content
+        try:
+            # Use a manual approach as a fallback
+            return self._generate_manual_patch(old_content, new_content)
+        except Exception as e:
+            logger.warning(f"All patch generation methods failed: {e}. Using raw diff.")
+            # Last resort: just use the raw diff with newlines and hope for the best
+            diff_text = (
+                "\n".join(
+                    difflib.unified_diff(
+                        old_lines,
+                        new_lines,
+                        fromfile="a/" + self.file_path,
+                        tofile="b/" + self.file_path,
+                        lineterm="",
+                        n=3,
+                    )
+                )
+                + "\n"
+            )
+            return diff_text
+
+    def _process_diff_for_unidiff(self, diff_lines):
+        """
+        Process diff lines to ensure they're properly formatted for unidiff parsing.
+        Especially handles cases with consecutive blank lines.
+        """
+        if not diff_lines:
+            return ""
+
+        # Join with newlines and add a final newline
+        diff_text = "\n".join(diff_lines) + "\n"
+
+        # Fix hunk headers to match the actual content
+        # This is critical for handling consecutive blank lines correctly
+        fixed_lines = []
+        current_hunk_start = None
+        hunk_old_count = 0
+        hunk_new_count = 0
+        actual_old_count = 0
+        actual_new_count = 0
+
+        for i, line in enumerate(diff_text.splitlines()):
+            # Detect hunk headers
+            if line.startswith("@@"):
+                # If we were processing a hunk, fix its header before starting a new one
+                if current_hunk_start is not None:
+                    # Fix the previous hunk header
+                    header_parts = fixed_lines[current_hunk_start].split()
+                    header_parts[1] = f"-{hunk_old_count},{actual_old_count}"
+                    header_parts[2] = f"+{hunk_new_count},{actual_new_count}"
+                    fixed_lines[current_hunk_start] = " ".join(header_parts)
+
+                # Start tracking a new hunk
+                current_hunk_start = len(fixed_lines)
+                fixed_lines.append(line)  # Add the header as a placeholder to be fixed later
+
+                # Parse the hunk header to get expected counts
+                try:
+                    old_range = line.split()[1]
+                    new_range = line.split()[2]
+                    hunk_old_count = int(old_range.split(",")[0].lstrip("-"))
+                    hunk_new_count = int(new_range.split(",")[0].lstrip("+"))
+                    actual_old_count = 0
+                    actual_new_count = 0
+                except (IndexError, ValueError):
+                    # If parsing fails, use default values
+                    hunk_old_count = 0
+                    hunk_new_count = 0
+
+            else:
+                fixed_lines.append(line)
+
+                # Count lines
+                if current_hunk_start is not None:
+                    if line.startswith("+"):
+                        actual_new_count += 1
+                    elif line.startswith("-"):
+                        actual_old_count += 1
+                    elif not line.startswith("\\"):  # Ignore "No newline" markers
+                        # Context lines count for both old and new
+                        actual_old_count += 1
+                        actual_new_count += 1
+
+        # Fix the last hunk header if there was one
+        if current_hunk_start is not None:
+            header_parts = fixed_lines[current_hunk_start].split()
+            header_parts[1] = f"-{hunk_old_count},{actual_old_count}"
+            header_parts[2] = f"+{hunk_new_count},{actual_new_count}"
+            fixed_lines[current_hunk_start] = " ".join(header_parts)
+
+        return "\n".join(fixed_lines) + "\n"
+
+    def _generate_manual_patch(self, old_content, new_content):
+        """
+        Generate a manual patch as a fallback when diff doesn't work.
+        This creates a single hunk that replaces the entire file.
+        """
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
+
+        # Create a header for the entire file
+        header = f"--- a/{self.file_path}\n+++ b/{self.file_path}\n@@ -1,{len(old_lines)} +1,{len(new_lines)} @@\n"
+
+        # Create the content lines
+        content = []
+        for line in old_lines:
+            content.append(f"-{line}")
+        for line in new_lines:
+            content.append(f"+{line}")
+
+        return header + "\n".join(content) + "\n"
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
@@ -876,18 +1188,24 @@ class FileContext(BaseModel):
         }
 
     @property
-    def workspace(self):
-        raise AttributeError("workspace property is write-only")
-
-    @property
     def repository(self) -> Repository:
         if not self._repo:
             raise ValueError("Repository is not set")
         return self._repo
 
+    @repository.setter
+    def repository(self, repo: Repository):
+        self._repo = repo
+        for file in self._files.values():
+            file._repo = repo
+
+    @property
+    def workspace(self):
+        raise AttributeError("workspace property is write-only")
+
     @workspace.setter
     def workspace(self, workspace: Workspace):
-        self._repo = workspace.repository
+        self.repository = workspace.repository
         self._runtime = workspace.runtime
 
     def snapshot(self):

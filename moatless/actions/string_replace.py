@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import List
+from typing import Any, List
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -79,14 +79,15 @@ class StringReplaceArgs(ActionArguments):
 
         return self
 
-    @field_validator("old_str", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def validate_old_str(cls, v):
+    def validate_old_str(cls, data: Any) -> Any:
+        v = data.get("old_str")
         if v is None or v.strip() == "":
             raise ValueError(
-                "StringReplace can only be used to replace existing code defined in `old_str`. Therefore `old_str` cannot be empty and must contain existing code to replace."
+                "`old_str` cannot be empty. StringReplace can only be used to replace existing code defined in `old_str`."
             )
-        return v
+        return data
 
     @field_validator("new_str")
     @classmethod
@@ -263,6 +264,9 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
             return error
 
         context_file = file_context.get_context_file(str(path))
+        if not context_file:
+            raise ValueError(f"File {path} not found in file context")
+
         file_content = context_file.content.expandtabs()
         old_str = args.old_str.expandtabs()
         new_str = args.new_str.expandtabs()

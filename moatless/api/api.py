@@ -38,6 +38,7 @@ from moatless.api.trajectory.trajectory_utils import (
     create_trajectory_dto,
     load_trajectory_from_file,
 )
+from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import BaseEvent, event_bus
 from moatless.logging_config import get_logger, setup_logging
@@ -56,64 +57,7 @@ setup_logging(
 
 logger = get_logger(__name__)
 
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: set[WebSocket] = set()
-
-    async def connect(self, websocket: WebSocket):
-        try:
-            logger.info("Accepting WebSocket connection")
-            await websocket.accept()
-            self.active_connections.add(websocket)
-            logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
-        except Exception as e:
-            logger.error(f"Failed to accept WebSocket connection: {e}")
-            raise
-
-    async def disconnect(self, websocket: WebSocket):
-        """Safely disconnect a WebSocket connection."""
-        try:
-            self.active_connections.discard(websocket)
-            if not websocket.client_state.DISCONNECTED:
-                await websocket.close()
-            logger.info(f"WebSocket disconnected. Total connections: {len(self.active_connections)}")
-        except Exception as e:
-            logger.error(f"Error during WebSocket disconnect: {e}")
-
-    async def broadcast_message(self, message: dict):
-        """Broadcast message to all connected clients"""
-        if not self.active_connections:
-            logger.debug("No active connections, skipping broadcast")
-            return
-
-        logger.debug(f"Broadcasting message to {len(self.active_connections)} clients")
-
-        connections = self.active_connections.copy()
-        disconnected = set()
-
-        for connection in connections:
-            try:
-                await connection.send_text(json.dumps(message))
-            except Exception as e:
-                logger.error(f"Failed to send message to client: {e}")
-                disconnected.add(connection)
-
-        for connection in disconnected:
-            await self.disconnect(connection)
-
-
-manager = ConnectionManager()
-
 runner = RQRunner()
-
-
-async def handle_event(event: BaseEvent):
-    """Handle system events and broadcast them via WebSocket"""
-    logger.debug(f"Broadcasting event: {event.scope}:{event.event_type}")
-
-    if event.scope == "flow" or event.scope == "evaluation":
-        await manager.broadcast_message(event.to_dict())
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
@@ -158,33 +102,8 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     router = FastAPI(title="Moatless API")
 
-    @router.websocket("/ws")
-    async def websocket_endpoint(websocket: WebSocket):
-        try:
-            await manager.connect(websocket)
-
-            while True:
-                try:
-                    # Receive and process messages
-                    message = await websocket.receive_text()
-                    data = json.loads(message)
-
-                    # Handle ping message
-                    if data.get("type") == "ping":
-                        await websocket.send_json({"type": "pong"})
-                    else:
-                        logger.info(f"Received message: {data}")
-
-                except WebSocketDisconnect:
-                    break
-                except Exception as e:
-                    logger.error(f"Error in WebSocket connection: {e}")
-                    break
-        except Exception as e:
-            logger.error(f"Failed to establish WebSocket connection: {e}")
-            raise
-        finally:
-            await manager.disconnect(websocket)
+    # Use the websocket endpoint from the websocket module
+    router.websocket("/ws")(websocket_endpoint)
 
     if workspace is not None:
 
@@ -226,7 +145,12 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         try:
             content = await file.read()
             trajectory_data = json.loads(content.decode())
-            return create_trajectory_dto(trajectory_data, trajectory_id=file.filename)
+            # Use load_trajectory_from_file directly since it's meant for parsing JSON data
+            # We'll save the content to a temporary file and load it
+            temp_file_path = f"/tmp/{file.filename}"
+            with open(temp_file_path, "w") as f:
+                json.dump(trajectory_data, f)
+            return load_trajectory_from_file(temp_file_path)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
 
@@ -313,7 +237,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             # Try to find UI files in the installed package
             try:
                 ui_files = pkg_resources.files("moatless_api") / "ui/dist"
-                if ui_files.exists():
+                # Fix: Check if the path exists using Path
+                ui_files_path = Path(str(ui_files))
+                if ui_files_path.exists():
                     logger.info(f"Found UI files in package at {ui_files}")
 
                     # Create static files instances

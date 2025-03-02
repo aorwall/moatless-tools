@@ -49,6 +49,11 @@ class RunMyPy(Action):
     An action for running MyPy type checking on Python code and generating diagnostic artifacts.
     """
 
+    ignore_notes: bool = Field(
+        default=False,
+        description="If true, ignore notes from MyPy.",
+    )
+
     args_schema = RunMyPyArgs
 
     async def initialize(self, workspace: Workspace):
@@ -154,6 +159,9 @@ class RunMyPy(Action):
                     "note": DiagnosticSeverity.INFO,
                 }
                 severity = severity_map.get(report.get("severity", "error"), DiagnosticSeverity.ERROR)
+
+                if self.ignore_notes and severity == DiagnosticSeverity.INFO:
+                    continue
 
                 line_num = report.get("line", 1)
                 column_num = report.get("column", 1)

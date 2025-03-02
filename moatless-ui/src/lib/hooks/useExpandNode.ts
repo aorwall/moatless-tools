@@ -1,6 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { trajectoryKeys } from "@/features/trajectory/hooks/useGetTrajectory";
 import { trajectoriesApi } from "@/lib/api/trajectories";
-import { trajectoryKeys } from "./useGetTrajectory";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 interface ExpandNodeParams {
@@ -17,7 +17,7 @@ export const useExpandNode = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ trajectoryId, nodeId, onSuccess, ...params }: ExpandNodeParams) => 
+    mutationFn: ({ trajectoryId, nodeId, onSuccess, ...params }: ExpandNodeParams) =>
       trajectoriesApi.expandNode(trajectoryId, nodeId, params),
     onSuccess: (_, { trajectoryId, onSuccess }) => {
       if (onSuccess) {
@@ -28,8 +28,8 @@ export const useExpandNode = () => {
     onError: (error, { trajectoryId }) => {
       queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId) });
       toast.error("Failed to expand node", {
-        description: error instanceof Error 
-          ? error.message 
+        description: error instanceof Error
+          ? error.message
           : "An unexpected error occurred",
       });
     },

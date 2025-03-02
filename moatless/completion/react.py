@@ -70,7 +70,6 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         if not isinstance(self._response_schema, list):
             return False
         for schema in self._response_schema:
-
             if not issubclass(schema, ActionArguments):
                 return False
         return True
@@ -121,14 +120,14 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                     format_example = (
                         action_class.format_schema_for_llm() if hasattr(action_class, "format_schema_for_llm") else ""
                     )
-                    raise ValueError(
+                    raise CompletionRetryError(
                         f"Invalid XML format for {action_name}. Error: {e}\n\n" f"Expected format:\n{format_example}"
                     )
             else:
                 try:
                     action_request = action_class.model_validate_json(action_input)
                 except Exception as e:
-                    raise ValueError(
+                    raise CompletionRetryError(
                         f"Invalid format for {action_name}. Error: {e}\n\n"
                         f"Expected schema:\n{action_class.format_schema_for_llm()}"
                     )
@@ -137,12 +136,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             return [action_request], None, []
 
         except Exception as e:
-            logger.warning(f"ReAct parsing failed: {e}. Response: {response_text}")
-            retry_message = ChatCompletionUserMessage(role="user", content=str(e))
-            raise CompletionRetryError(
-                message=str(e),
-                retry_messages=[retry_message],
-            ) from e
+            logger.exception(f"ReAct parsing failed. Response: {response_text}")
+            # TODO: Only handle ValueError?
+            raise CompletionRetryError(message=str(e)) from e
 
     def _validate_react_format(self, response_text: str) -> None:
         """Validate the ReAct format structure.
@@ -166,9 +162,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         # Check if all sections exist
         if not self.disable_thoughts and thought_count < 1:
-            raise ValueError("The response is incorrect, it should start with 'Thoughts:'")
+            raise CompletionRetryError("The response is incorrect, it should start with 'Thoughts:'")
         if action_count < 1:
-            raise ValueError("Response must have one 'Action:' section")
+            raise CompletionRetryError("Response must have one 'Action:' section")
 
         if not self.disable_thoughts:
             # Find the starting lines for each section
@@ -179,7 +175,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
             # Check if sections are in correct order
             if not (thought_line < action_line):
-                raise ValueError(
+                raise CompletionRetryError(
                     "Your response is incorrect. The Thought section must come before the Action section. Please try the same request again with the correct format."
                 )
 

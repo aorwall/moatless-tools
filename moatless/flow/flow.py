@@ -16,7 +16,7 @@ from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
-from moatless.context_data import current_trajectory_id, get_trajectory_dir
+from moatless.context_data import current_project_id, current_trajectory_id, get_trajectory_dir
 from moatless.events import BaseEvent, FlowCompletedEvent, FlowErrorEvent, FlowStartedEvent, event_bus
 from moatless.file_context import FileContext
 from moatless.flow.events import FlowErrorEvent
@@ -161,6 +161,7 @@ class AgenticFlow(MoatlessComponent):
         with tracer.start_as_current_span(f"flow_{self.trajectory_id}") as span:
             try:
                 current_trajectory_id.set(self.trajectory_id)
+                current_project_id.set(self.project_id)
                 self._initialize_run_state()
                 await event_bus.publish(FlowStartedEvent())
                 node, finish_reason = await self._run(message)
@@ -215,13 +216,9 @@ class AgenticFlow(MoatlessComponent):
             node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
     async def emit_event(self, event: BaseEvent):
-        """Emit an event."""
+        self.maybe_persist()
         logger.info(f"Emit event {event.event_type}")
         await event_bus.publish(event)
-
-    async def _handle_agent_event(self, event: BaseEvent):
-        """Handle agent events and propagate them to system event handlers"""
-        await self.emit_event(event)
 
     def _initialize_run_state(self):
         """Initialize or restore system run state and logging"""

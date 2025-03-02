@@ -18,17 +18,18 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useStartTrajectory } from "../hooks/useStartTrajectory";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
-  startInstance?: () => Promise<void> | void;
   className?: string;
 }
 
-export function TrajectoryStatus({ trajectory, startInstance, className }: TrajectoryStatusProps) {
+export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
   const queryClient = useQueryClient();
   const cancelJob = useCancelJob();
+  const startTrajectory = useStartTrajectory();
 
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
@@ -44,28 +45,23 @@ export function TrajectoryStatus({ trajectory, startInstance, className }: Traje
   };
 
   // Check if the trajectory can be started (not running or finished)
-  const canStart = startInstance &&
-    trajectory.status.toLowerCase() !== "running" &&
-    trajectory.status.toLowerCase() !== "finished";
+  const canStart = trajectory.status.toLowerCase() !== "running" && trajectory.status.toLowerCase() !== "completed";
 
   // Check if the trajectory has been started or not
   const hasStarted = trajectory.system_status.started_at !== undefined &&
     trajectory.system_status.started_at !== null;
 
   const handleStartClick = async () => {
-    if (startInstance) {
-      setIsStarting(true);
-      try {
-        await startInstance();
-        await queryClient.refetchQueries({
-          queryKey: trajectoryKeys.detail(trajectory.project_id, trajectory.trajectory_id),
-          exact: true
-        });
-      } catch (error) {
-        console.error("Error starting trajectory:", error);
-      } finally {
-        setIsStarting(false);
-      }
+    setIsStarting(true);
+    try {
+      await startTrajectory.mutateAsync({
+        projectId: trajectory.project_id,
+        trajectoryId: trajectory.trajectory_id
+      });
+    } catch (error) {
+      console.error("Error starting trajectory:", error);
+    } finally {
+      setIsStarting(false);
     }
   };
 
@@ -95,7 +91,6 @@ export function TrajectoryStatus({ trajectory, startInstance, className }: Traje
     };
   }, [trajectory.status, trajectory.project_id, trajectory.trajectory_id, queryClient]);
 
-  // Action button based on trajectory status
   const actionButton = canStart ? (
     <Button
       variant="outline"

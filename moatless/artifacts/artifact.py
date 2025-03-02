@@ -115,8 +115,7 @@ class ArtifactChange(BaseModel):
     actor: Literal["user", "assistant"]
 
 
-# Create a TypeVar for the specific Artifact type
-T = TypeVar("T", bound="ArtifactHandler")
+T = TypeVar("T")  # TODO: Add bound="ArtifactHandler" once mypy doesnt crash when it's used
 
 
 class SearchCriteria(BaseModel):

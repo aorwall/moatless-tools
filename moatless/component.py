@@ -1,3 +1,5 @@
+from __future__ import annotations  # type: ignore
+
 import importlib
 import logging
 import os
@@ -11,11 +13,10 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# TypeVar for generic component types
-T = TypeVar("T", bound="MoatlessComponent")
+T = TypeVar("T")  # TODO: Add bound="MoatlessComponent" once mypy doesnt crash when it's used
 
 # ComponentType -> {QualifiedClassName -> ComponentClass}
-_GLOBAL_COMPONENT_CACHE: dict[str, dict[str, type["MoatlessComponent"]]] = {}
+_GLOBAL_COMPONENT_CACHE: dict[str, dict[str, type[MoatlessComponent]]] = {}
 
 
 class MoatlessComponent(BaseModel, ABC, Generic[T]):
@@ -41,9 +42,6 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
             def _get_base_class(cls) -> Type:
                 return Action
     """
-
-    # We store components in a dict without a generic type
-    _components: ClassVar[dict[str, type["MoatlessComponent"]]] = {}
 
     @classmethod
     def model_validate(cls, obj: Any):
@@ -114,7 +112,6 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
         if component_type not in _GLOBAL_COMPONENT_CACHE:
             result = cls._scan_classes_in_paths(cls._get_package(), cls._get_base_class())
             _GLOBAL_COMPONENT_CACHE[component_type] = cast(dict[str, type["MoatlessComponent"]], result)
-        cls._components = _GLOBAL_COMPONENT_CACHE[component_type]
 
     @classmethod
     def _get_components(cls) -> dict[str, type[T]]:

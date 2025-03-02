@@ -47,7 +47,7 @@ def get_project_dir(project_id: str | None = None) -> Path:
     return project_dir
 
 
-def get_trajectory_dir(trajectory_id: str | None = None, project_id: str | None = None) -> Path:
+def get_trajectory_dir(project_id: str | None = None, trajectory_id: str | None = None) -> Path:
     """Get the moatless trajectory directory."""
 
     trajectory_dir_value = current_trajectory_dir.get()

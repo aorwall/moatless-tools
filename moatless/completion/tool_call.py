@@ -53,7 +53,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str], list[dict]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
         """Validate tool call completion response.
 
         Args:
@@ -73,12 +73,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return [], content, [], []
-
-        if hasattr(message, "thinking") and message.thinking:
-            thoughts = message.thinking
-        else:
-            thoughts = None
+            return [], content, []
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()
@@ -152,7 +147,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 retry_messages=retry_messages,
             )
 
-        return structured_outputs, content, flags, thoughts
+        return structured_outputs, content, flags
 
     def _get_response_model(self, tool_name: str) -> type[ResponseSchema]:
         """Get the response model for a tool name.

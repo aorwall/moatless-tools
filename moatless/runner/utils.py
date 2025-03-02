@@ -4,9 +4,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List
 
+from opentelemetry import trace
+
+from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
 from moatless.events import BaseEvent, event_bus
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer("moatless.runner")
 
 
 def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):
@@ -21,14 +25,55 @@ def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: s
         logger.error(f"Failed to publish event {event_type}: {e}")
 
 
-def run_async(coro):
+def run_async(coro, span_name: str | None = None):
+    """
+    Helper to run coroutines in synchronous context while preserving trace context.
+    """
+    current_span = trace.get_current_span()
+
+    context_data = {
+        "moatless_dir": moatless_dir.get(),
+        "current_node_id": current_node_id.get(),
+        "current_trajectory_id": current_trajectory_id.get(),
+        "current_project_id": current_project_id.get(),
+    }
+
+    # Create wrapper to run coroutine with trace context
+    async def _run_with_context():
+        try:
+            # Restore context data
+            tokens = []
+            if "current_trajectory_id" in context_data:
+                current_trajectory_id.set(context_data["current_trajectory_id"])
+            if "current_project_id" in context_data:
+                current_project_id.set(context_data["current_project_id"])
+
+            try:
+                # Create a new span if name is provided, otherwise just run with current context
+                if span_name:
+                    with tracer.start_as_current_span(span_name) as span:
+                        return await coro
+                else:
+                    return await coro
+            finally:
+                # Reset context vars
+                for var, token in tokens:
+                    var.reset(token)
+
+        except Exception as e:
+            if current_span:
+                current_span.record_exception(e)
+            raise
+
+    # Get or create event loop
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
 
-    return loop.run_until_complete(coro)
+    # Run coroutine with context
+    return loop.run_until_complete(_run_with_context())
 
 
 def setup_job_logging(job_type: str, trajectory_dir: Path) -> list[logging.Handler]:

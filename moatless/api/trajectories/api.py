@@ -45,6 +45,28 @@ async def get_trajectory(project_id: str, trajectory_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project_id}/{trajectory_id}/logs")
+async def get_trajectory_logs(project_id: str, trajectory_id: str, file_name: str = None):
+    """Get the log files for a specific trajectory.
+
+    Args:
+        project_id: The project ID
+        trajectory_id: The trajectory ID
+        file_name: Optional specific log file name to retrieve
+
+    Returns:
+        The log file contents
+    """
+    try:
+        return await _manager.get_trajectory_logs(project_id, trajectory_id, file_name)
+    except ValueError as e:
+        logger.exception(f"Error getting trajectory logs: {str(e)}")
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error getting trajectory logs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{project_id}/{trajectory_id}/start")
 async def start_trajectory(project_id: str, trajectory_id: str):
     """Start a trajectory without additional parameters."""

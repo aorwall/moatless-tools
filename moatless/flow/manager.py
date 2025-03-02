@@ -11,11 +11,14 @@ from typing import Any, Dict, List, Literal, Optional
 from moatless.agent.agent import ActionAgent
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes
+from moatless.benchmark.swebench import create_index_async
+from moatless.benchmark.swebench.utils import create_repository_async
 from moatless.completion.manager import create_completion_model
 from moatless.config.agent_config import get_agent
 from moatless.context_data import get_projects_dir, get_trajectory_dir
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.environment.local import LocalBashEnvironment
+from moatless.evaluation.utils import get_swebench_instance
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
@@ -32,6 +35,7 @@ from moatless.flow.schema import (
 from moatless.repository.git import GitRepository
 from moatless.runner.rq import RQRunner
 from moatless.runner.runner import JobStatus
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.selector.base import BaseSelector
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectories_dir
 from moatless.value_function.base import BaseValueFunction
@@ -383,7 +387,8 @@ class FlowManager:
 
         agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
         # TODO: This is for testing purposes, the node should be executed by a worker!
-        workspace = Workspace(repository=GitRepository(repo_path=str(Path.cwd())), environment=LocalBashEnvironment())
+        repository = GitRepository(repo_path=str(Path.cwd()))
+        workspace = Workspace(repository=repository, environment=LocalBashEnvironment())
         await agentic_flow.agent.initialize(workspace)
 
         node = agentic_flow.root.get_node_by_id(request.node_id)
@@ -393,7 +398,12 @@ class FlowManager:
         # Clone file context from parent node to reset file context
         if node.parent and node.parent.file_context:
             node.file_context = node.parent.file_context.clone()
+            logger.info(
+                f"Cloned file context from parent node {node.parent.node_id} to node {node.node_id}, setting repo to {repository}"
+            )
+            node.file_context.repository = repository
         else:
+            logger.warning("No parent node found, cannot clone file context")
             node.file_context = None
 
         # Execute the action step
@@ -401,15 +411,7 @@ class FlowManager:
 
     async def _setup_flow(self, trajectory_id: str, project_id: str):
         """Set up a flow for execution."""
-        from moatless.benchmark.swebench import create_index_async
-        from moatless.benchmark.swebench.utils import create_repository_async
-        from moatless.evaluation.utils import get_moatless_instance
-        from moatless.flow.flow import AgenticFlow
-        from moatless.runtime.testbed import TestbedEnvironment
-        from moatless.utils.moatless import get_moatless_trajectory_dir
-        from moatless.workspace import Workspace
-
-        moatless_instance = get_moatless_instance(trajectory_id)
+        moatless_instance = get_swebench_instance(trajectory_id)
         if moatless_instance:
             logger.info(f"Setting up swebench for trajectory {trajectory_id}")
 
@@ -419,7 +421,7 @@ class FlowManager:
             runtime = TestbedEnvironment(
                 repository=repository,
                 instance_id=trajectory_id,
-                log_dir=str(get_moatless_trajectory_dir(trajectory_id) / "testbed_logs"),
+                log_dir=str(get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id) / "testbed_logs"),
                 enable_cache=True,
             )
             workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
@@ -430,10 +432,6 @@ class FlowManager:
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
         return get_trajectory_dir(project_id, trajectory_id) / "trajectory.json"
-
-    def get_trajectory_dir(self, project_id: str, trajectory_id: str) -> Path:
-        """Get the trajectory directory for a run."""
-        return get_trajectory_dir(project_id, trajectory_id)
 
     def load_trajectory_events(self, trajectory_dir: Path) -> list:
         """Load events from events.jsonl file."""
@@ -469,6 +467,64 @@ class FlowManager:
             data["root"] = convert_nodes(root_node)
 
         return TrajectoryDTO(**data)
+
+    async def get_trajectory_logs(self, project_id: str, trajectory_id: str, file_name: Optional[str] = None) -> Dict:
+        """Get logs for a trajectory.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            file_name: Optional specific log file name to retrieve
+
+        Returns:
+            Dict containing the log contents and metadata
+        """
+        trajectory_dir = get_trajectory_dir(project_id, trajectory_id)
+        logs_dir = trajectory_dir / "logs"
+        logger.info(f"Logs directory: {logs_dir}")
+
+        if not logs_dir.exists():
+            logger.info(f"Logs directory does not exist: {logs_dir}")
+            return {"logs": "", "files": [], "current_file": None}
+
+        log_files = sorted(list(logs_dir.glob("*.log")), key=lambda p: p.stat().st_mtime, reverse=True)
+
+        if not log_files:
+            logger.info(f"No log files found in {logs_dir}")
+            return {"logs": "", "files": [], "current_file": None}
+
+        # Get a list of all log files with their modified times
+        file_list = [
+            {
+                "name": f.name,
+                "modified": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat(),
+            }
+            for f in log_files
+        ]
+
+        logger.info(f"Log files: {file_list}")
+
+        # If a specific file is requested, try to find it
+        if file_name:
+            target_file = logs_dir / file_name
+            if not target_file.exists() or not target_file.is_file():
+                raise ValueError(f"Log file {file_name} not found")
+            current_file = target_file
+        else:
+            # Otherwise return the most recent log file
+            current_file = log_files[0]
+
+        # Read the log contents
+        with open(current_file, "r") as f:
+            log_content = f.read()
+
+        logger.info(f"Log content: {log_content}")
+
+        return {
+            "logs": log_content,
+            "files": file_list,
+            "current_file": current_file.name,
+        }
 
 
 _manager = FlowManager.get_instance()

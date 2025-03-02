@@ -1,15 +1,15 @@
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
+import { useResumeTrajectory } from "@/lib/hooks/useResumeTrajectory";
 import { Node, TimelineItem, Trajectory } from "@/lib/types/trajectory";
-import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Bot, MessageSquare } from "lucide-react";
-import { ChatMessage, ChatMessageGroup } from "./types";
-import { MessageChatItem } from "./items/MessageChatItem";
-import { ThoughtChatItem } from "./items/ThoughtChatItem";
+import { useEffect, useRef, useState } from "react";
+import { ChatInput, ChatInputRef } from "./ChatInput";
 import { ActionChatItem } from "./items/ActionChatItem";
 import { ArtifactChatItem } from "./items/ArtifactChatItem";
-import { ChatInput, ChatInputRef } from "./ChatInput";
-import { useResumeTrajectory } from "@/lib/hooks/useResumeTrajectory";
+import { MessageChatItem } from "./items/MessageChatItem";
+import { ThoughtChatItem } from "./items/ThoughtChatItem";
+import { ChatMessage, ChatMessageGroup } from "./types";
 
 interface ChatProps {
   trajectory: Trajectory;
@@ -32,10 +32,10 @@ export function Chat({ trajectory }: ChatProps) {
     };
 
     scrollToBottom();
-    
+
     // ...after a small delay to ensure DOM has updated
     const timeoutId = setTimeout(scrollToBottom, 100);
-    
+
     return () => clearTimeout(timeoutId);
   }, [trajectory.nodes?.length]);
 
@@ -66,7 +66,7 @@ export function Chat({ trajectory }: ChatProps) {
 
   // Group consecutive messages by sender, keeping artifacts with their related messages
   const messageGroups: ChatMessageGroup[] = messages.reduce((groups: ChatMessageGroup[], message) => {
-    const isUser = message.type === "user_message" || 
+    const isUser = message.type === "user_message" ||
       (message.type === "artifact" && (message.content as any).actor === "user");
     const lastGroup = groups[groups.length - 1];
 
@@ -101,10 +101,10 @@ export function Chat({ trajectory }: ChatProps) {
   };
 
   const onSendMessage = (message: string, agentId: string, modelId: string) => {
-    resumeTrajectory.mutate({ 
-      trajectoryId: trajectory.id, 
-      agentId, 
-      modelId, 
+    resumeTrajectory.mutate({
+      trajectoryId: trajectory.id,
+      agentId,
+      modelId,
       message,
       onSuccess: () => {
         // Clear the input only on success
@@ -137,7 +137,7 @@ export function Chat({ trajectory }: ChatProps) {
                   <Bot className="h-4 w-4" />
                 )}
               </div>
-              
+
               <div className="flex min-w-0 max-w-[80%] flex-col gap-2">
                 {group.messages.map((message, messageIndex) => {
                   const messageId = `${message.nodeId}-${messageIndex}`;

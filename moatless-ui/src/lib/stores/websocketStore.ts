@@ -42,6 +42,12 @@ interface WebSocketStore {
   subscribers: Record<string, Set<(data: any) => void>>;
   subscribe: (channel: string, callback: (data: any) => void) => () => void;
   unsubscribe: (channel: string, callback: (data: any) => void) => void;
+  serverSubscribeToProject: (projectId: string) => Promise<boolean>;
+  serverSubscribeToTrajectory: (trajectoryId: string) => Promise<boolean>;
+  serverUnsubscribeFromProject: (projectId: string) => Promise<boolean>;
+  serverUnsubscribeFromTrajectory: (trajectoryId: string) => Promise<boolean>;
+  activeProjectSubscriptions: Set<string>;
+  activeTrajectorySubscriptions: Set<string>;
 }
 
 export const useWebSocketStore = create<WebSocketStore>()(
@@ -51,6 +57,8 @@ export const useWebSocketStore = create<WebSocketStore>()(
       messages: {},
       retryCount: 0,
       subscribers: {},
+      activeProjectSubscriptions: new Set<string>(),
+      activeTrajectorySubscriptions: new Set<string>(),
 
       isConnected: () => {
         return get().connection?.status === "connected";
@@ -130,7 +138,20 @@ export const useWebSocketStore = create<WebSocketStore>()(
                 retryCount: 0,
               });
 
-              // Start heartbeat
+              const resubscribe = async () => {
+                const store = get();
+
+                for (const projectId of store.activeProjectSubscriptions) {
+                  await store.serverSubscribeToProject(projectId);
+                }
+
+                for (const trajectoryId of store.activeTrajectorySubscriptions) {
+                  await store.serverSubscribeToTrajectory(trajectoryId);
+                }
+              };
+
+              resubscribe();
+
               heartbeat();
             };
 
@@ -213,6 +234,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
         set({ connection: null });
       },
 
+      // Method to subscribe to local updates (client-side only)
       subscribe: (channel, callback) => {
         set((state) => ({
           subscribers: {
@@ -225,6 +247,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
         return () => get().unsubscribe(channel, callback);
       },
 
+      // Method to unsubscribe from local updates
       unsubscribe: (channel, callback) => {
         set((state) => {
           const channelSubs = state.subscribers[channel];
@@ -235,9 +258,129 @@ export const useWebSocketStore = create<WebSocketStore>()(
         });
       },
 
+      serverSubscribeToProject: async (projectId: string) => {
+        const { connection } = get();
+        if (!connection || connection.status !== "connected") {
+          console.error("Cannot subscribe: WebSocket not connected");
+          return false;
+        }
+
+        try {
+          connection.ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              subscription: "project",
+              id: projectId,
+            })
+          );
+
+          set((state) => {
+            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
+            newActiveProjectSubscriptions.add(projectId);
+            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
+          });
+
+          console.log(`Sent subscription request for project: ${projectId}`);
+          return true;
+        } catch (error) {
+          console.error("Failed to send project subscription:", error);
+          return false;
+        }
+      },
+
+      serverSubscribeToTrajectory: async (trajectoryId: string) => {
+        const { connection } = get();
+        if (!connection || connection.status !== "connected") {
+          console.error("Cannot subscribe: WebSocket not connected");
+          return false;
+        }
+
+        try {
+          connection.ws.send(
+            JSON.stringify({
+              type: "subscribe",
+              subscription: "trajectory",
+              id: trajectoryId,
+            })
+          );
+
+          set((state) => {
+            const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+            newActiveTrajectorySubscriptions.add(trajectoryId);
+            return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+          });
+
+          console.log(`Sent subscription request for trajectory: ${trajectoryId}`);
+          return true;
+        } catch (error) {
+          console.error("Failed to send trajectory subscription:", error);
+          return false;
+        }
+      },
+
+      serverUnsubscribeFromProject: async (projectId: string) => {
+        const { connection } = get();
+        if (!connection || connection.status !== "connected") {
+          console.error("Cannot unsubscribe: WebSocket not connected");
+          return false;
+        }
+
+        try {
+          connection.ws.send(
+            JSON.stringify({
+              type: "unsubscribe",
+              subscription: "project",
+              id: projectId,
+            })
+          );
+
+          set((state) => {
+            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
+            newActiveProjectSubscriptions.delete(projectId);
+            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
+          });
+
+          console.log(`Sent unsubscription request for project: ${projectId}`);
+          return true;
+        } catch (error) {
+          console.error("Failed to send project unsubscription:", error);
+          return false;
+        }
+      },
+
+      serverUnsubscribeFromTrajectory: async (trajectoryId: string) => {
+        const { connection } = get();
+        if (!connection || connection.status !== "connected") {
+          console.error("Cannot unsubscribe: WebSocket not connected");
+          return false;
+        }
+
+        try {
+          connection.ws.send(
+            JSON.stringify({
+              type: "unsubscribe",
+              subscription: "trajectory",
+              id: trajectoryId,
+            })
+          );
+
+          set((state) => {
+            const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+            newActiveTrajectorySubscriptions.delete(trajectoryId);
+            return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+          });
+
+          console.log(`Sent unsubscription request for trajectory: ${trajectoryId}`);
+          return true;
+        } catch (error) {
+          console.error("Failed to send trajectory unsubscription:", error);
+          return false;
+        }
+      },
+
       addMessage: (message: WebSocketMessage) => {
         const { trajectory_id, project_id } = message;
-        
+
         // Notify trajectory subscribers
         if (trajectory_id) {
           const trajectoryChannel = `trajectory.${trajectory_id}`;

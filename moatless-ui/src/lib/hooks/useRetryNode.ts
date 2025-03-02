@@ -1,6 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { trajectoryKeys } from "@/features/trajectory/hooks/useGetTrajectory";
 import { trajectoriesApi } from "@/lib/api/trajectories";
-import { trajectoryKeys } from "./useGetTrajectory";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 interface RetryNodeParams {
@@ -14,19 +14,19 @@ export const useRetryNode = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ trajectoryId, projectId, nodeId, onSuccess }: RetryNodeParams) => 
+    mutationFn: ({ trajectoryId, projectId, nodeId, onSuccess }: RetryNodeParams) =>
       trajectoriesApi.retryNode(trajectoryId, projectId, nodeId),
     onSuccess: (_, { trajectoryId, onSuccess }) => {
       if (onSuccess) {
         onSuccess();
       }
-      queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId) });
+      queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId, projectId) });
     },
-    onError: (error, { trajectoryId }) => {
-      queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId) });
+    onError: (error, { trajectoryId, projectId }) => {
+      queryClient.invalidateQueries({ queryKey: trajectoryKeys.detail(trajectoryId, projectId) });
       toast.error("Failed to retry node", {
-        description: error instanceof Error 
-          ? error.message 
+        description: error instanceof Error
+          ? error.message
           : "An unexpected error occurred",
       });
     },
