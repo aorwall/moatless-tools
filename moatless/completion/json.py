@@ -46,9 +46,7 @@ You must respond with only a JSON object that match the following json_schema:\n
 Make sure to return an instance of the JSON, not the schema itself.""")
         return system_prompt
 
-    async def _validate_completion(
-        self, completion_response: Any
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+    async def _validate_completion(self, completion_response: Any) -> tuple[list[ResponseSchema], Optional[str]]:
         """Validate and parse JSON completion response.
 
         This method:
@@ -64,7 +62,6 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
-            - List of flags indicating any special conditions
 
         Raises:
             CompletionRejectError: For invalid JSON that should be retried
@@ -77,14 +74,8 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             assistant_message = completion_response.choices[0].message.content
 
             response = self._response_schema[0].model_validate_json(assistant_message)
-            return [response], None, []
+            return [response], None
 
         except (ValidationError, json.JSONDecodeError) as e:
             logger.warning(f"JSON validation failed with error: {e}")
-            retry_message = ChatCompletionUserMessage(
-                role="user", content=f"The response was invalid. Fix these errors:\n{e}"
-            )
-            raise CompletionRetryError(
-                message=str(e),
-                retry_messages=[retry_message],
-            ) from e
+            raise CompletionRetryError(f"The response was invalid. Fix these errors:\n{e}") from e

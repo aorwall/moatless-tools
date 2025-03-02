@@ -74,7 +74,6 @@ class CompletionResponse(BaseModel):
     text_response: Optional[str] = Field(default=None)
     completion: Optional[Completion] = Field(default=None)
     thoughts: Optional[list[dict]] = Field(default=None)
-    flags: list[str] = Field(default_factory=list)
 
     @classmethod
     def create(
@@ -355,14 +354,14 @@ class BaseCompletionModel(BaseModel, ABC):
 
             try:
                 # Validate the response - may raise CompletionRetryError
-                structured_outputs, text_response, flags = await self._validate_completion(
+                structured_outputs, text_response = await self._validate_completion(
                     completion_response=completion_response,
                 )
 
                 # Run post validation if provided and raise CompletionRetryError if it fails
                 if self._post_validation_fn:
-                    structured_outputs, text_response, flags = await self._post_validation_fn(
-                        structured_outputs, text_response, flags
+                    structured_outputs, text_response = await self._post_validation_fn(
+                        structured_outputs, text_response
                     )
             except CompletionRetryError as e:
                 await self._send_retry_event(retry_count, str(e))
@@ -408,15 +407,13 @@ class BaseCompletionModel(BaseModel, ABC):
                 completion_response=response_dict,
                 model=self.model,
                 retries=retry_count,
-                usage=accumulated_usage,  # Use accumulated usage here
-                flags=flags,
+                usage=accumulated_usage,
             )
 
             return CompletionResponse(
                 structured_outputs=structured_outputs or [],
                 text_response=text_response,
                 completion=completion,
-                flags=flags or [],
             )
 
         try:
@@ -580,7 +577,6 @@ class BaseCompletionModel(BaseModel, ABC):
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
-            - List of flags indicating any special conditions
         Raises:
             CompletionRejectError: If the response fails validation and should be retried
             CompletionRuntimeError: If the response indicates a fundamental problem

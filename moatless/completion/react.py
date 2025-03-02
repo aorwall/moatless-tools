@@ -3,10 +3,14 @@ import logging
 from textwrap import dedent
 from typing import Any, Dict, List, Optional, Type
 
+from pydantic import ValidationError
+
 from moatless.actions.schema import ActionArguments
+from moatless.actions.think import Think, ThinkArgs
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.json import JsonCompletionModel
 from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
+from moatless.exceptions import CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
 
@@ -56,15 +60,14 @@ Use one of the following actions and provide input arguments matching the schema
                             
 {input_schemas}
 
-Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''} Action blocks. Do not include code blocks or additional text outside of this format.
+Important: You can include multiple Action blocks to perform sequential actions. The first Action must be preceded by a Thought section{'' if self.disable_thoughts else ''}.
 """)
         return system_prompt
 
     def _get_completion_params(self, schema: ResponseSchema) -> dict[str, str | dict | list]:
-        # params = super()._get_completion_params(schema)
-        # params["stop"] = ["Observation:"]
-        # return params
-        return {}
+        params = super()._get_completion_params(schema)
+        params["stop"] = ["Observation:"]
+        return params
 
     def _supports_react_format(self) -> bool:
         if not isinstance(self._response_schema, list):
@@ -77,7 +80,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str]]:
         """Validate and parse ReAct format responses.
 
         This method:
@@ -93,11 +96,9 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
-            - List of flags indicating any special conditions
 
         Raises:
             CompletionRejectError: For invalid format that should be retried
-            CompletionRuntimeError: For fundamentally invalid responses
         """
 
         # Fall back to JSON completion model if the action is not an ActionArguments
@@ -106,39 +107,52 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         try:
             response_text = completion_response.choices[0].message.content
-
             self._validate_react_format(response_text)
 
-            thought, action_input = self._extract_thought_action(response_text)
-            action_name, action_input = self._parse_action(action_input)
-            action_class = self._get_action_class(action_name)
+            # Get all action blocks
+            thought, action_blocks = self._extract_action_blocks(response_text)
+            validated_actions = []
 
-            if action_input.strip().startswith("<") or action_input.strip().startswith("```"):
-                try:
-                    action_request = action_class.model_validate_xml(action_input)
-                except Exception as e:
-                    format_example = (
-                        action_class.format_schema_for_llm() if hasattr(action_class, "format_schema_for_llm") else ""
-                    )
-                    raise CompletionRetryError(
-                        f"Invalid XML format for {action_name}. Error: {e}\n\n" f"Expected format:\n{format_example}"
-                    )
-            else:
-                try:
-                    action_request = action_class.model_validate_json(action_input)
-                except Exception as e:
-                    raise CompletionRetryError(
-                        f"Invalid format for {action_name}. Error: {e}\n\n"
-                        f"Expected schema:\n{action_class.format_schema_for_llm()}"
-                    )
+            if thought:
+                validated_actions.append(ThinkArgs(thought=thought))  # type: ignore
 
-            action_request.thoughts = thought
-            return [action_request], None, []
+            for i, action_input in enumerate(action_blocks):
+                action_name, action_input = self._parse_action(action_input)
+                action_class = self._get_action_class(action_name)
 
+                if action_input.strip().startswith("<") or action_input.strip().startswith("```"):
+                    try:
+                        action_request = action_class.model_validate_xml(action_input)
+                    except Exception as e:
+                        format_example = (
+                            action_class.format_schema_for_llm()
+                            if hasattr(action_class, "format_schema_for_llm")
+                            else ""
+                        )
+                        raise CompletionRetryError(
+                            f"Invalid XML format for {action_name}. Error: {e}\n\n"
+                            f"Expected format:\n{format_example}"
+                        )
+                else:
+                    try:
+                        action_request = action_class.model_validate_json(action_input)
+                    except Exception as e:
+                        raise CompletionRetryError(
+                            f"Invalid format for {action_name}. Error: {e}\n\n"
+                            f"Expected schema:\n{action_class.format_schema_for_llm()}"
+                        )
+
+                validated_actions.append(action_request)
+
+            return validated_actions, None
+        except CompletionRetryError as e:
+            raise e
+        except (ValueError, ValidationError) as e:
+            logger.warning(f"ReAct parsing failed. Response: {response_text}")
+            raise CompletionRetryError(str(e)) from e
         except Exception as e:
             logger.exception(f"ReAct parsing failed. Response: {response_text}")
-            # TODO: Only handle ValueError?
-            raise CompletionRetryError(message=str(e)) from e
+            raise CompletionRuntimeError(str(e)) from e
 
     def _validate_react_format(self, response_text: str) -> None:
         """Validate the ReAct format structure.
@@ -155,10 +169,6 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         # Count occurrences of each section using case-insensitive matching
         thought_count = sum(1 for line in lines if line.lower().startswith(("thought:", "thoughts:")))
         action_count = sum(1 for line in lines if line.lower().startswith("action:"))
-
-        # Check for multiple action blocks
-        if thought_count > 1 or action_count > 1:
-            logger.warning(f"Multiple Thought or Action sections found in response: {response_text}")
 
         # Check if all sections exist
         if not self.disable_thoughts and thought_count < 1:
@@ -178,6 +188,63 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
                 raise CompletionRetryError(
                     "Your response is incorrect. The Thought section must come before the Action section. Please try the same request again with the correct format."
                 )
+
+    def _extract_action_blocks(self, response_text: str) -> tuple[Optional[str], list[str]]:
+        """Extract multiple action blocks from response text.
+
+        Args:
+            response_text: Raw response text
+
+        Returns:
+            Tuple of:
+            - Optional thought if it exists
+            - List of action blocks
+        """
+        # Find all action markers in the response
+        response_lower = response_text.lower()
+        action_positions = []
+        pos = 0
+
+        while True:
+            pos = response_lower.find("action:", pos)
+            if pos == -1:
+                break
+            action_positions.append(pos)
+            pos += 1
+
+        if not action_positions:
+            raise ValueError("Missing Action section")
+
+        first_action_pos = action_positions[0]
+        thought = ""
+
+        if not self.disable_thoughts:
+            # Find the first occurrence of either "thought:" or "thoughts:" case-insensitive
+            thought_start = min(
+                (pos for pos in (response_lower.find("thought:"), response_lower.find("thoughts:")) if pos != -1),
+                default=-1,
+            )
+
+            if thought_start == -1:
+                raise ValueError("Missing Thought section")
+
+            # Extract the thought text
+            thought_prefix_end = response_text.find(":", thought_start) + 1
+            thought = response_text[thought_prefix_end:first_action_pos].strip()
+
+        action_blocks = []
+
+        for i, action_pos in enumerate(action_positions):
+            # Extract the action text up to the next action or end of text
+            if i < len(action_positions) - 1:
+                next_action_pos = action_positions[i + 1]
+                action_text = response_text[action_pos + 7 : next_action_pos].strip()
+            else:
+                action_text = response_text[action_pos + 7 :].strip()
+
+            action_blocks.append(action_text)
+
+        return thought, action_blocks
 
     def _extract_thought_action(self, response_text: str) -> tuple[str, str]:
         """Extract thought and action from response text.
@@ -234,7 +301,7 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
 
         return action_lines[0].strip(), action_lines[1].strip()
 
-    def _get_action_class(self, action_name: str) -> Optional[type[ResponseSchema]]:
+    def _get_action_class(self, action_name: str) -> type[ResponseSchema]:
         """Get the action class for an action name.
 
         Args:
@@ -251,17 +318,21 @@ Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''}
         else:
             schemas = self._response_schema
 
-        action_class = next((a for a in schemas if a.name == action_name), None)
-        if not action_class:
-            action_names = [a.name for a in schemas]
+        # Find the matching action class
+        matching_actions = [a for a in schemas if hasattr(a, "name") and a.name == action_name]
+        if not matching_actions:
+            action_names = [a.name for a in schemas if hasattr(a, "name")]
             raise ValueError(f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}")
 
-        return action_class
+        return matching_actions[0]
 
     def _generate_few_shot_examples(self) -> str:
         """Generate few-shot examples in ReAct format"""
         base_prompt = super()._generate_few_shot_examples()
         if not base_prompt:
+            return ""
+
+        if not self._response_schema:
             return ""
 
         few_shot_examples = []

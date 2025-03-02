@@ -121,28 +121,6 @@ class GitRepository(FileRepository):
             commit=data["commit"],
         )
 
-    def restore_from_snapshot(self, snapshot: dict):
-        self.current_commit = snapshot["commit"]
-
-        if snapshot.get("patch"):
-            self.current_diff = snapshot["patch"]
-
-        try:
-            self.clean_untracked_files()
-            self._repo.git.reset("--hard", "HEAD")  # Discard all local changes
-            self._repo.git.checkout("-f", self.current_commit)  # Force checkout
-        except Exception as e:
-            logger.error(f"Error checking out commit {self.current_commit}: {e}")
-
-        # TODO: Check diff and only reset changed files
-
-    def clean_untracked_files(self):
-        try:
-            self._repo.git.clean("-fd")
-            logger.info("Removed all untracked files.")
-        except Exception as e:
-            logger.error(f"Error removing untracked files: {e}")
-
     def dict(self):
         return {
             "type": "git",
@@ -166,7 +144,7 @@ class GitRepository(FileRepository):
         self.commit(file_path)
         return file
 
-    def commit(self, file_path: str | None = None):
+    def commit(self, file_path: str):
         commit_message = self.commit_message(file_path)
 
         try:
@@ -180,7 +158,6 @@ class GitRepository(FileRepository):
             logger.info(
                 f"Committed changes to git with message '{commit_message}' and commit hash '{self.current_commit}'"
             )
-            self.clean_untracked_files()  # Clean untracked files after commit
         except FileNotFoundError as e:
             logger.error(f"Error committing changes: Current working directory not found. {e}")
             # Attempt to change to the repository directory

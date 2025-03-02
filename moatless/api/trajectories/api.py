@@ -81,6 +81,20 @@ async def start_trajectory(project_id: str, trajectory_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{project_id}/{trajectory_id}/retry-trajectory")
+async def retry_trajectory(project_id: str, trajectory_id: str):
+    """Reset and restart a trajectory by removing all children from the root node."""
+    try:
+        await _manager.retry_trajectory(project_id, trajectory_id)
+        return {"status": "success", "message": f"Retried trajectory {trajectory_id}"}
+    except ValueError as e:
+        logger.exception(f"Error retrying trajectory: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error retrying trajectory: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{project_id}/{trajectory_id}/resume")
 async def resume_trajectory(project_id: str, trajectory_id: str, request: StartTrajectoryRequest):
     """Resume a trajectory."""
@@ -92,20 +106,6 @@ async def resume_trajectory(project_id: str, trajectory_id: str, request: StartT
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.exception(f"Error resuming trajectory: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/{project_id}/{trajectory_id}/retry")
-async def retry_trajectory(project_id: str, trajectory_id: str, request: RetryTrajectoryRequest):
-    """Retry a run."""
-    try:
-        await _manager.retry_trajectory(project_id, trajectory_id, request)
-        return {"status": "success", "message": f"Started retry for trajectory {trajectory_id}"}
-    except ValueError as e:
-        logger.exception(f"Error retrying trajectory: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error retrying trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

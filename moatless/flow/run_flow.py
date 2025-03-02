@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from moatless.context_data import get_trajectory_dir
@@ -19,9 +20,11 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
     print(f"Setting up job logging for run in {trajectory_dir}")
     original_handlers = setup_job_logging("run", trajectory_dir)
 
+    repo_path = os.getenv("REPO_PATH", str(Path.cwd()))
+    logger.info(f"Using repository path: {repo_path}")
     try:
-        repository = GitRepository(repo_path=str(Path.cwd()))
-        workspace = Workspace(repository=repository, environment=LocalBashEnvironment())
+        repository = GitRepository(repo_path=repo_path)
+        workspace = Workspace(repository=repository, environment=LocalBashEnvironment(cwd=repo_path))
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
 

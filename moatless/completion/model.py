@@ -172,10 +172,6 @@ class Completion(BaseModel):
     response: dict[str, Any] | None = None
     retries: int | None = None
     usage: Usage | None = None
-    flags: list[str] = Field(
-        default_factory=list,
-        description="List of flags indicating special conditions or states during completion",
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -207,7 +203,6 @@ class Completion(BaseModel):
         model: str,
         usage: Usage | None = None,
         retries: int | None = None,
-        flags: list[str] | None = None,
     ) -> Optional["Completion"]:
         if completion_response is None:
             raise ValueError("Completion response is None")
@@ -223,11 +218,4 @@ class Completion(BaseModel):
         if not usage:
             usage = Usage.from_completion_response(completion_response, model)
 
-        return cls(
-            model=model,
-            input=input_messages,
-            response=response,
-            retries=retries,
-            usage=usage,
-            flags=flags or [],
-        )
+        return cls(model=model, input=input_messages, response=response, retries=retries, usage=usage)

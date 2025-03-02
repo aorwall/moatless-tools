@@ -67,11 +67,8 @@ class Reward(BaseModel):
     )
 
 
-class ThoughtBlock(BaseModel):
-    type: Literal["thinking", "redacted_thinking"] = Field(..., description="The type of the thought block")
+class Thoughts(BaseModel):
     text: str = Field(..., description="The text of the thought block")
-    signature: Optional[str] = Field(None, description="The signature of the thought block")
-    data: Optional[str] = Field(None, description="The data of the thought block")
 
 
 class Node(BaseModel):
@@ -88,7 +85,7 @@ class Node(BaseModel):
     user_message: Optional[str] = Field(None, description="The user message for this node")
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
 
-    thoughts: Optional[list[dict]] = Field(default=None, description="The thoughts associated with the node")
+    thoughts: Optional[Thoughts] = Field(default=None, description="The thoughts associated with the node")
 
     action_steps: list[ActionStep] = Field(
         default_factory=list,

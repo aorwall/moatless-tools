@@ -140,7 +140,9 @@ class ActionAgent(MoatlessComponent):
                     action.completion_model = self._completion_model
 
     @property
-    def workspace(self):
+    def workspace(self) -> Workspace:
+        if not self._workspace:
+            raise RuntimeError("Workspace not set")
         return self._workspace
 
     # TODO: Replace this with initialize method
@@ -268,11 +270,11 @@ class ActionAgent(MoatlessComponent):
         action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
-                f"Node{node.node_id}: Action {node.action.name} not found in action map. "
-                f"Available actions: {self.action_map.keys()}"
+                f"Node{node.node_id}: Action {type(action_step.action)} not found in action map. "
+                f"Available actions: {list(self.action_map.keys())}"
             )
             raise RuntimeError(
-                f"Action {type(node.action)} not found in action map with actions: {self.action_map.keys()}"
+                f"Action {type(action_step.action)} not found in action map with actions: {list(self.action_map.keys())}"
             )
 
         return await action.execute(action_step.action, file_context=node.file_context)

@@ -34,31 +34,23 @@ class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
                     ChatCompletionAssistantMessage(role="assistant", content=node_message.assistant_message)
                 )
 
-            if node_message.action:
-                # Add thought and action message
-                if self.disable_thoughts:
-                    thought = ""
+            assistant_content = ""
+            for action, observation in zip(node_message.actions, node_message.observations, strict=True):
+                from moatless.actions.think import ThinkArgs
+
+                if isinstance(action, ThinkArgs):
+                    assistant_content += f"Thought: {action.thought}\n"
+                elif hasattr(action, "thoughts") and action.thoughts:
+                    assistant_content += f"Thought: {action.thoughts}\n"
                 else:
-                    thought = (
-                        f"Thought: {node_message.action.thoughts}" if hasattr(node_message.action, "thoughts") else ""
-                    )
+                    assistant_content += "\n"
 
-                action_str = f"Action: {node_message.action.name}"
-                action_input = node_message.action.format_args_for_llm()
+                assistant_content = f"Action: {action.name}"
+                assistant_content += action.format_args_for_llm()
 
-                if thought:
-                    assistant_content = f"{thought}\n{action_str}"
-                else:
-                    assistant_content = action_str
-
-                if action_input:
-                    assistant_content += f"\n{action_input}"
-
-                messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
-                if node_message.observation:
-                    messages.append(
-                        ChatCompletionUserMessage(role="user", content=f"Observation: {node_message.observation}")
-                    )
+            messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
+            for observation in node_message.observations:
+                messages.append(ChatCompletionUserMessage(role="user", content=observation))
 
         tokens = count_tokens("".join([m["content"] for m in messages if m.get("content")]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")

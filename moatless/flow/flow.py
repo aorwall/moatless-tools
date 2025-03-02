@@ -155,6 +155,11 @@ class AgenticFlow(MoatlessComponent):
         if workspace:
             await self.agent.initialize(workspace)
 
+        # TODO: Workaround to set repo on existing nodes
+        for node in self.root.get_all_nodes():
+            if node.file_context and not node.file_context._repo:
+                node.file_context.repository = self.agent.workspace.repository
+
         if not self.agent.workspace:
             raise ValueError("Agent workspace is not set")
 

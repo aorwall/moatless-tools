@@ -36,6 +36,16 @@ export const trajectoriesApi = {
     return response;
   },
 
+  retryTrajectory: async (projectId: string, trajectoryId: string) => {
+    const response = await apiRequest<{ status: string; message: string }>(
+      `/trajectories/${projectId}/${trajectoryId}/retry-trajectory`,
+      {
+        method: 'POST',
+      }
+    );
+    return response;
+  },
+
   resume: (trajectoryId: string, data: ResumeTrajectoryRequest) =>
     apiRequest(`/trajectories/${trajectoryId}/resume`, {
       method: 'POST',

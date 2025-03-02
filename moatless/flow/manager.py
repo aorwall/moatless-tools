@@ -366,21 +366,35 @@ class FlowManager:
         await agentic_runner.start(agentic_flow, message=request.message)
         return agentic_flow
 
-    async def retry_trajectory(self, project_id: str, trajectory_id: str, request):
-        """Retry a trajectory."""
-        from moatless.flow.runner import agentic_runner
+    async def retry_trajectory(self, project_id: str, trajectory_id: str):
+        """Reset and restart a trajectory by removing all children from the root node.
 
-        system = await agentic_runner.get_run(trajectory_id, project_id)
-        if system:
-            raise ValueError("Flow is already running")
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
 
-        agentic_flow = await self._setup_flow(trajectory_id, project_id)
-        agentic_flow.reset_node(request.node_id)
+        Returns:
+            The reset and restarted flow
+        """
+        logger.info(f"Resetting trajectory {trajectory_id} in project {project_id}")
 
-        await agentic_runner.start(agentic_flow)
+        job_status = await self._runner.get_job_status(project_id, trajectory_id)
+        if job_status == JobStatus.RUNNING:
+            raise ValueError("Cannot retry a trajectory that is already running")
 
-        logger.info(f"Started retry for trajectory {trajectory_id}")
-        return agentic_flow
+        flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+
+        # Reset the trajectory by removing all children from the root node
+        if flow.root and flow.root.children:
+            logger.info(f"Removing {len(flow.root.children)} children from root node")
+            flow.root.children = []
+            flow.persist()
+            logger.info("Trajectory reset successfully")
+
+        await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
+        logger.info(f"Trajectory {trajectory_id} restarted successfully")
+
+        return flow
 
     async def execute_node(self, project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
         """Execute a specific node in a trajectory."""

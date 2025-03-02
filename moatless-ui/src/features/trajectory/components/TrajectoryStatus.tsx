@@ -14,10 +14,12 @@ import {
   Coins,
   Loader2,
   Play,
+  RefreshCw,
   Square,
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRetryTrajectory } from "../hooks/useRetryTrajectory";
 import { useStartTrajectory } from "../hooks/useStartTrajectory";
 
 interface TrajectoryStatusProps {
@@ -27,9 +29,11 @@ interface TrajectoryStatusProps {
 
 export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const queryClient = useQueryClient();
   const cancelJob = useCancelJob();
   const startTrajectory = useStartTrajectory();
+  const retryTrajectory = useRetryTrajectory();
 
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
@@ -51,6 +55,9 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
   const hasStarted = trajectory.system_status.started_at !== undefined &&
     trajectory.system_status.started_at !== null;
 
+  // Check if the trajectory can be retried (not running)
+  const canRetry = trajectory.status.toLowerCase() !== "running" && hasStarted;
+
   const handleStartClick = async () => {
     setIsStarting(true);
     try {
@@ -62,6 +69,20 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
       console.error("Error starting trajectory:", error);
     } finally {
       setIsStarting(false);
+    }
+  };
+
+  const handleRetryClick = async () => {
+    setIsRetrying(true);
+    try {
+      await retryTrajectory.mutateAsync({
+        projectId: trajectory.project_id,
+        trajectoryId: trajectory.trajectory_id
+      });
+    } catch (error) {
+      console.error("Error retrying trajectory:", error);
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -91,47 +112,78 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
     };
   }, [trajectory.status, trajectory.project_id, trajectory.trajectory_id, queryClient]);
 
-  const actionButton = canStart ? (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleStartClick}
-      disabled={isStarting}
-      className="ml-auto"
-    >
-      {isStarting ? (
-        <>
-          <Loader2 className="h-3 w-3 animate-spin mr-2" />
-          Starting...
-        </>
-      ) : (
-        <>
-          <Play className="h-3 w-3 mr-2" />
-          Start Instance
-        </>
-      )}
-    </Button>
-  ) : trajectory.status.toLowerCase() === "running" ? (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleCancelClick}
-      disabled={cancelJob.isPending}
-      className="ml-auto text-destructive hover:text-destructive"
-    >
-      {cancelJob.isPending ? (
-        <>
-          <Loader2 className="h-3 w-3 animate-spin mr-2" />
-          Cancelling...
-        </>
-      ) : (
-        <>
-          <Square className="h-3 w-3 mr-2" />
-          Cancel Job
-        </>
-      )}
-    </Button>
-  ) : null;
+  // Determine which action buttons to show
+  const getActionButtons = () => {
+    if (trajectory.status.toLowerCase() === "running") {
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleCancelClick}
+          disabled={cancelJob.isPending}
+          className="ml-auto text-destructive hover:text-destructive"
+        >
+          {cancelJob.isPending ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin mr-2" />
+              Cancelling...
+            </>
+          ) : (
+            <>
+              <Square className="h-3 w-3 mr-2" />
+              Cancel Job
+            </>
+          )}
+        </Button>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2 ml-auto">
+        {canRetry && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRetryClick}
+            disabled={isRetrying}
+          >
+            {isRetrying ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                Retrying...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-3 w-3 mr-2" />
+                Retry
+              </>
+            )}
+          </Button>
+        )}
+
+        {canStart && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleStartClick}
+            disabled={isStarting}
+          >
+            {isStarting ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin mr-2" />
+                Starting...
+              </>
+            ) : (
+              <>
+                <Play className="h-3 w-3 mr-2" />
+                Start Instance
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className={cn("flex items-center h-14 px-4 py-2 gap-4 border-b bg-background/50", className)}>
@@ -204,8 +256,8 @@ export function TrajectoryStatus({ trajectory, className }: TrajectoryStatusProp
         </div>
       )}
 
-      {/* Action button - pushed to the right */}
-      {actionButton}
+      {/* Action buttons */}
+      {getActionButtons()}
     </div>
   );
 }

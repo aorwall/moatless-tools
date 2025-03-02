@@ -53,7 +53,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str]]:
         """Validate tool call completion response.
 
         Args:
@@ -63,7 +63,6 @@ class ToolCallCompletionModel(BaseCompletionModel):
             Tuple of:
             - List of validated structured outputs
             - Optional text response
-            - List of flags
 
         Raises:
             CompletionRejectError: If validation fails
@@ -73,14 +72,12 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return [], content, []
+            return [], content
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()
-        flags = []
         structured_outputs = []
         valid_names = [s.name for s in self._response_schema]
-        invalid_function_names = []
 
         retry_messages = []
         retry = False
@@ -99,7 +96,6 @@ class ToolCallCompletionModel(BaseCompletionModel):
             # Check for duplicate arguments
             if tool_call.function.arguments in seen_arguments:
                 logger.warning(f"Duplicate tool call arguments found for {tool_call.function.name}")
-                flags.append("duplicate_tool_call")
                 continue
 
             seen_arguments.add(tool_call.function.arguments)
@@ -135,19 +131,13 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 retry = True
                 continue
 
-            # Just in case we need to retry
-            retry_message = self._create_retry_message(
-                tool_call, f"Tool {tool_name} could not be executed as other tools failed."
-            )
-            retry_messages.append(retry_message)
-
         if retry:
             raise CompletionRetryError(
-                message=f"Tool calls failed. Retry messages: {retry_messages}",
+                message=f"Tool {tool_name} could not be executed as other tools failed.",
                 retry_messages=retry_messages,
             )
 
-        return structured_outputs, content, flags
+        return structured_outputs, content
 
     def _get_response_model(self, tool_name: str) -> type[ResponseSchema]:
         """Get the response model for a tool name.
