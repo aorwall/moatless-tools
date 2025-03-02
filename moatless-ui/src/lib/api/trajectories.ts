@@ -1,6 +1,6 @@
-import { apiRequest } from "./config";
 import { TrajectoryListItem } from "@/lib/types";
-import { ResumeTrajectoryRequest, Trajectory } from "@/lib/types/trajectory";
+import { ResumeTrajectoryRequest, Trajectory, TrajectoryLogsResponse } from "@/lib/types/trajectory";
+import { apiRequest } from "./config";
 
 export const trajectoriesApi = {
   getTrajectories: async (): Promise<TrajectoryListItem[]> => {
@@ -8,15 +8,33 @@ export const trajectoriesApi = {
   },
 
   getTrajectory: async (projectId: string, trajectoryId: string): Promise<Trajectory> => {
-    return apiRequest(`/trajectories/${projectId}/${trajectoryId}`, {
-      method: "GET",
-    });
+    const response = await apiRequest<Trajectory>(`/trajectories/${projectId}/${trajectoryId}`);
+    return response;
   },
 
-  start: (projectId: string, trajectoryId: string) =>
-    apiRequest(`/trajectories/${projectId}/${trajectoryId}/start`, {
-      method: 'POST',
-    }),
+  getTrajectoryLogs: async (projectId: string, trajectoryId: string, fileName?: string) => {
+    const options: { params?: Record<string, string> } = {};
+
+    if (fileName) {
+      options.params = { file_name: fileName };
+    }
+
+    const response = await apiRequest<TrajectoryLogsResponse>(
+      `/trajectories/${projectId}/${trajectoryId}/logs`,
+      options
+    );
+    return response;
+  },
+
+  startTrajectory: async (projectId: string, trajectoryId: string) => {
+    const response = await apiRequest<{ status: string; message: string }>(
+      `/trajectories/${projectId}/${trajectoryId}/start`,
+      {
+        method: 'POST',
+      }
+    );
+    return response;
+  },
 
   resume: (trajectoryId: string, data: ResumeTrajectoryRequest) =>
     apiRequest(`/trajectories/${trajectoryId}/resume`, {
@@ -47,8 +65,8 @@ export const trajectoriesApi = {
   },
 
   executeNode: async (
-    trajectoryId: string, 
-    projectId: string, 
+    trajectoryId: string,
+    projectId: string,
     nodeId: number,
   ): Promise<any> => {
     if (!nodeId) {

@@ -26,7 +26,7 @@ export type TimelineItemType =
   | "artifact"
   | "reward";
 
-export type TimelineContent = 
+export type TimelineContent =
   | UserMessageContent
   | AssistantMessageContent
   | CompletionContent
@@ -242,4 +242,15 @@ export interface Trajectory {
   duplicatedActions?: number;
   nodes: Node[];
   events: TrajectoryEvent[];
+}
+
+export interface TrajectoryLogFile {
+  name: string;
+  modified: string;
+}
+
+export interface TrajectoryLogsResponse {
+  logs: string;
+  files: TrajectoryLogFile[];
+  current_file: string | null;
 }

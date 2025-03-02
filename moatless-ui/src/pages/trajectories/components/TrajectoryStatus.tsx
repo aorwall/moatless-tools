@@ -1,6 +1,9 @@
+import { useCancelJob } from "@/features/runner/hooks/useJobsManagement";
+import { trajectoryKeys } from "@/features/trajectory/hooks/useGetTrajectory";
 import { Badge } from "@/lib/components/ui/badge";
 import { Button } from "@/lib/components/ui/button";
 import { Trajectory } from "@/lib/types/trajectory";
+import { useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import {
   AlertCircle,
@@ -9,9 +12,10 @@ import {
   Coins,
   Loader2,
   Play,
+  Square,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
@@ -20,6 +24,8 @@ interface TrajectoryStatusProps {
 
 export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
+  const queryClient = useQueryClient();
+  const cancelJob = useCancelJob();
 
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
@@ -48,6 +54,10 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
       setIsStarting(true);
       try {
         await startInstance();
+        await queryClient.refetchQueries({
+          queryKey: trajectoryKeys.detail(trajectory.project_id, trajectory.trajectory_id),
+          exact: true
+        });
       } catch (error) {
         console.error("Error starting trajectory:", error);
       } finally {
@@ -55,6 +65,32 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
       }
     }
   };
+
+  const handleCancelClick = async () => {
+    cancelJob.mutate({
+      projectId: trajectory.project_id,
+      trajectoryId: trajectory.trajectory_id
+    });
+  };
+
+  // Periodically refetch trajectory status when running
+  useEffect(() => {
+    let intervalId: number | undefined;
+
+    if (trajectory.status.toLowerCase() === "running") {
+      intervalId = window.setInterval(() => {
+        queryClient.invalidateQueries({
+          queryKey: trajectoryKeys.detail(trajectory.project_id, trajectory.trajectory_id)
+        });
+      }, 5000); // Refetch every 5 seconds
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [trajectory.status, trajectory.project_id, trajectory.trajectory_id, queryClient]);
 
   return (
     <div className="space-y-2 p-3">
@@ -83,8 +119,8 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
         </div>
       </div>
 
-      {/* Start Button */}
-      {canStart && (
+      {/* Start Button or Cancel Button */}
+      {canStart ? (
         <Button
           variant="outline"
           size="sm"
@@ -104,7 +140,27 @@ export function TrajectoryStatus({ trajectory, startInstance }: TrajectoryStatus
             </>
           )}
         </Button>
-      )}
+      ) : trajectory.status.toLowerCase() === "running" ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full mt-2 flex items-center gap-2 text-destructive hover:text-destructive"
+          onClick={handleCancelClick}
+          disabled={cancelJob.isPending}
+        >
+          {cancelJob.isPending ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Cancelling...
+            </>
+          ) : (
+            <>
+              <Square className="h-3 w-3" />
+              Cancel Job
+            </>
+          )}
+        </Button>
+      ) : null}
 
       {/* Timing Info */}
       <div className="grid grid-cols-2 gap-x-2 text-xs">

@@ -1,95 +1,56 @@
-import { RunEvent } from "@/lib/types/run";
-import {
-  AlertCircle,
-  Info,
-  MessageSquare,
-  Bot,
-  Terminal,
-  Loader2,
-  GitBranch,
-} from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
 import { TrajectoryEvent } from "@/lib/types/trajectory";
+import { formatDistanceToNow } from "date-fns";
+
 interface TrajectoryEventsProps {
   events: TrajectoryEvent[];
-  className?: string;
 }
 
-export function TrajectoryEvents({ events, className }: TrajectoryEventsProps) {
-  // just sort in reverse order
-  const reversedEvents = [...events].reverse();
-
-  const getEventIcon = (event: TrajectoryEvent) => {
-    if (event.event_type.includes("error")) {
-      return <AlertCircle className="h-4 w-4 text-destructive" />;
-    } else if (event.scope === "agent" || event.scope === "action") {
-      return <Bot className="h-4 w-4 text-primary" />;
-    } else if (event.scope === "flow") {
-      return <GitBranch className="h-4 w-4 text-blue-500" />;
-    } else {
-        return <Info className="h-4 w-4 text-muted-foreground" />;
-    }
-  };
-
-  const formatEventType = (type: string) => {
-    return type
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ");
-  };
-
-  if (events.length === 0) {
+export function TrajectoryEvents({ events }: TrajectoryEventsProps) {
+  if (!events || events.length === 0) {
     return (
-      <div className="flex items-center justify-center h-32 text-muted-foreground">
-        No events yet
+      <div className="flex items-center justify-center h-full p-4 text-muted-foreground">
+        <p>No events</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 p-4">
-      {reversedEvents.map((event, i) => (
-        <div
-          key={`${event.timestamp}-${i}`}
-          className={cn(
-            "rounded-md border bg-card p-3 text-sm shadow-sm",
-            event.event_type.includes("error") && "bg-destructive/10 border-destructive/20"
-          )}
-        >
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              {getEventIcon(event)}
-              <span className="font-medium">
-                {formatEventType(event.event_type)}
-              </span>
-              {event.node_id !== undefined && (
-                <span className="text-xs text-muted-foreground">
-                  Node {event.node_id}
+    <ScrollArea className="h-full w-full">
+      <div className="p-4">
+        {events.map((event, index) => {
+          const date = new Date(event.timestamp);
+          const timeAgo = formatDistanceToNow(date, { addSuffix: true });
+
+          return (
+            <div key={index} className="mb-4 last:mb-0">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-foreground">
+                  {event.event_type}
                 </span>
-              )}
+                <span className="text-xs text-muted-foreground">
+                  {timeAgo}
+                </span>
+              </div>
+              <div className="flex gap-2 items-start mt-1">
+                <div className="w-1 h-1 rounded-full bg-muted-foreground mt-1.5"></div>
+                <div>
+                  <div className="text-sm">
+                    {event.scope && <span className="text-muted-foreground">{event.scope}</span>}
+                    {event.node_id !== undefined && <span className="ml-1 text-muted-foreground">Node: {event.node_id}</span>}
+                    {event.action_name && <span className="ml-1 text-muted-foreground">Action: {event.action_name}</span>}
+                  </div>
+                  {event.data && (
+                    <pre className="mt-1 text-xs font-mono bg-muted p-2 rounded overflow-x-auto">
+                      {JSON.stringify(event.data, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </div>
             </div>
-            <span className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(event.timestamp))} ago
-            </span>
-          </div>
-          {event.action_name && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Action: {event.action_name}
-            </p>
-          )}
-          {event.data && Object.entries(event.data).length > 0 && (
-            <div className="mt-2 space-y-1">
-              {Object.entries(event.data).map(([key, value]) => (
-                <p key={key} className="text-xs text-muted-foreground">
-                  {key}: {JSON.stringify(value)}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
+          );
+        })}
+      </div>
+    </ScrollArea>
   );
 }
