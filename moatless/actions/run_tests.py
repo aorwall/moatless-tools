@@ -46,8 +46,10 @@ class RunTests(Action):
         description="The maximum number of tokens in the test result output message",
     )
 
-    _repository: Repository = PrivateAttr()
-    _runtime: RuntimeEnvironment = PrivateAttr()
+    async def initialize(self, workspace: Workspace):
+        await super().initialize(workspace)
+        if not self._runtime or not self._repository:
+            raise ValueError("Runtime environment or repository not set for RunTests action")
 
     async def execute(
         self,
@@ -60,7 +62,7 @@ class RunTests(Action):
         if file_context is None:
             raise ValueError("File context must be provided to execute the run tests action.")
 
-        if self._runtime is None:
+        if file_context._runtime is None:
             raise ValueError("Runtime must be provided to execute the run tests action.")
 
         # Separate non-existent files and directories from valid test files

@@ -1,6 +1,6 @@
+import { AttachmentData } from "@/types/attachments";
 import { Trajectory } from "../types/trajectory";
 import { apiRequest } from "./config";
-import { AttachmentData } from "@/types/attachments";
 
 export interface SWEBenchInstance {
   instance_id: string;
@@ -70,6 +70,14 @@ export const swebenchApi = {
   startInstance: (evaluationName: string, instanceId: string) =>
     apiRequest<any>(
       `/swebench/evaluations/${evaluationName}/instances/${instanceId}/start`,
+      {
+        method: "POST",
+      },
+    ),
+
+  retryInstance: (evaluationName: string, instanceId: string) =>
+    apiRequest<any>(
+      `/swebench/evaluations/${evaluationName}/instances/${instanceId}/retry`,
       {
         method: "POST",
       },

@@ -11,6 +11,7 @@ from moatless.evaluation.schema import Evaluation, EvaluationInstance
 from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instance, get_moatless_instances
 from moatless.flow.manager import FlowManager, get_flow_config
 from moatless.flow.schema import TrajectoryResponseDTO
+
 from .schema import (
     CancelJobsResponseDTO,
     DatasetDTO,
@@ -187,18 +188,18 @@ async def cancel_evaluation_jobs(evaluation_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/evaluations/{evaluation_name}/instances/{instance_id}/start", response_model=EvaluationResponseDTO)
+@router.post("/evaluations/{evaluation_name}/instances/{instance_id}/start")
 async def start_instance(evaluation_name: str, instance_id: str):
-    """Start a specific instance within an evaluation."""
-    try:
-        manager = await EvaluationManager.get_instance()
-        evaluation = await manager.start_instance(evaluation_name=evaluation_name, instance_id=instance_id)
-        return map_to_evaluation_response(evaluation)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Failed to start instance: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    """Start a specific instance in an evaluation."""
+    manager = await EvaluationManager.get_instance()
+    await manager.start_instance(evaluation_name, instance_id)
+
+
+@router.post("/evaluations/{evaluation_name}/instances/{instance_id}/retry")
+async def retry_instance(evaluation_name: str, instance_id: str):
+    """Retry a specific instance in an evaluation that failed."""
+    manager = await EvaluationManager.get_instance()
+    await manager.retry_instance(evaluation_name, instance_id)
 
 
 @router.get("/instances", response_model=SWEBenchInstancesResponseDTO)

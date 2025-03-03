@@ -91,7 +91,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
 
 async def _run_instance(
     evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict
-) -> None:
+) -> AgenticFlow:
     current_project_id.set(evaluation_name)
     current_trajectory_id.set(instance_id)
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
@@ -101,7 +101,6 @@ async def _run_instance(
         litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
 
         code_index = await create_index_async(swebench_instance, repository=repository)
-
         workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
@@ -115,6 +114,8 @@ async def _run_instance(
 
         node = await flow.run(workspace=workspace)
         logger.info(f"Flow completed for instance {instance_id}")
+
+    return flow
 
 
 def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, runtime: TestbedEnvironment) -> None:

@@ -562,21 +562,6 @@ class Node(BaseModel):
             # Old tree format
             return cls._reconstruct_node(data, repo=repo)
 
-    def persist(self, file_path: str, format: str = "list"):
-        """
-        Persist the node tree to file.
-
-        Args:
-            file_path (str): The path to save to
-            format (str): Either "list" (new) or "tree" (legacy)
-        """
-        if format == "list":
-            self.persist_as_list(file_path)
-        elif format == "tree":
-            self.persist_tree(file_path)
-        else:
-            raise ValueError("Format must be either 'list' or 'tree'")
-
     def truncate_children_by_id(self, max_id: int):
         """Truncate children to only include nodes with IDs less than or equal to the specified value.
 

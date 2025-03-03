@@ -89,12 +89,12 @@ class ChatCompletionAssistantToolCall(TypedDict):
 
 class ChatCompletionMessage(TypedDict, total=False):
     role: Required[Literal["assistant", "user", "tool"]]
-    content: Optional[Union[str, Iterable[ChatCompletionTextObject]]]
+    content: Optional[MessageContent]
 
 
 class ChatCompletionAssistantMessage(ChatCompletionMessage, total=False):
     name: Optional[str]
-    content: Optional[Union[str, Iterable[ChatCompletionTextObject]]]
+    content: Optional[MessageContent]
     tool_calls: Optional[list[ChatCompletionAssistantToolCall]]
     function_call: Optional[ChatCompletionToolCallFunctionChunk]
     cache_control: Optional[ChatCompletionCachedContent]

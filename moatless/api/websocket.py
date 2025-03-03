@@ -66,7 +66,7 @@ class ConnectionManager:
 
         self.project_subscriptions[project_id].add(websocket)
         self.socket_subscriptions[websocket]["projects"].add(project_id)
-        logger.debug(f"WebSocket subscribed to project: {project_id}")
+        logger.info(f"WebSocket subscribed to project: {project_id}")
 
         # Acknowledge subscription
         await websocket.send_json({"type": "subscription_ack", "subscription": "project", "id": project_id})
@@ -78,7 +78,7 @@ class ConnectionManager:
 
         self.trajectory_subscriptions[trajectory_id].add(websocket)
         self.socket_subscriptions[websocket]["trajectories"].add(trajectory_id)
-        logger.debug(f"WebSocket subscribed to trajectory: {trajectory_id}")
+        logger.info(f"WebSocket subscribed to trajectory: {trajectory_id}")
 
         # Acknowledge subscription
         await websocket.send_json({"type": "subscription_ack", "subscription": "trajectory", "id": trajectory_id})
@@ -93,7 +93,7 @@ class ConnectionManager:
         if websocket in self.socket_subscriptions:
             self.socket_subscriptions[websocket]["projects"].discard(project_id)
 
-        logger.debug(f"WebSocket unsubscribed from project: {project_id}")
+        logger.info(f"WebSocket unsubscribed from project: {project_id}")
 
         # Acknowledge unsubscription
         await websocket.send_json({"type": "unsubscription_ack", "subscription": "project", "id": project_id})
@@ -108,7 +108,7 @@ class ConnectionManager:
         if websocket in self.socket_subscriptions:
             self.socket_subscriptions[websocket]["trajectories"].discard(trajectory_id)
 
-        logger.debug(f"WebSocket unsubscribed from trajectory: {trajectory_id}")
+        logger.info(f"WebSocket unsubscribed from trajectory: {trajectory_id}")
 
         # Acknowledge unsubscription
         await websocket.send_json({"type": "unsubscription_ack", "subscription": "trajectory", "id": trajectory_id})
@@ -147,42 +147,31 @@ class ConnectionManager:
         # Track connections that received the message via specific subscription
         notified_connections = set()
 
-        # Send to trajectory subscribers if applicable
+        # Only send flow and evaluation events to project subscribers
+        if event_dict.get("scope") == "flow" or event_dict.get("scope") == "evaluation":
+            if project_id and project_id in self.project_subscriptions:
+                for connection in self.project_subscriptions[project_id].copy():
+                    # Skip if already notified via trajectory subscription
+                    if connection in notified_connections:
+                        continue
+
+                    try:
+                        await connection.send_text(json.dumps(event_dict))
+                        notified_connections.add(connection)
+                    except Exception as e:
+                        logger.error(f"Failed to send message to project subscriber: {e}")
+                        await self.disconnect(connection)
+
         if trajectory_id and trajectory_id in self.trajectory_subscriptions:
             for connection in self.trajectory_subscriptions[trajectory_id].copy():
+                if connection in notified_connections:
+                    continue
+
                 try:
                     await connection.send_text(json.dumps(event_dict))
                     notified_connections.add(connection)
                 except Exception as e:
                     logger.error(f"Failed to send message to trajectory subscriber: {e}")
-                    await self.disconnect(connection)
-
-        # Send to project subscribers if applicable
-        if project_id and project_id in self.project_subscriptions:
-            for connection in self.project_subscriptions[project_id].copy():
-                # Skip if already notified via trajectory subscription
-                if connection in notified_connections:
-                    continue
-
-                try:
-                    await connection.send_text(json.dumps(event_dict))
-                    notified_connections.add(connection)
-                except Exception as e:
-                    logger.error(f"Failed to send message to project subscriber: {e}")
-                    await self.disconnect(connection)
-
-        # For flow or evaluation events or if no specific subscribers,
-        # send to all other connections that weren't already notified
-        if event.scope == "flow" or event.scope == "evaluation" or not notified_connections:
-            for connection in self.active_connections.copy():
-                # Skip connections that already received the message
-                if connection in notified_connections:
-                    continue
-
-                try:
-                    await connection.send_text(json.dumps(event_dict))
-                except Exception as e:
-                    logger.error(f"Failed to send message to client: {e}")
                     await self.disconnect(connection)
 
     async def handle_message(self, websocket: WebSocket, data: dict):

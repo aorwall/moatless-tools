@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { trajectoryKeys } from "./useGetTrajectory";
 
-export function useStartTrajectory() {
+export function useStartTrajectory(options?: {
+  onSuccess?: (data: any, variables: { projectId: string; trajectoryId: string }) => void;
+}) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -15,15 +17,21 @@ export function useStartTrajectory() {
       trajectoryId: string;
     }) => trajectoriesApi.startTrajectory(projectId, trajectoryId),
 
-    onSuccess: (_, variables) => {
-      // Invalidate the trajectory queries
+    onSuccess: (data, variables) => {
+      // Default invalidation
       queryClient.invalidateQueries({
         queryKey: trajectoryKeys.detail(
           variables.projectId,
           variables.trajectoryId,
         ),
       });
+
       toast.success("Trajectory started successfully");
+
+      // Call custom onSuccess handler if provided
+      if (options?.onSuccess) {
+        options.onSuccess(data, variables);
+      }
     },
 
     onError: (error) => {

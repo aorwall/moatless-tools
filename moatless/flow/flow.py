@@ -153,6 +153,7 @@ class AgenticFlow(MoatlessComponent):
         for node in self.root.get_all_nodes():
             if node.file_context and not node.file_context._repo:
                 node.file_context.repository = self.agent.workspace.repository
+                node.file_context._runtime = self.agent.workspace.runtime
 
         if not self.agent.workspace:
             raise ValueError("Agent workspace is not set")

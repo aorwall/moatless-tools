@@ -437,6 +437,8 @@ class EvaluationManager:
         await self.runner.start_job(evaluation_name, instance_id, run_instance)
         await self._save_evaluation(evaluation)
 
+        return evaluation
+
     def _is_evaluation_completed(self, evaluation: Evaluation) -> bool:
         """Check if all instances in an evaluation have been evaluated."""
         return all(instance.status == InstanceStatus.EVALUATED for instance in evaluation.instances)

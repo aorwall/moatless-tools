@@ -1666,8 +1666,7 @@ class FileContext(BaseModel):
         """
 
         if not self._runtime:
-            logger.error("Runtime environment not set for FileContext to run tests")
-            return []
+            raise ValueError("Runtime environment not set for FileContext to run tests")
 
         if test_files:
             for test_file in test_files:

@@ -8,62 +8,53 @@ from moatless.completion.schema import (
     ChatCompletionAssistantMessage,
     ChatCompletionUserMessage,
 )
-from moatless.message_history.compact import CompactMessageHistoryGenerator
+from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
 
 logger = logging.getLogger(__name__)
 
 
-class ReactMessageHistoryGenerator(CompactMessageHistoryGenerator):
-    disable_thoughts: bool = Field(default=False, description="Do not include thoughts messages in the history")
-
+class ReactMessageHistoryGenerator(MessageHistoryGenerator):
     async def generate_messages(self, node: Node) -> list[AllMessageValues]:
-        node_messages = await self.get_node_messages(node)
-        logger.info(f"Node messages: {len(node_messages)}")
+        previous_nodes = node.get_trajectory()
 
         messages = []
 
-        # Convert node messages to react format
-        for node_message in node_messages:
-            if node_message.user_message:
-                messages.append(ChatCompletionUserMessage(role="user", content=node_message.user_message))
+        for previous_node in previous_nodes:
+            if previous_node.user_message:
+                messages.append(ChatCompletionUserMessage(role="user", content=previous_node.user_message))
 
-            if node_message.assistant_message:
+            if previous_node.assistant_message:
                 messages.append(
-                    ChatCompletionAssistantMessage(role="assistant", content=node_message.assistant_message)
+                    ChatCompletionAssistantMessage(role="assistant", content=previous_node.assistant_message)
                 )
 
-            if not node_message.actions:
+            if not previous_node.action_steps:
                 continue
 
             assistant_content = ""
             user_content = "Observations:\n "
 
-            has_actions = False
-
-            for action, observation in zip(node_message.actions, node_message.observations, strict=True):
+            for action_step in previous_node.action_steps:
                 from moatless.actions.think import ThinkArgs
 
-                if isinstance(action, ThinkArgs):
-                    assistant_content += f"Thought: {action.thought}\n"
+                if isinstance(action_step.action, ThinkArgs):
+                    assistant_content += f"Thought: {action_step.action.thought}\n"
                     continue
-                elif hasattr(action, "thoughts") and action.thoughts:
-                    assistant_content += f"Thought: {action.thoughts}\n"
+                elif hasattr(action_step.action, "thoughts") and action_step.action.thoughts:
+                    assistant_content += f"Thought: {action_step.action.thoughts}\n"
                 else:
                     assistant_content += "\n"
 
-                has_actions = True
+                assistant_content += f"Action: {action_step.action.name}\n"
+                assistant_content += action_step.action.format_args_for_llm()
 
-                assistant_content += f"Action: {action.name}\n"
-                assistant_content += action.format_args_for_llm()
+                if action_step.observation:
+                    user_content += f"{action_step.observation.message}\n"
 
-                if observation:
-                    user_content += f"{observation}\n"
-
-            if has_actions:
-                messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
-                messages.append(ChatCompletionUserMessage(role="user", content=user_content))
+            messages.append(ChatCompletionAssistantMessage(role="assistant", content=assistant_content))
+            messages.append(ChatCompletionUserMessage(role="user", content=user_content))
 
         tokens = count_tokens("".join([m["content"] for m in messages if m.get("content")]))
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")

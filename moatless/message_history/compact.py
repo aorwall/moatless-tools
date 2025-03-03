@@ -149,12 +149,12 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                 current_messages.append(NodeMessage(user_message=user_message, assistant_message=assistant_message))
 
             if previous_node.action_steps:
-                actions = []
-                observations = []
                 for i, action_step in enumerate(previous_node.action_steps):
                     if not action_step.observation:
                         continue
 
+                    actions = []
+                    observations = []
                     if isinstance(action_step.action, ViewCodeArgs):
                         # Always include ViewCode actions
                         file_path = action_step.action.files[0].file_path
@@ -272,11 +272,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                                 shown_diff = True
 
                     # Add test results only if status changed or first occurrence
-                    if (
-                        node.file_context.has_runtime
-                        and previous_node.observation
-                        and previous_node.observation.properties.get("diff")
-                    ):
+                    if node.file_context.has_runtime and node.file_context.has_patch():
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
                             if node.file_context.has_test_patch():

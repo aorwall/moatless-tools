@@ -1,8 +1,10 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { swebenchApi } from "@/lib/api/swebench";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-export function useStartInstance() {
+export function useStartInstance(options?: {
+  onSuccess?: (data: any, variables: { evaluationName: string; instanceId: string }) => void;
+}) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -13,8 +15,9 @@ export function useStartInstance() {
       evaluationName: string;
       instanceId: string;
     }) => swebenchApi.startInstance(evaluationName, instanceId),
-    onSuccess: (_, variables) => {
-      // Invalidate the specific evaluation and instance
+
+    onSuccess: (data, variables) => {
+      // Default invalidation
       queryClient.invalidateQueries({
         queryKey: ["evaluation", variables.evaluationName],
       });
@@ -26,8 +29,15 @@ export function useStartInstance() {
           variables.instanceId,
         ],
       });
+
       toast.success("Instance started successfully");
+
+      // Call custom onSuccess handler if provided
+      if (options?.onSuccess) {
+        options.onSuccess(data, variables);
+      }
     },
+
     onError: (error) => {
       toast.error("Failed to start instance", {
         description:

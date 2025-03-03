@@ -1,6 +1,6 @@
-import { useWebSocket } from "@/lib/hooks/useWebSocket";
+import { WebSocketMessage, useWebSocketStore } from "@/lib/stores/websocketStore";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
 /**
@@ -15,138 +15,74 @@ export function useTrajectorySubscription(
   trajectoryId: string,
   projectId: string,
   options?: {
-    onEvent?: (message: any) => void;
+    onEvent?: (message: WebSocketMessage) => void;
     showToasts?: boolean;
-    queryInvalidation?: boolean;
   },
 ) {
   const {
     onEvent,
-    showToasts = false,
-    queryInvalidation = true,
+    showToasts = false
   } = options || {};
 
   const queryClient = useQueryClient();
   const {
-    subscribe,
     subscribeToTrajectory,
-    unsubscribeFromTrajectory,
-    subscribeToProject,
-    unsubscribeFromProject,
     isConnected,
-  } = useWebSocket();
+  } = useWebSocketStore();
 
-  // Handle client-side subscription for local UI updates
-  useEffect(() => {
-    if (!trajectoryId) return;
+  // Keep track of the unsubscribe function
+  const unsubscribeRef = useRef<(() => void) | null>(null);
 
-    const handleMessage = (message: any) => {
-      // Invalidate queries if enabled
-      if (queryInvalidation && message.type === "event") {
-        queryClient.invalidateQueries({
-          queryKey: ["trajectory", trajectoryId],
-        });
+  /**
+   * Handle incoming messages from the WebSocket
+   */
+  const handleMessage = (message: WebSocketMessage) => {
+    // Call the onEvent callback if provided
+    if (onEvent) {
+      onEvent(message);
+    }
+
+    // Show toast notifications if enabled
+    if (showToasts) {
+      if (message.type === "error") {
+        toast.error(message.message || "An error occurred");
+      } else if (message.type === "success") {
+        toast.success(message.message || "Operation completed successfully");
+      } else if (message.type === "info") {
+        toast.info(message.message || "Information update");
       }
+    }
 
-      // Call custom event handler if provided
-      if (onEvent) {
-        onEvent(message);
-      }
-    };
+    // Invalidate queries based on message type
+    if (message.type === "trajectory_updated") {
+      queryClient.invalidateQueries({ queryKey: ["trajectory", trajectoryId] });
+    }
+  };
 
-    // Subscribe to local event handlers for both trajectory and project
-    const unsubscribeTrajectory = subscribe(
-      `trajectory.${trajectoryId}`,
-      handleMessage,
-    );
-    const unsubscribeProject = subscribe(`project.${projectId}`, handleMessage);
-
-    return () => {
-      unsubscribeTrajectory();
-      unsubscribeProject();
-    };
-  }, [
-    trajectoryId,
-    projectId,
-    subscribe,
-    queryClient,
-    onEvent,
-    queryInvalidation,
-  ]);
-
-  // Handle server-side WebSocket subscription
   useEffect(() => {
     if (!trajectoryId || !projectId) return;
 
-    const setupSubscriptions = async () => {
-      try {
-        if (!isConnected) {
-          // We'll subscribe when the connection is established via the reconnection logic
-          if (showToasts) {
-            toast.info(
-              "Waiting for WebSocket connection to subscribe to updates...",
-            );
-          }
-          return;
-        }
+    // The enhanced subscribeToTrajectory handles both client and server subscriptions
+    unsubscribeRef.current = subscribeToTrajectory(projectId, trajectoryId, handleMessage);
 
-        // Always subscribe to both the trajectory and its project
-        const [trajectorySuccess, projectSuccess] = await Promise.all([
-          subscribeToTrajectory(trajectoryId),
-          subscribeToProject(projectId),
-        ]);
-
-        if (!trajectorySuccess || !projectSuccess) {
-          console.warn(
-            `Subscription partial or failed: trajectory=${trajectoryId} (${trajectorySuccess}), ` +
-              `project=${projectId} (${projectSuccess})`,
-          );
-          if (showToasts) {
-            toast.error("Failed to subscribe to some real-time updates");
-          }
-        } else {
-          console.log(
-            `Successfully subscribed to trajectory ${trajectoryId} and project ${projectId}`,
-          );
-          if (showToasts) {
-            toast.success("Subscribed to real-time updates");
-          }
-        }
-      } catch (error) {
-        console.error("Error subscribing to updates:", error);
-        if (showToasts) {
-          toast.error("Failed to subscribe to real-time updates");
-        }
-      }
-    };
-
-    setupSubscriptions();
-
-    // Unsubscribe when component unmounts
+    // Clean up when the component unmounts
     return () => {
-      if (isConnected) {
-        Promise.all([
-          unsubscribeFromTrajectory(trajectoryId).catch((error) => {
-            console.error("Error unsubscribing from trajectory:", error);
-          }),
-          unsubscribeFromProject(projectId).catch((error) => {
-            console.error("Error unsubscribing from project:", error);
-          }),
-        ]);
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
       }
     };
   }, [
     trajectoryId,
     projectId,
     subscribeToTrajectory,
-    subscribeToProject,
-    unsubscribeFromTrajectory,
-    unsubscribeFromProject,
-    isConnected,
+    // Dependencies for handleMessage
+    queryClient,
+    onEvent,
     showToasts,
   ]);
 
   return {
-    isConnected,
+    isConnected: isConnected(),
   };
 }

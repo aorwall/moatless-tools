@@ -1,6 +1,27 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 
+// Constants
+const WS_RETRY_DELAY = 3000; // 3 seconds
+const MAX_RETRIES = 3;
+const PING_INTERVAL = 15000; // 15 seconds instead of 30
+const PONG_TIMEOUT = 5000; // 5 seconds to wait for pong response
+const INITIAL_CONNECTION_DELAY = 1000; // 1 second delay before first connection attempt
+
+// Message types
+export enum WebSocketMessageType {
+  PING = "ping",
+  PONG = "pong",
+  SUBSCRIBE = "subscribe",
+  UNSUBSCRIBE = "unsubscribe",
+}
+
+// Subscription types
+export enum SubscriptionType {
+  PROJECT = "project",
+  TRAJECTORY = "trajectory",
+}
+
 export type WebSocketMessage = {
   trajectory_id: string;
   project_id: string;
@@ -18,11 +39,34 @@ type WebSocketConnection = {
   error?: string;
 };
 
-const WS_RETRY_DELAY = 3000; // 3 seconds
-const MAX_RETRIES = 3;
-const PING_INTERVAL = 15000; // 15 seconds instead of 30
-const PONG_TIMEOUT = 5000; // 5 seconds to wait for pong response
-const INITIAL_CONNECTION_DELAY = 1000; // 1 second delay before first connection attempt
+// Define a type for trajectory subscriptions
+export type TrajectorySubscription = {
+  projectId: string;
+  trajectoryId: string;
+};
+
+// Helper to create a unique key for a trajectory subscription
+export const getTrajectorySubscriptionKey = (sub: TrajectorySubscription): string =>
+  `${sub.projectId}:${sub.trajectoryId}`;
+
+// Helper to find a trajectory subscription in a set
+const findTrajectorySubscription = (
+  set: Set<TrajectorySubscription>,
+  projectId: string,
+  trajectoryId: string
+): TrajectorySubscription | undefined => {
+  for (const sub of set) {
+    if (sub.projectId === projectId && sub.trajectoryId === trajectoryId) {
+      return sub;
+    }
+  }
+  return undefined;
+};
+
+// Channel helpers
+const getProjectChannel = (projectId: string) => `project.${projectId}`;
+const getTrajectoryChannel = (projectId: string, trajectoryId: string): string =>
+  `project.${projectId}.trajectory.${trajectoryId}`;
 
 // Add a function to get the WebSocket URL
 const getWebSocketUrl = () => {
@@ -31,23 +75,34 @@ const getWebSocketUrl = () => {
   return `${protocol}//localhost:8000/api/ws`;
 };
 
+// Type for subscription message
+type SubscriptionMessage = {
+  type: WebSocketMessageType.SUBSCRIBE | WebSocketMessageType.UNSUBSCRIBE;
+  subscription: SubscriptionType;
+  project_id: string;
+  trajectory_id?: string;
+};
+
 interface WebSocketStore {
   connection: WebSocketConnection | null;
-  messages: Record<string, WebSocketMessage[]>;
   connect: () => void;
   disconnect: () => void;
   addMessage: (message: WebSocketMessage) => void;
   isConnected: () => boolean;
   retryCount: number;
-  subscribers: Record<string, Set<(data: any) => void>>;
-  subscribe: (channel: string, callback: (data: any) => void) => () => void;
-  unsubscribe: (channel: string, callback: (data: any) => void) => void;
+  subscribers: Record<string, Set<(data: WebSocketMessage) => void>>;
+  subscribe: (channel: string, callback: (data: WebSocketMessage) => void) => () => void;
+  unsubscribe: (channel: string, callback: (data: WebSocketMessage) => void) => void;
+  sendSubscriptionMessage: (message: SubscriptionMessage) => Promise<boolean>;
   serverSubscribeToProject: (projectId: string) => Promise<boolean>;
-  serverSubscribeToTrajectory: (trajectoryId: string) => Promise<boolean>;
+  serverSubscribeToTrajectory: (projectId: string, trajectoryId: string) => Promise<boolean>;
   serverUnsubscribeFromProject: (projectId: string) => Promise<boolean>;
-  serverUnsubscribeFromTrajectory: (trajectoryId: string) => Promise<boolean>;
+  serverUnsubscribeFromTrajectory: (projectId: string, trajectoryId: string) => Promise<boolean>;
   activeProjectSubscriptions: Set<string>;
-  activeTrajectorySubscriptions: Set<string>;
+  activeTrajectorySubscriptions: Set<TrajectorySubscription>;
+  messages: Record<string, WebSocketMessage[]>;
+  subscribeToProject: (projectId: string, callback: (data: WebSocketMessage) => void) => () => void;
+  subscribeToTrajectory: (projectId: string, trajectoryId: string, callback: (data: WebSocketMessage) => void) => () => void;
 }
 
 export const useWebSocketStore = create<WebSocketStore>()(
@@ -58,7 +113,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
       retryCount: 0,
       subscribers: {},
       activeProjectSubscriptions: new Set<string>(),
-      activeTrajectorySubscriptions: new Set<string>(),
+      activeTrajectorySubscriptions: new Set<TrajectorySubscription>(),
 
       isConnected: () => {
         return get().connection?.status === "connected";
@@ -116,7 +171,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
 
               // Send ping
               if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: "ping" }));
+                ws.send(JSON.stringify({ type: WebSocketMessageType.PING }));
 
                 // Set timeout for pong response
                 pongTimeout = setTimeout(() => {
@@ -144,17 +199,19 @@ export const useWebSocketStore = create<WebSocketStore>()(
               const resubscribe = async () => {
                 const store = get();
 
+                // Resubscribe to all active project subscriptions
                 for (const projectId of store.activeProjectSubscriptions) {
                   await store.serverSubscribeToProject(projectId);
                 }
 
-                for (const trajectoryId of store.activeTrajectorySubscriptions) {
-                  await store.serverSubscribeToTrajectory(trajectoryId);
+                // Resubscribe to all active trajectory subscriptions
+                for (const channelId of store.activeTrajectorySubscriptions) {
+                  const { projectId, trajectoryId } = channelId;
+                  await store.serverSubscribeToTrajectory(projectId, trajectoryId);
                 }
               };
 
               resubscribe();
-
               heartbeat();
             };
 
@@ -163,7 +220,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
               console.log("Received message:", message);
 
               // Handle pong response
-              if (message.type === "pong") {
+              if (message.type === WebSocketMessageType.PONG) {
                 if (pongTimeout) clearTimeout(pongTimeout);
                 return;
               }
@@ -174,8 +231,7 @@ export const useWebSocketStore = create<WebSocketStore>()(
               });
             };
 
-            ws.onclose = () => {
-              console.log("WebSocket closed");
+            const handleDisconnect = () => {
               // Clear heartbeat timeouts
               if (pingTimeout) clearTimeout(pingTimeout);
               if (pongTimeout) clearTimeout(pongTimeout);
@@ -189,25 +245,20 @@ export const useWebSocketStore = create<WebSocketStore>()(
               }));
 
               // Attempt to reconnect after delay
-              const newRetryCount = get().retryCount + 1;
+              const newRetryCount = get().retryCount;
               if (newRetryCount < MAX_RETRIES) {
                 setTimeout(() => get().connect(), WS_RETRY_DELAY);
               }
             };
 
+            ws.onclose = () => {
+              console.log("WebSocket closed");
+              handleDisconnect();
+            };
+
             ws.onerror = (event) => {
-              console.log("WebSocket error");
-              console.log(event);
-              // Clear heartbeat timeouts
-              if (pingTimeout) clearTimeout(pingTimeout);
-              if (pongTimeout) clearTimeout(pongTimeout);
-
-              const newRetryCount = get().retryCount + 1;
-              set({ retryCount: newRetryCount });
-
-              if (newRetryCount < MAX_RETRIES) {
-                setTimeout(() => get().connect(), WS_RETRY_DELAY);
-              }
+              console.log("WebSocket error", event);
+              handleDisconnect();
             };
           } catch (error) {
             console.error("WebSocket connection error:", error);
@@ -257,169 +308,185 @@ export const useWebSocketStore = create<WebSocketStore>()(
           if (channelSubs) {
             channelSubs.delete(callback);
           }
-          return { subscribers: state.subscribers };
+          return { subscribers: { ...state.subscribers } };
         });
       },
 
-      serverSubscribeToProject: async (projectId: string) => {
+      // Generic method to send subscription messages
+      sendSubscriptionMessage: async (message: SubscriptionMessage) => {
         const { connection } = get();
         if (!connection || connection.status !== "connected") {
-          console.error("Cannot subscribe: WebSocket not connected");
+          console.error("Cannot send subscription message: WebSocket not connected");
           return false;
         }
 
         try {
-          connection.ws.send(
-            JSON.stringify({
-              type: "subscribe",
-              subscription: "project",
-              id: projectId,
-            }),
-          );
-
-          set((state) => {
-            const newActiveProjectSubscriptions = new Set(
-              state.activeProjectSubscriptions,
-            );
-            newActiveProjectSubscriptions.add(projectId);
-            return {
-              activeProjectSubscriptions: newActiveProjectSubscriptions,
-            };
-          });
-
-          console.log(`Sent subscription request for project: ${projectId}`);
+          connection.ws.send(JSON.stringify(message));
           return true;
         } catch (error) {
-          console.error("Failed to send project subscription:", error);
+          console.error(`Failed to send ${message.type} message:`, error);
           return false;
         }
       },
 
-      serverSubscribeToTrajectory: async (trajectoryId: string) => {
-        const { connection } = get();
-        if (!connection || connection.status !== "connected") {
-          console.error("Cannot subscribe: WebSocket not connected");
-          return false;
-        }
+      // Type-safe method to subscribe to a project
+      subscribeToProject: (projectId, callback) => {
+        const channel = getProjectChannel(projectId);
+        const clientUnsubscribe = get().subscribe(channel, callback);
 
-        try {
-          connection.ws.send(
-            JSON.stringify({
-              type: "subscribe",
-              subscription: "trajectory",
-              id: trajectoryId,
-            }),
-          );
+        // Also subscribe on the server side
+        get().serverSubscribeToProject(projectId).catch(error => {
+          console.error(`Error subscribing to project ${projectId} on server:`, error);
+        });
 
+        // Return a cleanup function that handles both client and server unsubscription
+        return () => {
+          // Unsubscribe client-side
+          clientUnsubscribe();
+
+          // Unsubscribe server-side if connected
+          if (get().isConnected()) {
+            get().serverUnsubscribeFromProject(projectId).catch(error => {
+              console.error(`Error unsubscribing from project ${projectId} on server:`, error);
+            });
+          }
+        };
+      },
+
+      // Type-safe method to subscribe to a trajectory
+      subscribeToTrajectory: (projectId, trajectoryId, callback) => {
+        const channel = getTrajectoryChannel(projectId, trajectoryId);
+        const clientUnsubscribe = get().subscribe(channel, callback);
+
+        // Also subscribe on the server side
+        get().serverSubscribeToTrajectory(projectId, trajectoryId).catch(error => {
+          console.error(`Error subscribing to trajectory ${trajectoryId} on server:`, error);
+        });
+
+        // Return a cleanup function that handles both client and server unsubscription
+        return () => {
+          // Unsubscribe client-side
+          clientUnsubscribe();
+
+          // Unsubscribe server-side if connected
+          if (get().isConnected()) {
+            get().serverUnsubscribeFromTrajectory(projectId, trajectoryId).catch(error => {
+              console.error(`Error unsubscribing from trajectory ${trajectoryId} on server:`, error);
+            });
+          }
+        };
+      },
+
+      serverSubscribeToProject: async (projectId: string) => {
+        const success = await get().sendSubscriptionMessage({
+          type: WebSocketMessageType.SUBSCRIBE,
+          subscription: SubscriptionType.PROJECT,
+          project_id: projectId,
+        });
+
+        if (success) {
           set((state) => {
-            const newActiveTrajectorySubscriptions = new Set(
-              state.activeTrajectorySubscriptions,
-            );
-            newActiveTrajectorySubscriptions.add(trajectoryId);
-            return {
-              activeTrajectorySubscriptions: newActiveTrajectorySubscriptions,
-            };
+            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
+            newActiveProjectSubscriptions.add(projectId);
+            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
           });
-
-          console.log(
-            `Sent subscription request for trajectory: ${trajectoryId}`,
-          );
-          return true;
-        } catch (error) {
-          console.error("Failed to send trajectory subscription:", error);
-          return false;
+          console.log(`Sent subscription request for project: ${projectId}`);
         }
+
+        return success;
+      },
+
+      serverSubscribeToTrajectory: async (projectId: string, trajectoryId: string) => {
+        const success = await get().sendSubscriptionMessage({
+          type: WebSocketMessageType.SUBSCRIBE,
+          subscription: SubscriptionType.TRAJECTORY,
+          project_id: projectId,
+          trajectory_id: trajectoryId,
+        });
+
+        if (success) {
+          set((state) => {
+            // Only add if not already present
+            if (!findTrajectorySubscription(state.activeTrajectorySubscriptions, projectId, trajectoryId)) {
+              const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+              newActiveTrajectorySubscriptions.add({ projectId, trajectoryId });
+              return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+            }
+            return {};
+          });
+          console.log(`Sent subscription request for trajectory: ${trajectoryId} (project: ${projectId})`);
+        }
+
+        return success;
       },
 
       serverUnsubscribeFromProject: async (projectId: string) => {
-        const { connection } = get();
-        if (!connection || connection.status !== "connected") {
-          console.error("Cannot unsubscribe: WebSocket not connected");
-          return false;
-        }
+        const success = await get().sendSubscriptionMessage({
+          type: WebSocketMessageType.UNSUBSCRIBE,
+          subscription: SubscriptionType.PROJECT,
+          project_id: projectId,
+        });
 
-        try {
-          connection.ws.send(
-            JSON.stringify({
-              type: "unsubscribe",
-              subscription: "project",
-              id: projectId,
-            }),
-          );
-
+        if (success) {
           set((state) => {
-            const newActiveProjectSubscriptions = new Set(
-              state.activeProjectSubscriptions,
-            );
+            const newActiveProjectSubscriptions = new Set(state.activeProjectSubscriptions);
             newActiveProjectSubscriptions.delete(projectId);
-            return {
-              activeProjectSubscriptions: newActiveProjectSubscriptions,
-            };
+            return { activeProjectSubscriptions: newActiveProjectSubscriptions };
           });
-
           console.log(`Sent unsubscription request for project: ${projectId}`);
-          return true;
-        } catch (error) {
-          console.error("Failed to send project unsubscription:", error);
-          return false;
         }
+
+        return success;
       },
 
-      serverUnsubscribeFromTrajectory: async (trajectoryId: string) => {
-        const { connection } = get();
-        if (!connection || connection.status !== "connected") {
-          console.error("Cannot unsubscribe: WebSocket not connected");
-          return false;
-        }
+      serverUnsubscribeFromTrajectory: async (projectId: string, trajectoryId: string) => {
+        const success = await get().sendSubscriptionMessage({
+          type: WebSocketMessageType.UNSUBSCRIBE,
+          subscription: SubscriptionType.TRAJECTORY,
+          project_id: projectId,
+          trajectory_id: trajectoryId,
+        });
 
-        try {
-          connection.ws.send(
-            JSON.stringify({
-              type: "unsubscribe",
-              subscription: "trajectory",
-              id: trajectoryId,
-            }),
-          );
-
+        if (success) {
           set((state) => {
-            const newActiveTrajectorySubscriptions = new Set(
+            const existingSub = findTrajectorySubscription(
               state.activeTrajectorySubscriptions,
+              projectId,
+              trajectoryId
             );
-            newActiveTrajectorySubscriptions.delete(trajectoryId);
-            return {
-              activeTrajectorySubscriptions: newActiveTrajectorySubscriptions,
-            };
-          });
 
-          console.log(
-            `Sent unsubscription request for trajectory: ${trajectoryId}`,
-          );
-          return true;
-        } catch (error) {
-          console.error("Failed to send trajectory unsubscription:", error);
-          return false;
+            if (existingSub) {
+              const newActiveTrajectorySubscriptions = new Set(state.activeTrajectorySubscriptions);
+              newActiveTrajectorySubscriptions.delete(existingSub);
+              return { activeTrajectorySubscriptions: newActiveTrajectorySubscriptions };
+            }
+            return {};
+          });
+          console.log(`Sent unsubscription request for trajectory: ${trajectoryId} (project: ${projectId})`);
         }
+
+        return success;
       },
 
       addMessage: (message: WebSocketMessage) => {
         const { trajectory_id, project_id } = message;
 
+        // Notify subscribers based on message type
+        const notifySubscribers = (channel: string) => {
+          const subscribers = get().subscribers[channel];
+          if (subscribers) {
+            subscribers.forEach((callback) => callback(message));
+          }
+        };
+
         // Notify trajectory subscribers
         if (trajectory_id) {
-          const trajectoryChannel = `trajectory.${trajectory_id}`;
-          const trajectorySubscribers = get().subscribers[trajectoryChannel];
-          if (trajectorySubscribers) {
-            trajectorySubscribers.forEach((callback) => callback(message));
-          }
+          notifySubscribers(getTrajectoryChannel(project_id, trajectory_id));
         }
 
         // Notify project subscribers
         if (project_id) {
-          const projectChannel = `project.${project_id}`;
-          const projectSubscribers = get().subscribers[projectChannel];
-          if (projectSubscribers) {
-            projectSubscribers.forEach((callback) => callback(message));
-          }
+          notifySubscribers(getProjectChannel(project_id));
         }
 
         // Store message in state
@@ -440,10 +507,6 @@ export const useWebSocketStore = create<WebSocketStore>()(
   ),
 );
 
-// Selector functions
-export const selectMessages = (runId: string) => (state: WebSocketStore) =>
-  state.messages[runId] || [];
-
 export const selectConnectionStatus = () => (state: WebSocketStore) =>
   state.connection?.status || "closed";
 
@@ -455,8 +518,11 @@ export function useWebSocket() {
   const store = useWebSocketStore();
 
   return {
-    subscribe: store.subscribe,
-    unsubscribe: store.unsubscribe,
+    // Connection status
     isConnected: store.isConnected,
+
+    // Type-safe subscription methods (these handle both client and server subscriptions)
+    subscribeToProject: store.subscribeToProject,
+    subscribeToTrajectory: store.subscribeToTrajectory
   };
 }

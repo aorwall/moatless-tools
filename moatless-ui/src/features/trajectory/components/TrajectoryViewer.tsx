@@ -37,9 +37,15 @@ import { useEffect, useState } from "react";
 
 interface TrajectoryViewerProps {
   trajectory: Trajectory;
+  handleStart?: () => Promise<void>;
+  handleRetry?: () => Promise<void>;
 }
 
-export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
+export function TrajectoryViewer({
+  trajectory,
+  handleStart,
+  handleRetry
+}: TrajectoryViewerProps) {
   const queryClient = useQueryClient();
   const [showBottomPanel, setShowBottomPanel] = useState(() => {
     // Try to get from localStorage, default to true if not found
@@ -91,12 +97,12 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   const tabs: TabItem[] = [
     ...(trajectory.system_status.error
       ? [
-          {
-            id: "error",
-            label: "Error",
-            icon: <AlertCircle className="h-4 w-4" />,
-          },
-        ]
+        {
+          id: "error",
+          label: "Error",
+          icon: <AlertCircle className="h-4 w-4" />,
+        },
+      ]
       : []),
     {
       id: "timeline",
@@ -118,7 +124,11 @@ export function TrajectoryViewer({ trajectory }: TrajectoryViewerProps) {
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
       {/* Status Bar */}
-      <TrajectoryStatus trajectory={trajectory} />
+      <TrajectoryStatus
+        trajectory={trajectory}
+        handleStart={handleStart}
+        handleRetry={handleRetry}
+      />
 
       {/* Main Content Area with two columns */}
       <ResizablePanelGroup direction="horizontal" className="flex-1">

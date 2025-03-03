@@ -19,24 +19,24 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useRetryTrajectory } from "../hooks/useRetryTrajectory";
-import { useStartTrajectory } from "../hooks/useStartTrajectory";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
   className?: string;
+  handleStart?: () => Promise<void>;
+  handleRetry?: () => Promise<void>;
 }
 
 export function TrajectoryStatus({
   trajectory,
   className,
+  handleStart,
+  handleRetry
 }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const queryClient = useQueryClient();
   const cancelJob = useCancelJob();
-  const startTrajectory = useStartTrajectory();
-  const retryTrajectory = useRetryTrajectory();
 
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
@@ -65,12 +65,11 @@ export function TrajectoryStatus({
   const canRetry = trajectory.status.toLowerCase() !== "running" && hasStarted;
 
   const handleStartClick = async () => {
+    if (!handleStart) return;
+
     setIsStarting(true);
     try {
-      await startTrajectory.mutateAsync({
-        projectId: trajectory.project_id,
-        trajectoryId: trajectory.trajectory_id,
-      });
+      await handleStart();
     } catch (error) {
       console.error("Error starting trajectory:", error);
     } finally {
@@ -79,12 +78,11 @@ export function TrajectoryStatus({
   };
 
   const handleRetryClick = async () => {
+    if (!handleRetry) return;
+
     setIsRetrying(true);
     try {
-      await retryTrajectory.mutateAsync({
-        projectId: trajectory.project_id,
-        trajectoryId: trajectory.trajectory_id,
-      });
+      await handleRetry();
     } catch (error) {
       console.error("Error retrying trajectory:", error);
     } finally {
@@ -154,7 +152,7 @@ export function TrajectoryStatus({
 
     return (
       <div className="flex items-center gap-2 ml-auto">
-        {canRetry && (
+        {canRetry && handleRetry && (
           <Button
             variant="outline"
             size="sm"
@@ -175,7 +173,7 @@ export function TrajectoryStatus({
           </Button>
         )}
 
-        {canStart && (
+        {canStart && handleStart && (
           <Button
             variant="outline"
             size="sm"
@@ -249,86 +247,23 @@ export function TrajectoryStatus({
         <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
           <div className="flex items-center gap-1">
             <Zap className="h-3 w-3 text-muted-foreground" />
-            <span>{trajectory.nodes.length} Nodes</span>
+            <span>{trajectory.nodes?.length || 0} Actions</span>
           </div>
         </div>
 
-        {/* Token Usage Group */}
-        {trajectory.usage && (
-          <div className="flex items-center gap-2 px-2 py-1 bg-muted/20 rounded-md">
-            <div className="flex items-center gap-1">
-              <span className="text-muted-foreground">Prompt:</span>
-              <span className="font-medium">
-                {trajectory.usage.prompt_tokens?.toLocaleString() || 0}
-              </span>
-            </div>
-
-            <Separator orientation="vertical" className="h-3" />
-
-            <div className="flex items-center gap-1">
-              <span className="text-muted-foreground hidden sm:inline">
-                Completion:
-              </span>
-              <span className="font-medium">
-                {trajectory.usage.completion_tokens?.toLocaleString() || 0}
-              </span>
-            </div>
-
-            {trajectory.usage.cache_read_tokens &&
-              trajectory.usage.cache_read_tokens > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-3" />
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground hidden md:inline">
-                      Cached:
-                    </span>
-                    <span className="font-medium">
-                      {trajectory.usage.cache_read_tokens.toLocaleString()}
-                    </span>
-                  </div>
-                </>
-              )}
-
-            {trajectory.usage.cache_write_tokens &&
-              trajectory.usage.cache_write_tokens > 0 && (
-                <>
-                  <Separator orientation="vertical" className="h-3" />
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground hidden md:inline">
-                      Cache Write:
-                    </span>
-                    <span className="font-medium">
-                      {trajectory.usage.cache_write_tokens.toLocaleString()}
-                    </span>
-                  </div>
-                </>
-              )}
-
-            <Separator orientation="vertical" className="h-3" />
-
+        {/* Cost Info (if present) */}
+        {trajectory.usage?.completion_cost && (
+          <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
             <div className="flex items-center gap-1">
               <Coins className="h-3 w-3 text-muted-foreground" />
-              <span className="font-medium">
-                ${trajectory.usage.completion_cost?.toFixed(4) || 0}
-              </span>
+              <span>Cost: ${trajectory.usage.completion_cost.toFixed(4)}</span>
             </div>
-          </div>
-        )}
-
-        {/* Flags */}
-        {trajectory.flags !== undefined && trajectory.flags.length > 0 && (
-          <div className="flex items-center gap-1 px-2 py-1 bg-muted/20 rounded-md">
-            {trajectory.flags.map((flag, index) => (
-              <Badge key={index} variant="outline" className="text-xs">
-                {flag}
-              </Badge>
-            ))}
           </div>
         )}
       </div>
 
-      {/* Action buttons */}
-      <div className="ml-auto">{getActionButtons()}</div>
+      {/* Render action buttons on the right side */}
+      {getActionButtons()}
     </div>
   );
 }
