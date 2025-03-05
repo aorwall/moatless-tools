@@ -57,6 +57,28 @@ interface TimelineItemProps {
   hasNextSibling: boolean;
 }
 
+// Helper function to safely check if content is valid for rendering
+const isValidContent = (content: any): boolean => {
+  return content !== null && content !== undefined && typeof content !== 'function';
+};
+
+// Helper function to safely stringify objects if needed
+const safeStringify = (content: any): string => {
+  if (content === null || content === undefined) {
+    return '';
+  }
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  try {
+    return JSON.stringify(content);
+  } catch (e) {
+    return '[Object]';
+  }
+};
+
 export const TimelineItem = ({
   type,
   content,
@@ -82,72 +104,92 @@ export const TimelineItem = ({
     return Icons[type] || AlertTriangle;
   };
 
-  const renderedContent = (() => {
-    switch (type) {
-      case "user_message":
-      case "assistant_message":
-      case "thought":
-        return (
-          <MessageTrajectoryItem
-            content={content as MessageTimelineContent}
-            type={type}
-          />
-        );
-      case "action":
-        // Determine the correct action name from the content structure
+  // Safety check for content
+  if (!isValidContent(content)) {
+    return (
+      <div className="text-red-500 p-2 border border-red-200 rounded">
+        Invalid content for item type: {type}
+      </div>
+    );
+  }
 
-        return (
-          <ActionTrajectoryItem
-            name={label}
-            content={content as ActionTimelineContent}
-          />
-        );
-      case "observation":
-        return (
-          <ObservationTrajectoryItem
-            content={content as ObservationTimelineContent}
-          />
-        );
-      case "completion":
-        return (
-          <CompletionTrajectoryItem
-            content={content as CompletionTimelineContent}
-          />
-        );
-      case "workspace_context":
-        return (
-          <WorkspaceContextTrajectoryItem
-            content={content as WorkspaceContextTimelineContent}
-          />
-        );
-      case "workspace_files":
-        return (
-          <WorkspaceFilesTrajectoryItem
-            content={content as WorkspaceFilesTimelineContent}
-          />
-        );
-      case "workspace_tests":
-        return (
-          <WorkspaceTestsTrajectoryItem
-            content={content as WorkspaceTestsTimelineContent}
-          />
-        );
-      case "error":
-        return (
-          <ErrorTrajectoryItem content={content as ErrorTimelineContent} />
-        );
-      case "artifact":
-        return (
-          <ArtifactTrajectoryItem
-            content={content as ArtifactTimelineContent}
-          />
-        );
-      case "reward":
-        return (
-          <RewardTrajectoryItem content={content as RewardTimelineContent} />
-        );
-      default:
-        return null;
+  const renderedContent = (() => {
+    try {
+      switch (type) {
+        case "user_message":
+        case "assistant_message":
+        case "thought":
+          return (
+            <MessageTrajectoryItem
+              content={content as MessageTimelineContent}
+              type={type as any}
+            />
+          );
+        case "action":
+          return (
+            <ActionTrajectoryItem
+              name={label}
+              content={content as ActionTimelineContent}
+            />
+          );
+        case "observation":
+          return (
+            <ObservationTrajectoryItem
+              content={content as ObservationTimelineContent}
+            />
+          );
+        case "completion":
+          return (
+            <CompletionTrajectoryItem
+              content={content as CompletionTimelineContent}
+            />
+          );
+        case "workspace_context":
+          return (
+            <WorkspaceContextTrajectoryItem
+              content={content as WorkspaceContextTimelineContent}
+            />
+          );
+        case "workspace_files":
+          return (
+            <WorkspaceFilesTrajectoryItem
+              content={content as WorkspaceFilesTimelineContent}
+            />
+          );
+        case "workspace_tests":
+          return (
+            <WorkspaceTestsTrajectoryItem
+              content={content as WorkspaceTestsTimelineContent}
+            />
+          );
+        case "error":
+          return (
+            <ErrorTrajectoryItem content={content as ErrorTimelineContent} />
+          );
+        case "artifact":
+          return (
+            <ArtifactTrajectoryItem
+              content={content as ArtifactTimelineContent}
+            />
+          );
+        case "reward":
+          return (
+            <RewardTrajectoryItem content={content as RewardTimelineContent} />
+          );
+        default:
+          return (
+            <div className="p-2 text-gray-500">
+              Unknown item type: {type}
+            </div>
+          );
+      }
+    } catch (error) {
+      console.error("Error rendering timeline item:", error);
+      return (
+        <div className="p-2 text-red-500 border border-red-200 rounded">
+          Error rendering item: {error instanceof Error ? error.message : String(error)}
+        </div>
+      );
     }
   })();
 

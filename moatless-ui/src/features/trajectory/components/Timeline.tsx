@@ -109,9 +109,9 @@ function renderNodes(
     const currentParentNodes =
       level > 0
         ? [
-            ...parentNodes,
-            { hasNextSibling: !isLastNode, level: level - 1 }, // Adjust level to start from 0
-          ]
+          ...parentNodes,
+          { hasNextSibling: !isLastNode, level: level - 1 }, // Adjust level to start from 0
+        ]
         : [];
 
     // Special handling for the initial user message node
@@ -174,6 +174,7 @@ function renderNodes(
                       <UserMessageItem message={node.userMessage!} />
                     ) : (
                       <TrajectoryNode
+                        key={node.nodeId}
                         node={node}
                         expanded={isExpanded(node.nodeId)}
                         level={level}

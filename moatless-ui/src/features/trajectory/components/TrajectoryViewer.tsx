@@ -6,6 +6,7 @@ import { TrajectoryEvents } from "@/features/trajectory/components/TrajectoryEve
 import { TrajectoryLogs } from "@/features/trajectory/components/TrajectoryLogs.tsx";
 import { TrajectoryStatus } from "@/features/trajectory/components/TrajectoryStatus.tsx";
 import { useTrajectorySubscription } from "@/features/trajectory/hooks/useTrajectorySubscription";
+import { WebSocketMessage } from "@/lib/stores/websocketStore";
 import { Chat } from "@/lib/components/chat/Chat.tsx";
 import { Button } from "@/lib/components/ui/button.tsx";
 import {
@@ -71,20 +72,6 @@ export function TrajectoryViewer({
   useEffect(() => {
     localStorage.setItem("trajectoryViewerActiveTab", activeBottomTab);
   }, [activeBottomTab]);
-
-  // Subscribe to updates for this trajectory and its project
-  useTrajectorySubscription(trajectory.id, trajectory.project_id, {
-    onEvent: (message) => {
-      if (message.type === "event") {
-        queryClient.invalidateQueries({
-          queryKey: ["trajectory", trajectory.id],
-        });
-      }
-    },
-    // Enable toasts only in development environment
-    showToasts: process.env.NODE_ENV === "development",
-    queryInvalidation: true,
-  });
 
   interface TabItem {
     id: string;

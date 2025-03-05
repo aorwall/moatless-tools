@@ -4,45 +4,25 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/lib/components/ui/collapsible";
-import { formatDuration, intervalToDuration } from "date-fns";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
+import debounce from "lodash/debounce";
+import { useWebSocketStore } from "@/lib/stores/websocketStore";
 import { Evaluation } from "../api/evaluation";
 import { EvaluationInstancesTable } from "../components/EvaluationInstancesTable";
 import { EvaluationStatus } from "../components/EvaluationStatus";
 import { EvaluationTimeline } from "../components/EvaluationTimeline";
 import { EvaluationToolbar } from "../components/EvaluationToolbar";
-
-interface EvaluationPageProps {
-  evaluation: Evaluation;
-}
-
-function getDuration(
-  start?: string,
-  end?: string,
-  isRunning?: boolean,
-): string {
-  if (!start) return "-";
-  if (isRunning) {
-    const duration = intervalToDuration({
-      start: new Date(start),
-      end: new Date(),
-    });
-    return formatDuration(duration, { format: ["minutes", "seconds"] });
-  }
-  if (!end) return "-";
-  const duration = intervalToDuration({
-    start: new Date(start),
-    end: new Date(end),
-  });
-  return formatDuration(duration, { format: ["minutes", "seconds"] });
-}
+import { useRealtimeEvaluation } from "../hooks/useEvaluation";
 
 const formatDate = (date: string) => {
   return new Date(date).toLocaleString();
 };
 
-export function EvaluationPage({ evaluation }: EvaluationPageProps) {
+// Component that renders the evaluation details
+function EvaluationContent({ evaluation }: { evaluation: Evaluation }) {
   const [timelineExpanded, setTimelineExpanded] = useState(false);
 
   const canStart = (() => {
@@ -177,6 +157,79 @@ export function EvaluationPage({ evaluation }: EvaluationPageProps) {
       <div>
         <p className="font-medium mb-2">Instance Details</p>
         <EvaluationInstancesTable evaluation={evaluation} />
+      </div>
+    </div>
+  );
+}
+
+// Main page component that fetches data and handles errors
+export function EvaluationPage() {
+  const { evaluationId } = useParams();
+  const navigate = useNavigate();
+
+  // Use the real-time evaluation hook
+  const {
+    data: evaluation,
+    isLoading,
+    error,
+    connectionState
+  } = useRealtimeEvaluation(evaluationId!);
+
+  if (error) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-destructive">
+            Failed to load evaluation
+          </h2>
+          <p className="mt-2 text-muted-foreground">
+            {error instanceof Error
+              ? error.message
+              : "An unexpected error occurred"}
+          </p>
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => navigate("/swebench/evaluation")}
+          >
+            Back to Evaluations
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold">Loading evaluation...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!evaluation) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold">Evaluation not found</h2>
+          <Button
+            variant="outline"
+            className="mt-4"
+            onClick={() => navigate("/swebench/evaluation")}
+          >
+            Back to Evaluations
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex-1 min-h-0 overflow-auto">
+        <EvaluationContent evaluation={evaluation} />
       </div>
     </div>
   );

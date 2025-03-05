@@ -8,7 +8,6 @@ import { useEffect, useRef } from "react";
 export function useWebSocket() {
   // Use selectors to access store state
   const connection = useWebSocketStore((state) => state.connection);
-  const connect = useWebSocketStore((state) => state.connect);
   const disconnect = useWebSocketStore((state) => state.disconnect);
 
   // Get server subscription methods

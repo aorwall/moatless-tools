@@ -72,7 +72,7 @@ export const TrajectoryNode = ({
           <span className="font-mono text-sm text-gray-700">{action.name}</span>
           {priorityProps.map((propKey) =>
             action.properties?.[propKey] ? (
-              <span className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
+              <span key={propKey} className="font-mono text-xs text-gray-500 truncate max-w-[300px]">
                 {action.properties[propKey]}
               </span>
             ) : null,

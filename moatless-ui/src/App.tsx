@@ -22,7 +22,6 @@ import { ModelsLayout } from "@/pages/settings/models/layout";
 
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
 import { EvaluationsPage } from "@/pages/swebench/evaluation";
-import { EvaluationDetailsPage } from "@/pages/swebench/evaluation/[id]";
 import { CreateEvaluationPage } from "@/pages/swebench/evaluation/create";
 import RunLoopPage from "./features/loop/pages/RunLoopPage";
 import { RunnerDashboardPage } from "./features/runner/pages/RunnerDashboardPage";
@@ -30,6 +29,7 @@ import { EvaluationInstancePage } from "./features/swebench/pages/EvaluationInst
 import { TrajectoryListPage } from "./features/trajectory/pages/TrajectoryListPage";
 import { BaseModelsPage } from "./pages/settings/models/base";
 import { CreateModelPage } from "./pages/settings/models/create";
+import { EvaluationPage } from "./features/swebench/pages/EvaluationPage";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,7 +85,7 @@ function App() {
                     <Route path="create" element={<CreateEvaluationPage />} />
                     <Route
                       path=":evaluationId"
-                      element={<EvaluationDetailsPage />}
+                      element={<EvaluationPage />}
                     />
                     <Route element={<EvaluationLayout />}>
                       <Route
