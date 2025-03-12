@@ -265,10 +265,10 @@ async def create_repository_async(
     logger.info(f"Setting up central repo at {central_repo_path}")
 
     # Handle both central repo setup and instance repo creation under the same lock
-    # async with repo_operation_async_lock(central_repo_path):
     # First handle central repo
     if not os.path.exists(central_repo_path):
         logger.info(f"Creating central repo at {central_repo_path}")
+        # Use swe-bench organization URL format
         github_url = f"https://github.com/swe-bench/{repo_dir_name}.git"
         try:
             # Add timeout and process tracking

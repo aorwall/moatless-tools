@@ -21,7 +21,8 @@ from moatless.evaluation.schema import (
     InstanceStatus,
 )
 from moatless.evaluation.utils import get_moatless_instance
-from moatless.events import BaseEvent, EventBus, event_bus
+from moatless.eventbus.base import BaseEventBus
+from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import create_flow, get_flow_config
 from moatless.runner.rq import RQRunner
@@ -29,6 +30,8 @@ from moatless.runner.runner import BaseRunner, EvaluationJobStatus, JobInfo, Job
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
+
+import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")
@@ -46,14 +49,14 @@ class EvaluationManager:
         return cls._instance
 
     def __init__(
-        self, runner: BaseRunner | None = None, storage: BaseStorage | None = None, eventbus: EventBus | None = None
+        self, runner: BaseRunner | None = None, storage: BaseStorage | None = None, eventbus: BaseEventBus | None = None
     ):
-        self.runner = runner or BaseRunner.get_instance()
-        self.storage = storage or BaseStorage.get_instance()
-        self.eventbus = eventbus or event_bus
+        self.runner = runner or settings.runner
+        self.storage = storage or settings.storage
+        self.eventbus = eventbus or settings.event_bus
 
     async def initialize(self):
-        await event_bus.subscribe(self._handle_event)
+        await self.eventbus.subscribe(self._handle_event)
 
     async def create_evaluation(
         self,
@@ -244,26 +247,21 @@ class EvaluationManager:
             return instance
 
         # Check if the instance information exists in storage
-        instance_key = "instance"
         if not await self.storage.exists_in_trajectory(
-            instance_key, project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
+            "trajectory", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
         ):
-            logger.warning(f"Instance not found in storage: {instance.instance_id}")
+            logger.warning(f"Instance {instance.instance_id} not found in storage {self.storage}")
             return instance
 
-        # Get the trajectory directory for backup/legacy access
-        trajectory_dir = get_moatless_trajectory_dir(
-            trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
-        )
-
         try:
-            # Get usage information from flow
-            if trajectory_dir.exists():
-                flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
-                instance.usage = flow.total_usage()
+            flow = await AgenticFlow.from_trajectory_id(
+                trajectory_id=instance.instance_id,
+                project_id=evaluation.evaluation_name,
+                storage=self.storage,
+            )
+            instance.usage = flow.total_usage()
 
-            # Get events
-            events = await event_bus.read_events(
+            events = await self.eventbus.read_events(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
             )
@@ -276,9 +274,6 @@ class EvaluationManager:
                 )
                 if event:
                     instance.started_at = event.timestamp
-
-            # After processing, save the updated instance
-            await self._save_instance(evaluation.evaluation_name, instance)
 
             if not instance.completed_at and not instance.evaluated_at:
                 event = next(
@@ -308,7 +303,9 @@ class EvaluationManager:
                 instance.iterations = len(flow.root.get_all_nodes())
 
             if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
-                eval_result_path = trajectory_dir / "eval_result.json"
+                eval_result = await self.storage.read_from_trajectory(
+                    "eval_result", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
+                )
 
                 event = next(
                     (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
@@ -329,12 +326,9 @@ class EvaluationManager:
                 if event:
                     instance.evaluated_at = event.timestamp
 
-                if not eval_result_path.exists():
+                if not eval_result:
                     logger.debug(f"Evaluation result not found for instance: {instance.instance_id}")
                     return
-
-                with open(eval_result_path) as f:
-                    eval_result = json.load(f)
 
                 benchmark_result = to_result(
                     node=flow.root,
@@ -342,7 +336,7 @@ class EvaluationManager:
                     instance_id=instance.instance_id,
                 )
 
-                instance.benchmark_result = benchmark_result
+                instance.benchmark_result = benchmark_result.model_dump()
                 instance.resolved = benchmark_result.resolved
                 if instance.status != InstanceStatus.EVALUATED:
                     instance.status = InstanceStatus.EVALUATED
@@ -359,22 +353,6 @@ class EvaluationManager:
         except Exception as e:
             logger.error(f"Error processing trajectory results for instance {instance.instance_id}: {e}")
             return instance
-
-    async def get_evaluation_status(self, evaluation_name: str) -> EvaluationJobStatus:
-        """Get the status of all jobs for an evaluation."""
-        evaluation = await self._load_evaluation(evaluation_name)
-        if not evaluation:
-            raise ValueError(f"Evaluation {evaluation_name} not found")
-
-        return await self.runner.get_evaluation_status(evaluation)
-
-    async def is_runner_up(self) -> bool:
-        """Check if any RQ workers are currently running.
-
-        Returns:
-            bool: True if at least one worker is up and running, False otherwise
-        """
-        return await self.runner.status()
 
     async def cancel_evaluation(self, evaluation_name: str):
         """Cancel all running jobs for an evaluation."""
@@ -467,10 +445,6 @@ class EvaluationManager:
         """Save evaluation metadata to storage."""
         await self._save_evaluation(evaluation)
 
-        # Also save each instance individually using trajectory storage
-        for instance in evaluation.instances:
-            await self._save_instance(evaluation.evaluation_name, instance)
-
     async def _save_evaluation(self, evaluation: Evaluation):
         """Save evaluation data using project storage."""
         try:
@@ -481,20 +455,6 @@ class EvaluationManager:
             )
         except Exception as e:
             logger.error(f"Failed to save evaluation {evaluation.evaluation_name}: {e}")
-
-    async def _save_instance(self, evaluation_name: str, instance: EvaluationInstance):
-        """Save instance data using trajectory storage."""
-        try:
-            # Save the instance data using trajectory storage
-            # Use model_dump_json for serialization
-            await self.storage.write_to_trajectory(
-                "instance",
-                json.loads(instance.model_dump_json()),
-                project_id=evaluation_name,
-                trajectory_id=instance.instance_id,
-            )
-        except Exception as e:
-            logger.error(f"Failed to save instance {instance.instance_id} for evaluation {evaluation_name}: {e}")
 
     async def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from storage."""
@@ -523,32 +483,19 @@ class EvaluationManager:
     async def list_evaluations(self) -> list[Evaluation]:
         """List all evaluations with their metadata."""
         evaluations = []
-
-        # First, get evaluations from storage
-        eval_data_list = await self.storage.list_evaluations()
-        for eval_data in eval_data_list:
+        project_ids = await self.storage.list_projects()
+        evaluation_ids = [pid for pid in project_ids if pid.startswith("eval_")]
+        for eval_id in evaluation_ids:
             try:
-                evaluation = Evaluation.model_validate(eval_data)
-                evaluations.append(evaluation)
+                if await self.storage.exists(f"projects/{eval_id}/evaluation"):
+                    eval_data = await self.storage.read(f"projects/{eval_id}/evaluation")
+                    evaluations.append(Evaluation.model_validate(eval_data))
+                    continue
             except Exception as e:
                 logger.error(f"Error parsing evaluation data: {e}")
 
         # Sort evaluations by creation time, newest first
         return sorted(evaluations, key=lambda x: x.created_at if x.created_at else datetime.min, reverse=True)
-
-    async def _handle_evaluation_event(self, trajectory_id: str | None, project_id: str | None, event: EvaluationEvent):
-        """Handle events from evaluation runners."""
-        if not isinstance(event, EvaluationEvent):
-            return
-
-        # Get evaluation from active runner if exists, otherwise load from file
-        evaluation = await self._load_evaluation(event.evaluation_name)
-
-        if not evaluation:
-            logger.warning(f"Received event for unknown evaluation: {event.evaluation_name}")
-            return
-
-        await self._save_evaluation(evaluation)
 
     def get_dataset_instance_ids(self, dataset_name: str) -> list[str]:
         """Get instance IDs for a dataset."""
@@ -624,6 +571,7 @@ class EvaluationManager:
         if await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
+            job_func=run_instance,
         ):
             logger.info(f"Started instance {instance_id} for evaluation {evaluation_name}")
 

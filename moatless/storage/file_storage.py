@@ -9,13 +9,23 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional, List, Dict, Any
+from datetime import datetime
 
 import aiofiles
 
 from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects."""
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 class FileStorage(BaseStorage):
@@ -58,57 +68,161 @@ class FileStorage(BaseStorage):
         normalized_key = self.normalize_key(key)
 
         if "/" in normalized_key:
-            # Handle hierarchical keys by creating appropriate directory structure
+            # For keys with slashes, create a directory structure
             parts = normalized_key.split("/")
-            filename = parts[-1]
+            dir_path = self.base_dir.joinpath(*parts[:-1])
+            dir_path.mkdir(parents=True, exist_ok=True)
 
-            # Create subdirectories if needed
-            if len(parts) > 1:
-                parent_dir = self.base_dir.joinpath(*parts[:-1])
-                parent_dir.mkdir(parents=True, exist_ok=True)
-                return parent_dir / f"{filename}.{self.file_extension}"
-
-        # Simple case - just append extension
-        return self.base_dir / f"{normalized_key}.{self.file_extension}"
+            # Only add file extension to the last part
+            filename = f"{parts[-1]}.{self.file_extension}"
+            return dir_path / filename
+        else:
+            return self.base_dir / f"{normalized_key}.{self.file_extension}"
 
     async def read(self, key: str) -> dict:
-        """Read binary data from a file."""
+        """
+        Read JSON data from a file.
+
+        Args:
+            key: The key to read
+
+        Returns:
+            The parsed JSON data
+
+        Raises:
+            KeyError: If the key does not exist
+        """
         path = self._get_path(key)
         if not path.exists():
-            logger.error(f"Path '{path}' does not exist")
-            raise KeyError(f"Key '{key}' does not exist")
+            raise KeyError(f"No data found for key: {key}")
 
-        try:
-            async with aiofiles.open(path, "r") as f:
-                return json.loads(await f.read())
-        except Exception as e:
-            logger.error(f"Error reading from {path}: {e}")
-            raise
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            content = await f.read()
+            return json.loads(content)
+
+    async def read_raw(self, key: str) -> str:
+        """
+        Read raw string data from a file without parsing.
+
+        Args:
+            key: The key to read
+
+        Returns:
+            The raw file contents as a string
+
+        Raises:
+            KeyError: If the key does not exist
+        """
+        path = self._get_path(key)
+        if not path.exists():
+            raise KeyError(f"No data found for key: {key}")
+
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            return await f.read()
+
+    async def read_lines(self, key: str) -> List[dict]:
+        """
+        Read data from a JSONL file, parsing each line as a JSON object.
+
+        Args:
+            key: The key to read
+
+        Returns:
+            A list of parsed JSON objects, one per line
+
+        Raises:
+            KeyError: If the key does not exist
+        """
+        path = self._get_path(key)
+        if not path.exists():
+            raise KeyError(f"No data found for key: {key}")
+
+        results = []
+        async with aiofiles.open(path, "r", encoding="utf-8") as f:
+            async for line in f:
+                line = line.strip()
+                if line:  # Skip empty lines
+                    results.append(json.loads(line))
+        return results
 
     async def write(self, key: str, data: dict) -> None:
-        """Write binary data to a file."""
+        """
+        Write data to a file as JSON.
+
+        Args:
+            key: The key to write to
+            data: The data to write
+        """
         path = self._get_path(key)
-        try:
-            async with aiofiles.open(path, "w") as f:
-                await f.write(json.dumps(data))
-        except Exception as e:
-            logger.error(f"Error writing to {path}: {e}")
-            raise
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(json.dumps(data, indent=2, cls=DateTimeEncoder))
+
+    async def write_raw(self, key: str, data: str) -> None:
+        """
+        Write raw string data to a file.
+
+        Args:
+            key: The key to write to
+            data: The string data to write
+        """
+        path = self._get_path(key)
+        async with aiofiles.open(path, "w", encoding="utf-8") as f:
+            await f.write(data)
+
+    async def append(self, key: str, data: Union[dict, str]) -> None:
+        """
+        Append data to an existing file.
+
+        Args:
+            key: The key to append to
+            data: The data to append. If dict, it will be serialized as JSON.
+                 If string, it will be written as-is with a newline.
+        """
+        path = self._get_path(key)
+
+        # Create the file if it doesn't exist
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        async with aiofiles.open(path, "a", encoding="utf-8") as f:
+            # Convert to JSON string if it's a dict
+            if isinstance(data, dict):
+                line = json.dumps(data, cls=DateTimeEncoder)
+            else:
+                line = data
+
+            # Make sure the line ends with a newline
+            if not line.endswith("\n"):
+                line += "\n"
+
+            await f.write(line)
 
     async def delete(self, key: str) -> None:
-        """Delete a file."""
+        """
+        Delete a file.
+
+        Args:
+            key: The key to delete
+
+        Raises:
+            KeyError: If the key does not exist
+        """
         path = self._get_path(key)
         if not path.exists():
-            raise KeyError(f"Key '{key}' does not exist")
+            raise KeyError(f"No data found for key: {key}")
 
-        try:
-            path.unlink()
-        except Exception as e:
-            logger.error(f"Error deleting {path}: {e}")
-            raise
+        os.remove(path)
 
     async def exists(self, key: str) -> bool:
-        """Check if a file exists."""
+        """
+        Check if a file exists.
+
+        Args:
+            key: The key to check
+
+        Returns:
+            True if the file exists, False otherwise
+        """
         path = self._get_path(key)
         return path.exists()
 
@@ -117,53 +231,18 @@ class FileStorage(BaseStorage):
         List all keys with the given prefix.
 
         Args:
-            prefix: The key prefix to search for
+            prefix: The prefix to filter keys by
 
         Returns:
-            A list of keys that match the prefix
+            A list of keys
         """
         normalized_prefix = self.normalize_key(prefix)
+        all_keys = await self._list_all_keys()
 
-        # If prefix is empty, we need to search the entire base directory
-        if not normalized_prefix:
-            return await self._list_all_keys()
-
-        # Handle file system path considerations
-        if "/" in normalized_prefix:
-            parts = normalized_prefix.split("/")
-            search_dir = self.base_dir.joinpath(*parts)
+        if normalized_prefix:
+            return [key for key in all_keys if key.startswith(normalized_prefix)]
         else:
-            search_dir = self.base_dir / normalized_prefix
-
-        # The directory might not exist yet
-        if not search_dir.exists():
-            return []
-
-        # If it's a file, not a directory
-        if search_dir.is_file():
-            # Extract key from the file path
-            rel_path = search_dir.relative_to(self.base_dir)
-            # Remove file extension if present
-            key = str(rel_path)
-            if key.endswith(f".{self.file_extension}"):
-                key = key[: -len(f".{self.file_extension}")]
-            return [key]
-
-        # It's a directory, so find all files recursively
-        result = []
-
-        # Walk through the directory
-        for path in search_dir.glob(f"**/*.{self.file_extension}"):
-            if path.is_file():
-                # Get the relative path from the base directory
-                rel_path = path.relative_to(self.base_dir)
-                # Convert to key format and remove extension
-                key = str(rel_path).replace("\\", "/")  # Normalize path separators
-                if key.endswith(f".{self.file_extension}"):
-                    key = key[: -len(f".{self.file_extension}")]
-                result.append(key)
-
-        return result
+            return all_keys
 
     async def _list_all_keys(self) -> list[str]:
         """
@@ -172,20 +251,16 @@ class FileStorage(BaseStorage):
         Returns:
             A list of all keys
         """
-        result = []
-
-        # Walk through the entire base directory
+        keys = []
         for path in self.base_dir.glob(f"**/*.{self.file_extension}"):
-            if path.is_file():
-                # Get the relative path from the base directory
-                rel_path = path.relative_to(self.base_dir)
-                # Convert to key format and remove extension
-                key = str(rel_path).replace("\\", "/")  # Normalize path separators
-                if key.endswith(f".{self.file_extension}"):
-                    key = key[: -len(f".{self.file_extension}")]
-                result.append(key)
-
-        return result
+            # Get relative path to base_dir
+            rel_path = path.relative_to(self.base_dir)
+            # Remove file extension
+            key = str(rel_path.with_suffix(""))
+            # Replace path separators with forward slashes
+            key = key.replace(os.path.sep, "/")
+            keys.append(key)
+        return keys
 
     async def assert_exists(self, key: str) -> None:
         """

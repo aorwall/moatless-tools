@@ -231,6 +231,9 @@ class ClaudeEditTool(Action, CodeModificationMixin):
             raise ValueError("Workspace is not set")
         return self._workspace
 
+    async def initialize(self, workspace: Workspace):
+        self.workspace = workspace
+
     @workspace.setter
     def workspace(self, value: Workspace):
         self._workspace = value

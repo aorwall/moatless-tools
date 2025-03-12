@@ -8,6 +8,10 @@ from moatless.actions.schema import (
     Observation,
     RewardScaleEntry,
 )
+
+from moatless.artifacts.artifact import ArtifactChange
+from testbeds.schema import TestStatus
+
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
@@ -35,7 +39,22 @@ class RunTestsArgs(ActionArguments):
 
     @classmethod
     def get_few_shot_examples(cls) -> list[FewShotExample]:
-        return []
+        return [
+            FewShotExample.create(
+                user_input="Run the tests for our user authentication module",
+                action=RunTestsArgs(
+                    thoughts="Running authentication tests to verify the login functionality works as expected",
+                    test_files=["tests/auth/test_authentication.py", "tests/auth/test_login.py"],
+                ),
+            ),
+            FewShotExample.create(
+                user_input="After fixing the data validation bug, I need to make sure the validation tests pass",
+                action=RunTestsArgs(
+                    thoughts="Running validation tests to confirm that the bug fix resolved the issues with input validation",
+                    test_files=["tests/validation/test_input_validator.py"],
+                ),
+            ),
+        ]
 
 
 class RunTests(Action):
@@ -95,7 +114,7 @@ class RunTests(Action):
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_files = await file_context.run_tests(test_files)
+        test_file_objects = await file_context.run_tests(test_files)
 
         response_msg = ""
 
@@ -106,10 +125,37 @@ class RunTests(Action):
         summary = f"\n{file_context.get_test_summary(args.test_files)}"
         response_msg += summary
 
-        return Observation.create(
-            message=response_msg,
-            summary=summary,
-        )
+        artifact_changes = []
+
+        logger.info(f"Running tests for {len(args.test_files)} files")
+        for test_file in file_context.test_files:
+            logger.info(f"Running tests for {test_file.file_path}")
+            if test_file.file_path not in args.test_files:
+                continue
+
+            # Calculate test counts for this file
+            passed_count = sum(1 for r in test_file.test_results if r.status == TestStatus.PASSED)
+            failed_count = sum(1 for r in test_file.test_results if r.status == TestStatus.FAILED)
+            error_count = sum(1 for r in test_file.test_results if r.status == TestStatus.ERROR)
+            skipped_count = sum(1 for r in test_file.test_results if r.status == TestStatus.SKIPPED)
+
+            artifact_changes.append(
+                ArtifactChange(
+                    artifact_id=test_file.file_path,
+                    artifact_type="test",
+                    change_type="updated",
+                    properties={
+                        "passed": passed_count,
+                        "failed": failed_count,
+                        "errors": error_count,
+                        "skipped": skipped_count,
+                        "total": len(test_file.test_results),
+                    },
+                    actor="assistant",
+                )
+            )
+
+        return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> list[str]:

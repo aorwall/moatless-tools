@@ -10,11 +10,13 @@ import uuid
 
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes
+from moatless.benchmark.swebench.utils import create_index_async, create_repository_async
 from moatless.completion.manager import create_completion_model
 from moatless.config.agent_config import get_agent
 from moatless.context_data import get_projects_dir, get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
-from moatless.events import EventBus
+from moatless.evaluation.utils import get_swebench_instance
+from moatless.eventbus import BaseEventBus
 from moatless.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
@@ -29,9 +31,12 @@ from moatless.flow.schema import (
 )
 from moatless.repository.git import GitRepository
 from moatless.runner.runner import BaseRunner, JobStatus
+from moatless.runtime.testbed import TestbedEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
 from moatless.workspace import Workspace
+
+import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,19 +46,21 @@ class FlowManager:
         self,
         runner: BaseRunner | None = None,
         storage: BaseStorage | None = None,
-        eventbus: EventBus | None = None,
+        eventbus: BaseEventBus | None = None,
     ):
         self._configs = {}
         self._load_configs()
-        self._runner = runner or BaseRunner.get_instance()
-        self._storage = storage or BaseStorage.get_instance()
-        self._eventbus = eventbus or EventBus()
+        self._runner = runner or settings.runner
+        self._storage = storage or settings.storage
+        self._eventbus = eventbus or settings.event_bus
 
     @classmethod
-    def get_instance(cls):
+    def get_instance(
+        cls, storage: BaseStorage | None = None, eventbus: BaseEventBus | None = None, runner: BaseRunner | None = None
+    ):
         """Get the singleton instance of the FlowManager."""
         if not hasattr(cls, "_instance"):
-            cls._instance = cls()
+            cls._instance = cls(storage=storage, eventbus=eventbus, runner=runner)
         return cls._instance
 
     def create_flow(
@@ -269,7 +276,7 @@ class FlowManager:
             flow_status_info = flow.get_status()
 
             if not flow.is_finished():
-                job_status = await self._runner.get_job_status(project_id, trajectory_id)
+                job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
                 if job_status == JobStatus.RUNNING:
                     flow_status = FlowStatus.RUNNING
                 elif job_status == JobStatus.QUEUED:
@@ -281,15 +288,15 @@ class FlowManager:
             elif flow.root.get_last_node() and flow.root.get_last_node().error:
                 flow_status = FlowStatus.ERROR
             else:
-                flow_status = flow_status_info.status
+                flow_status = FlowStatus.COMPLETED
 
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
                 project_id=flow.project_id,
                 status=flow_status,
                 system_status=flow_status_info,
-                agent_id=flow_status_info.metadata.get("agent_id"),
-                model_id=flow_status_info.metadata.get("model_id"),
+                agent_id=flow.agent.agent_id,
+                model_id=flow.agent.completion_model.model_id,
                 nodes=nodes,
                 usage=flow.total_usage(),
             )
@@ -331,7 +338,7 @@ class FlowManager:
     async def start_trajectory(self, project_id: str, trajectory_id: str):
         """Start a trajectory."""
 
-        flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+        flow = await AgenticFlow.from_trajectory_id(trajectory_id, project_id)
 
         job_status = await self._runner.get_job_status(project_id, trajectory_id)
         if job_status == JobStatus.RUNNING:
@@ -343,20 +350,6 @@ class FlowManager:
             await flow.persist()
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
-
-    async def resume_trajectory(self, project_id: str, trajectory_id: str, request):
-        """Resume a trajectory."""
-        from moatless.flow.loop import AgenticLoop
-        from moatless.flow.runner import agentic_runner
-
-        system = await agentic_runner.get_run(trajectory_id, project_id)
-        if system:
-            raise ValueError("Flow is already running")
-
-        agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
-
-        await agentic_runner.start(agentic_flow, message=request.message)
-        return agentic_flow
 
     async def retry_trajectory(self, project_id: str, trajectory_id: str):
         """Reset and restart a trajectory by removing all children from the root node.
@@ -374,7 +367,7 @@ class FlowManager:
         if job_status == JobStatus.RUNNING:
             raise ValueError("Cannot retry a trajectory that is already running")
 
-        flow = AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+        flow = await AgenticFlow.from_trajectory_id(trajectory_id, project_id)
 
         # Reset the trajectory by removing all children from the root node
         if flow.root and flow.root.children:
@@ -391,10 +384,18 @@ class FlowManager:
     async def execute_node(self, project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
         """Execute a specific node in a trajectory."""
 
-        agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
-        # TODO: This is for testing purposes, the node should be executed by a worker!
-        repository = GitRepository(repo_path=str(Path.cwd()))
-        workspace = Workspace(repository=repository, environment=LocalBashEnvironment())
+        agentic_flow = await AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
+
+        swebench_instance = get_swebench_instance(trajectory_id)
+        if swebench_instance:
+            # TODO: This is for testing purposes, should be derived from settings and executed by a worker
+            repository = await create_repository_async(swebench_instance)
+            code_index = await create_index_async(instance=swebench_instance, repository=repository)
+            runtime = TestbedEnvironment(repository=repository, instance_id=trajectory_id)
+            workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
+        else:
+            workspace = Workspace(environment=LocalBashEnvironment())
+
         await agentic_flow.agent.initialize(workspace)
 
         node = agentic_flow.root.get_node_by_id(request.node_id)
@@ -413,7 +414,7 @@ class FlowManager:
             node.file_context = None
 
         # Execute the action step
-        return await agentic_flow.agent._execute_action_step(node, node.action_steps[0])
+        return await agentic_flow.agent._execute_action_step(node, node.action_steps[-1])
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""

@@ -133,7 +133,6 @@ class EvaluationInstance(BaseModel):
     reward: Optional[int] = Field(default=None, description="Reward of the instance")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
     benchmark_result: Optional[dict[str, Any]] = Field(default=None, description="Benchmark result")
-
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
 
     def start(self):
@@ -220,6 +219,13 @@ class Evaluation(BaseModel):
                 "total": len(self.instances),
             },
         }
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "Evaluation":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["instances"] = [EvaluationInstance.model_validate(i) for i in obj["instances"]]
+        return super().model_validate(obj, **kwargs)
 
     def model_dump(self, *args, **kwargs) -> dict:
         data = super().model_dump(*args, **kwargs)

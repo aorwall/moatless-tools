@@ -2,8 +2,9 @@
 
 import logging
 from typing import Optional
+from typing_extensions import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from moatless.completion.manager import get_model_config
 from moatless.evaluation.manager import EvaluationManager

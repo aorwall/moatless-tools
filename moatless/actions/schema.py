@@ -112,7 +112,7 @@ class Observation(BaseModel):
 
     properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
-    artifact_changes: Optional[list[ArtifactChange]] = Field(
+    artifact_changes: list[ArtifactChange] = Field(
         default_factory=list, description="Artifact changes created when executing the action"
     )
 
@@ -132,8 +132,13 @@ class Observation(BaseModel):
             summary=summary,
             properties=properties,
             execution_completion=execution_completion,
-            artifact_changes=artifact_changes,
+            artifact_changes=artifact_changes or [],
         )
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["artifact_changes"] = [change.model_dump() for change in self.artifact_changes]
+        return data
 
 
 class RewardScaleEntry(BaseModel):

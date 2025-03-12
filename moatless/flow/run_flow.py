@@ -28,7 +28,7 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
         repository = GitRepository(repo_path=repo_path)
         workspace = Workspace(repository=repository, environment=LocalBashEnvironment(cwd=repo_path))
 
-        litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
+        litellm.callbacks = [LogHandler()]
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
 
@@ -44,7 +44,13 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
 
     except Exception as e:
         logger.exception(f"Error running instance {trajectory_id}")
-        emit_event(evaluation_name=project_id, instance_id=trajectory_id, scope="flow", event_type="error")
+        emit_event(
+            evaluation_name=project_id,
+            instance_id=trajectory_id,
+            scope="flow",
+            event_type="error",
+            data={"error": str(e)},
+        )
         raise e
     finally:
         cleanup_job_logging(original_handlers)

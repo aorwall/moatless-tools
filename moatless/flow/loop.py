@@ -35,7 +35,7 @@ class AgenticLoop(AgenticFlow):
             try:
                 if current_node.is_expandable() and current_node.is_executed():
                     child_node = self._create_next_node(current_node)
-                    await self.emit_event(
+                    await self._emit_event(
                         NodeExpandedEvent(node_id=current_node.node_id, child_node_id=child_node.node_id)
                     )
                     current_node = child_node

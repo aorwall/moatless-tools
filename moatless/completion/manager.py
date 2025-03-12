@@ -324,7 +324,7 @@ class ModelConfigManager:
             if not log_dir.exists():
                 log_dir.mkdir(parents=True, exist_ok=True)
 
-            litellm.callbacks = [LogHandler(log_dir=log_dir)]
+            litellm.callbacks = [LogHandler()]
             model = self.create_completion_model(model_id)
 
             model.initialize(

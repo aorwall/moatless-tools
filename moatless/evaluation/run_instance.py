@@ -1,29 +1,21 @@
-import asyncio
-import fcntl
 import json
 import logging
 import os
-import shutil
 import time
 import traceback
-import uuid
 from datetime import datetime, timezone
-from functools import wraps
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import litellm
 from dotenv import load_dotenv
 from opentelemetry import trace
-from redis import Redis
-from rq.job import Dependency
 
 from moatless.benchmark.swebench.utils import create_index_async, create_repository
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import Evaluation, EvaluationEvent, EvaluationStatus, InstanceStatus
-from moatless.evaluation.utils import get_moatless_instance
-from moatless.events import event_bus
+from moatless.evaluation.utils import get_moatless_instance, get_swebench_instance
+from moatless.eventbus.base import BaseEventBus
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import create_flow
 from moatless.node import Node
@@ -33,6 +25,8 @@ from moatless.runtime.testbed import TestbedEnvironment
 from moatless.telemetry import run_async, setup_telemetry
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
+
+from moatless.settings import event_bus
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")
@@ -52,7 +46,7 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
 
     try:
-        swebench_instance = get_moatless_instance(instance_id=trajectory_id)
+        swebench_instance = get_swebench_instance(instance_id=trajectory_id)
         repository = create_repository(swebench_instance, repo_base_dir="/tmp/moatless_repos")
 
         testbed_log_dir = trajectory_dir / "testbed_logs"
@@ -92,13 +86,11 @@ def run_instance(project_id: str, trajectory_id: str) -> None:
 async def _run_instance(
     evaluation_name: str, instance_id: str, repository: Repository, runtime: TestbedEnvironment, swebench_instance: dict
 ) -> AgenticFlow:
-    current_project_id.set(evaluation_name)
-    current_trajectory_id.set(instance_id)
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
     with tracer.start_as_current_span(f"run_instance_{instance_id}"):
         trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
         print(f"Setting up job logging for run in {trajectory_dir}")
-        litellm.callbacks = [LogHandler(trajectory_dir=str(trajectory_dir))]
+        litellm.callbacks = [LogHandler()]
 
         code_index = await create_index_async(swebench_instance, repository=repository)
         workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)

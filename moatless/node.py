@@ -1,3 +1,4 @@
+from datetime import datetime
 import json
 import logging
 from pathlib import Path
@@ -104,6 +105,7 @@ class Node(BaseModel):
     max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
     agent_id: Optional[str] = Field(None, description="The agent ID associated with the node")
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
+    timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
 
     @property
     def action(self) -> Optional[ActionArguments]:

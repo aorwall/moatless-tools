@@ -7,6 +7,8 @@ from pydantic import PrivateAttr
 from moatless.artifacts.artifact import Artifact, ArtifactHandler, SearchCriteria
 from moatless.storage import BaseStorage
 
+import moatless.settings as settings
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=Artifact)
@@ -34,7 +36,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         """
 
         super().__init__(**kwargs)
-        self._storage = storage or BaseStorage.get_default_storage()
+        self._storage = storage or settings.storage
 
     @classmethod
     @abstractmethod

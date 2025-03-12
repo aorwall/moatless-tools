@@ -23,9 +23,12 @@ from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
 )
-from moatless.events import BaseEvent, event_bus
+
+from moatless.events import BaseEvent
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
 from moatless.schema import MessageHistoryType
+
+import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -200,6 +203,7 @@ class BaseCompletionModel(BaseModel, ABC):
         if system_prompt:
             self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
 
+        self._event_bus = settings.event_bus
         self._initialized = True
 
     @property
@@ -580,7 +584,7 @@ class BaseCompletionModel(BaseModel, ABC):
             retry_count=retry_count,
             message=message,
         )
-        await event_bus.publish(event)
+        await self._event_bus.publish(event)
 
     def clone(self, **kwargs) -> "BaseCompletionModel":
         """Create a copy of the completion model with optional parameter overrides."""

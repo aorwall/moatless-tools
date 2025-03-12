@@ -283,7 +283,8 @@ class RQRunner(BaseRunner):
             project_id: The project ID
             trajectory_id: The trajectory ID
         """
-        job_prefix = self._job_id(project_id, trajectory_id)
+        job_prefix = self._job_id(project_id=project_id, trajectory_id=trajectory_id)
+        logger.info(f"Checking job status for {job_prefix}")
 
         if any(
             [

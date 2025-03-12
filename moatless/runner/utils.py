@@ -7,10 +7,14 @@ from typing import Any
 from opentelemetry import trace
 
 from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
-from moatless.events import BaseEvent, event_bus
+from moatless.events import BaseEvent
+
+import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner")
+
+event_bus = settings.event_bus
 
 
 def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):

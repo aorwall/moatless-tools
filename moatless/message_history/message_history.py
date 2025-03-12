@@ -97,17 +97,17 @@ class MessageHistoryGenerator(BaseModel):
                             ChatCompletionTextObject(type="text", text=action_step.observation.message)
                         )
 
-                    if action_step.observation.artifact_changes:
-                        for change in action_step.observation.artifact_changes:
-                            artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
-                            if artifact:
-                                message_content.append(
-                                    ChatCompletionTextObject(
-                                        type="text",
-                                        text=f"The {artifact.type} {artifact.id} was {change.change_type}",
-                                    )
-                                )
-                                message_content.append(artifact.to_prompt_message_content())
+                    # if action_step.observation.artifact_changes:
+                    #    for change in action_step.observation.artifact_changes:
+                    #        artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
+                    #        if artifact:
+                    #            message_content.append(
+                    #                ChatCompletionTextObject(
+                    #                    type="text",
+                    #                    text=f"The {artifact.type} {artifact.id} was {change.change_type}",
+                    #                )
+                    #            )
+                    #            message_content.append(artifact.to_prompt_message_content())
 
                     tool_responses.append(
                         {

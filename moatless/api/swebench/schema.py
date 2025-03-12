@@ -109,10 +109,10 @@ class EvaluationListItemDTO(BaseModel):
             # Add up token usage if benchmark_result exists
             if instance.benchmark_result:
                 result = instance.benchmark_result
-                total_cost += result.total_cost
-                prompt_tokens += result.prompt_tokens
-                completion_tokens += result.completion_tokens
-                cached_tokens += result.cached_tokens
+                total_cost += result.get("total_cost", 0)
+                prompt_tokens += result.get("prompt_tokens", 0)
+                completion_tokens += result.get("completion_tokens", 0)
+                cached_tokens += result.get("cached_tokens", 0)
 
         return cls(
             evaluation_name=evaluation.evaluation_name,

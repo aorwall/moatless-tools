@@ -107,8 +107,20 @@ class ArtifactChange(BaseModel):
     artifact_id: str
     artifact_type: str
     change_type: Literal["added", "updated", "removed"]
-    diff_details: Optional[str] = None
+    properties: dict[str, Any]
     actor: Literal["user", "assistant"]
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["properties"] = {k: v for k, v in data["properties"].items() if v is not None}
+        return data
+
+    @classmethod
+    def model_validate(cls, data: Any):
+        """Override model_validate to customize deserialization."""
+        if "properties" in data:
+            data["properties"] = {k: v for k, v in data["properties"].items() if v is not None}
+        return super().model_validate(data)
 
 
 T = TypeVar("T")  # TODO: Add bound="ArtifactHandler" once mypy doesnt crash when it's used

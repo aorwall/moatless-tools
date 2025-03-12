@@ -5,7 +5,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.completion.model import Usage
+from moatless.artifacts.artifact import ArtifactChange
+from moatless.completion.model import Completion, Usage
 
 
 class UsageDTO(BaseModel):
@@ -50,6 +51,8 @@ class ActionStepDTO(BaseModel):
 
     thoughts: Optional[str] = None
     action: ActionDTO
+    artifacts: list[ArtifactChange] = []
+
     observation: Optional[ObservationDTO] = None
     completion: Optional[CompletionDTO] = None
     warnings: list[str] = []
@@ -152,7 +155,8 @@ class NodeDTO(BaseModel):
     reward: Optional[RewardDTO] = None
     userMessage: Optional[str] = None
     assistantMessage: Optional[str] = None
-    actionCompletion: Optional[CompletionDTO] = None
+    completion: Optional[Completion] = None
+    thoughts: Optional[str] = None
     actionSteps: list[ActionStepDTO] = []
     fileContext: Optional[FileContextDTO] = None
     error: Optional[str] = None

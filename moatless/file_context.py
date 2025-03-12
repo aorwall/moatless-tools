@@ -3,14 +3,17 @@ import io
 import json
 import logging
 import os
-from collections.abc import Awaitable
+import re
+import subprocess
 from dataclasses import dataclass
 from math import log
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Literal, Any
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from unidiff import PatchSet
+from pydantic.json_schema import JsonSchemaMode
+from unidiff import Hunk, PatchSet
 
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.codeblocks import CodeBlockType, get_parser_by_path
 from moatless.codeblocks.codeblocks import (
     BlockSpan,
@@ -938,6 +941,30 @@ class ContextFile(BaseModel):
         else:
             return 0  # TODO: Support context size...
 
+    def count_line_changes(self, old_content: Optional[str] = None) -> dict[str, Any]:
+        """
+        Count the number of added and removed lines between the current file content and old content.
+
+        Args:
+            old_content: The previous content of the file. If None, will compare with base content.
+
+        Returns:
+            dict: A dictionary with keys 'added_lines', 'removed_lines', and 'token_count'
+        """
+        if old_content is None:
+            old_content = self.get_base_content()
+
+        current_content = self.content
+
+        patch = self.generate_patch(old_content, current_content)
+        if patch:
+            patch_lines = patch.split("\n")
+            additions = sum(1 for line in patch_lines if line.startswith("+") and not line.startswith("+++"))
+            deletions = sum(1 for line in patch_lines if line.startswith("-") and not line.startswith("---"))
+            return {"added_lines": additions, "removed_lines": deletions, "diff": patch}
+        else:
+            return {"added_lines": 0, "removed_lines": 0}
+
     def has_span(self, span_id: str):
         return span_id in self.span_ids
 
@@ -1522,6 +1549,84 @@ class FileContext(BaseModel):
                     updated_files.add(file_path)
 
         return updated_files
+
+    def get_artifact_changes(
+        self, old_context: "FileContext", actor: Literal["user", "assistant"] = "assistant"
+    ) -> list[ArtifactChange]:
+        """
+        Compares this FileContext with an older one and returns a list of ArtifactChange objects for files
+        that have been added, updated, or removed.
+
+        Args:
+            old_context: The previous FileContext to compare against
+            actor: Who made the changes, either "user" or "assistant"
+
+        Returns:
+            list[ArtifactChange]: List of ArtifactChange objects representing the changes between contexts
+        """
+        artifact_changes = []
+
+        # Check files in current context for added or updated files
+        for file_path, current_file in self._files.items():
+            old_file = old_context._files.get(file_path)
+
+            if old_file is None:
+                properties = {
+                    "token_count": current_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="added",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+            elif current_file.patch != old_file.patch:
+                properties = current_file.count_line_changes(old_file.content)
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="updated",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+            elif current_file.span_ids != old_file.span_ids:
+                properties = {
+                    "token_count": current_file.context_size() - old_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="added",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+
+        for file_path, old_file in old_context._files.items():
+            if file_path not in self._files:
+                change_stats = {
+                    "token_count": -old_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="removed",
+                        properties=change_stats,
+                        actor=actor,
+                    )
+                )
+
+        return artifact_changes
 
     def get_context_diff(self, old_context: "FileContext") -> "FileContext":
         diff_context = FileContext(repo=self._repo)

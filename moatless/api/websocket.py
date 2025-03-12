@@ -139,9 +139,8 @@ class ConnectionManager:
         """Handle system events and broadcast them to subscribers or all clients."""
         logger.debug(f"Broadcasting event: {event.scope}:{event.event_type}")
 
-        event_dict = event.to_dict()
+        event_dict = event.model_dump(mode="json")
 
-        # Determine if this event contains project or trajectory info
         project_id = event_dict.get("project_id")
         trajectory_id = event_dict.get("trajectory_id")
 

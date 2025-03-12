@@ -17,23 +17,22 @@ from moatless.agent.events import (
     AgentEvent,
     RunAgentEvent,
 )
-from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion import BaseCompletionModel
 from moatless.completion.manager import create_completion_model
 from moatless.completion.model import Completion
 from moatless.component import MoatlessComponent
-from moatless.events import event_bus
+from moatless.eventbus.base import BaseEventBus
 from moatless.exceptions import (
     CompletionError,
     CompletionRejectError,
     RejectError,
     RuntimeError,
 )
-from moatless.index.code_index import CodeIndex
 from moatless.message_history import MessageHistoryGenerator
 from moatless.node import ActionStep, Node
-from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
+
+import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.agent")
@@ -42,9 +41,7 @@ tracer = trace.get_tracer("moatless.agent")
 class ActionAgent(MoatlessComponent):
     agent_id: str = Field(..., description="Agent ID")
 
-    system_prompt: str = Field(
-        ..., description="System prompt to be used for generating completions"
-    )
+    system_prompt: str = Field(..., description="System prompt to be used for generating completions")
     actions: list[Action] = Field(default_factory=list)
 
     _completion_model: BaseCompletionModel | None = PrivateAttr(default=None)
@@ -95,9 +92,7 @@ class ActionAgent(MoatlessComponent):
                     action.completion_model = None
         else:
             self._completion_model = completion_model.clone()
-            self._message_generator = MessageHistoryGenerator.create(
-                completion_model.message_history_type
-            )
+            self._message_generator = MessageHistoryGenerator.create(completion_model.message_history_type)
             if self._workspace:
                 self._message_generator.workspace = self._workspace
 
@@ -135,7 +130,7 @@ class ActionAgent(MoatlessComponent):
 
     async def _emit_event(self, event: AgentEvent):
         """Emit a pure agent event"""
-        await event_bus.publish(event)
+        await settings.event_bus.publish(event)
 
     @tracer.start_as_current_span("ActionAgent._run")
     async def run(self, node: Node):
@@ -153,17 +148,11 @@ class ActionAgent(MoatlessComponent):
             node.file_context._repo = self._workspace.repository
 
         try:
-            await self._emit_event(
-                RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id)
-            )
+            await self._emit_event(RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id))
             messages = await self._message_generator.generate_messages(node)
-            logger.info(
-                f"Node{node.node_id}: Build action with {len(messages)} messages"
-            )
+            logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
 
-            completion_response = await self._completion_model.create_completion(
-                messages=messages
-            )
+            completion_response = await self._completion_model.create_completion(messages=messages)
             node.completions["build_action"] = completion_response.completion
 
             node.assistant_message = completion_response.text_response
@@ -172,13 +161,9 @@ class ActionAgent(MoatlessComponent):
 
             if completion_response.thoughts:
                 node.thoughts = completion_response.thoughts
-            logger.info(f"Node{node.node_id}: Thoughts: {node.thoughts}")
 
             if completion_response.structured_outputs:
-                node.action_steps = [
-                    ActionStep(action=action)
-                    for action in completion_response.structured_outputs
-                ]
+                node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
                 # Emit action created events
                 for step in node.action_steps:
                     await self._emit_event(
@@ -193,17 +178,13 @@ class ActionAgent(MoatlessComponent):
             node.terminal = True
 
             if e.last_completion:
-                logger.error(
-                    f"Node{node.node_id}: Build action failed with completion error: {e}"
-                )
+                logger.error(f"Node{node.node_id}: Build action failed with completion error: {e}")
 
                 node.completions["build_action"] = Completion.from_llm_completion(
                     input_messages=e.messages if hasattr(e, "messages") else [],
                     completion_response=e.last_completion,
                     model=self.completion_model.model,
-                    usage=e.accumulated_usage
-                    if hasattr(e, "accumulated_usage")
-                    else None,
+                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
             else:
                 logger.exception(f"Node{node.node_id}: Build action failed with error ")
@@ -219,9 +200,7 @@ class ActionAgent(MoatlessComponent):
                 )
                 return
             else:
-                node.error = (
-                    f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
-                )
+                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
                 await self._emit_event(
                     AgentErrorEvent(
                         agent_id=self.agent_id,
@@ -233,9 +212,7 @@ class ActionAgent(MoatlessComponent):
         except Exception as e:
             node.terminal = True
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
-            logger.error(
-                f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}"
-            )
+            logger.error(f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}")
             await self._emit_event(
                 AgentErrorEvent(
                     agent_id=self.agent_id,
@@ -252,9 +229,7 @@ class ActionAgent(MoatlessComponent):
         duplicate_node = node.find_duplicate()
         if duplicate_node:
             node.is_duplicate = True
-            logger.info(
-                f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
-            )
+            logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution.")
             return
 
         action_names = [action_step.action.name for action_step in node.action_steps]
@@ -263,9 +238,7 @@ class ActionAgent(MoatlessComponent):
             await self._execute(node, action_step)
 
     @tracer.start_as_current_span("ActionAgent._execute_action_step")
-    async def _execute_action_step(
-        self, node: Node, action_step: ActionStep
-    ) -> Observation:
+    async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:
         action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
@@ -281,7 +254,11 @@ class ActionAgent(MoatlessComponent):
     @tracer.start_as_current_span("ActionAgent._execute")
     async def _execute(self, node: Node, action_step: ActionStep):
         try:
+            previous_context = node.file_context.clone() if node.file_context else None
             action_step.observation = await self._execute_action_step(node, action_step)
+
+            if previous_context and node.file_context:
+                action_step.observation.artifact_changes = node.file_context.get_artifact_changes(previous_context)
 
             await self._emit_event(
                 ActionExecutedEvent(
@@ -292,15 +269,11 @@ class ActionAgent(MoatlessComponent):
             )
 
             if not action_step.observation:
-                logger.warning(
-                    f"Node{node.node_id}: Action {action_step.action.name} returned no observation"
-                )
+                logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:
                 node.terminal = action_step.observation.terminal
                 if action_step.observation.execution_completion:
-                    action_step.completion = (
-                        action_step.observation.execution_completion
-                    )
+                    action_step.completion = action_step.observation.execution_completion
 
             logger.info(
                 f"Node{node.node_id}: Executed action: {action_step.action.name}. "
@@ -317,9 +290,7 @@ class ActionAgent(MoatlessComponent):
                     input_messages=e.messages,
                     completion_response=e.last_completion,
                     model=self.completion_model.model,
-                    usage=e.accumulated_usage
-                    if hasattr(e, "accumulated_usage")
-                    else None,
+                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
                 )
 
             node.terminal = True
@@ -328,15 +299,11 @@ class ActionAgent(MoatlessComponent):
                 node.error = f"Completion validation error: {e.message}"
                 return
             else:
-                node.error = (
-                    f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
-                )
+                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
                 raise e
 
         except Exception as e:
-            logger.exception(
-                f"Node{node.node_id}: Execution of action {action_step.action.name} failed."
-            )
+            logger.exception(f"Node{node.node_id}: Execution of action {action_step.action.name} failed.")
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             node.terminal = True
             raise e
@@ -358,27 +325,20 @@ class ActionAgent(MoatlessComponent):
         if isinstance(obj, dict):
             obj = obj.copy()
 
-            obj["actions"] = [
-                Action.model_validate(action_data)
-                for action_data in obj.get("actions", [])
-            ]
+            obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
 
             if "model_id" in obj:
                 obj["completion_model"] = create_completion_model(obj["model_id"])
 
-            return super().model_validate(obj)
+            instance = super().model_validate(obj)
+
+            for action in instance.actions:
+                if not isinstance(action, Action):
+                    raise ValueError(f"Invalid action type: {type(action)}. Expected Action subclass.")
+                if not hasattr(action, "args_schema"):
+                    raise ValueError(f"Action {action.__class__.__name__} has no args_schema attribute")
+                instance._action_map[action.args_schema] = action
+
+            return instance
 
         return obj
-
-    @model_validator(mode="after")
-    def verify_actions(self) -> "ActionAgent":
-        for action in self.actions:
-            if not isinstance(action, Action):
-                raise ValueError(
-                    f"Invalid action type: {type(action)}. Expected Action subclass."
-                )
-            if not hasattr(action, "args_schema"):
-                raise ValueError(
-                    f"Action {action.__class__.__name__} is missing args_schema attribute"
-                )
-        return self

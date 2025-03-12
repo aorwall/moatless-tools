@@ -272,7 +272,9 @@ async def run_git_command(command, cwd=None):
             raise TimeoutError(f"Git command timed out after 300s: {' '.join(command)}")
 
         if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, command, stdout.decode(), stderr.decode())
+            error_msg = stderr.decode()
+            logger.error(f"Git command failed with error: {error_msg}")
+            raise subprocess.CalledProcessError(process.returncode or 1, command, stdout.decode(), error_msg)
         return stdout.decode()
     except Exception as e:
         logger.error(f"Git command failed: {command} - {str(e)}")

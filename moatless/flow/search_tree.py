@@ -127,7 +127,7 @@ class SearchTree(AgenticFlow):
                     node = new_node
                 else:
                     self.log(logger.warning, f"No node expanded from Node{node.node_id}")
-                    await self.emit_event(
+                    await self._emit_event(
                         FlowErrorEvent(
                             node_id=node.node_id,
                             error="No node expanded",
@@ -171,7 +171,7 @@ class SearchTree(AgenticFlow):
 
         node = await self.selector.select(expandable_nodes)
 
-        await self.emit_event(
+        await self._emit_event(
             NodeSelectedEvent(
                 node_id=node.node_id,
                 previous_node_id=previous_node_id,
@@ -195,7 +195,7 @@ class SearchTree(AgenticFlow):
 
         await self.persist()
 
-        await self.emit_event(
+        await self._emit_event(
             NodeExpandedEvent(
                 node_id=node.node_id,
                 child_node_id=child_node.node_id,
@@ -209,7 +209,7 @@ class SearchTree(AgenticFlow):
                 child_node.feedback_data = feedback_data
                 child_node.user_message = feedback_data.feedback
 
-                await self.emit_event(
+                await self._emit_event(
                     FeedbackGeneratedEvent(
                         node_id=child_node.node_id,
                     )
@@ -246,7 +246,7 @@ class SearchTree(AgenticFlow):
                         f"Node{node.node_id}: The value function returned a reward of {node.reward.value}.",
                     )
 
-                    await self.emit_event(
+                    await self._emit_event(
                         NodeRewardEvent(
                             node_id=node.node_id,
                             reward=node.reward.value,
@@ -262,7 +262,7 @@ class SearchTree(AgenticFlow):
                     logger.warning,
                     f"Node{node.node_id}: Value function rejected: {e.message}",
                 )
-                await self.emit_event(
+                await self._emit_event(
                     NodeRewardFailureEvent(
                         node_id=node.node_id,
                         error=str(e),

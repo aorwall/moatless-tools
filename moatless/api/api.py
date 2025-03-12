@@ -31,13 +31,15 @@ from moatless.api.trajectory.trajectory_utils import (
 )
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
-from moatless.events import event_bus
+from moatless.eventbus.base import BaseEventBus
 from moatless.logging_config import get_logger, setup_logging
 from moatless.runner.rq import RQRunner
 from moatless.runner.runner import BaseRunner, JobsStatusSummary
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
+
+import moatless.settings as settings
 
 # Filter warnings from external dependencies
 filter_external_warnings()
@@ -52,7 +54,8 @@ setup_logging(
 
 logger = get_logger(__name__)
 
-runner = BaseRunner.get_instance()
+runner = settings.runner
+event_bus = settings.event_bus
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
@@ -75,15 +78,11 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         logger.info("Unsubscribing from system events")
         await event_bus.unsubscribe(handle_event)
 
-    # Initialize FastAPI instrumentation
     FastAPIInstrumentor.instrument_app(api)
 
-    # Update CORS middleware configuration
     origins = [
         "http://localhost:5173",  # Development frontend
-        "http://localhost:8000",  # Development API
         "http://127.0.0.1:5173",
-        "http://127.0.0.1:8000",
     ]
 
     api.add_middleware(

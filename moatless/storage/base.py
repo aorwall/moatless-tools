@@ -1,6 +1,6 @@
 import abc
 import logging
-from typing import TypeVar, Optional, cast, Union, Type
+from typing import TypeVar, Optional, cast, Union, Type, Any, List
 from pathlib import Path
 
 from moatless.context_data import get_project_dir, get_trajectory_dir, current_project_id, current_trajectory_id
@@ -20,7 +20,7 @@ class BaseStorage(abc.ABC):
     _instance = None
 
     @classmethod
-    def get_instance(cls, storage_impl: Type["BaseStorage"] = None, **kwargs) -> "BaseStorage":
+    def get_instance(cls, storage_impl: Optional[Type["BaseStorage"]] = None, **kwargs) -> "BaseStorage":
         """
         Get or create the singleton instance of Storage.
 
@@ -32,9 +32,12 @@ class BaseStorage(abc.ABC):
             The singleton Storage instance
         """
         if cls._instance is None:
+            # Import here to avoid circular imports
             from moatless.storage.file_storage import FileStorage
 
+            # Use FileStorage as default implementation
             impl_class = storage_impl or FileStorage
+            logger.info(f"Using {impl_class.__name__} as storage implementation")
             cls._instance = impl_class(**kwargs)
 
         return cls._instance
@@ -47,13 +50,45 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def read(self, key: str) -> dict:
         """
-        Read binary data from storage.
+        Read data from storage.
 
         Args:
             key: The identifier for the data to read
 
         Returns:
-            The binary data associated with the key
+            The data associated with the key
+
+        Raises:
+            KeyError: If the key does not exist
+        """
+        pass
+
+    @abc.abstractmethod
+    async def read_raw(self, key: str) -> str:
+        """
+        Read raw data from storage without parsing.
+
+        Args:
+            key: The identifier for the data to read
+
+        Returns:
+            The raw data as a string
+
+        Raises:
+            KeyError: If the key does not exist
+        """
+        pass
+
+    @abc.abstractmethod
+    async def read_lines(self, key: str) -> List[dict]:
+        """
+        Read data from a JSONL or similar line-based format.
+
+        Args:
+            key: The identifier for the data to read
+
+        Returns:
+            A list of data objects, one per line
 
         Raises:
             KeyError: If the key does not exist
@@ -63,11 +98,34 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def write(self, key: str, data: dict) -> None:
         """
-        Write binary data to storage.
+        Write data to storage.
 
         Args:
             key: The identifier for the data
-            data: The binary data to write
+            data: The data to write
+        """
+        pass
+
+    @abc.abstractmethod
+    async def write_raw(self, key: str, data: str) -> None:
+        """
+        Write raw string data to storage.
+
+        Args:
+            key: The identifier for the data
+            data: The string data to write
+        """
+        pass
+
+    @abc.abstractmethod
+    async def append(self, key: str, data: Union[dict, str]) -> None:
+        """
+        Append data to an existing file.
+
+        Args:
+            key: The identifier for the data
+            data: The data to append. If dict, it will be serialized as JSON.
+                 If string, it will be written as-is with a newline.
         """
         pass
 
@@ -87,19 +145,25 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def exists(self, key: str) -> bool:
         """
-        Check if a key exists in storage.
+        Check if data exists in storage.
 
         Args:
-            key: The identifier to check
+            key: The identifier for the data to check
 
         Returns:
-            True if the key exists, False otherwise
+            True if the data exists, False otherwise
         """
         pass
 
     async def assert_exists(self, key: str) -> None:
         """
-        Assert that a key exists in storage.
+        Assert that data exists in storage.
+
+        Args:
+            key: The identifier for the data to check
+
+        Raises:
+            KeyError: If the key does not exist
         """
         if not await self.exists(key):
             raise KeyError(f"Key '{key}' does not exist")
@@ -107,13 +171,13 @@ class BaseStorage(abc.ABC):
     @abc.abstractmethod
     async def list_keys(self, prefix: str = "") -> list[str]:
         """
-        List all keys with the given prefix.
+        List all keys in storage with the given prefix.
 
         Args:
-            prefix: The key prefix to search for
+            prefix: The prefix to filter keys by
 
         Returns:
-            A list of keys that match the prefix
+            A list of keys
         """
         pass
 

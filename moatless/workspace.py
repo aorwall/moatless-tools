@@ -60,9 +60,7 @@ class Workspace(BaseModel):
         return self._code_index
 
     @property
-    def runtime(self) -> RuntimeEnvironment:
-        if not self._runtime:
-            raise ValueError("Runtime is not set")
+    def runtime(self) -> RuntimeEnvironment | None:
         return self._runtime
 
     @property

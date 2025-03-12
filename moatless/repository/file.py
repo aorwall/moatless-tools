@@ -63,6 +63,8 @@ class CodeFile(BaseModel):
             return False
 
     def save(self, updated_content: str):
+        if self._repo_path is None:
+            raise ValueError("Repository path is not set")
         full_file_path = os.path.join(self._repo_path, self.file_path)
         with open(full_file_path, "w") as f:
             f.write(updated_content)
@@ -73,6 +75,8 @@ class CodeFile(BaseModel):
     @property
     def content(self):
         if self.has_been_modified():
+            if self._repo_path is None:
+                raise ValueError("Repository path is not set")
             with open(os.path.join(self._repo_path, self.file_path)) as f:
                 self._content = f.read()
                 self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
@@ -291,17 +295,16 @@ class FileRepository(Repository):
         Uses grep to search for exact text matches in files asynchronously.
         """
         matches = []
-        if not file_pattern:
-            file_pattern = "."
+        search_path = "."
+        include_arg = []
 
         try:
-            # Remove '**' and everything after it
-            grep_pattern = file_pattern
-            if "**" in grep_pattern:
-                grep_pattern = grep_pattern.split("**")[0]
-
-            if not grep_pattern:
-                grep_pattern = "."
+            # Handle file pattern as --include argument for grep
+            if file_pattern and "*" in file_pattern:
+                include_arg = ["--include", file_pattern]
+            elif file_pattern and file_pattern != ".":
+                # If it's a specific file, use it as the search path
+                search_path = file_pattern
 
             # Always escape special regex characters to handle them literally
             escaped_search_text = (
@@ -318,14 +321,16 @@ class FileRepository(Repository):
                 .replace("^", "\\^")
             )
 
-            cmd = ["grep", "-n", "-r", escaped_search_text, grep_pattern]
+            cmd = ["grep", "-n", "-r"] + include_arg + [escaped_search_text, search_path]
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
 
             process = await asyncio.create_subprocess_exec(
-                *cmd, cwd=self.repo_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, text=True
+                *cmd, cwd=self.repo_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await process.communicate()
+            stdout_bytes, stderr_bytes = await process.communicate()
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
 
             if process.returncode not in (0, 1):  # grep returns 1 if no matches found
                 logger.info(f"Grep returned non-standard exit code: {process.returncode}")
@@ -337,20 +342,24 @@ class FileRepository(Repository):
 
             for line in stdout.splitlines():
                 try:
-                    parts = line.split(":", 2)
+                    parts = line.split(":", 2)  # type: ignore
                     if len(parts) < 2:
                         logger.info(f"Skipping malformed line: {line}")
                         continue
 
-                    if os.path.isfile(os.path.join(self.repo_path, file_pattern)) and "/" not in parts[0]:
+                    if (
+                        os.path.isfile(os.path.join(self.repo_path, search_path))
+                        and search_path != "."
+                        and "/" not in parts[0]
+                    ):  # type: ignore
                         # Format: "5:def test_partitions():"
                         line_num = int(parts[0])
                         content = parts[1]
-                        file_path = file_pattern
+                        file_path = search_path
                     else:
                         # Format: "path/to/file:5:def test_partitions():"
                         file_path = parts[0]
-                        if file_path.startswith("./"):
+                        if file_path.startswith("./"):  # type: ignore
                             file_path = file_path[2:]
                         line_num = int(parts[1])
                         content = parts[2]
@@ -361,8 +370,8 @@ class FileRepository(Repository):
                     continue
 
         except Exception as e:
-            logger.info(f"Grep command failed: {e}")
-            return []
+            logger.exception(f"Grep command failed: {cmd}")
+            raise e
 
         logger.info(f"Returning {len(matches)} matches")
         return matches
@@ -431,32 +440,30 @@ class FileRepository(Repository):
                 stderr=asyncio.subprocess.PIPE,
                 universal_newlines=False,
             )
-            stdout, stderr = await process.communicate()
-
-            # Decode the bytes to strings
-            stdout_str = stdout.decode("utf-8") if stdout else ""
-            stderr_str = stderr.decode("utf-8") if stderr else ""
+            stdout_bytes, stderr_bytes = await process.communicate()
+            stdout = stdout_bytes.decode("utf-8", errors="replace")
+            stderr = stderr_bytes.decode("utf-8", errors="replace")
 
             if process.returncode not in (0, 1):  # grep returns 1 if no matches found
                 logger.info(f"Grep returned non-standard exit code: {process.returncode}")
-                if stderr_str:
-                    logger.warning(f"Grep error output: {stderr_str}")
+                if stderr:
+                    logger.warning(f"Grep error output: {stderr}")
                 return []
 
-            logger.info(f"Found {len(stdout_str.splitlines())} potential matches")
+            logger.info(f"Found {len(stdout.splitlines())} potential matches")
 
             # Process and organize the results
             file_matches = {}
-            for line in stdout_str.splitlines():
+            for line in stdout.splitlines():
                 try:
                     # Parse line format: "path/to/file:line_num:line_content"
-                    parts = line.split(":", 2)
+                    parts = line.split(":", 2)  # type: ignore
                     if len(parts) < 3:
                         logger.info(f"Skipping malformed line: {line}")
                         continue
 
                     file_path = parts[0]
-                    if file_path.startswith("./"):
+                    if file_path.startswith("./"):  # type: ignore
                         file_path = file_path[2:]
                     line_num = int(parts[1])
                     content = parts[2]

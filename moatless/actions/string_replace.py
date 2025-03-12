@@ -11,6 +11,7 @@ from moatless.actions.schema import (
     ActionArguments,
     Observation,
 )
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 
@@ -436,6 +437,8 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         else:
             new_file_content = file_content.replace(args.old_str, args.new_str)
 
+        diff = context_file.generate_patch(file_content, new_file_content)
+
         context_file.apply_changes(new_file_content)
 
         # Create a snippet of the edited section
@@ -448,10 +451,10 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
         message = (
             f"The file {path} has been edited. Here's the result of running `cat -n` "
             f"on a snippet of {path}:\n{snippet_with_lines}\n"
-            "Review the changes and make sure they are as expected. Edit the file again if necessary."
+            "Review the changes and make sure they are as expected. Edit the file again if necessary. Remember to verify the changes by running tests and adding new tests if necessary."
         )
 
-        summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary."
+        summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary. Remember to verify the changes by running tests and adding new tests if necessary."
 
         test_summary = await self.run_tests(
             file_path=str(path),

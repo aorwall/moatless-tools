@@ -4,6 +4,7 @@ from typing import Any, List
 
 from fastapi import HTTPException
 
+from moatless.actions.think import Think, ThinkArgs
 from moatless.api.trajectory.schema import (
     ActionDTO,
     ActionStepDTO,
@@ -32,11 +33,14 @@ def convert_moatless_node_to_api_node(
     all_warnings = []
     all_errors = []
 
+    thoughts = node.thoughts.text if node.thoughts else None
+
     for step in node.action_steps:
         warnings = []
         errors = []
 
-        if step.action.name == "Think":
+        if isinstance(step.action, ThinkArgs):
+            thoughts = step.action.thought
             continue
 
         # Convert action
@@ -54,7 +58,7 @@ def convert_moatless_node_to_api_node(
             if dump_str in action_history:
                 errors.append(f"Same action as in step {action_history[dump_str]}")
             else:
-                action_history[dump_str] = node.node_id
+                action_history[dump_str] = str(node.node_id)
 
         # Convert observation
         observation = None
@@ -90,6 +94,7 @@ def convert_moatless_node_to_api_node(
                 observation=observation,
                 errors=errors,
                 warnings=warnings,
+                artifacts=step.observation.artifact_changes if step.observation else [],
             )
         )
 
@@ -104,11 +109,13 @@ def convert_moatless_node_to_api_node(
         reward = None
 
     return NodeDTO(
+        thoughts=thoughts,
         nodeId=node.node_id,
         reward=reward,
         actionSteps=action_steps,
         executed=node.is_executed(),
         usage=node.usage(),
+        completion=node.completions.get("build_action") if node.completions else None,
         # assistantMessage=node.assistant_message,
         userMessage=node.user_message,
         # actionCompletion=action_completion,
