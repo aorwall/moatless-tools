@@ -68,7 +68,7 @@ export function Chat({ trajectory }: ChatProps) {
           ...item,
           nodeId: node.nodeId,
           id: `${node.nodeId}-${item.type}-${messages.length}`,
-          trajectoryId: trajectory.id,
+          trajectoryId: trajectory.trajectory_id,
           timestamp: new Date().toISOString(),
         });
       }
@@ -122,7 +122,7 @@ export function Chat({ trajectory }: ChatProps) {
 
   const onSendMessage = (message: string, agentId: string, modelId: string) => {
     resumeTrajectory.mutate({
-      trajectoryId: trajectory.id,
+      trajectoryId: trajectory.trajectory_id,
       agentId,
       modelId,
       message,

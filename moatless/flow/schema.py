@@ -265,7 +265,6 @@ class ExecuteNodeRequest(BaseModel):
 class TrajectoryResponseDTO(BaseModel):
     """Data transfer object for trajectory responses."""
 
-    id: str
     trajectory_id: str
     project_id: str
     status: FlowStatus

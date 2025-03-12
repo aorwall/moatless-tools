@@ -34,9 +34,13 @@ from moatless.artifacts.artifact import ArtifactListItem
 from moatless.events import event_bus
 from moatless.logging_config import get_logger, setup_logging
 from moatless.runner.rq import RQRunner
-from moatless.runner.runner import JobsStatusSummary
+from moatless.runner.runner import BaseRunner, JobsStatusSummary
 from moatless.telemetry import setup_telemetry
+from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
+
+# Filter warnings from external dependencies
+filter_external_warnings()
 
 setup_logging(
     log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -48,7 +52,7 @@ setup_logging(
 
 logger = get_logger(__name__)
 
-runner = RQRunner()
+runner = BaseRunner.get_instance()
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:

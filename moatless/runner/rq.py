@@ -9,7 +9,7 @@ from rq import Queue, Worker
 from rq.command import send_stop_job_command
 from rq.job import Job
 
-from moatless.runner.runner import JobInfo, JobsStatusSummary, JobStatus, RunnerInfo, RunnerStatus
+from moatless.runner.runner import BaseRunner, JobInfo, JobsStatusSummary, JobStatus, RunnerInfo, RunnerStatus
 from moatless.telemetry import extract_trace_context
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class MoatlessQueue(Queue):
         return job
 
 
-class RQRunner:
+class RQRunner(BaseRunner):
     """Runner for managing jobs with RQ."""
 
     def __init__(self, redis_url: str | None = None):
@@ -81,22 +81,6 @@ class RQRunner:
         except Exception as exc:
             self.logger.exception(f"Error starting job {project_id}_{trajectory_id}")
             raise exc
-
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
-        """Get the status of a job.
-
-        Args:
-            project_id: The project ID
-            trajectory_id: The trajectory ID
-        """
-        job_id = self._job_id(project_id, trajectory_id)
-
-        if self._is_queued(job_id):
-            return JobStatus.QUEUED
-        elif self._is_running(job_id):
-            return JobStatus.RUNNING
-        else:
-            return JobStatus.PENDING
 
     def _is_queued(self, job_id: str) -> bool:
         # if get_job_ids has an item that contains job_id, return True

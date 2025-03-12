@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Callable, Optional, Type
 
 from pydantic import BaseModel, Field
 
@@ -104,47 +104,82 @@ class JobsStatusSummary(BaseModel):
     pending_jobs: int = 0
     job_ids: dict[str, list[str]] = Field(
         default_factory=lambda: {
+            "pending": [],
             "queued": [],
             "running": [],
             "completed": [],
             "failed": [],
             "canceled": [],
-            "pending": [],
         }
     )
 
 
-class Runner(ABC):
-    """Runner for managing jobs."""
+class BaseRunner(ABC):
+    _instance = None
+
+    @classmethod
+    def get_instance(cls, runner_impl: Type["BaseRunner"] = None, **kwargs) -> "BaseRunner":
+        """
+        Get or create the singleton instance of Runner.
+
+        Args:
+            runner_impl: Optional runner implementation class to use, defaults to AsyncioRunner
+            **kwargs: Arguments to pass to the runner implementation constructor
+
+        Returns:
+            The singleton Runner instance
+        """
+        if cls._instance is None:
+            # Import here to avoid circular imports
+            from moatless.runner.asyncio_runner import AsyncioRunner
+
+            # Use AsyncioRunner as default implementation
+            impl_class = runner_impl or AsyncioRunner
+            cls._instance = impl_class(**kwargs)
+
+        return cls._instance
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Reset the singleton instance. Mainly useful for testing."""
+        cls._instance = None
 
     @abstractmethod
-    async def start_job(self, project_id: str, trajectory_id: str) -> bool:
+    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable) -> bool:
+        """Start a job for the given project and trajectory."""
         pass
 
     @abstractmethod
     async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
+        """Get a list of jobs for the given project."""
         pass
 
     @abstractmethod
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
+        """Cancel a job for the given project and trajectory."""
         pass
 
     @abstractmethod
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
+        """Check if a job exists for the given project and trajectory."""
         pass
 
     @abstractmethod
     async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
+        """Retry a job for the given project and trajectory."""
         pass
 
     @abstractmethod
     async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+        """Get the status of a job for the given project and trajectory."""
         pass
 
     @abstractmethod
     async def get_runner_info(self) -> RunnerInfo:
+        """Get information about the runner."""
         pass
 
     @abstractmethod
     async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
+        """Get a summary of job statuses for the given project."""
         pass

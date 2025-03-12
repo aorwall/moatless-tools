@@ -193,7 +193,7 @@ class SearchTree(AgenticFlow):
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
             return None
 
-        self.maybe_persist()
+        await self.persist()
 
         await self.emit_event(
             NodeExpandedEvent(

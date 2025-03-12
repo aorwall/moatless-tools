@@ -1,3 +1,4 @@
+from litellm import ConfigDict
 from pydantic import Field
 
 from moatless.actions.action import Action
@@ -14,6 +15,8 @@ class BashArgs(ActionArguments):
     * To inspect a particular line range of a file, e.g. lines 10-25, try 'sed -n 10,25p /path/to/the/file'.
     * Please avoid commands that may produce a very large amount of output.
     """
+
+    model_config = ConfigDict(title="Bash")
 
     command: str = Field(..., description="The command to run")
 

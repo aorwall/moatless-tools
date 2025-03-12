@@ -2,6 +2,8 @@ import contextvars
 import os
 from pathlib import Path
 
+USE_DEFAULTS = os.getenv("MOATLESS_USE_DEFAULTS", "false") == "false"
+
 # A context variable to hold the current node id (or any other context you need)
 moatless_dir = contextvars.ContextVar[str | None]("moatless_dir", default=None)
 current_node_id = contextvars.ContextVar[int | None]("current_node_id", default=None)

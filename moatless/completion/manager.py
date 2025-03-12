@@ -185,7 +185,7 @@ class ModelConfigManager:
             return self._user_configs[model_id]
         elif model_id in self._base_configs:
             return self._base_configs[model_id]
-        raise ValueError(f"Model {model_id} not found")
+        raise ValueError(f"Model {model_id} not found, available models: {list(self._base_configs.keys())}")
 
     def get_all_base_configs(self) -> list[ModelConfig]:
         """Get all base model configurations.

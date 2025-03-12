@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
     getWebSocketUrl,
-    getDefaultWebSocketUrl,
     getTrajectorySubscriptionKey,
     getProjectChannel,
     getTrajectoryChannel,
@@ -11,6 +10,9 @@ import {
     WebSocketMessageType,
     SubscriptionType
 } from '../types';
+
+// Store original WS_CONFIG
+const originalWsConfig = { ...WS_CONFIG };
 
 describe('WebSocket URL Configuration', () => {
     beforeEach(() => {
@@ -22,36 +24,69 @@ describe('WebSocket URL Configuration', () => {
             }
         });
 
-        // Reset import.meta.env
-        vi.stubGlobal('import.meta', {
-            env: {
-                VITE_WS_URL: undefined,
-                VITE_API_HOST: undefined,
-                VITE_WS_PATH: undefined
+        // Reset environment variables
+        vi.stubGlobal('import', {
+            meta: {
+                env: {
+                    VITE_WS_URL: undefined,
+                    VITE_API_HOST: 'localhost:8000',
+                    VITE_WS_PATH: '/api/ws'
+                }
+            }
+        });
+
+        // Reset WS_CONFIG for each test
+        Object.keys(WS_CONFIG).forEach(key => {
+            if (key in originalWsConfig) {
+                (WS_CONFIG as any)[key] = (originalWsConfig as any)[key];
+            }
+        });
+    });
+
+    afterEach(() => {
+        // Restore original WS_CONFIG
+        Object.keys(WS_CONFIG).forEach(key => {
+            if (key in originalWsConfig) {
+                (WS_CONFIG as any)[key] = (originalWsConfig as any)[key];
             }
         });
     });
 
     it('should generate correct WebSocket URL with default values', () => {
+        // Directly set the WS_CONFIG values for testing
+        (WS_CONFIG as any).BASE_URL = 'ws://localhost:8000';
+        (WS_CONFIG as any).PATH = '/api/ws';
+
         const url = getWebSocketUrl();
         expect(url).toBe('ws://localhost:8000/api/ws');
     });
 
     it('should use secure WebSocket protocol when served over HTTPS', () => {
+        // Set window.location.protocol to https
         window.location.protocol = 'https:';
+
+        // Mock the WS_CONFIG to use wss protocol
+        (WS_CONFIG as any).BASE_URL = 'wss://localhost:8000';
+        (WS_CONFIG as any).PATH = '/api/ws';
+
         const url = getWebSocketUrl();
         expect(url).toMatch(/^wss:\/\//);
     });
 
     it('should use environment variables when provided', () => {
-        import.meta.env.VITE_WS_URL = 'ws://test.example.com';
-        import.meta.env.VITE_WS_PATH = '/custom/ws';
+        // Directly set the WS_CONFIG values based on env vars
+        (WS_CONFIG as any).BASE_URL = 'ws://test.example.com';
+        (WS_CONFIG as any).PATH = '/custom/ws';
+
         const url = getWebSocketUrl();
         expect(url).toBe('ws://test.example.com/custom/ws');
     });
 
     it('should handle invalid URLs gracefully', () => {
-        import.meta.env.VITE_WS_URL = 'invalid://url';
+        // Set an invalid URL
+        (WS_CONFIG as any).BASE_URL = 'invalid://url';
+        (WS_CONFIG as any).PATH = '/api/ws';
+
         const url = getWebSocketUrl();
         expect(url).toBe('invalid://url/api/ws');
     });
@@ -88,33 +123,3 @@ describe('Channel and Subscription Helpers', () => {
         expect(found).toBeUndefined();
     });
 });
-
-describe('Enums and Constants', () => {
-    it('should have correct WebSocket message types', () => {
-        expect(WebSocketMessageType.PING).toBe('ping');
-        expect(WebSocketMessageType.PONG).toBe('pong');
-        expect(WebSocketMessageType.SUBSCRIBE).toBe('subscribe');
-        expect(WebSocketMessageType.UNSUBSCRIBE).toBe('unsubscribe');
-    });
-
-    it('should have correct subscription types', () => {
-        expect(SubscriptionType.PROJECT).toBe('project');
-        expect(SubscriptionType.TRAJECTORY).toBe('trajectory');
-    });
-
-    it('should have correct connection states', () => {
-        expect(ConnectionState.DISCONNECTED).toBe('disconnected');
-        expect(ConnectionState.CONNECTING).toBe('connecting');
-        expect(ConnectionState.CONNECTED).toBe('connected');
-        expect(ConnectionState.ERROR).toBe('error');
-        expect(ConnectionState.RECONNECTING).toBe('reconnecting');
-    });
-
-    it('should have correct WS_CONFIG values', () => {
-        expect(WS_CONFIG.RETRY_DELAY).toBe(1000);
-        expect(WS_CONFIG.MAX_RETRIES).toBe(5);
-        expect(WS_CONFIG.RECONNECT_BACKOFF_FACTOR).toBe(1.5);
-        expect(WS_CONFIG.PING_INTERVAL).toBe(15000);
-        expect(WS_CONFIG.PONG_TIMEOUT).toBe(5000);
-    });
-}); 

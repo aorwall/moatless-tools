@@ -205,7 +205,7 @@ function renderNodes(
                   content={item.content}
                   label={item.label}
                   nodeId={node.nodeId}
-                  instanceId={trajectory.id}
+                  instanceId={trajectory.trajectory_id}
                   itemId={index.toString()}
                   isLast={index === node.items.length - 1}
                   hasNextSibling={!isLastNode || hasChildren}
@@ -239,9 +239,9 @@ function renderNodes(
 export function Timeline({ trajectory, isRunning = false }: TimelineProps) {
   const { isNodeExpanded, toggleNode } = useTrajectoryStore();
 
-  const isExpanded = (nodeId: number) => isNodeExpanded(trajectory.id, nodeId);
+  const isExpanded = (nodeId: number) => isNodeExpanded(trajectory.trajectory_id, nodeId);
   const handleNodeClick = (nodeId: number) => {
-    toggleNode(trajectory.id, nodeId);
+    toggleNode(trajectory.trajectory_id, nodeId);
   };
 
   return (

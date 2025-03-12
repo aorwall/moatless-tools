@@ -108,16 +108,11 @@ class EvaluationEvent(BaseEvent):
     """Event emitted by the evaluation process"""
 
     scope: str = "evaluation"
-    data: Any
+    data: Any = Field(default_factory=dict)
 
 
 class EvaluationInstance(BaseModel):
-    model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda v: v.isoformat(),
-            Enum: lambda v: v.value,
-        }
-    )
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     instance_id: str = Field(description="Unique identifier for the instance")
     status: InstanceStatus = Field(default=InstanceStatus.CREATED, description="Current status of the instance")
@@ -137,7 +132,7 @@ class EvaluationInstance(BaseModel):
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
     reward: Optional[int] = Field(default=None, description="Reward of the instance")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
-    benchmark_result: Optional[BenchmarkResult] = Field(default=None, description="Benchmark result")
+    benchmark_result: Optional[dict[str, Any]] = Field(default=None, description="Benchmark result")
 
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
 
@@ -151,13 +146,17 @@ class EvaluationInstance(BaseModel):
         resolved: Optional[bool] = None,
         benchmark_result: Optional[BenchmarkResult] = None,
     ):
+        """Mark the instance as completed"""
         self.status = InstanceStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
-        self.submission = submission
-        self.resolved = resolved
-        if self.started_at:
+        if submission:
+            self.submission = submission
+        if resolved is not None:
+            self.resolved = resolved
+        if self.started_at and self.completed_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
         if benchmark_result:
+            # Store as dict to avoid type issues
             self.benchmark_result = benchmark_result.model_dump()
 
     def fail(self, error: str):
@@ -175,12 +174,7 @@ class EvaluationInstance(BaseModel):
 
 
 class Evaluation(BaseModel):
-    model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda v: v.isoformat(),
-            Enum: lambda v: v.value,
-        }
-    )
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
@@ -234,12 +228,7 @@ class Evaluation(BaseModel):
 
 
 class EvaluationDatasetSplit(BaseModel):
-    model_config = ConfigDict(
-        json_encoders={
-            datetime: lambda v: v.isoformat(),
-            Enum: lambda v: v.value,
-        }
-    )
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
     description: str = Field(description="Description of what this split represents")

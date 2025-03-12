@@ -1,12 +1,11 @@
 import { Artifacts } from "@/features/trajectory/components/Artifacts.tsx";
-import { Timeline } from "@/features/trajectory/components/index.ts";
+import { Timeline as Timeline2 } from "@/features/trajectory2/timeline.tsx";
+import { Timeline } from "@/features/trajectory/components/Timeline.tsx";
 import { TimelineItemDetails } from "@/features/trajectory/components/TimelineItemDetails.tsx";
 import { TrajectoryError } from "@/features/trajectory/components/TrajectoryError.tsx";
 import { TrajectoryEvents } from "@/features/trajectory/components/TrajectoryEvents.tsx";
 import { TrajectoryLogs } from "@/features/trajectory/components/TrajectoryLogs.tsx";
 import { TrajectoryStatus } from "@/features/trajectory/components/TrajectoryStatus.tsx";
-import { useTrajectorySubscription } from "@/features/trajectory/hooks/useTrajectorySubscription";
-import { WebSocketMessage } from "@/lib/stores/websocketStore";
 import { Chat } from "@/lib/components/chat/Chat.tsx";
 import { Button } from "@/lib/components/ui/button.tsx";
 import {
@@ -47,10 +46,14 @@ export function TrajectoryViewer({
   handleStart,
   handleRetry
 }: TrajectoryViewerProps) {
-  const queryClient = useQueryClient();
   const [showBottomPanel, setShowBottomPanel] = useState(() => {
     // Try to get from localStorage, default to true if not found
     const saved = localStorage.getItem("trajectoryViewerShowBottomPanel");
+    return saved !== null ? saved === "true" : true;
+  });
+  const [showRightPanel, setShowRightPanel] = useState(() => {
+    // Try to get from localStorage, default to true if not found
+    const saved = localStorage.getItem("trajectoryViewerShowRightPanel");
     return saved !== null ? saved === "true" : true;
   });
   const [activeBottomTab, setActiveBottomTab] = useState<"events" | "logs">(
@@ -70,8 +73,19 @@ export function TrajectoryViewer({
   }, [showBottomPanel]);
 
   useEffect(() => {
+    localStorage.setItem(
+      "trajectoryViewerShowRightPanel",
+      String(showRightPanel),
+    );
+  }, [showRightPanel]);
+
+  useEffect(() => {
     localStorage.setItem("trajectoryViewerActiveTab", activeBottomTab);
   }, [activeBottomTab]);
+
+  const toggleRightPanel = () => {
+    setShowRightPanel(!showRightPanel);
+  };
 
   interface TabItem {
     id: string;
@@ -106,6 +120,11 @@ export function TrajectoryViewer({
       label: "Artifacts",
       icon: <Package className="h-4 w-4" />,
     },
+    {
+      id: "timeline2",
+      label: "Timeline 2",
+      icon: <Clock className="h-4 w-4" />,
+    },
   ];
 
   return (
@@ -115,12 +134,18 @@ export function TrajectoryViewer({
         trajectory={trajectory}
         handleStart={handleStart}
         handleRetry={handleRetry}
+        showRightPanel={showRightPanel}
+        onToggleRightPanel={toggleRightPanel}
       />
 
       {/* Main Content Area with two columns */}
       <ResizablePanelGroup direction="horizontal" className="flex-1">
         {/* Left column: Timeline */}
-        <ResizablePanel defaultSize={60} minSize={30} className="flex flex-col">
+        <ResizablePanel
+          defaultSize={showRightPanel ? 60 : 100}
+          minSize={30}
+          className="flex flex-col"
+        >
           <ResizablePanelGroup direction="vertical">
             {/* Timeline Panel */}
             <ResizablePanel
@@ -139,8 +164,8 @@ export function TrajectoryViewer({
                     className={cn(
                       "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
                       trajectory.system_status.error
-                        ? "grid-cols-4"
-                        : "grid-cols-3",
+                        ? "grid-cols-5"
+                        : "grid-cols-4",
                     )}
                   >
                     {tabs.map((tab) => (
@@ -194,19 +219,25 @@ export function TrajectoryViewer({
                   </TabsContent>
 
                   <TabsContent
+                    value="timeline2"
+                    className="flex-1 p-10 m-0 data-[state=active]:flex overflow-hidden"
+                  >
+                    <Timeline2 trajectory={trajectory} />
+                  </TabsContent>
+
+                  <TabsContent
                     value="artifacts"
                     className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
                   >
-                    <Artifacts trajectoryId={trajectory.id} />
+                    <Artifacts trajectoryId={trajectory.trajectory_id} />
                   </TabsContent>
                 </Tabs>
               ) : (
                 <div className="flex h-full flex-col overflow-hidden">
                   <ScrollArea className="flex-1">
                     <div className="p-10 min-w-[600px]">
-                      <Timeline
+                      <Timeline2
                         trajectory={trajectory}
-                        isRunning={trajectory.status === "running"}
                       />
                     </div>
                   </ScrollArea>
@@ -305,15 +336,18 @@ export function TrajectoryViewer({
           </ResizablePanelGroup>
         </ResizablePanel>
 
-        <ResizableHandle className="bg-border hover:bg-ring" />
-
-        {/* Right column: Details */}
-        <ResizablePanel defaultSize={40} minSize={20}>
-          <TimelineItemDetails
-            trajectoryId={trajectory.id}
-            trajectory={trajectory}
-          />
-        </ResizablePanel>
+        {/* Right panel and handle only shown when visible */}
+        {showRightPanel && (
+          <>
+            <ResizableHandle className="bg-border hover:bg-ring" />
+            <ResizablePanel defaultSize={40} minSize={20}>
+              <TimelineItemDetails
+                trajectoryId={trajectory.trajectory_id}
+                trajectory={trajectory}
+              />
+            </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
     </div>
   );

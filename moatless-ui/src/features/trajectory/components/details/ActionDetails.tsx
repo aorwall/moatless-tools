@@ -126,7 +126,11 @@ export const ActionDetails = ({
                     </div>
                   ) : (
                     <div className="font-mono text-sm">
-                      <JsonViewer data={result.data} />
+                      {result.data && result.data.message ? (
+                        <pre className="whitespace-pre-wrap break-words">{result.data.message}</pre>
+                      ) : (
+                        <JsonViewer data={result.data} />
+                      )}
                     </div>
                   )}
                 </div>

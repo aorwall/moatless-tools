@@ -117,6 +117,7 @@ export interface ActionStep {
   thoughts?: string;
   action: Action;
   observation?: Observation;
+  artifacts?: ArtifactChangeContent[];
   completion?: Completion;
   warnings: string[];
   errors: string[];
@@ -177,10 +178,12 @@ export interface Node {
   children: Node[];
   executed: boolean;
   userMessage?: string;
+  thoughts?: string;
   assistantMessage?: string;
   actionSteps: ActionStep[];
   error?: string;
   fileContext?: FileContext;
+  completion?: Completion;
   warnings: string[];
   errors: string[];
   usage?: Usage;
@@ -189,6 +192,20 @@ export interface Node {
   allNodeWarnings: string[];
   testResultsSummary?: TestResultsSummary;
   items: TimelineItem[];
+  timestamp?: number;
+}
+
+export interface ArtifactChangeProperties {
+  added_lines?: number;
+  removed_lines?: number;
+  token_count?: number;
+  diff?: string;
+  // Test-related properties
+  passed?: number;
+  failed?: number;
+  errors?: number;
+  skipped?: number;
+  total?: number;
 }
 
 export interface ArtifactChangeContent {
@@ -197,6 +214,7 @@ export interface ArtifactChangeContent {
   change_type: "added" | "updated" | "removed";
   diff_details?: string;
   actor: "user" | "assistant";
+  properties?: ArtifactChangeProperties;
 }
 
 export interface TrajectoryEvent {
@@ -222,7 +240,6 @@ export interface TrajectoryStatus {
 }
 
 export interface Trajectory {
-  id: string;
   trajectory_id: string;
   project_id: string;
   status: "running" | "error" | "finished" | "unknown";

@@ -6,16 +6,15 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
+import uuid
 
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes
-from moatless.benchmark.swebench import create_index_async
-from moatless.benchmark.swebench.utils import create_repository_async
 from moatless.completion.manager import create_completion_model
 from moatless.config.agent_config import get_agent
 from moatless.context_data import get_projects_dir, get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
-from moatless.evaluation.utils import get_swebench_instance
+from moatless.events import EventBus
 from moatless.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
@@ -29,9 +28,8 @@ from moatless.flow.schema import (
     TrajectoryResponseDTO,
 )
 from moatless.repository.git import GitRepository
-from moatless.runner.rq import RQRunner
-from moatless.runner.runner import JobStatus
-from moatless.runtime.testbed import TestbedEnvironment
+from moatless.runner.runner import BaseRunner, JobStatus
+from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
 from moatless.workspace import Workspace
 
@@ -39,7 +37,17 @@ logger = logging.getLogger(__name__)
 
 
 class FlowManager:
-    """Manages tree search configurations."""
+    def __init__(
+        self,
+        runner: BaseRunner | None = None,
+        storage: BaseStorage | None = None,
+        eventbus: EventBus | None = None,
+    ):
+        self._configs = {}
+        self._load_configs()
+        self._runner = runner or BaseRunner.get_instance()
+        self._storage = storage or BaseStorage.get_instance()
+        self._eventbus = eventbus or EventBus()
 
     @classmethod
     def get_instance(cls):
@@ -48,18 +56,13 @@ class FlowManager:
             cls._instance = cls()
         return cls._instance
 
-    def __init__(self):
-        """Initialize the tree config manager."""
-        self._configs = {}
-        self._load_configs()
-        self._runner = RQRunner()
-
     def create_flow(
         self,
         id: str,
         model_id: str,
         message: str | None = None,
         trajectory_id: str | None = None,
+        project_id: str | None = None,
         persist_dir: str | None = None,
         metadata: dict[str, Any] | None = None,
         **kwargs,
@@ -76,15 +79,24 @@ class FlowManager:
         # Create expander if not specified
 
         config = self.get_flow_config(id)
+        if not config:
+            raise ValueError(f"Flow config {id} not found")
 
         agent = get_agent(agent_id=config.agent_id)
         completion_model = create_completion_model(model_id)
         agent.completion_model = completion_model
 
+        if not project_id:
+            project_id = "default"
+
+        if not trajectory_id:
+            trajectory_id = str(uuid.uuid4())
+
         if config.flow_type == "loop":
             return AgenticLoop.create(
                 message=message,
                 trajectory_id=trajectory_id,
+                project_id=project_id,
                 agent=agent,
                 max_iterations=config.max_iterations,
                 max_cost=config.max_cost,
@@ -111,6 +123,7 @@ class FlowManager:
             tree = SearchTree.create(
                 message=message,
                 trajectory_id=trajectory_id,
+                project_id=project_id,
                 agent=agent,
                 selector=config.selector,
                 expander=expander,
@@ -129,19 +142,6 @@ class FlowManager:
             )
 
         return tree
-
-    def create_loop(
-        self, agent_id: str, model_id: str, message: str | None = None, trajectory_id: str | None = None
-    ) -> AgenticLoop:
-        agent = get_agent(agent_id=agent_id)
-        completion_model = create_completion_model(model_id)
-        agent.completion_model = completion_model
-        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        trajectory_id = f"loop_{agent_id}_{model_id}_{date_str}"
-
-        return AgenticLoop.create(
-            message=message, trajectory_id=trajectory_id, agent=agent, max_iterations=20, max_cost=1.0
-        )
 
     def _get_config_path(self) -> Path:
         """Get the path to the config file."""
@@ -257,13 +257,13 @@ class FlowManager:
 
     async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
+        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
 
         try:
-            trajectory_dir = get_trajectory_dir(project_id=project_id, trajectory_id=trajectory_id)
-            flow = AgenticFlow.from_dir(trajectory_dir)
-            if not flow:
-                logger.error(f"Trajectory not found: {trajectory_dir}")
-                raise ValueError("Trajectory not found")
+            trajectory_data = await self._storage.read_from_trajectory("trajectory", project_id, trajectory_id)
+            settings_data = await self._storage.read_from_trajectory("settings", project_id, trajectory_id)
+            flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
+            flow._storage = self._storage
 
             nodes = convert_nodes(flow.root)
             flow_status_info = flow.get_status()
@@ -283,11 +283,9 @@ class FlowManager:
             else:
                 flow_status = flow_status_info.status
 
-            logger.info(f"Trajectory {trajectory_id} status: {flow_status}: {flow.total_usage()}")
             return TrajectoryResponseDTO(
-                id=trajectory_id,
-                trajectory_id=trajectory_id,
-                project_id=project_id,
+                trajectory_id=flow.trajectory_id,
+                project_id=flow.project_id,
                 status=flow_status,
                 system_status=flow_status_info,
                 agent_id=flow_status_info.metadata.get("agent_id"),
@@ -342,7 +340,7 @@ class FlowManager:
         if flow.root.get_last_node() and flow.root.get_last_node().error:
             logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
             flow.root.get_last_node().reset()
-            flow.persist()
+            await flow.persist()
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
 
@@ -355,7 +353,7 @@ class FlowManager:
         if system:
             raise ValueError("Flow is already running")
 
-        agentic_flow = AgenticLoop.from_trajectory_id(trajectory_id, project_id, request.agent_id, request.model_id)
+        agentic_flow = AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
 
         await agentic_runner.start(agentic_flow, message=request.message)
         return agentic_flow
@@ -382,7 +380,7 @@ class FlowManager:
         if flow.root and flow.root.children:
             logger.info(f"Removing {len(flow.root.children)} children from root node")
             flow.root.children = []
-            flow.persist()
+            await flow.persist()
             logger.info("Trajectory reset successfully")
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
@@ -416,26 +414,6 @@ class FlowManager:
 
         # Execute the action step
         return await agentic_flow.agent._execute_action_step(node, node.action_steps[0])
-
-    async def _setup_flow(self, trajectory_id: str, project_id: str):
-        """Set up a flow for execution."""
-        moatless_instance = get_swebench_instance(trajectory_id)
-        if moatless_instance:
-            logger.info(f"Setting up swebench for trajectory {trajectory_id}")
-
-            repository = await create_repository_async(moatless_instance)
-            code_index = await create_index_async(moatless_instance, repository=repository)
-
-            runtime = TestbedEnvironment(
-                repository=repository,
-                instance_id=trajectory_id,
-                log_dir=str(get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id) / "testbed_logs"),
-                enable_cache=True,
-            )
-            workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
-            return AgenticFlow.from_trajectory_id(trajectory_id, project_id, workspace=workspace)
-        else:
-            return AgenticFlow.from_trajectory_id(trajectory_id, project_id)
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""

@@ -45,7 +45,7 @@ class AgenticLoop(AgenticFlow):
 
                 current_node_id.set(current_node.node_id)
                 await self.agent.run(current_node)
-                self.maybe_persist()
+                await self.persist()
                 self.log(logger.info, generate_ascii_tree(self.root, current_node))
             except RejectError as e:
                 self.log(logger.error, f"Rejection error: {e}")
@@ -53,7 +53,7 @@ class AgenticLoop(AgenticFlow):
                 self.log(logger.exception, f"Unexpected error: {e}")
                 raise e
             finally:
-                self.maybe_persist()
+                await self.persist()
 
         logger.info(
             f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost"

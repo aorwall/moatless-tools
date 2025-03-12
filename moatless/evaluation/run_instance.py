@@ -104,15 +104,7 @@ async def _run_instance(
         workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, legacy_workspace=True)
 
         flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
-
-        leaf_nodes = flow.root.get_leaf_nodes()
-        for node in leaf_nodes:
-            if node.error:
-                logger.info(f"Leaf node {node.node_id} has error: {node.error}, resetting node")
-                node.reset()
-        flow.persist()
-
-        node = await flow.run(workspace=workspace)
+        await flow.run(workspace=workspace)
         logger.info(f"Flow completed for instance {instance_id}")
 
     return flow

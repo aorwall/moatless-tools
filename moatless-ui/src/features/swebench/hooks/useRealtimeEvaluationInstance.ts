@@ -4,9 +4,6 @@ import { Trajectory } from "@/lib/types/trajectory";
 import { UseQueryOptions } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 
-/**
- * Query keys for evaluation instance data
- */
 export const evaluationKeys = {
     all: ["evaluation"] as const,
     lists: () => [...evaluationKeys.all, "list"] as const,
@@ -31,36 +28,21 @@ export function useRealtimeEvaluationInstance(
     instanceId: string,
     options?: Omit<UseQueryOptions<Trajectory, Error, Trajectory>, "queryKey" | "queryFn">
 ) {
-    // Track project and trajectory IDs for subscription
-    const [projectId, setProjectId] = useState<string>("");
-    const [trajectoryId, setTrajectoryId] = useState<string>("");
-
-    // Create a modified options object with enabled condition
-    const modifiedOptions = {
-        ...options,
-        enabled: !!evaluationId && !!instanceId && (options?.enabled !== false)
-    };
 
     const result = useRealtimeQuery({
         queryKey: evaluationKeys.instance(evaluationId, instanceId),
         queryFn: () => swebenchApi.getEvaluationInstance(evaluationId, instanceId),
         subscriptionConfig: {
-            projectId,
-            trajectoryId,
+            projectId: evaluationId,
+            trajectoryId: instanceId,
             eventFilter: {
                 scopes: ["evaluation", "flow", "trajectory"],
                 anyMatch: true
             }
         },
-        options: modifiedOptions
+        options
     });
 
-    useEffect(() => {
-        if (result.data) {
-            setProjectId(result.data.project_id);
-            setTrajectoryId(result.data.id);
-        }
-    }, [result.data]);
 
     return result;
 } 

@@ -17,6 +17,10 @@ import {
   RefreshCw,
   Square,
   Zap,
+  Bot,
+  Cpu,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -25,13 +29,17 @@ interface TrajectoryStatusProps {
   className?: string;
   handleStart?: () => Promise<void>;
   handleRetry?: () => Promise<void>;
+  showRightPanel?: boolean;
+  onToggleRightPanel?: () => void;
 }
 
 export function TrajectoryStatus({
   trajectory,
   className,
   handleStart,
-  handleRetry
+  handleRetry,
+  showRightPanel = true,
+  onToggleRightPanel
 }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -126,14 +134,42 @@ export function TrajectoryStatus({
 
   // Determine which action buttons to show
   const getActionButtons = () => {
-    if (trajectory.status.toLowerCase() === "running") {
-      return (
+    const actionButtons = [];
+
+    // Add toggle panel button
+    if (onToggleRightPanel) {
+      actionButtons.push(
         <Button
+          key="toggle-panel"
+          variant="ghost"
+          size="sm"
+          onClick={onToggleRightPanel}
+          className="mr-2"
+        >
+          {showRightPanel ? (
+            <>
+              <ChevronRight className="h-3 w-3 mr-2" />
+              Hide Details
+            </>
+          ) : (
+            <>
+              <ChevronLeft className="h-3 w-3 mr-2" />
+              Show Details
+            </>
+          )}
+        </Button>
+      );
+    }
+
+    if (trajectory.status.toLowerCase() === "running") {
+      actionButtons.push(
+        <Button
+          key="cancel"
           variant="outline"
           size="sm"
           onClick={handleCancelClick}
           disabled={cancelJob.isPending}
-          className="ml-auto text-destructive hover:text-destructive"
+          className="text-destructive hover:text-destructive"
         >
           {cancelJob.isPending ? (
             <>
@@ -148,53 +184,60 @@ export function TrajectoryStatus({
           )}
         </Button>
       );
+
+      return <div className="flex items-center ml-auto">{actionButtons}</div>;
     }
 
-    return (
-      <div className="flex items-center gap-2 ml-auto">
-        {canRetry && handleRetry && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRetryClick}
-            disabled={isRetrying}
-          >
-            {isRetrying ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                Retrying...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-3 w-3 mr-2" />
-                Retry
-              </>
-            )}
-          </Button>
-        )}
+    // Add retry and start buttons
+    if (canRetry && handleRetry) {
+      actionButtons.push(
+        <Button
+          key="retry"
+          variant="outline"
+          size="sm"
+          onClick={handleRetryClick}
+          disabled={isRetrying}
+        >
+          {isRetrying ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin mr-2" />
+              Retrying...
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-3 w-3 mr-2" />
+              Retry
+            </>
+          )}
+        </Button>
+      );
+    }
 
-        {canStart && handleStart && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleStartClick}
-            disabled={isStarting}
-          >
-            {isStarting ? (
-              <>
-                <Loader2 className="h-3 w-3 animate-spin mr-2" />
-                Starting...
-              </>
-            ) : (
-              <>
-                <Play className="h-3 w-3 mr-2" />
-                Start Instance
-              </>
-            )}
-          </Button>
-        )}
-      </div>
-    );
+    if (canStart && handleStart) {
+      actionButtons.push(
+        <Button
+          key="start"
+          variant="outline"
+          size="sm"
+          onClick={handleStartClick}
+          disabled={isStarting}
+        >
+          {isStarting ? (
+            <>
+              <Loader2 className="h-3 w-3 animate-spin mr-2" />
+              Starting...
+            </>
+          ) : (
+            <>
+              <Play className="h-3 w-3 mr-2" />
+              Start Instance
+            </>
+          )}
+        </Button>
+      );
+    }
+
+    return <div className="flex items-center gap-2 ml-auto">{actionButtons}</div>;
   };
 
   return (
@@ -243,6 +286,19 @@ export function TrajectoryStatus({
           </div>
         )}
 
+        {/* Agent and Model Info */}
+        <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
+          <div className="flex items-center gap-1">
+            <Bot className="h-3 w-3 text-muted-foreground" />
+            <span>{trajectory.agent_id}</span>
+          </div>
+          <Separator orientation="vertical" className="mx-1 h-3" />
+          <div className="flex items-center gap-1">
+            <Cpu className="h-3 w-3 text-muted-foreground" />
+            <span>{trajectory.model_id}</span>
+          </div>
+        </div>
+
         {/* Activity Info */}
         <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
           <div className="flex items-center gap-1">
@@ -252,12 +308,37 @@ export function TrajectoryStatus({
         </div>
 
         {/* Cost Info (if present) */}
-        {trajectory.usage?.completion_cost && (
+        {trajectory.usage && (
           <div className="flex items-center px-2 py-1 bg-muted/20 rounded-md">
             <div className="flex items-center gap-1">
               <Coins className="h-3 w-3 text-muted-foreground" />
-              <span>Cost: ${trajectory.usage.completion_cost.toFixed(4)}</span>
+              {trajectory.usage.completion_cost && (
+                <span>${trajectory.usage.completion_cost.toFixed(4)}</span>
+              )}
             </div>
+
+            {(trajectory.usage.prompt_tokens || trajectory.usage.cache_read_tokens) && (
+              <>
+                <Separator orientation="vertical" className="mx-1 h-3" />
+                <div className="flex items-center gap-1">
+                  <span>
+                    P: {trajectory.usage.prompt_tokens || 0}
+                    {trajectory.usage.cache_read_tokens ?
+                      ` (${trajectory.usage.cache_read_tokens} cached)` :
+                      ''}
+                  </span>
+                </div>
+              </>
+            )}
+
+            {trajectory.usage.completion_tokens && (
+              <>
+                <Separator orientation="vertical" className="mx-1 h-3" />
+                <div className="flex items-center gap-1">
+                  <span>C: {trajectory.usage.completion_tokens}</span>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

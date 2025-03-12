@@ -20,7 +20,6 @@ export const ActionTrajectoryItem = ({
 }: ActionTrajectoryItemProps) => {
   // Get the correct properties object based on the content structure
   let actionName = name || "";
-  console.log(content);
 
   const isSpecialAction = [
     "StringReplace",

@@ -22,7 +22,7 @@ interface NodeCircleProps {
   node: Node;
   isLastNode: boolean;
   isRunning: boolean;
-  onClick: () => void;
+  onClick?: () => void;
   trajectory: Trajectory;
 }
 

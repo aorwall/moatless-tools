@@ -12,10 +12,11 @@ from opentelemetry import trace
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
-from moatless.completion.base import BaseCompletionModel
 from moatless.completion.model import Usage
 from moatless.component import MoatlessComponent
 from moatless.config.agent_config import get_agent
+from moatless.storage.base import BaseStorage
+from moatless.storage.file_storage import FileStorage
 from moatless.context_data import (
     current_project_id,
     current_trajectory_id,
@@ -28,13 +29,9 @@ from moatless.events import (
     FlowStartedEvent,
     event_bus,
 )
-from moatless.file_context import FileContext
-from moatless.flow.events import FlowErrorEvent
 from moatless.flow.schema import FlowStatus, FlowStatusInfo
-from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -44,7 +41,7 @@ tracer = trace.get_tracer("moatless.flow")
 class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    project_id: str | None = Field(None, description="The project ID")
+    project_id: str = Field(..., description="The project ID")
     trajectory_id: str = Field(..., description="The trajectory ID.")
 
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
@@ -53,10 +50,14 @@ class AgenticFlow(MoatlessComponent):
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
 
-    _persist_dir: Optional[Path] = PrivateAttr(default=None)
+    _storage: BaseStorage = PrivateAttr()
     _root: Optional[Node] = PrivateAttr(default=None)
     _status: FlowStatusInfo = PrivateAttr(default_factory=FlowStatusInfo)
     _events_file: Optional[Any] = PrivateAttr(default=None)
+
+    def __init__(self, storage: BaseStorage | None = None, **kwargs):
+        super().__init__(**kwargs)
+        self._storage = storage or BaseStorage.get_instance()
 
     @classmethod
     def get_component_type(cls) -> str:
@@ -141,13 +142,18 @@ class AgenticFlow(MoatlessComponent):
     def workspace(self, workspace: Workspace):
         self.agent.workspace = workspace
 
-    async def run(self, message: str | None = None, workspace: Workspace | None = None) -> Node:
+    async def run(
+        self, message: str | None = None, workspace: Workspace | None = None, storage: BaseStorage | None = None
+    ) -> Node:
         """Run the system with optional root node."""
         if not self.root:
             raise ValueError("Root node is not set")
 
         if workspace:
             await self.agent.initialize(workspace)
+
+        if storage:
+            self._storage = storage
 
         # TODO: Workaround to set repo on existing nodes
         for node in self.root.get_all_nodes():
@@ -184,7 +190,7 @@ class AgenticFlow(MoatlessComponent):
                 await event_bus.publish(FlowErrorEvent(error=str(e)))
                 raise
             finally:
-                self.maybe_persist()
+                await self.persist()
                 self._save_status()
                 if self._events_file:
                     self._events_file.close()
@@ -216,7 +222,7 @@ class AgenticFlow(MoatlessComponent):
             node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
     async def emit_event(self, event: BaseEvent):
-        self.maybe_persist()
+        await self.persist()
         logger.info(f"Emit event {event.event_type}")
         await event_bus.publish(event)
 
@@ -287,35 +293,16 @@ class AgenticFlow(MoatlessComponent):
         """Calculate total token usage across all nodes."""
         return self.root.total_usage()
 
-    def maybe_persist(self):
-        """Persist the system state if a persist path is set."""
-        if self._persist_dir:
-            self.persist(self._persist_dir)
-
-    def persist(self, persist_dir: Path | None = None):
-        """Persist the system state to a file."""
-        if not persist_dir:
-            persist_dir = self._persist_dir
-
-        if not persist_dir:
-            raise ValueError("Persist directory is not set")
-
+    async def persist(self):
         trajectory_data = {
             "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
         }
 
-        self._save_file(persist_dir / "trajectory.json", trajectory_data)
+        await self._storage.write_to_trajectory("trajectory", trajectory_data, self.project_id, self.trajectory_id)
 
+        # TODO: Only save on creation
         flow_settings = self.model_dump(exclude_none=True)
-        self._save_file(persist_dir / "settings.json", flow_settings)
-
-    def _save_file(self, file_path: Path, data: dict[str, Any]):
-        with open(file_path, "w") as f:
-            try:
-                json.dump(data, f, indent=2)
-            except Exception as e:
-                logger.exception(f"Error saving system to {file_path}: {data}")
-                raise e
+        await self._storage.write_to_trajectory("settings", flow_settings, self.project_id, self.trajectory_id)
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""
@@ -348,6 +335,13 @@ class AgenticFlow(MoatlessComponent):
                 del obj["nodes"]
 
         return super().model_validate(obj)
+
+    @classmethod
+    def from_dicts(cls, settings: dict[str, Any], trajectory: dict[str, Any]) -> "AgenticFlow":
+        """Load a system instance from a dictionary."""
+        flow = cls.model_validate(settings)
+        flow._root = Node.from_dict(trajectory)
+        return flow
 
     @classmethod
     def from_dir(cls, trajectory_dir: Path) -> "AgenticFlow":

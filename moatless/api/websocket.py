@@ -71,8 +71,9 @@ class ConnectionManager:
         # Acknowledge subscription
         await websocket.send_json({"type": "subscription_ack", "subscription": "project", "id": project_id})
 
-    async def subscribe_to_trajectory(self, websocket: WebSocket, trajectory_id: str):
+    async def subscribe_to_trajectory(self, websocket: WebSocket, project_id: str, trajectory_id: str):
         """Subscribe a connection to a specific trajectory."""
+        # TODO: Support for project_id
         if trajectory_id not in self.trajectory_subscriptions:
             self.trajectory_subscriptions[trajectory_id] = set()
 
@@ -98,7 +99,7 @@ class ConnectionManager:
         # Acknowledge unsubscription
         await websocket.send_json({"type": "unsubscription_ack", "subscription": "project", "id": project_id})
 
-    async def unsubscribe_from_trajectory(self, websocket: WebSocket, trajectory_id: str):
+    async def unsubscribe_from_trajectory(self, websocket: WebSocket, project_id: str, trajectory_id: str):
         """Unsubscribe a connection from a specific trajectory."""
         if trajectory_id in self.trajectory_subscriptions:
             self.trajectory_subscriptions[trajectory_id].discard(websocket)
@@ -182,21 +183,39 @@ class ConnectionManager:
             if message_type == "ping":
                 await websocket.send_json({"type": "pong"})
 
-            elif message_type == "subscribe":
+            elif message_type == "subscribe" or message_type == "unsubscribe":
                 subscription_type = data.get("subscription")
-                subscription_id = data.get("id")
 
-                if not subscription_type or not subscription_id:
+                if not subscription_type:
                     await websocket.send_json(
-                        {"type": "error", "message": "Invalid subscription request. Missing subscription type or ID."}
+                        {"type": "error", "message": "Invalid subscription request. Missing subscription type."}
                     )
                     return
 
+                project_id = data.get("project_id")
+                if not project_id:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Invalid subscription request. Missing project ID."}
+                    )
+                    return
+
+                trajectory_id = data.get("trajectory_id")
+
                 if subscription_type == "project":
-                    await self.subscribe_to_project(websocket, subscription_id)
+                    if not project_id:
+                        await websocket.send_json(
+                            {"type": "error", "message": "Invalid subscription request. Missing project ID."}
+                        )
+                        return
+                    await self.subscribe_to_project(websocket, project_id)
 
                 elif subscription_type == "trajectory":
-                    await self.subscribe_to_trajectory(websocket, subscription_id)
+                    if not trajectory_id:
+                        await websocket.send_json(
+                            {"type": "error", "message": "Invalid subscription request. Missing trajectory ID."}
+                        )
+                        return
+                    await self.subscribe_to_trajectory(websocket, project_id, trajectory_id)
 
                 else:
                     await websocket.send_json(
@@ -205,19 +224,31 @@ class ConnectionManager:
 
             elif message_type == "unsubscribe":
                 subscription_type = data.get("subscription")
-                subscription_id = data.get("id")
 
-                if not subscription_type or not subscription_id:
+                if not subscription_type:
                     await websocket.send_json(
-                        {"type": "error", "message": "Invalid unsubscription request. Missing subscription type or ID."}
+                        {"type": "error", "message": "Invalid unsubscription request. Missing subscription type."}
+                    )
+                    return
+
+                project_id = data.get("project_id")
+                if not project_id:
+                    await websocket.send_json(
+                        {"type": "error", "message": "Invalid unsubscription request. Missing project ID."}
                     )
                     return
 
                 if subscription_type == "project":
-                    await self.unsubscribe_from_project(websocket, subscription_id)
+                    await self.unsubscribe_from_project(websocket, project_id)
 
                 elif subscription_type == "trajectory":
-                    await self.unsubscribe_from_trajectory(websocket, subscription_id)
+                    trajectory_id = data.get("trajectory_id")
+                    if not trajectory_id:
+                        await websocket.send_json(
+                            {"type": "error", "message": "Invalid unsubscription request. Missing trajectory ID."}
+                        )
+                        return
+                    await self.unsubscribe_from_trajectory(websocket, project_id, trajectory_id)
 
                 else:
                     await websocket.send_json(

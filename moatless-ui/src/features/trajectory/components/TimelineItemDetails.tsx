@@ -11,6 +11,7 @@ import { WorkspaceTestsDetails } from "@/features/trajectory/components/details/
 import { ArtifactDetails } from "@/features/trajectory/components/details/ArtifactDetails.tsx";
 import { RewardDetails } from "@/features/trajectory/components/details/RewardDetails.tsx";
 import { Trajectory } from "@/lib/types/trajectory.ts";
+import { NodeDetails } from "./details/NodeDetails";
 
 interface TimelineItemDetailsProps {
   trajectoryId: string;
@@ -35,6 +36,8 @@ export const TimelineItemDetails = ({
 
   const renderContent = () => {
     switch (selectedItem.type) {
+      case "node":
+        return <NodeDetails nodeId={selectedItem.nodeId} trajectory={trajectory} />;
       case "completion":
         return <CompletionDetails content={selectedItem.content} />;
       case "action":

@@ -33,8 +33,7 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    class Config:
-        title = "FindCodeSnippet"
+    model_config = {"title": "FindCodeSnippet"}
 
     @model_validator(mode="after")
     def validate_snippet(self) -> "FindCodeSnippetArgs":

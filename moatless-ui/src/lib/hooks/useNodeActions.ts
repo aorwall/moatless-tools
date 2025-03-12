@@ -12,19 +12,19 @@ export function useNodeActions({ nodeId, trajectory }: UseNodeActionsProps) {
   const navigate = useNavigate();
 
   const handleRetry = async () => {
-    if (!trajectory.id) return;
+    if (!trajectory.trajectory_id) return;
 
     await retryNode.mutateAsync({
-      trajectoryId: trajectory.id,
+      trajectoryId: trajectory.trajectory_id,
       projectId: trajectory.project_id,
       nodeId,
     });
   };
 
   const handleFork = async () => {
-    if (!trajectory.id) return;
+    if (!trajectory.trajectory_id) return;
 
-    const response = await fetch(`/api/trajectories/${trajectory.id}/fork`, {
+    const response = await fetch(`/api/trajectories/${trajectory.trajectory_id}/fork`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -42,6 +42,6 @@ export function useNodeActions({ nodeId, trajectory }: UseNodeActionsProps) {
     handleRetry,
     handleFork,
     isRetryPending: retryNode.isPending,
-    canPerformActions: !!trajectory.id,
+    canPerformActions: !!trajectory.trajectory_id,
   };
 }

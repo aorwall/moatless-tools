@@ -18,10 +18,10 @@ export function CompletionContent({ content }: CompletionContentProps) {
   // Transform usage data to match the expected format in CompletionUsage
   const transformedUsage = content.usage
     ? {
-        prompt_tokens: content.usage.prompt_tokens,
-        completion_tokens: content.usage.completion_tokens,
-        cached_tokens: content.usage.cached_tokens,
-      }
+      prompt_tokens: content.usage.prompt_tokens,
+      completion_tokens: content.usage.completion_tokens,
+      cached_tokens: content.usage.cached_tokens,
+    }
     : undefined;
 
   return (

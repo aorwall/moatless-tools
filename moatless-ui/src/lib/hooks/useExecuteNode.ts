@@ -16,13 +16,13 @@ export const useExecuteNode = () => {
       if (!nodeId) {
         throw new Error("Node ID is required to execute a node");
       }
-      if (!trajectory.id || !trajectory.project_id) {
+      if (!trajectory.trajectory_id || !trajectory.project_id) {
         throw new Error(
           "Trajectory ID and Project ID must be set to execute a node",
         );
       }
       return trajectoriesApi.executeNode(
-        trajectory.id,
+        trajectory.trajectory_id,
         trajectory.project_id,
         nodeId,
       );

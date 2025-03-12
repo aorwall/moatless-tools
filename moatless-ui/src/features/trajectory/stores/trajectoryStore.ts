@@ -9,7 +9,7 @@ interface TrajectoryState {
     string,
     {
       nodeId: number;
-      itemId: string;
+      itemId: string | null;
       type: string;
       content: any;
     }
@@ -26,6 +26,8 @@ interface TrajectoryState {
       "instanceId"
     > | null,
   ) => void;
+  setSelectedNode: (instanceId: string, nodeId: number) => void;
+
   setEvents: (events: TrajectoryEvent[]) => void;
   addEvent: (event: TrajectoryEvent) => void;
 
@@ -115,6 +117,13 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
     const state = get();
     return state.selectedItems[instanceId] || null;
   },
+
+  setSelectedNode: (instanceId, nodeId) =>
+    set((state) => {
+      const newSelectedItems = { ...state.selectedItems };
+      newSelectedItems[instanceId] = { nodeId, itemId: null, type: "node", content: null };
+      return { selectedItems: newSelectedItems };
+    }),
 
   isNodeExpanded: (instanceId, nodeId) => {
     const state = get();

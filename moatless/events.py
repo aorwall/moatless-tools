@@ -30,7 +30,7 @@ class BaseEvent(BaseModel):
     event_type: str
     data: Optional[dict] = Field(default_factory=dict)
 
-    model_config = {"json_encoders": {datetime: lambda dt: dt.isoformat()}}
+    model_config = {"ser_json_timedelta": "iso8601"}
 
     @field_validator("timestamp", mode="before")
     @classmethod
