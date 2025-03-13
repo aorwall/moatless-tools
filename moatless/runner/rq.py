@@ -9,7 +9,14 @@ from rq import Queue, Worker
 from rq.command import send_stop_job_command
 from rq.job import Job
 
-from moatless.runner.runner import BaseRunner, JobInfo, JobsStatusSummary, JobStatus, RunnerInfo, RunnerStatus
+from moatless.runner.runner import (
+    BaseRunner,
+    JobInfo,
+    JobsStatusSummary,
+    JobStatus,
+    RunnerInfo,
+    RunnerStatus,
+)
 from moatless.telemetry import extract_trace_context
 
 logger = logging.getLogger(__name__)
@@ -42,21 +49,23 @@ class RQRunner(BaseRunner):
         """
         if redis_url:
             self.redis_url = redis_url
-        elif os.getenv("REDIS_URL"):
+        elif os.getenv("REDIS_URL") is not None:
             self.redis_url = os.getenv("REDIS_URL")
         else:
-            self.redis_url = "redis://localhost:6379"
+            raise ValueError("REDIS_URL environment variable not set")
+
         self.redis_conn = Redis.from_url(self.redis_url)
         self.queue = MoatlessQueue(connection=self.redis_conn, default_timeout=3600)
         self.logger = logging.getLogger(__name__)
 
     @tracer.start_as_current_span("RQRunner.start_job")
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable) -> bool:
+    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str) -> bool:
         """Start a job.
 
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
+            job_func: The function to run or a string with the fully qualified function name
 
         Returns:
             True if the job was scheduled successfully, False otherwise
@@ -67,8 +76,28 @@ class RQRunner(BaseRunner):
 
         job_id = self._job_id(project_id, trajectory_id)
         try:
+            # Check if job_func is a string or a callable
+            if isinstance(job_func, str):
+                # If it's a string, use it directly as the fully qualified name
+                fully_qualified_name = job_func
+            else:
+                # If it's a callable, get the fully qualified name
+                func_module = job_func.__module__
+                func_name = job_func.__name__
+
+                # Check if the module name ends with the function name
+                # This happens when the function is imported directly from a module with the same name
+                if func_module.endswith(f".{func_name}"):
+                    # Use the module path directly as the function is the module's name
+                    fully_qualified_name = func_module
+                else:
+                    # Normal case: append the function name to the module path
+                    fully_qualified_name = f"{func_module}.{func_name}"
+
+            self.logger.info(f"Enqueueing job with function: {fully_qualified_name}")
+
             run_job = self.queue.enqueue(
-                job_func,
+                fully_qualified_name,
                 kwargs={
                     "project_id": project_id,
                     "trajectory_id": trajectory_id,
@@ -269,7 +298,10 @@ class RQRunner(BaseRunner):
             return RunnerInfo(
                 runner_type="rq",
                 status=RunnerStatus.RUNNING if len(active_workers) > 0 else RunnerStatus.STOPPED,
-                data={"active_workers": len(active_workers), "total_workers": len(workers)},
+                data={
+                    "active_workers": len(active_workers),
+                    "total_workers": len(workers),
+                },
             )
 
         except Exception as exc:

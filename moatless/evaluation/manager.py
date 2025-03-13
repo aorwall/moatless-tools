@@ -24,36 +24,26 @@ from moatless.evaluation.utils import get_moatless_instance
 from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
-from moatless.flow.manager import create_flow, get_flow_config
-from moatless.runner.rq import RQRunner
-from moatless.runner.runner import BaseRunner, EvaluationJobStatus, JobInfo, JobStatus
+from moatless.flow.manager import FlowManager
+from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
-from moatless.storage.file_storage import FileStorage
-from moatless.utils.moatless import get_moatless_dir, get_moatless_trajectory_dir
-
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")
 
 
 class EvaluationManager:
-    _instance = None
-
-    @classmethod
-    async def get_instance(cls) -> "EvaluationManager":
-        if cls._instance is None:
-            cls._instance = cls()
-            await cls._instance.initialize()
-
-        return cls._instance
-
     def __init__(
-        self, runner: BaseRunner | None = None, storage: BaseStorage | None = None, eventbus: BaseEventBus | None = None
+        self,
+        runner: BaseRunner,
+        storage: BaseStorage,
+        eventbus: BaseEventBus,
+        flow_manager: FlowManager,
     ):
-        self.runner = runner or settings.runner
-        self.storage = storage or settings.storage
-        self.eventbus = eventbus or settings.event_bus
+        self.runner = runner
+        self.storage = storage
+        self.eventbus = eventbus
+        self._flow_manager = flow_manager
 
     async def initialize(self):
         await self.eventbus.subscribe(self._handle_event)
@@ -102,7 +92,7 @@ class EvaluationManager:
         for instance in evaluation.instances:
             moatless_instance = get_moatless_instance(instance_id=instance.instance_id)
             problem_statement = f"Solve the following issue:\n{moatless_instance['problem_statement']}"
-            flow = create_flow(
+            flow = self._flow_manager.create_flow(
                 id=evaluation.flow_id,
                 message=problem_statement,
                 project_id=evaluation.evaluation_name,
@@ -145,7 +135,7 @@ class EvaluationManager:
             if await self.runner.start_job(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
-                job_func=run_instance,
+                job_func="moatless.evaluation.run_instance.run_instance",
             ):
                 started_instances += 1
                 instance.status = InstanceStatus.PENDING
@@ -248,7 +238,9 @@ class EvaluationManager:
 
         # Check if the instance information exists in storage
         if not await self.storage.exists_in_trajectory(
-            "trajectory", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
+            "trajectory",
+            project_id=evaluation.evaluation_name,
+            trajectory_id=instance.instance_id,
         ):
             logger.warning(f"Instance {instance.instance_id} not found in storage {self.storage}")
             return instance
@@ -304,7 +296,9 @@ class EvaluationManager:
 
             if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
                 eval_result = await self.storage.read_from_trajectory(
-                    "eval_result", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
+                    "eval_result",
+                    project_id=evaluation.evaluation_name,
+                    trajectory_id=instance.instance_id,
                 )
 
                 event = next(
@@ -408,8 +402,12 @@ class EvaluationManager:
         # If the instance was already started, cancel any existing jobs
         await self.runner.cancel_job(evaluation_name, instance_id)
 
-        # Start a new job for this instance
-        await self.runner.start_job(project_id=evaluation_name, trajectory_id=instance_id)
+        # Start a new job for this instance using the string path
+        await self.runner.start_job(
+            project_id=evaluation_name,
+            trajectory_id=instance_id,
+            job_func="moatless.evaluation.run_instance.run_instance",
+        )
 
         await self._save_evaluation(evaluation)
 
@@ -451,33 +449,22 @@ class EvaluationManager:
             # Save the evaluation data using the project storage
             # Use model_dump_json for serialization
             await self.storage.write_to_project(
-                "evaluation", json.loads(evaluation.model_dump_json()), project_id=evaluation.evaluation_name
+                "evaluation",
+                json.loads(evaluation.model_dump_json()),
+                project_id=evaluation.evaluation_name,
             )
         except Exception as e:
             logger.error(f"Failed to save evaluation {evaluation.evaluation_name}: {e}")
 
     async def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from storage."""
-        try:
-            # Check if the evaluation exists in storage
-            if await self.storage.exists_in_project("evaluation", evaluation_name):
-                # Load the evaluation data from project storage
-                data = await self.storage.read_from_project("evaluation", evaluation_name)
-                evaluation = Evaluation.model_validate(data)
-                return evaluation
-            else:
-                # Try legacy path
-                eval_path = self.get_evaluation_dir(evaluation_name) / "evaluation.json"
-                if eval_path.exists():
-                    with open(eval_path) as f:
-                        data = json.load(f)
-                        evaluation = Evaluation.model_validate(data)
-                        return evaluation
-                return None
-        except KeyError:
-            return None
-        except Exception as e:
-            logger.error(f"Failed to load evaluation {evaluation_name}: {e}")
+        # Check if the evaluation exists in storage
+        if await self.storage.exists_in_project("evaluation", evaluation_name):
+            # Load the evaluation data from project storage
+            data = await self.storage.read_from_project("evaluation", evaluation_name)
+            evaluation = Evaluation.model_validate(data)
+            return evaluation
+        else:
             return None
 
     async def list_evaluations(self) -> list[Evaluation]:
@@ -495,7 +482,11 @@ class EvaluationManager:
                 logger.error(f"Error parsing evaluation data: {e}")
 
         # Sort evaluations by creation time, newest first
-        return sorted(evaluations, key=lambda x: x.created_at if x.created_at else datetime.min, reverse=True)
+        return sorted(
+            evaluations,
+            key=lambda x: x.created_at if x.created_at else datetime.min,
+            reverse=True,
+        )
 
     def get_dataset_instance_ids(self, dataset_name: str) -> list[str]:
         """Get instance IDs for a dataset."""
@@ -506,14 +497,6 @@ class EvaluationManager:
         with open(dataset_path) as f:
             dataset = json.load(f)
             return dataset["instance_ids"]
-
-    def get_evaluation_dir(self, evaluation_name: str) -> Path:
-        """Get the directory for a specific evaluation."""
-        return self.evals_dir / evaluation_name
-
-    def get_instance_dir(self, evaluation_name: str, instance_id: str) -> Path:
-        """Get the directory for a specific instance within an evaluation."""
-        return self.get_evaluation_dir(evaluation_name) / instance_id
 
     async def get_evaluation_instance(self, evaluation_name: str, instance_id: str) -> EvaluationInstance:
         """Get an instance from an evaluation."""
@@ -571,7 +554,7 @@ class EvaluationManager:
         if await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
-            job_func=run_instance,
+            job_func="moatless.evaluation.run_instance.run_instance",
         ):
             logger.info(f"Started instance {instance_id} for evaluation {evaluation_name}")
 
@@ -631,7 +614,9 @@ class EvaluationManager:
                     "instance", project_id=evaluation_name, trajectory_id=instance_id
                 ):
                     instance_data = await self.storage.read_from_trajectory(
-                        "instance", project_id=evaluation_name, trajectory_id=instance_id
+                        "instance",
+                        project_id=evaluation_name,
+                        trajectory_id=instance_id,
                     )
                     instance = EvaluationInstance.model_validate(instance_data)
                     instances.append(instance)

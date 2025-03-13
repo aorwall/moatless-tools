@@ -145,7 +145,7 @@ class BaseRunner(ABC):
         cls._instance = None
 
     @abstractmethod
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable) -> bool:
+    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str) -> bool:
         """Start a job for the given project and trajectory."""
         pass
 

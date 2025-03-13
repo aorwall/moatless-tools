@@ -4,6 +4,8 @@ from asyncio import Task
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, cast
 from uuid import uuid4
+import importlib
+import traceback
 
 from opentelemetry import trace
 
@@ -34,13 +36,13 @@ class AsyncioRunner(BaseRunner):
         return f"{project_id}:{trajectory_id}"
 
     @tracer.start_as_current_span("AsyncioRunner.start_job")
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable) -> bool:
+    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str) -> bool:
         """Start a job for the given project and trajectory.
 
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
-            job_func: The function to run
+            job_func: The function to run or a string with the fully qualified function name
 
         Returns:
             True if the job was started, False otherwise
@@ -60,53 +62,81 @@ class AsyncioRunner(BaseRunner):
             "started_at": None,
             "ended_at": None,
             "exc_info": None,
-            "project_id": project_id,
-            "trajectory_id": trajectory_id,
         }
 
-        # Create and start the task
-        task = asyncio.create_task(self._run_job(job_id, job_func))
+        # Start the job in a separate task
+        task = asyncio.create_task(
+            self._run_job(job_id, job_func),
+            name=f"job-{job_id}",
+        )
         self.tasks[job_id] = task
+
+        # Add a callback to handle task completion
+        task.add_done_callback(lambda t: self._handle_task_done(job_id, t))
 
         return True
 
-    async def _run_job(self, job_id: str, job_func: Callable) -> None:
-        """Run a job and update its status.
+    def _handle_task_done(self, job_id: str, task: asyncio.Task) -> None:
+        """Handle task completion.
 
         Args:
             job_id: The job ID
-            job_func: The function to run
+            task: The completed task
         """
-        meta = self.job_metadata[job_id]
-        try:
-            # Update job status to running
-            meta["status"] = JobStatus.RUNNING
-            meta["started_at"] = datetime.now()
+        # Clean up task reference (but keep metadata for status queries)
+        if job_id in self.tasks:
+            del self.tasks[job_id]
 
-            # Run the job
-            await job_func()
+        # Check if the task raised an exception
+        if task.exception() and job_id in self.job_metadata:
+            self.job_metadata[job_id]["status"] = JobStatus.FAILED
+            self.job_metadata[job_id]["ended_at"] = datetime.now()
+            self.job_metadata[job_id]["exc_info"] = str(task.exception())
+
+    async def _run_job(self, job_id: str, job_func: Callable | str) -> None:
+        """Run a job in a separate task.
+
+        Args:
+            job_id: The job ID
+            job_func: The function to run or a string with the fully qualified function name
+        """
+        # Extract project_id and trajectory_id from job_id
+        project_id, trajectory_id = job_id.split(":")
+
+        # Update job status to running
+        self.job_metadata[job_id]["status"] = JobStatus.RUNNING
+        self.job_metadata[job_id]["started_at"] = datetime.now()
+
+        try:
+            # If job_func is a string, import it
+            if isinstance(job_func, str):
+                self.logger.info(f"Importing function {job_func}")
+                module_path, func_name = job_func.rsplit(".", 1)
+                module = importlib.import_module(module_path)
+                func = getattr(module, func_name)
+                job_func = func
+
+            # Run the job function
+            # Use a direct call instead of asyncio.to_thread to avoid type issues
+            if callable(job_func):
+                job_func(project_id=project_id, trajectory_id=trajectory_id)
+            else:
+                raise TypeError(f"job_func must be callable, got {type(job_func)}")
 
             # Update job status to completed
-            meta["status"] = JobStatus.COMPLETED
-
+            self.job_metadata[job_id]["status"] = JobStatus.COMPLETED
+            self.job_metadata[job_id]["ended_at"] = datetime.now()
         except asyncio.CancelledError:
-            # Handle cancellation
-            meta["status"] = JobStatus.CANCELED
+            # Job was cancelled
             self.logger.info(f"Job {job_id} was cancelled")
-
-        except Exception as exc:
-            # Handle failure
-            meta["status"] = JobStatus.FAILED
-            meta["exc_info"] = str(exc)
-            self.logger.exception(f"Job {job_id} failed: {exc}")
-
-        finally:
-            # Update end time
-            meta["ended_at"] = datetime.now()
-
-            # Clean up task reference (but keep metadata for status queries)
-            if job_id in self.tasks:
-                del self.tasks[job_id]
+            self.job_metadata[job_id]["status"] = JobStatus.CANCELED
+            self.job_metadata[job_id]["ended_at"] = datetime.now()
+        except Exception as e:
+            # Job failed with an exception
+            self.logger.exception(f"Job {job_id} failed with exception: {e}")
+            self.job_metadata[job_id]["status"] = JobStatus.FAILED
+            self.job_metadata[job_id]["ended_at"] = datetime.now()
+            self.job_metadata[job_id]["exc_info"] = traceback.format_exc()
 
     async def get_jobs(self, project_id: str | None = None) -> List[JobInfo]:
         """Get all jobs for the given project, or all jobs if project_id is None.
