@@ -131,11 +131,11 @@ class EvaluationManager:
             if instance.status == InstanceStatus.EVALUATED:
                 continue
 
-            # Start the job
+            # Start the job using the wrapper function
             if await self.runner.start_job(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
-                job_func="moatless.evaluation.run_instance.run_instance",
+                job_func="moatless.runner.job_wrappers.run_evaluation_instance",
             ):
                 started_instances += 1
                 instance.status = InstanceStatus.PENDING
@@ -402,11 +402,11 @@ class EvaluationManager:
         # If the instance was already started, cancel any existing jobs
         await self.runner.cancel_job(evaluation_name, instance_id)
 
-        # Start a new job for this instance using the string path
+        # Start a new job for this instance using the wrapper function
         await self.runner.start_job(
             project_id=evaluation_name,
             trajectory_id=instance_id,
-            job_func="moatless.evaluation.run_instance.run_instance",
+            job_func="moatless.runner.job_wrappers.run_evaluation_instance",
         )
 
         await self._save_evaluation(evaluation)
@@ -550,11 +550,11 @@ class EvaluationManager:
             logger.info(f"Instance {instance_id} is already evaluated, skipping")
             return evaluation
 
-        # Start the job
+        # Start the job using the wrapper function
         if await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
-            job_func="moatless.evaluation.run_instance.run_instance",
+            job_func="moatless.runner.job_wrappers.run_evaluation_instance",
         ):
             logger.info(f"Started instance {instance_id} for evaluation {evaluation_name}")
 
