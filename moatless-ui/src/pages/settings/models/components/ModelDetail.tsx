@@ -55,7 +55,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
         e instanceof Error
           ? e.message
           : (e as any)?.response?.data?.detail ||
-            "An unexpected error occurred";
+          "An unexpected error occurred";
 
       console.error(errorMessage);
       setError(errorMessage);
@@ -67,7 +67,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
 
   const handleTestModel = async () => {
     try {
-      await testModelMutation.mutateAsync(model.id);
+      await testModelMutation.mutateAsync(model.model_id);
     } catch (e) {
       const errorMessage =
         e instanceof Error
@@ -125,7 +125,7 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
         {/* Header with model name and action buttons */}
         <div className="flex items-center justify-between mb-6 border-b pb-6">
           <div>
-            <h1 className="text-2xl font-bold">{model.model}</h1>
+            <h1 className="text-2xl font-bold">{model.model_id}</h1>
           </div>
           <div className="flex items-center gap-3">
             <Button
@@ -245,52 +245,6 @@ export function ModelDetail({ model, onSubmit }: ModelDetailProps) {
           {/* Right Column - Model Parameters */}
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Model Parameters</h2>
-
-            <FormField
-              control={form.control}
-              name="response_format"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Response Format</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select response format" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="react">React</SelectItem>
-                      <SelectItem value="tool_call">Tool Call</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>Format for model responses</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="message_history_type"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Message History Type</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select history type" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="react">React</SelectItem>
-                      <SelectItem value="messages">Messages</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>Message history format</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
 
             <FormField
               control={form.control}

@@ -1,9 +1,9 @@
 import { ComponentSchema, ComponentProperty } from "@/lib/types/flow";
 import { Control } from "react-hook-form";
-import { ModelSelect } from "./properties/ModelSelect";
-import { BooleanSwitch } from "./properties/BooleanSwitch";
-import { EnumSelect } from "./properties/EnumSelect";
-import { DefaultInput } from "./properties/DefaultInput";
+import { ModelSelect } from "../../../pages/settings/flows/components/properties/ModelSelect";
+import { BooleanSwitch } from "../../../pages/settings/flows/components/properties/BooleanSwitch";
+import { EnumSelect } from "../../../pages/settings/flows/components/properties/EnumSelect";
+import { DefaultInput } from "../../../pages/settings/flows/components/properties/DefaultInput";
 
 interface ComponentPropertiesProps {
   schema: ComponentSchema;

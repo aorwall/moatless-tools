@@ -38,7 +38,7 @@ import {
   useArtifactHandlers,
 } from "@/lib/hooks/useFlowComponents";
 import { ComponentSchema, ComponentProperty } from "@/lib/types/flow";
-import { ComponentSelect } from "./ComponentSelect";
+import { ComponentSelect } from "@/features/settings/components/ComponentSelect";
 import { ArtifactHandlersSelect } from "./ArtifactHandlersSelect";
 
 interface FlowDetailProps {

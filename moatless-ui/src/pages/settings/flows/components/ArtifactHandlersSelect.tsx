@@ -29,7 +29,7 @@ import {
   PopoverTrigger,
 } from "@/lib/components/ui/popover";
 import { ScrollArea } from "@/lib/components/ui/scroll-area";
-import { ComponentProperties } from "./ComponentProperties";
+import { ComponentProperties } from "../../../../features/settings/components/ComponentProperties";
 import {
   Collapsible,
   CollapsibleContent,

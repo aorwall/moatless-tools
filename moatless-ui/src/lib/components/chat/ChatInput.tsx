@@ -87,7 +87,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             </SelectTrigger>
             <SelectContent>
               {models?.models.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
+                <SelectItem key={model.model_id} value={model.model_id}>
                   {model.model}
                 </SelectItem>
               ))}

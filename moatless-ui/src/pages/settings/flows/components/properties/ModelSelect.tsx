@@ -45,9 +45,9 @@ export function ModelSelect({ name, control, property }: ModelSelectProps) {
             </FormControl>
             <SelectContent>
               <SelectItem value="">None</SelectItem>
-              {models?.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {model.id}
+              {models?.models.map((model) => (
+                <SelectItem key={model.model_id} value={model.model_id}>
+                  {model.model}
                 </SelectItem>
               ))}
             </SelectContent>

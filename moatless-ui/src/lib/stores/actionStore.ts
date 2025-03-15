@@ -1,19 +1,20 @@
 import { create } from "zustand";
-import { ActionSchema } from "@/lib/types/agent";
+import { ActionSchema, ActionSchemaWithClass } from "@/lib/types/agent";
 import { agentsApi } from "@/lib/api/agents";
 
 interface ActionStore {
-  actions: ActionSchema[];
+  actions: Record<string, ActionSchema>;
   isLoading: boolean;
   error: Error | null;
   hasLoaded: boolean;
-  searchActions: (query: string) => ActionSchema[];
-  getActionByTitle: (title: string) => ActionSchema | undefined;
+  searchActions: (query: string) => ActionSchemaWithClass[];
+  getActionByTitle: (title: string) => ActionSchemaWithClass | undefined;
+  getActionByClass: (actionClass: string) => ActionSchemaWithClass | undefined;
   fetchActions: () => Promise<void>;
 }
 
 export const useActionStore = create<ActionStore>((set, get) => ({
-  actions: [],
+  actions: {},
   isLoading: false,
   error: null,
   hasLoaded: false,
@@ -22,7 +23,10 @@ export const useActionStore = create<ActionStore>((set, get) => ({
     const { actions } = get();
     const lowercaseQuery = query.toLowerCase();
 
-    return Object.values(actions).filter(
+    return Object.entries(actions).map(([actionClass, action]) => ({
+      ...action,
+      action_class: actionClass
+    })).filter(
       (action) =>
         action.title.toLowerCase().includes(lowercaseQuery) ||
         action.description.toLowerCase().includes(lowercaseQuery),
@@ -31,7 +35,27 @@ export const useActionStore = create<ActionStore>((set, get) => ({
 
   getActionByTitle: (title: string) => {
     const { actions } = get();
-    return Object.values(actions).find((action) => action.title === title);
+    const found = Object.entries(actions).find(([_, action]) => action.title === title);
+    if (found) {
+      const [actionClass, schema] = found;
+      return {
+        ...schema,
+        action_class: actionClass
+      };
+    }
+    return undefined;
+  },
+
+  getActionByClass: (actionClass: string) => {
+    const { actions } = get();
+    const schema = actions[actionClass];
+    if (schema) {
+      return {
+        ...schema,
+        action_class: actionClass
+      };
+    }
+    return undefined;
   },
 
   fetchActions: async () => {

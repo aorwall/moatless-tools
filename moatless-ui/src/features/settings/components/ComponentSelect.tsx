@@ -18,7 +18,6 @@ import { Loader2 } from "lucide-react";
 import {
   ComponentSchema,
   ComponentProperty,
-  FlowConfig,
 } from "@/lib/types/flow";
 import { ComponentProperties } from "./ComponentProperties";
 
@@ -26,13 +25,14 @@ type ComponentField =
   | "selector"
   | "value_function"
   | "feedback_generator"
-  | "artifact_handlers";
+  | "artifact_handlers"
+  | "memory";
 
 type ComponentsResponse = Record<string, ComponentSchema>;
 
 interface ComponentSelectProps {
   name: ComponentField;
-  control: Control<FlowConfig>;
+  control: Control<any>;
   componentsResponse: ComponentsResponse | undefined;
   label: string;
   description: string;

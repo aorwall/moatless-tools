@@ -8,16 +8,15 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { TrajectoryPage } from "@/features/trajectory/pages/TrajectoryPage";
-import { AgentsPage } from "@/pages/settings/agents";
-import { AgentDetailPage } from "@/pages/settings/agents/[id]";
-import { AgentsLayout } from "@/pages/settings/agents/layout";
-import { NewAgentPage } from "@/pages/settings/agents/new";
-import { FlowsPage } from "@/pages/settings/flows";
-import { FlowDetailPage } from "@/pages/settings/flows/[id]";
-import { FlowsLayout } from "@/pages/settings/flows/layout";
-import { NewFlowPage } from "@/pages/settings/flows/new";
+import { AgentDetailPage } from "@/features/settings/agents/AgentDetailPage";
+import { AgentsLayout } from "@/features/settings/agents/AgentsLayout";
+import { AgentNewPage } from "@/features/settings/agents/AgentNewPage";
+import { FlowDetailPage } from "@/features/settings/flows/FlowDetailPage";
+import { FlowsLayout } from "@/features/settings/flows/FlowsLayout";
+import { FlowsPage } from "@/features/settings/flows/FlowsPage";
+import { NewFlowPage } from "@/features/settings/flows/NewFlowPage";
 import { ModelsPage } from "@/pages/settings/models";
-import { ModelDetailPage } from "@/pages/settings/models/[id]";
+import { ModelDetailPage } from "@/features/settings/models/ModelDetailPage";
 import { ModelsLayout } from "@/pages/settings/models/layout";
 
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
@@ -57,8 +56,8 @@ function App() {
 
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route path="agents" element={<AgentsLayout />}>
-                    <Route index element={<AgentsPage />} />
-                    <Route path="new" element={<NewAgentPage />} />
+                    <Route index element={<AgentDetailPage />} />
+                    <Route path="new" element={<AgentNewPage />} />
                     <Route path=":id" element={<AgentDetailPage />} />
                   </Route>
                   <Route path="models" element={<ModelsLayout />}>

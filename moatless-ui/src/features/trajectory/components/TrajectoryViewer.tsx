@@ -5,7 +5,7 @@ import { TimelineItemDetails } from "@/features/trajectory/components/TimelineIt
 import { TrajectoryError } from "@/features/trajectory/components/TrajectoryError.tsx";
 import { TrajectoryEvents } from "@/features/trajectory/components/TrajectoryEvents.tsx";
 import { TrajectoryLogs } from "@/features/trajectory/components/TrajectoryLogs.tsx";
-import { TrajectoryStatus } from "@/features/trajectory/components/TrajectoryStatus.tsx";
+import { TrajectoryStatus, TrajectoryView } from "@/features/trajectory/components/TrajectoryStatus.tsx";
 import { Chat } from "@/lib/components/chat/Chat.tsx";
 import { Button } from "@/lib/components/ui/button.tsx";
 import {
@@ -24,10 +24,8 @@ import { Trajectory } from "@/lib/types/trajectory.ts";
 import { cn } from "@/lib/utils.ts";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  AlertCircle,
   ChevronDown,
   ChevronUp,
-  Clock,
   List,
   MessageSquare,
   Package,
@@ -64,6 +62,12 @@ export function TrajectoryViewer({
     },
   );
 
+  // New state for current view
+  const [currentView, setCurrentView] = useState<TrajectoryView>(() => {
+    const saved = localStorage.getItem("trajectoryViewerCurrentView");
+    return (saved as TrajectoryView) || "timeline";
+  });
+
   // Save preferences when they change
   useEffect(() => {
     localStorage.setItem(
@@ -83,166 +87,98 @@ export function TrajectoryViewer({
     localStorage.setItem("trajectoryViewerActiveTab", activeBottomTab);
   }, [activeBottomTab]);
 
+  useEffect(() => {
+    localStorage.setItem("trajectoryViewerCurrentView", currentView);
+  }, [currentView]);
+
   const toggleRightPanel = () => {
     setShowRightPanel(!showRightPanel);
   };
 
-  interface TabItem {
-    id: string;
-    label: string;
-    icon: React.ReactNode;
-  }
+  // Render current view based on selection
+  const renderCurrentView = () => {
+    const hasError = trajectory.system_status.error;
 
-  const enableTabs = false;
+    // Render the view content based on the current selection
+    const viewContent = () => {
+      switch (currentView) {
+        case "timeline":
+          return (
+            <ScrollArea className="flex-1 w-full">
+              <div className="p-6 min-w-[600px]">
+                {trajectory.nodes && (
+                  <Timeline
+                    trajectory={trajectory}
+                    isRunning={trajectory.status === "running"}
+                  />
+                )}
+              </div>
+            </ScrollArea>
+          );
+        case "timeline2":
+          return (
+            <ScrollArea className="flex-1">
+              <div className="p-10 min-w-[600px]">
+                <Timeline2 trajectory={trajectory} />
+              </div>
+            </ScrollArea>
+          );
+        case "chat":
+          return <Chat trajectory={trajectory} />;
+        case "artifacts":
+          return <Artifacts trajectoryId={trajectory.trajectory_id} />;
+        default:
+          return (
+            <div className="flex items-center justify-center h-full p-4 text-muted-foreground">
+              Select a view to display
+            </div>
+          );
+      }
+    };
 
-  const tabs: TabItem[] = [
-    ...(trajectory.system_status.error
-      ? [
-        {
-          id: "error",
-          label: "Error",
-          icon: <AlertCircle className="h-4 w-4" />,
-        },
-      ]
-      : []),
-    {
-      id: "timeline",
-      label: "Timeline",
-      icon: <Clock className="h-4 w-4" />,
-    },
-    {
-      id: "chat",
-      label: "Chat",
-      icon: <MessageSquare className="h-4 w-4" />,
-    },
-    {
-      id: "artifacts",
-      label: "Artifacts",
-      icon: <Package className="h-4 w-4" />,
-    },
-    {
-      id: "timeline2",
-      label: "Timeline 2",
-      icon: <Clock className="h-4 w-4" />,
-    },
-  ];
+    return (
+      <div className="flex h-full flex-col overflow-hidden relative">
+        {viewContent()}
+
+        {/* Show error overlay when there's an error */}
+        {hasError && (
+          <div className="absolute inset-0 bg-background/90 z-10 backdrop-blur-sm flex flex-col">
+            <TrajectoryError trajectory={trajectory} />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="h-[calc(100vh-56px)] flex flex-col">
-      {/* Status Bar */}
+      {/* Status Bar with View Selector */}
       <TrajectoryStatus
         trajectory={trajectory}
         handleStart={handleStart}
         handleRetry={handleRetry}
         showRightPanel={showRightPanel}
         onToggleRightPanel={toggleRightPanel}
+        currentView={currentView}
+        onViewChange={setCurrentView}
       />
 
       {/* Main Content Area with two columns */}
       <ResizablePanelGroup direction="horizontal" className="flex-1">
-        {/* Left column: Timeline */}
+        {/* Left column */}
         <ResizablePanel
           defaultSize={showRightPanel ? 60 : 100}
           minSize={30}
           className="flex flex-col"
         >
           <ResizablePanelGroup direction="vertical">
-            {/* Timeline Panel */}
+            {/* Main View Panel */}
             <ResizablePanel
               defaultSize={showBottomPanel ? 70 : 100}
               minSize={30}
               className="flex flex-col overflow-hidden"
             >
-              {enableTabs ? (
-                <Tabs
-                  defaultValue={
-                    trajectory.system_status.error ? "error" : "timeline"
-                  }
-                  className="flex h-full flex-col"
-                >
-                  <TabsList
-                    className={cn(
-                      "grid w-full h-12 items-stretch rounded-none border-b bg-background p-0",
-                      trajectory.system_status.error
-                        ? "grid-cols-5"
-                        : "grid-cols-4",
-                    )}
-                  >
-                    {tabs.map((tab) => (
-                      <TabsTrigger
-                        key={tab.id}
-                        value={tab.id}
-                        className={cn(
-                          "rounded-none border-b-2 border-transparent px-4",
-                          "data-[state=active]:border-primary data-[state=active]:bg-background",
-                          "hover:bg-muted/50 [&:not([data-state=active])]:hover:border-muted",
-                          "flex items-center gap-2",
-                          tab.id === "error" && "text-destructive",
-                        )}
-                      >
-                        {tab.icon}
-                        {tab.label}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-
-                  {trajectory.system_status.error && (
-                    <TabsContent
-                      value="error"
-                      className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-                    >
-                      <TrajectoryError trajectory={trajectory} />
-                    </TabsContent>
-                  )}
-
-                  <TabsContent
-                    value="timeline"
-                    className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-                  >
-                    <ScrollArea className="flex-1 w-full">
-                      <div className="p-6 min-w-[600px]">
-                        {trajectory.nodes && (
-                          <Timeline
-                            trajectory={trajectory}
-                            isRunning={trajectory.status === "running"}
-                          />
-                        )}
-                      </div>
-                    </ScrollArea>
-                  </TabsContent>
-
-                  <TabsContent
-                    value="chat"
-                    className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-                  >
-                    <Chat trajectory={trajectory} />
-                  </TabsContent>
-
-                  <TabsContent
-                    value="timeline2"
-                    className="flex-1 p-10 m-0 data-[state=active]:flex overflow-hidden"
-                  >
-                    <Timeline2 trajectory={trajectory} />
-                  </TabsContent>
-
-                  <TabsContent
-                    value="artifacts"
-                    className="flex-1 p-0 m-0 data-[state=active]:flex overflow-hidden"
-                  >
-                    <Artifacts trajectoryId={trajectory.trajectory_id} />
-                  </TabsContent>
-                </Tabs>
-              ) : (
-                <div className="flex h-full flex-col overflow-hidden">
-                  <ScrollArea className="flex-1">
-                    <div className="p-10 min-w-[600px]">
-                      <Timeline2
-                        trajectory={trajectory}
-                      />
-                    </div>
-                  </ScrollArea>
-                </div>
-              )}
+              {renderCurrentView()}
             </ResizablePanel>
 
             {/* Resizable handle that only shows when bottom panel is visible */}
@@ -297,7 +233,11 @@ export function TrajectoryViewer({
                         value="events"
                         className="h-full data-[state=active]:flex flex-col m-0 p-0 overflow-hidden"
                       >
-                        <TrajectoryEvents events={trajectory.events} />
+                        <TrajectoryEvents
+                          projectId={trajectory.project_id}
+                          trajectoryId={trajectory.trajectory_id}
+                          status={trajectory.status}
+                        />
                       </TabsContent>
 
                       <TabsContent

@@ -36,4 +36,11 @@ export const settingsApi = {
 
   getAvailableArtifactHandlers: () =>
     apiRequest<ComponentsResponse>("/settings/components/artifact-handlers"),
+
+  getAvailableMemory: () =>
+    apiRequest<ComponentsResponse>("/settings/components/memory"),
+
+  // Generic component endpoint
+  getComponentsByType: (componentType: string) =>
+    apiRequest<ComponentsResponse>(`/settings/components/${componentType}`),
 };

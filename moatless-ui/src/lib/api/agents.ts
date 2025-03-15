@@ -10,17 +10,17 @@ export const agentsApi = {
   getAgents: () => apiRequest<AgentData>("/agents"),
   getAgent: (id: string) => apiRequest<AgentConfig>(`/agents/${id}`),
   updateAgent: (agent: AgentConfig) =>
-    apiRequest<AgentConfig>(`/agents/${agent.id}`, {
+    apiRequest<AgentConfig>(`/agents/${agent.agent_id}`, {
       method: "PUT",
       body: JSON.stringify(agent),
     }),
   getAvailableActions: () =>
-    apiRequest<ActionSchema[]>("/settings/components/actions"),
+    apiRequest<Record<string, ActionSchema>>("/settings/components/actions"),
   deleteAgent: (id: string) =>
     apiRequest<void>(`/agents/${id}`, {
       method: "DELETE",
     }),
-  createAgent: (agent: Omit<AgentConfig, "id">) =>
+  createAgent: (agent: Omit<AgentConfig, "agent_id">) =>
     apiRequest<AgentConfig>("/agents", {
       method: "POST",
       body: JSON.stringify(agent),

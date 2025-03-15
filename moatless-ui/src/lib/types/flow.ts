@@ -54,11 +54,17 @@ export const FlowConfigSchema = z.object({
   reward_threshold: z.number().optional(),
 
   // Component references
-  selector: z.any().optional(),
-  expander: z.any().optional(),
-  value_function: z.any().optional(),
-  feedback_generator: z.any().optional(),
+  selector: z.string().optional(),
+  expander: z.string().optional(),
+  value_function: z.string().optional(),
+  feedback_generator: z.string().optional(),
   discriminator: z.any().optional(),
+
+  // Component configurations
+  selector_config: z.record(z.any()).optional(),
+  expander_config: z.record(z.any()).optional(),
+  value_function_config: z.record(z.any()).optional(),
+  feedback_generator_config: z.record(z.any()).optional(),
 });
 
 export const FlowConfigListSchema = z.array(FlowConfigSchema);

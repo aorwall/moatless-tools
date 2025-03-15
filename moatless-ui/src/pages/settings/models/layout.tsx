@@ -2,12 +2,10 @@ import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { DataExplorer } from "@/lib/components/DataExplorer";
 import { useModels } from "@/lib/hooks/useModels";
 import type { ModelConfig } from "@/lib/types/model";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/lib/components/ui/alert";
 import { SplitLayout } from "@/lib/components/layouts/SplitLayout";
 import { Button } from "@/lib/components/ui/button";
-import { BaseModelsList } from "./components/BaseModelsList";
-import { CreateModelForm } from "./components/CreateModelForm";
 
 export function ModelsLayout() {
   const navigate = useNavigate();
@@ -24,12 +22,12 @@ export function ModelsLayout() {
   ];
 
   const getModelDisplay = (model: ModelConfig) => ({
-    title: model.model,
-    subtitle: `${model.response_format}`,
+    title: model.model_id,
+    subtitle: `${model.completion_model_class}`,
   });
 
   const handleModelSelect = (model: ModelConfig) => {
-    navigate(`/settings/models/${encodeURIComponent(model.id)}`);
+    navigate(`/settings/models/${encodeURIComponent(model.model_id)}`);
   };
 
   if (isLoading) {
@@ -73,7 +71,7 @@ export function ModelsLayout() {
           filterFields={filterFields}
           itemDisplay={getModelDisplay}
           onSelect={handleModelSelect}
-          selectedItem={userModels.models.find((m) => m.id === id)}
+          selectedItem={userModels.models.find((m) => m.model_id === id)}
         />
       ) : (
         <div className="flex flex-col items-center justify-center h-full p-4 text-center">

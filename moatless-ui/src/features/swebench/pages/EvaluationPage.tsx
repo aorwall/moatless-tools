@@ -65,17 +65,13 @@ function EvaluationContent({ evaluation }: { evaluation: Evaluation }) {
           <div className="flex items-center justify-between mb-2">
             <h3 className="font-medium">Model</h3>
             <span className="text-xs text-muted-foreground">
-              ID: {evaluation.model.id}
+              ID: {evaluation.model.model_id}
             </span>
           </div>
           <div className="space-y-1 text-sm">
             <p>
               <span className="text-muted-foreground">Name:</span>{" "}
               {evaluation.model.model}
-            </p>
-            <p>
-              <span className="text-muted-foreground">Response Format:</span>{" "}
-              {evaluation.model.response_format}
             </p>
             <p>
               <span className="text-muted-foreground">Temperature:</span>{" "}

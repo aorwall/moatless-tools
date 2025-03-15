@@ -1,9 +1,3 @@
-import { AgentForm } from "./components/AgentForm";
+import { AgentNewPage } from "@/features/settings/agents/AgentNewPage";
 
-export function NewAgentPage() {
-  return (
-    <div className="h-full min-h-0">
-      <AgentForm isNew />
-    </div>
-  );
-}
+export { AgentNewPage as NewAgentPage };

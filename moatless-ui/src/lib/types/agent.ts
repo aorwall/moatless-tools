@@ -12,22 +12,25 @@ export interface ActionSchema {
   description: string;
   type: string;
   properties: Record<string, ActionProperty>;
-  action_class?: string;
+}
+
+export interface ActionSchemaWithClass extends ActionSchema {
+  action_class: string;
 }
 
 export const ActionConfigSchema = z.object({
-  title: z.string(),
-  properties: z.record(z.string(), z.any()).default({}),
-});
+  action_class: z.string(),
+}).passthrough();
 
 export type ActionConfig = z.infer<typeof ActionConfigSchema>;
 
 export const AgentConfigSchema = z.object({
-  id: z.string(),
-  model_id: z.string(),
-  response_format: z.enum(["TOOL_CALL", "REACT"]),
+  agent_id: z.string(),
+  model_id: z.string().optional(),
+  response_format: z.enum(["TOOL_CALL", "REACT"]).optional(),
   actions: z.array(ActionConfigSchema).default([]),
   system_prompt: z.string().optional(),
+  memory: z.record(z.any()).optional(),
 });
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;

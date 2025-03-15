@@ -11,8 +11,9 @@ import { apiRequest } from "./config";
 export const modelsApi = {
   getModels: () => apiRequest<ModelsResponse>("/models"),
   getBaseModels: () => apiRequest<BaseModelsResponse>("/models/base"),
-  getModel: (id: string) => apiRequest<ModelConfig>(`/models/${id}`),
-  getBaseModel: (id: string) => apiRequest<ModelConfig>(`/models/base/${id}`),
+  getModel: (model_id: string) => apiRequest<ModelConfig>(`/models/${model_id}`),
+  getBaseModel: (model_id: string) =>
+    apiRequest<ModelConfig>(`/models/base/${model_id}`),
   addFromBase: (request: AddModelFromBaseRequest) =>
     apiRequest<ModelConfig>("/models/base", {
       method: "POST",
@@ -24,16 +25,16 @@ export const modelsApi = {
       body: JSON.stringify(request),
     }),
   updateModel: (model: ModelConfig) =>
-    apiRequest<ModelConfig>(`/models/${model.id}`, {
+    apiRequest<ModelConfig>(`/models/${model.model_id}`, {
       method: "PUT",
       body: JSON.stringify(model),
     }),
-  deleteModel: (id: string) =>
-    apiRequest(`/models/${id}`, {
+  deleteModel: (model_id: string) =>
+    apiRequest(`/models/${model_id}`, {
       method: "DELETE",
     }),
-  testModel: (id: string) =>
-    apiRequest<ModelTestResult>(`/models/${id}/test`, {
+  testModel: (model_id: string) =>
+    apiRequest<ModelTestResult>(`/models/${model_id}/test`, {
       method: "POST",
     }),
 };

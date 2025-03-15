@@ -21,8 +21,19 @@ import {
   Cpu,
   ChevronLeft,
   ChevronRight,
+  Layers,
+  MessageSquare,
+  Package
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from "@/lib/components/ui/dropdown-menu";
+
+export type TrajectoryView = "timeline" | "chat" | "artifacts" | "timeline2";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
@@ -31,6 +42,8 @@ interface TrajectoryStatusProps {
   handleRetry?: () => Promise<void>;
   showRightPanel?: boolean;
   onToggleRightPanel?: () => void;
+  currentView?: TrajectoryView;
+  onViewChange?: (view: TrajectoryView) => void;
 }
 
 export function TrajectoryStatus({
@@ -39,7 +52,9 @@ export function TrajectoryStatus({
   handleStart,
   handleRetry,
   showRightPanel = true,
-  onToggleRightPanel
+  onToggleRightPanel,
+  currentView = "timeline",
+  onViewChange
 }: TrajectoryStatusProps) {
   const [isStarting, setIsStarting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
@@ -136,7 +151,38 @@ export function TrajectoryStatus({
   const getActionButtons = () => {
     const actionButtons = [];
 
-    // Add toggle panel button
+    // Add view selector dropdown
+    if (onViewChange) {
+      actionButtons.push(
+        <DropdownMenu key="view-selector">
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="mr-2">
+              <Layers className="h-3 w-3 mr-2" />
+              {getViewName(currentView)}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onViewChange("timeline")}>
+              <Clock className="h-4 w-4 mr-2" />
+              Timeline v1
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onViewChange("timeline2")}>
+              <Clock className="h-4 w-4 mr-2" />
+              Timeline v2
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onViewChange("chat")}>
+              <MessageSquare className="h-4 w-4 mr-2" />
+              Chat
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onViewChange("artifacts")}>
+              <Package className="h-4 w-4 mr-2" />
+              Artifacts
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      );
+    }
+
     if (onToggleRightPanel) {
       actionButtons.push(
         <Button
@@ -238,6 +284,17 @@ export function TrajectoryStatus({
     }
 
     return <div className="flex items-center gap-2 ml-auto">{actionButtons}</div>;
+  };
+
+  // Helper function to get view name for the dropdown button
+  const getViewName = (view: TrajectoryView) => {
+    switch (view) {
+      case "timeline": return "Timeline v1";
+      case "timeline2": return "Timeline v2";
+      case "chat": return "Chat";
+      case "artifacts": return "Artifacts";
+      default: return "View";
+    }
   };
 
   return (

@@ -121,7 +121,7 @@ export function EvaluationToolbar({
       </TooltipProvider>
 
       {/* Only show Sync Results button if evaluation is not completed */}
-      {!isCompleted && (
+      {true && (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

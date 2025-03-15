@@ -45,22 +45,18 @@ export function ModelSelector({
   }
 
   const options: OptionType[] = models.map((model) => ({
-    id: model.id,
-    label: model.id,
+    id: model.model_id,
+    label: model.model_id,
   }));
 
   const renderInfo = (selected: OptionType | undefined) => {
     if (!selected) return null;
-    const model = models.find((m) => m.id === selected.id);
+    const model = models.find((m) => m.model_id === selected.id);
     if (!model) return null;
     return (
       <>
         <p>
           <span className="font-medium">Base Model:</span> {model.model}
-        </p>
-        <p>
-          <span className="font-medium">Response Format:</span>{" "}
-          {model.response_format}
         </p>
         <p>
           <span className="font-medium">Temperature:</span> {model.temperature}

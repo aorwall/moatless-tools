@@ -28,15 +28,13 @@ import { ModelConfigSchema } from "@/lib/types/model";
 
 // Create a schema for the form with required fields
 const createModelSchema = ModelConfigSchema.extend({
-  id: z.string().min(1, "Model ID is required"),
+  model_id: z.string().min(1, "Model ID is required"),
   model: z.string().min(1, "Model name is required"),
-  response_format: z.enum(["tool_call", "react"]),
-  message_history_type: z.enum(["messages", "react"]),
 });
 
 // Default values for the form
 const defaultValues = {
-  id: "",
+  model_id: "",
   model: "",
   model_base_url: "",
   model_api_key: "",
@@ -47,9 +45,7 @@ const defaultValues = {
   disable_thoughts: false,
   merge_same_role_messages: false,
   message_cache: true,
-  few_shot_examples: true,
-  response_format: "tool_call" as const,
-  message_history_type: "messages" as const,
+  few_shot_examples: true
 };
 
 export function CreateModelForm() {
@@ -94,7 +90,7 @@ export function CreateModelForm() {
 
               <FormField
                 control={form.control}
-                name="id"
+                name="model_id"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Model ID</FormLabel>
@@ -205,53 +201,6 @@ export function CreateModelForm() {
             <div className="space-y-4">
               <h2 className="text-lg font-semibold">Model Parameters</h2>
 
-              <FormField
-                control={form.control}
-                name="response_format"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Response Format</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select response format" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="react">React</SelectItem>
-                        <SelectItem value="tool_call">Tool Call</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      Format for model responses
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="message_history_type"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Message History Type</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select history type" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="react">React</SelectItem>
-                        <SelectItem value="messages">Messages</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>Message history format</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <FormField
                 control={form.control}

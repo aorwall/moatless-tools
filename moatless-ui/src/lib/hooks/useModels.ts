@@ -74,7 +74,7 @@ export function useUpdateModel() {
     mutationFn: (model: ModelConfig) => modelsApi.updateModel(model),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["models"] });
-      queryClient.invalidateQueries({ queryKey: ["models", data.id] });
+      queryClient.invalidateQueries({ queryKey: ["models", data.model_id] });
     },
   });
 }

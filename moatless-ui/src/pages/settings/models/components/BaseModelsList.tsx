@@ -48,7 +48,7 @@ export function BaseModelsList() {
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
     const matchesFormat =
-      formatFilter === "all" || model.response_format === formatFilter;
+      formatFilter === "all" || model.completion_model_class === formatFilter;
     return matchesSearch && matchesFormat;
   });
 
@@ -97,8 +97,8 @@ export function BaseModelsList() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All formats</SelectItem>
-                <SelectItem value="tool_call">Tool Call</SelectItem>
-                <SelectItem value="react">React</SelectItem>
+                <SelectItem value="moatless.completion.react.ReActCompletionModel">React</SelectItem>
+                <SelectItem value="moatless.completion.tool_call.ToolCallCompletionModel">Tool Call</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -109,25 +109,16 @@ export function BaseModelsList() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredModels?.map((model) => (
             <div
-              key={model.id}
+              key={model.model_id}
               className="flex flex-col rounded-lg border bg-card text-card-foreground shadow-sm hover:shadow-md transition-shadow"
             >
               <div className="flex flex-col space-y-1.5 p-6">
                 <h3 className="font-semibold text-lg">{model.model}</h3>
-                <p className="text-sm text-gray-500">ID: {model.id}</p>
+                <p className="text-sm text-gray-500">ID: {model.model_id}</p>
               </div>
               <div className="p-6 pt-0 space-y-4">
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">Response Format</span>
-                    <span className="font-medium">{model.response_format}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-gray-500">History Type</span>
-                    <span className="font-medium">
-                      {model.message_history_type}
-                    </span>
-                  </div>
+
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-500">Temperature</span>
                     <span className="font-medium">
