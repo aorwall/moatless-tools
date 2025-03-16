@@ -18,6 +18,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from moatless.context_data import get_moatless_dir
+
 try:
     from azure.monitor.opentelemetry import configure_azure_monitor
 
@@ -208,7 +210,7 @@ def extract_context_data() -> dict[str, Any]:
     from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
 
     context_data = {
-        "moatless_dir": moatless_dir.get(),
+        "moatless_dir": get_moatless_dir(),
         "current_node_id": current_node_id.get(),
         "current_trajectory_id": current_trajectory_id.get(),
         "current_project_id": current_project_id.get(),
@@ -235,10 +237,10 @@ def run_async(coro, span_name: Optional[str] = None):
     current_span = trace.get_current_span()
 
     # Capture current context data
-    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
+    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, get_moatless_dir
 
     context_data = {
-        "moatless_dir": moatless_dir.get(),
+        "moatless_dir": get_moatless_dir(),
         "current_node_id": current_node_id.get(),
         "current_trajectory_id": current_trajectory_id.get(),
         "current_project_id": current_project_id.get(),

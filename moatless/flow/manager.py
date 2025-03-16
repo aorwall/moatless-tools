@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import uuid
 
+from moatless.actions.action import CompletionModelMixin
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.trajectory.trajectory_utils import convert_nodes
-from moatless.benchmark.swebench.utils import create_index_async, create_repository_async
-from moatless.completion.manager import create_completion_model
-from moatless.config.agent_config import get_agent
+from moatless.benchmark.swebench.utils import (
+    create_index_async,
+    create_repository_async,
+)
 from moatless.context_data import get_projects_dir, get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
 from moatless.evaluation.utils import get_swebench_instance
@@ -21,14 +23,21 @@ from moatless.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
+    CompletionDTO,
+    CompletionInputMessage,
+    CompletionOutput,
     ExecuteNodeRequest,
     FlowConfig,
     FlowStatus,
     FlowStatusInfo,
+    ToolCall,
     TrajectoryEventDTO,
     TrajectoryListItem,
     TrajectoryResponseDTO,
+    StartTrajectoryRequest,
 )
+from moatless.flow.trajectory_tree import create_node_tree
+from moatless.node import Node
 from moatless.repository.git import GitRepository
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.runtime.testbed import TestbedEnvironment
@@ -36,7 +45,6 @@ from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
 from moatless.workspace import Workspace
 
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,24 +52,21 @@ logger = logging.getLogger(__name__)
 class FlowManager:
     def __init__(
         self,
-        runner: BaseRunner | None = None,
-        storage: BaseStorage | None = None,
-        eventbus: BaseEventBus | None = None,
+        runner: BaseRunner,
+        storage: BaseStorage,
+        eventbus: BaseEventBus,
+        agent_manager,
+        model_manager,
     ):
         self._configs = {}
-        self._load_configs()
-        self._runner = runner or settings.runner
-        self._storage = storage or settings.storage
-        self._eventbus = eventbus or settings.event_bus
+        self._runner = runner
+        self._storage = storage
+        self._eventbus = eventbus
+        self._agent_manager = agent_manager
+        self._model_manager = model_manager
 
-    @classmethod
-    def get_instance(
-        cls, storage: BaseStorage | None = None, eventbus: BaseEventBus | None = None, runner: BaseRunner | None = None
-    ):
-        """Get the singleton instance of the FlowManager."""
-        if not hasattr(cls, "_instance"):
-            cls._instance = cls(storage=storage, eventbus=eventbus, runner=runner)
-        return cls._instance
+    async def initialize(self):
+        await self._load_configs()
 
     def create_flow(
         self,
@@ -89,9 +94,12 @@ class FlowManager:
         if not config:
             raise ValueError(f"Flow config {id} not found")
 
-        agent = get_agent(agent_id=config.agent_id)
-        completion_model = create_completion_model(model_id)
+        agent = self._agent_manager.get_agent(agent_id=config.agent_id)
+        completion_model = self._model_manager.create_completion_model(model_id)
         agent.completion_model = completion_model
+        for action in agent.actions:
+            if isinstance(action, CompletionModelMixin):
+                action.completion_model = completion_model
 
         if not project_id:
             project_id = "default"
@@ -158,47 +166,33 @@ class FlowManager:
         """Get the path to the global config file."""
         return Path(__file__).parent / "flows.json"
 
-    def _load_configs(self):
+    async def _load_configs(self):
         """Load configurations from JSON file."""
-        config_path = self._get_config_path()
+        configs = await self._storage.read("flows")
 
         # Copy global config to local path if it doesn't exist
-        if not config_path.exists():
+        if not configs:
             try:
                 global_path = self._get_global_config_path()
                 if global_path.exists():
-                    # Copy global config to local path
-                    config_path.parent.mkdir(parents=True, exist_ok=True)
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        with open(config_path, "w") as local_f:
-                            json.dump(global_config, local_f, indent=2)
+                        await self._storage.write("flows", global_config)
                     logger.info("Copied global config to local path")
                 else:
                     logger.info("No global tree configs found")
             except Exception as e:
                 logger.error(f"Failed to copy global tree configs: {e}")
 
-        # Load configs from local path
-        try:
-            if config_path.exists():
-                logger.info(f"Loading flow configs from {config_path}")
-                with open(config_path) as f:
-                    configs = json.load(f)
-                logger.info(f"Loaded {len(configs)} flow configs")
-                for config in configs:
-                    try:
-                        self._configs[config["id"]] = config
-                        logger.debug(f"Loaded flow config {config['id']}")
-                    except Exception:
-                        logger.exception(f"Failed to load flow config {config['id']} from {config_path}")
-            else:
-                logger.info(f"No local flow configs found on path {config_path}")
-        except Exception as e:
-            logger.exception(f"Failed to load flow config from {config_path}")
-            raise e
+        logger.info(f"Loading {len(configs)} flow configs")
+        for config in configs:
+            try:
+                self._configs[config["id"]] = config
+                logger.debug(f"Loaded flow config {config['id']}")
+            except Exception:
+                logger.exception(f"Failed to load flow config {config['id']}")
 
-    def _save_configs(self):
+    async def _save_configs(self):
         """Save configurations to JSON file."""
         path = self._get_config_path()
         try:
@@ -234,33 +228,33 @@ class FlowManager:
         configs.sort(key=lambda x: x.id)
         return configs
 
-    def create_config(self, config: FlowConfig) -> FlowConfig:
+    async def create_config(self, config: FlowConfig) -> FlowConfig:
         """Create a new flow configuration."""
         logger.debug(f"Creating flow config {config.id}")
         if config.id in self._configs:
             raise ValueError(f"Flow config {config.id} already exists")
 
         self._configs[config.id] = config.model_dump()
-        self._save_configs()
+        await self._save_configs()
         return config
 
-    def update_config(self, config: FlowConfig):
+    async def update_config(self, config: FlowConfig):
         """Update an existing flow configuration."""
         logger.debug(f"Updating flow config {config.id}")
         if config.id not in self._configs:
             raise ValueError(f"Flow config {config.id} not found")
 
         self._configs[config.id] = config.model_dump()
-        self._save_configs()
+        await self._save_configs()
 
-    def delete_config(self, id: str):
+    async def delete_config(self, id: str):
         """Delete a flow configuration."""
         logger.debug(f"Deleting flow config {id}")
         if id not in self._configs:
             raise ValueError(f"Flow config {id} not found")
 
         del self._configs[id]
-        self._save_configs()
+        await self._save_configs()
 
     async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
@@ -296,7 +290,7 @@ class FlowManager:
                 status=flow_status,
                 system_status=flow_status_info,
                 agent_id=flow.agent.agent_id,
-                model_id=flow.agent.completion_model.model_id,
+                model_id=flow.agent.model_id,
                 nodes=nodes,
                 usage=flow.total_usage(),
             )
@@ -327,7 +321,9 @@ class FlowManager:
                             if status:
                                 # Create TrajectoryListItem from status
                                 trajectory_item = TrajectoryListItem(
-                                    **status.model_dump(), project_id=project_id, trajectory_id=trajectory_id
+                                    **status.model_dump(),
+                                    project_id=project_id,
+                                    trajectory_id=trajectory_id,
                                 )
                                 trajectories.append(trajectory_item)
                         except Exception as e:
@@ -378,6 +374,40 @@ class FlowManager:
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
         logger.info(f"Trajectory {trajectory_id} restarted successfully")
+
+        return flow
+
+    async def resume_trajectory(self, project_id: str, trajectory_id: str, request: StartTrajectoryRequest):
+        """Resume a trajectory with additional parameters.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            request: The request containing parameters to resume the trajectory
+
+        Returns:
+            The resumed flow
+        """
+        logger.info(f"Resuming trajectory {trajectory_id} in project {project_id}")
+
+        job_status = await self._runner.get_job_status(project_id, trajectory_id)
+        if job_status == JobStatus.RUNNING:
+            raise ValueError("Cannot resume a trajectory that is already running")
+
+        flow = await AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+
+        # Update flow with any new parameters from the request
+        if request.message:
+            flow.message = request.message
+
+        if request.metadata:
+            flow.metadata.update(request.metadata)
+
+        await flow.persist()
+        logger.info("Trajectory updated with new parameters")
+
+        await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
+        logger.info(f"Trajectory {trajectory_id} resumed successfully")
 
         return flow
 
@@ -506,12 +536,64 @@ class FlowManager:
             "current_file": current_file.name,
         }
 
+    async def get_completions(self, project_id: str, trajectory_id: str, node_id: str, action_step: int | None = None):
+        """Get the completions for a specific node.
 
-_manager = FlowManager.get_instance()
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            node_id: The node ID to get completions for
 
-get_flow_config = _manager.get_flow_config
-get_all_configs = _manager.get_all_configs
-create_flow_config = _manager.create_config
-update_flow_config = _manager.update_config
-delete_flow_config = _manager.delete_config
-create_flow = _manager.create_flow
+        Returns:
+            A list of parsed CompletionDTO objects
+        """
+        from moatless.utils.completion_parser import parse_completion
+
+        trajectory_key = self._storage.get_trajectory_key(project_id, trajectory_id)
+
+        if action_step is not None:
+            log_keys = await self._storage.list_keys(f"{trajectory_key}/completions/action_{node_id}_{action_step}")
+        else:
+            log_keys = await self._storage.list_keys(f"{trajectory_key}/completions/node_{node_id}")
+
+        completions = []
+
+        for log_key in log_keys:
+            raw_completion = await self._storage.read(log_key)
+
+            try:
+                completion_dto = parse_completion(raw_completion)
+                completions.append(completion_dto)
+            except Exception as e:
+                logger.exception(f"Error parsing completion: {e}")
+                # Still add a basic DTO with original data for debugging
+                completions.append(
+                    CompletionDTO(
+                        original_input=raw_completion.get("original_input"),
+                        original_output=raw_completion.get("original_response"),
+                    )
+                )
+
+        return completions
+
+    async def get_node_tree(self, project_id: str, trajectory_id: str) -> dict:
+        node = await self.read_trajectory_node(project_id, trajectory_id)
+        tree_node = create_node_tree(node)
+        return tree_node.model_dump()
+
+    async def get_node(self, project_id: str, trajectory_id: str, node_id: int) -> dict:
+        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
+
+        root_node = await self.read_trajectory_node(project_id, trajectory_id)
+        node = root_node.get_node_by_id(node_id)
+        if not node:
+            raise ValueError(f"Node {node_id} not found in trajectory {trajectory_id}")
+
+        return node.model_dump(exclude={"children", "parent"})
+
+    async def read_trajectory_node(self, project_id: str, trajectory_id: str) -> Node:
+        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
+
+        trajectory_data = await self._storage.read_from_trajectory("trajectory", project_id, trajectory_id)
+
+        return Node.from_dict(trajectory_data)

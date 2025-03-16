@@ -14,7 +14,6 @@ from moatless.evaluation.utils import (
     get_moatless_instance,
     has_identified_files,
     has_identified_spans,
-    read_search_trees,
 )
 from moatless.file_context import FileContext
 from moatless.node import Node
@@ -293,9 +292,6 @@ def create_trajectory_stats(
                     + node.completions["build_action"].usage.cache_read_tokens,
                 )
 
-                if node.completions["build_action"].retries:
-                    result.retries += node.completions["build_action"].retries
-
             current_action_dump = node.action.model_dump(exclude={"thoughts"})
             action_dumps.append(current_action_dump)
 
@@ -428,7 +424,6 @@ def to_result(
                 eval_report.get("node_results", {}).get(str(leaf_node.node_id)),
             )
             result.trajectories.append(traj)
-            result.retries += traj.retries
 
             for action, count in traj.actions.items():
                 result.actions[action] = result.actions.get(action, 0) + count
@@ -483,9 +478,6 @@ def to_result(
             result.flags.append("no_test_edits")
         if result.failed_actions > 0 and "has_failed_actions" not in result.flags:
             result.flags.append("has_failed_actions")
-        if result.retries > 0:
-            result.flags.append("has_retries")
-
     except Exception:
         logger.exception(f"Failed to generate report for instance {instance_id}")
 
@@ -758,47 +750,3 @@ def read_results_from_json(file_path: str) -> list[BenchmarkResult]:
 
     results = [BenchmarkResult.validate(item) for item in data]
     return results
-
-
-def generate_report(dir: str, split: str = "lite"):
-    result_path = os.path.join(dir, "result.json")
-
-    external_result = None
-    if os.path.exists(result_path):
-        with open(result_path) as f:
-            external_result = json.load(f)
-
-    search_trees = read_search_trees(dir)
-    if not search_trees:
-        raise ValueError("No trajectories found")
-
-    results = []
-    for search_tree in search_trees:
-        instance_id = search_tree.metadata["instance_id"]
-
-        instance = get_moatless_instance(instance_id)
-        if not instance:
-            logger.error(f"Instance {instance_id} not found")
-            continue
-
-        eval_report = None
-        eval_result_file = os.path.join(dir, instance_id, "eval_result.json")
-        try:
-            if os.path.exists(eval_result_file):
-                with open(eval_result_file) as f:
-                    eval_report = json.load(f)
-        except Exception as e:
-            logger.exception(f"Failed to load eval report from {eval_result_file}: {e}")
-
-        result = to_result(search_tree, eval_report, external_result)
-        results.append(result)
-
-    report_path = os.path.join(dir, "report.json")
-    with open(report_path, "w") as f:
-        json.dump([result.model_dump() for result in results], f, indent=2)
-
-    df = to_dataframe(results)
-    df.to_csv(os.path.join(dir, "report.csv"), index=False)
-
-    df = to_trajectory_dataframe(results)
-    df.to_csv(os.path.join(dir, "trajectories.csv"), index=False)

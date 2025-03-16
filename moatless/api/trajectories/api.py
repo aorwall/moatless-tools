@@ -2,8 +2,9 @@
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from moatless.api.dependencies import get_flow_manager, get_storage, get_event_bus
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import (
     ExecuteNodeRequest,
@@ -11,8 +12,8 @@ from moatless.flow.schema import (
     TrajectoryListItem,
     TrajectoryResponseDTO,
 )
-
-_manager = FlowManager.get_instance()
+from moatless.storage.base import BaseStorage
+from moatless.eventbus.base import BaseEventBus
 
 
 logger = logging.getLogger(__name__)
@@ -21,20 +22,24 @@ router = APIRouter()
 
 
 @router.get("/", response_model=list[TrajectoryListItem])
-async def get_trajectories():
+async def get_trajectories(flow_manager: FlowManager = Depends(get_flow_manager)):
     """Get all trajectories."""
     try:
-        return await _manager.list_trajectories()
+        return await flow_manager.list_trajectories()
     except Exception as e:
         logger.exception(f"Error getting trajectories: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{project_id}/{trajectory_id}", response_model=TrajectoryResponseDTO)
-async def get_trajectory(project_id: str, trajectory_id: str):
+async def get_trajectory(
+    project_id: str,
+    trajectory_id: str,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Get the status, trajectory data, and events for a specific trajectory."""
     try:
-        return await _manager.get_trajectory(project_id, trajectory_id)
+        return await flow_manager.get_trajectory(project_id, trajectory_id)
     except ValueError as e:
         logger.exception(f"Error getting trajectory data: {str(e)}")
         raise HTTPException(status_code=404, detail=str(e))
@@ -44,7 +49,12 @@ async def get_trajectory(project_id: str, trajectory_id: str):
 
 
 @router.get("/{project_id}/{trajectory_id}/logs")
-async def get_trajectory_logs(project_id: str, trajectory_id: str, file_name: str = None):
+async def get_trajectory_logs(
+    project_id: str,
+    trajectory_id: str,
+    file_name: str | None = None,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Get the log files for a specific trajectory.
 
     Args:
@@ -56,7 +66,7 @@ async def get_trajectory_logs(project_id: str, trajectory_id: str, file_name: st
         The log file contents
     """
     try:
-        return await _manager.get_trajectory_logs(project_id, trajectory_id, file_name)
+        return await flow_manager.get_trajectory_logs(project_id, trajectory_id, file_name)
     except ValueError as e:
         logger.exception(f"Error getting trajectory logs: {str(e)}")
         raise HTTPException(status_code=404, detail=str(e))
@@ -65,11 +75,62 @@ async def get_trajectory_logs(project_id: str, trajectory_id: str, file_name: st
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project_id}/{trajectory_id}/events")
+async def get_trajectory_events(
+    project_id: str,
+    trajectory_id: str,
+    storage: BaseStorage = Depends(get_storage),
+):
+    """Get the events for a specific trajectory.
+
+    Args:
+        project_id: The project ID
+        trajectory_id: The trajectory ID
+        event_bus: The event bus instance
+
+    Returns:
+        The trajectory events
+    """
+    key = storage.get_trajectory_key(project_id, trajectory_id)
+    key = f"{key}/events"
+
+    if not await storage.exists(key):
+        logger.info(f"No events found for key {key}")
+        return []
+
+    return await storage.read_lines(key)
+
+
+@router.get("/{project_id}/{trajectory_id}/completions/{node_id}")
+async def get_completions(
+    project_id: str,
+    trajectory_id: str,
+    node_id: str,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    return await flow_manager.get_completions(project_id, trajectory_id, node_id)
+
+
+@router.get("/{project_id}/{trajectory_id}/completions/{node_id}/action/{action_step}")
+async def get_completions(
+    project_id: str,
+    trajectory_id: str,
+    node_id: str,
+    action_step: int,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    return await flow_manager.get_completions(project_id, trajectory_id, node_id, action_step)
+
+
 @router.post("/{project_id}/{trajectory_id}/start")
-async def start_trajectory(project_id: str, trajectory_id: str):
+async def start_trajectory(
+    project_id: str,
+    trajectory_id: str,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Start a trajectory without additional parameters."""
     try:
-        await _manager.start_trajectory(project_id, trajectory_id)
+        await flow_manager.start_trajectory(project_id, trajectory_id)
         return {"status": "success", "message": f"Started trajectory {trajectory_id}"}
     except ValueError as e:
         logger.exception(f"Error starting trajectory: {str(e)}")
@@ -80,10 +141,14 @@ async def start_trajectory(project_id: str, trajectory_id: str):
 
 
 @router.post("/{project_id}/{trajectory_id}/retry-trajectory")
-async def retry_trajectory(project_id: str, trajectory_id: str):
+async def retry_trajectory(
+    project_id: str,
+    trajectory_id: str,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Reset and restart a trajectory by removing all children from the root node."""
     try:
-        await _manager.retry_trajectory(project_id, trajectory_id)
+        await flow_manager.retry_trajectory(project_id, trajectory_id)
         return {"status": "success", "message": f"Retried trajectory {trajectory_id}"}
     except ValueError as e:
         logger.exception(f"Error retrying trajectory: {str(e)}")
@@ -94,10 +159,15 @@ async def retry_trajectory(project_id: str, trajectory_id: str):
 
 
 @router.post("/{project_id}/{trajectory_id}/resume")
-async def resume_trajectory(project_id: str, trajectory_id: str, request: StartTrajectoryRequest):
+async def resume_trajectory(
+    project_id: str,
+    trajectory_id: str,
+    request: StartTrajectoryRequest,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Resume a trajectory."""
     try:
-        await _manager.resume_trajectory(project_id, trajectory_id, request)
+        await flow_manager.resume_trajectory(project_id, trajectory_id, request)
         return {"status": "success", "message": f"Resumed trajectory {trajectory_id}"}
     except ValueError as e:
         logger.exception(f"Error resuming trajectory: {str(e)}")
@@ -108,10 +178,15 @@ async def resume_trajectory(project_id: str, trajectory_id: str, request: StartT
 
 
 @router.post("/{project_id}/{trajectory_id}/execute")
-async def execute_node(project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
+async def execute_node(
+    project_id: str,
+    trajectory_id: str,
+    request: ExecuteNodeRequest,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
     """Execute a run."""
     try:
-        result = await _manager.execute_node(project_id, trajectory_id, request)
+        result = await flow_manager.execute_node(project_id, trajectory_id, request)
         return result
     except ValueError as e:
         logger.exception(f"Error executing node: {str(e)}")
@@ -119,3 +194,22 @@ async def execute_node(project_id: str, trajectory_id: str, request: ExecuteNode
     except Exception as e:
         logger.exception(f"Error executing node: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/{trajectory_id}/tree")
+async def get_node_tree(
+    project_id: str,
+    trajectory_id: str,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    return await flow_manager.get_node_tree(project_id, trajectory_id)
+
+
+@router.get("/{project_id}/{trajectory_id}/node/{node_id}")
+async def get_node(
+    project_id: str,
+    trajectory_id: str,
+    node_id: int,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    return await flow_manager.get_node(project_id, trajectory_id, node_id)

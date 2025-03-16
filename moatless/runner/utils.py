@@ -6,15 +6,11 @@ from typing import Any
 
 from opentelemetry import trace
 
-from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
+from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, get_moatless_dir
 from moatless.events import BaseEvent
-
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner")
-
-event_bus = settings.event_bus
 
 
 def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):
@@ -22,6 +18,8 @@ def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: s
     event = BaseEvent(
         project_id=evaluation_name, trajectory_id=instance_id, scope=scope, event_type=event_type, data=data
     )
+
+    from moatless.settings import event_bus
 
     try:
         run_async(event_bus.publish(event))
@@ -36,7 +34,7 @@ def run_async(coro, span_name: str | None = None):
     current_span = trace.get_current_span()
 
     context_data = {
-        "moatless_dir": moatless_dir.get(),
+        "moatless_dir": get_moatless_dir(),
         "current_node_id": current_node_id.get(),
         "current_trajectory_id": current_trajectory_id.get(),
         "current_project_id": current_project_id.get(),

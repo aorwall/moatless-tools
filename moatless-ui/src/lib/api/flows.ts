@@ -17,4 +17,9 @@ export const flowsApi = {
       method: "PUT",
       body: JSON.stringify(flow),
     }),
+
+  deleteFlow: (id: string) =>
+    apiRequest<void>(`/settings/flows/${id}`, {
+      method: "DELETE",
+    }),
 };

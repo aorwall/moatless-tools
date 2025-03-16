@@ -45,33 +45,30 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
 
     @classmethod
     def model_validate(cls, obj: Any):
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            discriminator_key = f"{cls.get_component_type()}_class"
+        if not isinstance(obj, dict):
+            return obj
 
-            if discriminator_key in obj:
-                class_path = obj.pop(discriminator_key, None)
-                if class_path:
-                    try:
-                        cls._initialize_components()
-                        module_name, class_name = class_path.rsplit(".", 1)
-                        component_class = cls.get_component_by_name(class_name)
+        obj = obj.copy()
+        discriminator_key = f"{cls.get_component_type()}_class"
 
-                        if not component_class:
-                            available = list(cls._get_components().keys())
-                            logger.warning(
-                                f"Invalid {cls.get_component_type()} class: {class_name}. Available: {available}"
-                            )
-                            raise ValueError(f"Invalid {cls.get_component_type()} class: {class_name}")
-                        return component_class.model_validate(obj)
-                    except Exception as e:
-                        raise Exception(f"Failed to load {cls.get_component_type()} class {class_path}: {e}") from e
-                else:
-                    raise ValueError(f"No {cls.get_component_type()} class path found on {obj}")
-            else:
-                return super().model_validate(obj)
+        # If there no discriminator we expect it to be a regular initalization of the sub class
+        if discriminator_key not in obj:
+            return super().model_validate(obj)
 
-        return obj
+        classpath = obj.pop(discriminator_key, None)
+        if not classpath:
+            raise ValueError(f"No {cls.get_component_type()} class path found on {obj}")
+
+        try:
+            component_class = cls.get_component_by_classpath(classpath)
+
+            if not component_class:
+                available = list(cls._get_components().keys())
+                logger.warning(f"Invalid {cls.get_component_type()} class: {classpath}. Available: {available}")
+                raise ValueError(f"Invalid {cls.get_component_type()} class: {classpath}")
+            return component_class.model_validate(obj)
+        except Exception as e:
+            raise Exception(f"Failed to load {cls.get_component_type()} class {classpath}: {e}") from e
 
     def model_dump(self, *args, **kwargs) -> dict[str, Any]:
         data = super().model_dump(*args, **kwargs)
@@ -88,15 +85,12 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
         raise NotImplementedError
 
     @classmethod
-    def get_component_by_name(cls, name: str) -> type[T] | None:
+    def get_component_by_classpath(cls, classpath: str) -> type[T] | None:
         """Get a component class by its name."""
         cls._initialize_components()
         components = cls._get_components()
-        if name in components:
-            return cast(type[T], components[name])
-        for qualified_name, component in components.items():
-            if qualified_name.endswith(f".{name}"):
-                return cast(type[T], component)
+        if classpath in components:
+            return cast(type[T], components[classpath])
         return None
 
     @classmethod

@@ -2,28 +2,16 @@ import contextvars
 import os
 from pathlib import Path
 
-USE_DEFAULTS = os.getenv("MOATLESS_USE_DEFAULTS", "false") == "false"
-
-# A context variable to hold the current node id (or any other context you need)
-moatless_dir = contextvars.ContextVar[str | None]("moatless_dir", default=None)
+# Used to track the current action step, node id, trajectory id, and project id
+current_action_step = contextvars.ContextVar[int | None]("current_action_step", default=None)
 current_node_id = contextvars.ContextVar[int | None]("current_node_id", default=None)
 current_trajectory_id = contextvars.ContextVar[str | None]("current_trajectory_id", default=None)
 current_project_id = contextvars.ContextVar[str | None]("current_project_id", default=None)
 
-current_trajectory_dir = contextvars.ContextVar[Path | None]("current_trajectory_dir", default=None)
-
 
 def get_moatless_dir() -> Path:
     """Get the moatless directory."""
-    dir_value = moatless_dir.get()
-    if not dir_value:
-        dir_path = Path(os.getenv("MOATLESS_DIR", ".moatless"))
-    else:
-        dir_path = Path(dir_value)
-
-    if not dir_path.exists():
-        dir_path.mkdir(parents=True, exist_ok=True)
-    return dir_path
+    return Path(os.getenv("MOATLESS_DIR", ".moatless"))
 
 
 def get_projects_dir() -> Path:
@@ -51,10 +39,6 @@ def get_project_dir(project_id: str | None = None) -> Path:
 
 def get_trajectory_dir(project_id: str | None = None, trajectory_id: str | None = None) -> Path:
     """Get the moatless trajectory directory."""
-
-    trajectory_dir_value = current_trajectory_dir.get()
-    if trajectory_dir_value:
-        return trajectory_dir_value
 
     trajectory_base_dir = get_project_dir(project_id)
     if not trajectory_id:

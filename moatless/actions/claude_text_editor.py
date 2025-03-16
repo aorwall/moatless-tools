@@ -4,11 +4,10 @@ from typing import Literal, Optional
 
 from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
-from moatless.actions import CreateFile, RunTests
-from moatless.actions.action import Action
+from moatless.actions import CreateFile
+from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.create_file import CreateFileArgs
-from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import CodeSpan, ViewCode, ViewCodeArgs
@@ -138,7 +137,7 @@ class EditActionArguments(ActionArguments):
         return f"{self.name}({param_str})"
 
 
-class ClaudeEditTool(Action, CodeModificationMixin):
+class ClaudeEditTool(Action, CodeModificationMixin, CompletionModelMixin):
     """
     An filesystem editor tool that allows the agent to view, create, and edit files.
     The tool parameters are defined by Anthropic and are not editable.
@@ -161,7 +160,10 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         super().__init__(**data)
         self._str_replace = StringReplace(auto_run_tests=self.auto_run_tests)
         self._create_file = CreateFile(auto_run_tests=self.auto_run_tests)
-        self._view_code = ViewCode()
+        self._view_code = ViewCode(completion_model=self.completion_model)
+
+    def _initialize_completion_model(self):
+        self._view_code._initialize_completion_model()
 
     async def execute(self, args: EditActionArguments, file_context: FileContext | None = None) -> Observation:
         # Claude tends to add /repo in the start of the file path.
@@ -241,16 +243,12 @@ class ClaudeEditTool(Action, CodeModificationMixin):
         self._str_replace.workspace = value
         self._create_file.workspace = value
 
-    @property
-    def completion_model(self):
-        return self._view_code._completion_model
-
     @completion_model.setter
     def completion_model(self, value: Optional[BaseCompletionModel]):
         if value is None:
-            self._view_code._completion_model = None
+            self._view_code.completion_model = None
         else:
-            self._view_code._completion_model = value.clone()
+            self._view_code.completion_model = value.clone()
             self._view_code._initialize_completion_model()
 
     def validate_path(self, file_context: FileContext, command: str, path: Path) -> str | None:

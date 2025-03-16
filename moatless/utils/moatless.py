@@ -1,19 +1,12 @@
 import os
 from pathlib import Path
 
-from moatless.context_data import current_project_id, moatless_dir
+from moatless.context_data import current_project_id
 
 
 def get_moatless_dir() -> Path:
     """Get the moatless directory."""
-    if not moatless_dir.get():
-        dir_path = Path(os.getenv("MOATLESS_DIR", ".moatless"))
-    else:
-        dir_path = Path(moatless_dir.get())
-
-    if not dir_path.exists():
-        dir_path.mkdir(parents=True, exist_ok=True)
-    return dir_path
+    return Path(os.getenv("MOATLESS_DIR", ".moatless"))
 
 
 def get_moatless_trajectories_dir(evaluation_name: str | None = None) -> Path:

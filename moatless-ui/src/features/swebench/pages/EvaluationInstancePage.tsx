@@ -29,7 +29,7 @@ export function EvaluationInstancePage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="flex items-center justify-center h-full">
         <Card>
           <CardContent className="py-6">
             <div className="flex items-center justify-center gap-2">
@@ -44,7 +44,7 @@ export function EvaluationInstancePage() {
 
   if (trajectoryError || !trajectory) {
     return (
-      <div className="container mx-auto p-6">
+      <div className="flex items-center justify-center h-full">
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>

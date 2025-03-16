@@ -1,10 +1,12 @@
 import { TrajectoryEvent } from "@/lib/types/trajectory.ts";
 import { create } from "zustand";
+import { TreeItem } from "../components/tree-view/types";
 
 interface TrajectoryState {
   expandedNodes: Record<string, Set<number>>;
   expandedItems: Record<string, Record<number, Set<string>>>;
   events: TrajectoryEvent[];
+  selectedTreeItem: TreeItem | null;
   selectedItems: Record<
     string,
     {
@@ -41,6 +43,8 @@ interface TrajectoryState {
   getSelectedItem: (
     instanceId: string,
   ) => TrajectoryState["selectedItems"][string] | null;
+  setSelectedTreeItem: (treeItem: TreeItem) => void;
+  getSelectedTreeItem: (instanceId: string) => TreeItem | null;
 }
 
 export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
@@ -48,6 +52,7 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
   expandedItems: {},
   selectedItems: {},
   events: [],
+  selectedTreeItem: null,
 
   toggleNode: (instanceId, nodeId) =>
     set((state) => {
@@ -113,6 +118,8 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
       return { selectedItems: newSelectedItems };
     }),
 
+  setSelectedTreeItem: (treeItem: TreeItem) => set({ selectedTreeItem: treeItem }),
+
   getSelectedItem: (instanceId) => {
     const state = get();
     return state.selectedItems[instanceId] || null;
@@ -133,6 +140,11 @@ export const useTrajectoryStore = create<TrajectoryState>((set, get) => ({
   isItemExpanded: (instanceId, nodeId, itemId) => {
     const state = get();
     return state.expandedItems[instanceId]?.[nodeId]?.has(itemId) || false;
+  },
+
+  getSelectedTreeItem: (instanceId) => {
+    const state = get();
+    return state.selectedTreeItem;
   },
 
   setEvents: (events: TrajectoryEvent[]) => set({ events }),

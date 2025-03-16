@@ -16,6 +16,7 @@ from moatless.completion.schema import (
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
         return messages
 
-    async def get_node_messages(self, node: "Node") -> list[NodeMessage]:
+    async def get_node_messages(self, node: Node, workspace: Workspace) -> list[NodeMessage]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
         Respects token limits while preserving ViewCode context.
@@ -106,7 +107,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
         # Calculate initial token count
         total_tokens = node.file_context.context_size()
-        total_tokens += count_tokens(node.get_root().message)
+        total_tokens += count_tokens(node.get_root().message or "")
 
         # Pre-calculate test output tokens if there's a patch
         test_output_tokens = 0

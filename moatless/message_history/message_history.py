@@ -6,22 +6,17 @@ from pydantic import BaseModel, Field, PrivateAttr, model_serializer
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionTextObject,
-    ChatCompletionThinkingObject,
     ChatCompletionUserMessage,
 )
+from moatless.message_history.base import BaseMemory
 from moatless.node import Node
-from moatless.schema import MessageHistoryType
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
-class MessageHistoryGenerator(BaseModel):
-    message_history_type: MessageHistoryType = Field(
-        default=MessageHistoryType.MESSAGES,
-        description="Type of message history to generate",
-    )
+class MessageHistoryGenerator(BaseMemory):
     max_tokens: int = Field(default=20000, description="Maximum number of tokens allowed in message history")
     include_file_context: bool = Field(default=True, description="Whether to include file context in messages")
     include_git_patch: bool = Field(default=True, description="Whether to include git patch in messages")
@@ -32,7 +27,7 @@ class MessageHistoryGenerator(BaseModel):
 
     _workspace: Workspace | None = PrivateAttr(default=None)
 
-    async def generate_messages(self, node: Node) -> list[AllMessageValues]:  # type: ignore
+    async def generate_messages(self, node: Node, workspace: Workspace) -> list[AllMessageValues]:  # type: ignore
         previous_nodes = node.get_trajectory()
 
         messages = []
@@ -45,7 +40,7 @@ class MessageHistoryGenerator(BaseModel):
 
             if previous_node.artifact_changes:
                 for change in previous_node.artifact_changes:
-                    artifact = self._workspace.get_artifact(change.artifact_type, change.artifact_id)
+                    artifact = workspace.get_artifact(change.artifact_type, change.artifact_id)
                     if artifact:
                         message_content.append(
                             ChatCompletionTextObject(
@@ -146,52 +141,3 @@ class MessageHistoryGenerator(BaseModel):
         logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
 
         return messages
-
-    @property
-    def workspace(self):
-        return self._workspace
-
-    @workspace.setter
-    def workspace(self, workspace: Workspace):
-        self._workspace = workspace
-
-    def model_dump(self, **kwargs):
-        return {
-            "message_history_type": self.message_history_type.value,
-            "max_tokens": self.max_tokens,
-            "include_file_context": self.include_file_context,
-            "include_git_patch": self.include_git_patch,
-            "thoughts_in_action": self.thoughts_in_action,
-        }
-
-    @classmethod
-    def create(cls, message_history_type: MessageHistoryType, **obj):
-        obj["message_history_type"] = message_history_type
-
-        if message_history_type == MessageHistoryType.REACT:
-            from moatless.message_history.react import ReactMessageHistoryGenerator
-
-            return ReactMessageHistoryGenerator(**obj)
-
-        elif message_history_type == MessageHistoryType.MESSAGES_COMPACT:
-            from moatless.message_history.compact import CompactMessageHistoryGenerator
-
-            return CompactMessageHistoryGenerator(**obj)
-
-        elif message_history_type == MessageHistoryType.SUMMARY:
-            from moatless.message_history.summary import SummaryMessageHistoryGenerator
-
-            return SummaryMessageHistoryGenerator(**obj)
-
-        elif message_history_type == MessageHistoryType.MESSAGES:
-            return cls(**obj)
-        else:
-            raise ValueError(f"Invalid message_history_type: {message_history_type}")
-
-    @classmethod
-    def model_validate(cls, obj):
-        if isinstance(obj, dict) and "message_history_type" in obj:
-            obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
-            return cls.create(**obj)
-
-        return obj

@@ -40,7 +40,7 @@ export function RunnerDashboardPage() {
 
   if (isLoading) {
     return (
-      <div className="container mx-auto px-4 py-6 space-y-6 max-w-7xl">
+      <div className="space-y-6">
         <h1 className="text-2xl font-bold">Runner Dashboard</h1>
         <div className="grid grid-cols-4 gap-4">
           {Array(4)
@@ -63,7 +63,7 @@ export function RunnerDashboardPage() {
 
   if (error || !data) {
     return (
-      <div className="container mx-auto px-4 py-6 space-y-6 max-w-7xl">
+      <div className="space-y-6">
         <h1 className="text-2xl font-bold">Runner Dashboard</h1>
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
@@ -126,7 +126,7 @@ export function RunnerDashboardPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 py-6 space-y-6 max-w-7xl">
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Runner Dashboard</h1>
         <Button onClick={() => refetch()} variant="outline" size="sm">

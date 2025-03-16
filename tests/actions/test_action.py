@@ -37,8 +37,7 @@ def test_take_action():
     class TakeAction(OpenAISchema):
         action: Union[tuple(actions)] = Field(...)
 
-        class Config:
-            smart_union = True
+        model_config = {"smart_union": True}
 
     action_type = TakeAction
     schema = action_type.model_json_schema()

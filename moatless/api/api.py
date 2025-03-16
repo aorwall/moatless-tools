@@ -2,9 +2,12 @@
 
 import importlib.resources as pkg_resources
 import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
+import asyncio
+from datetime import datetime
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -12,10 +15,12 @@ from fastapi import (
     HTTPException,
     Request,
     UploadFile,
+    Depends,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from pydantic import ConfigDict
 
 from moatless.api.agents.api import router as agent_router
 from moatless.api.artifacts.api import router as artifact_router
@@ -38,24 +43,15 @@ from moatless.runner.runner import BaseRunner, JobsStatusSummary
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
+from moatless.api.dependencies import get_runner, get_event_bus
 
 import moatless.settings as settings
 
 # Filter warnings from external dependencies
 filter_external_warnings()
 
-setup_logging(
-    log_level=os.getenv("LOG_LEVEL", "INFO"),
-    log_dir=Path(os.getcwd()) / "logs",
-    service_name="moatless-api",
-    environment=os.getenv("DEPLOYMENT_ENV", "development"),
-    use_json=os.getenv("LOG_FORMAT", "").lower() == "json",
-)
-
-logger = get_logger(__name__)
-
-runner = settings.runner
-event_bus = settings.event_bus
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
@@ -63,20 +59,31 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     load_dotenv()
 
-    api = FastAPI(title="Moatless API")
+    api = FastAPI(
+        title="Moatless API",
+        json_encoders={datetime: lambda dt: dt.isoformat()},
+        model_config={"exclude_none": True},
+    )
 
     @api.on_event("startup")
     async def startup_event():
-        logger.info("Subscribing to system events")
+        logger.info("API startup event triggered")
+
+        logger.info("Setting up telemetry")
         setup_telemetry()
 
-        await event_bus.initialize()
-        await event_bus.subscribe(handle_event)
+        await settings.ensure_managers_initialized()
+
+        event_bus = settings.event_bus
+        if event_bus:
+            await event_bus.subscribe(handle_event)
 
     @api.on_event("shutdown")
     async def shutdown_event():
         logger.info("Unsubscribing from system events")
-        await event_bus.unsubscribe(handle_event)
+        event_bus = settings.event_bus
+        if event_bus:
+            await event_bus.unsubscribe(handle_event)
 
     FastAPIInstrumentor.instrument_app(api)
 
@@ -118,7 +125,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             try:
                 artifact = workspace.get_artifact(type, id)
                 if not artifact:
-                    raise HTTPException(status_code=404, detail=f"Artifact {id} not found")
+                    raise HTTPException(
+                        status_code=404, detail=f"Artifact {id} not found"
+                    )
                 return artifact.to_ui_representation()
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e))
@@ -146,24 +155,35 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 json.dump(trajectory_data, f)
             return load_trajectory_from_file(temp_file_path)
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid trajectory file: {str(e)}"
+            )
 
     @router.get("/runner", response_model=RunnerResponseDTO)
-    async def get_runner() -> RunnerResponseDTO:
+    async def get_runner_info(
+        runner: BaseRunner = Depends(get_runner),
+    ) -> RunnerResponseDTO:
         """Get the runner"""
-        return RunnerResponseDTO(info=await runner.get_runner_info(), jobs=await runner.get_jobs())
+        return RunnerResponseDTO(
+            info=await runner.get_runner_info(), jobs=await runner.get_jobs()
+        )
 
     @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
-    async def get_job_status_summary(project_id: str) -> JobsStatusSummary:
+    async def get_job_status_summary(
+        project_id: str, runner: BaseRunner = Depends(get_runner)
+    ) -> JobsStatusSummary:
         """Get a summary of job statuses for a project"""
         return await runner.get_job_status_summary(project_id)
 
     @router.post("/runner/jobs/{project_id}/cancel")
-    async def cancel_jobs(project_id: str, request: Request):
+    async def cancel_jobs(
+        project_id: str, request: Request, runner: BaseRunner = Depends(get_runner)
+    ):
         """Cancel jobs for a project"""
         data = (
             await request.json()
-            if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0
+            if request.headers.get("content-length")
+            and int(request.headers.get("content-length", "0")) > 0
             else None
         )
         trajectory_id = data.get("trajectory_id") if data else None
@@ -171,14 +191,17 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         return {"status": "success", "message": "Job(s) canceled successfully"}
 
     @router.post("/runner/jobs/{project_id}/{trajectory_id}/retry")
-    async def retry_job(project_id: str, trajectory_id: str):
+    async def retry_job(
+        project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)
+    ):
         """Retry a failed job"""
         success = await runner.retry_job(project_id, trajectory_id)
         if success:
             return {"status": "success", "message": "Job requeued successfully"}
         else:
             raise HTTPException(
-                status_code=400, detail="Failed to retry job, it may not exist or not be in a failed state"
+                status_code=400,
+                detail="Failed to retry job, it may not exist or not be in a failed state",
             )
 
     # Include model, agent, and loop configuration routers
@@ -186,7 +209,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     router.include_router(model_router, prefix="/models", tags=["models"])
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
     router.include_router(swebench_router, prefix="/swebench", tags=["swebench"])
-    router.include_router(trajectory_router, prefix="/trajectories", tags=["trajectories"])
+    router.include_router(
+        trajectory_router, prefix="/trajectories", tags=["trajectories"]
+    )
     router.include_router(loop_router, prefix="/loop", tags=["loop"])
     router.include_router(artifact_router, prefix="/artifacts", tags=["artifacts"])
 
@@ -214,7 +239,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 return await html_app.get_response("index.html", scope)
 
             # Mount static files for assets
-            api.mount("/assets", StaticFiles(directory=str(ui_path / "assets")), name="assets")
+            api.mount(
+                "/assets", StaticFiles(directory=str(ui_path / "assets")), name="assets"
+            )
 
             # Add the catch-all route for SPA
             @api.get("/{full_path:path}")
@@ -247,11 +274,17 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                     @api.get("/")
                     async def serve_root(request: Request):
                         scope = request.scope
-                        scope.update({"path": "/index.html", "method": "GET", "type": "http"})
+                        scope.update(
+                            {"path": "/index.html", "method": "GET", "type": "http"}
+                        )
                         return await html_app.get_response("index.html", scope)
 
                     # Mount static files for assets
-                    api.mount("/assets", StaticFiles(directory=str(ui_files / "assets")), name="assets")
+                    api.mount(
+                        "/assets",
+                        StaticFiles(directory=str(ui_files / "assets")),
+                        name="assets",
+                    )
 
                     # Add the catch-all route for SPA
                     @api.get("/{full_path:path}")
@@ -259,7 +292,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                         if full_path.startswith("api/"):
                             raise HTTPException(status_code=404, detail="Not found")
                         try:
-                            return await html_app.get_response("index.html", request.scope)
+                            return await html_app.get_response(
+                                "index.html", request.scope
+                            )
                         except Exception as e:
                             logger.error(f"Error serving SPA: {e}")
                             raise HTTPException(status_code=404, detail="Not found")

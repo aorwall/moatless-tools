@@ -1,13 +1,13 @@
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
 from moatless.api.trajectory.schema import NodeDTO
 from moatless.artifacts.artifact import ArtifactHandler
-from moatless.completion.model import Usage
+from moatless.completion.stats import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
@@ -274,3 +274,42 @@ class TrajectoryResponseDTO(BaseModel):
     events: list[TrajectoryEventDTO] = Field(default_factory=list)
     nodes: list[NodeDTO] = Field(default_factory=list)
     usage: Optional[Usage] = None
+
+
+class NodeDetails(BaseModel):
+    """Details about a node."""
+
+    node: NodeDTO
+    children: list[NodeDTO] = Field(default_factory=list)
+
+
+class ToolCall(BaseModel):
+    """A tool call."""
+
+    name: str
+    arguments: dict[str, Any]
+
+
+class CompletionOutput(BaseModel):
+    """Output of a completion."""
+
+    content: Optional[str] = None
+    tool_calls: Optional[list[ToolCall]] = None
+
+
+class CompletionInputMessage(BaseModel):
+    """Input of a completion."""
+
+    role: str
+    content: Optional[str] = None
+    tool_calls: Optional[list[ToolCall]] = None
+
+
+class CompletionDTO(BaseModel):
+    """Data transfer object for completions."""
+
+    system_prompt: Optional[str] = None
+    input: List[CompletionInputMessage] = None
+    output: Optional[CompletionOutput] = None
+    original_input: Optional[dict] = None
+    original_output: Optional[dict] = None

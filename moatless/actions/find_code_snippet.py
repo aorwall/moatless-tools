@@ -36,7 +36,7 @@ class FindCodeSnippetArgs(SearchBaseArgs):
     model_config = {"title": "FindCodeSnippet"}
 
     @model_validator(mode="after")
-    def validate_snippet(self) -> "FindCodeSnippetArgs":
+    def validate_snippet(self):
         if not self.code_snippet.strip():
             raise ValueError("code_snippet cannot be empty")
         return self

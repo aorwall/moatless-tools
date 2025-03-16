@@ -3,8 +3,10 @@ import {
   ResumeTrajectoryRequest,
   Trajectory,
   TrajectoryLogsResponse,
+  Node
 } from "@/lib/types/trajectory";
 import { apiRequest } from "./config";
+import { NodeItem } from "@/features/trajectory/components/tree-view/types";
 
 export const trajectoriesApi = {
   getTrajectories: async (): Promise<TrajectoryListItem[]> => {
@@ -37,6 +39,21 @@ export const trajectoriesApi = {
       options,
     );
     return response;
+  },
+
+  getTreeViewData: async (
+    projectId: string,
+    trajectoryId: string
+  ): Promise<NodeItem> => {
+    return apiRequest<NodeItem>(`/trajectories/${projectId}/${trajectoryId}/tree`);
+  },
+
+  getNode: async (
+    projectId: string,
+    trajectoryId: string,
+    nodeId: number
+  ): Promise<Node> => {
+    return apiRequest<Node>(`/trajectories/${projectId}/${trajectoryId}/node/${nodeId}`);
   },
 
   startTrajectory: async (projectId: string, trajectoryId: string) => {

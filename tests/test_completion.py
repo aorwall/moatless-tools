@@ -115,8 +115,7 @@ class TestCompletion:
         class TestAction(ActionArguments):
             query: str
 
-            class Config:
-                title = "TestAction"
+            model_config = {"title": "TestAction"}
 
         mock_content = """Thought: I need to calculate the sum of 2 and 2.
 This is a simple arithmetic operation.

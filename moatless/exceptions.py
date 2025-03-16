@@ -1,5 +1,11 @@
 from typing import Any, List, Optional
 
+# Import CompletionInvocation for type hint
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from moatless.completion.stats import CompletionInvocation, Usage
+
 
 class MoatlessError(Exception):
     """Base exception class for all Moatless exceptions."""
@@ -27,14 +33,10 @@ class CompletionError(MoatlessError):
     def __init__(
         self,
         message: str,
-        last_completion: Any | None = None,
-        messages: list[dict] | None = None,
-        accumulated_usage: Optional["Usage"] = None,
+        completion_invocation: "CompletionInvocation | None" = None,
     ):
         super().__init__(message)
-        self.last_completion = last_completion
-        self.messages = messages or []
-        self.accumulated_usage = accumulated_usage
+        self.completion_invocation = completion_invocation
 
 
 class CompletionRuntimeError(RuntimeError, CompletionError):

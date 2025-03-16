@@ -7,8 +7,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from moatless.artifacts.artifact import ArtifactChange
-from moatless.completion.model import Completion
 from moatless.completion.schema import ResponseSchema
+from moatless.completion.stats import CompletionInvocation
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +33,15 @@ class ActionArguments(ResponseSchema, ABC):
         return cls(**tool_args)
 
     def equals(self, other: "ActionArguments") -> bool:
-        return self.model_dump(exclude={"thoughts"}) == other.model_dump(exclude={"thoughts"})
+        return self.model_dump(exclude={"thoughts"}) == other.model_dump(
+            exclude={"thoughts"}
+        )
 
     def to_prompt(self):
         prompt = f"Action: {self.name}\n"
-        prompt += "\n".join([f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()])
+        prompt += "\n".join(
+            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
+        )
         return prompt
 
     def short_summary(self) -> str:
@@ -76,7 +80,11 @@ class ActionArguments(ResponseSchema, ABC):
             full_module_name = f"moatless.actions.{module_name}"
             module = importlib.import_module(full_module_name)
             for name, obj in module.__dict__.items():
-                if isinstance(obj, type) and issubclass(obj, ActionArguments) and obj != ActionArguments:
+                if (
+                    isinstance(obj, type)
+                    and issubclass(obj, ActionArguments)
+                    and obj != ActionArguments
+                ):
                     _action_args[name] = obj
 
     @classmethod
@@ -86,11 +94,16 @@ class ActionArguments(ResponseSchema, ABC):
             action_args_class_path = obj.pop("action_args_class", None)
 
             if action_args_class_path:
-                if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
+                if (
+                    action_args_class_path
+                    == "moatless.actions.request_context.RequestMoreContextArgs"
+                ):
                     action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
 
                 if action_args_class_path.startswith("moatless.actions.edit"):
-                    action_args_class_path = "moatless.actions.claude_text_editor.EditActionArguments"
+                    action_args_class_path = (
+                        "moatless.actions.claude_text_editor.EditActionArguments"
+                    )
 
                 module_name, class_name = action_args_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
@@ -108,12 +121,19 @@ class Observation(BaseModel):
         None,
         description="Summary of the observation, will be displayed in summarised message history.",
     )
-    terminal: bool = Field(False, description="Indicates if this action results in a terminal state")
+    terminal: bool = Field(
+        False, description="Indicates if this action results in a terminal state"
+    )
 
-    properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
-    execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
+    properties: Optional[dict[str, Any]] = Field(
+        default_factory=dict, description="Additional properties"
+    )
+    execution_completion: Optional[CompletionInvocation] = Field(
+        None, description="Completion created when executing the action"
+    )
     artifact_changes: list[ArtifactChange] = Field(
-        default_factory=list, description="Artifact changes created when executing the action"
+        default_factory=list,
+        description="Artifact changes created when executing the action",
     )
 
     @classmethod
@@ -123,7 +143,7 @@ class Observation(BaseModel):
         summary: Optional[str] = None,
         terminal: bool = False,
         properties: Optional[dict[str, Any]] = None,
-        execution_completion: Optional[Completion] = None,
+        execution_completion: Optional[CompletionInvocation] = None,
         artifact_changes: Optional[list[ArtifactChange]] = None,
     ):
         return cls(
@@ -137,8 +157,28 @@ class Observation(BaseModel):
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        data["artifact_changes"] = [change.model_dump() for change in self.artifact_changes]
+        data["artifact_changes"] = [
+            change.model_dump() for change in self.artifact_changes
+        ]
+        if self.execution_completion:
+            data["execution_completion"] = self.execution_completion.model_dump()
+        else:
+            data["execution_completion"] = None
         return data
+
+    @classmethod
+    def model_validate(cls, obj: Any):
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["artifact_changes"] = [
+                ArtifactChange.model_validate(change)
+                for change in obj.get("artifact_changes", [])
+            ]
+            if obj.get("execution_completion"):
+                obj["execution_completion"] = CompletionInvocation.model_validate(
+                    obj["execution_completion"]
+                )
+        return super().model_validate(obj)
 
 
 class RewardScaleEntry(BaseModel):

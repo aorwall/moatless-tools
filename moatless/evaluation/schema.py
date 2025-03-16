@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.benchmark.report import BenchmarkResult
-from moatless.completion.model import Usage
+from moatless.completion.stats import Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.events import BaseEvent
 from moatless.feedback import BaseFeedbackGenerator

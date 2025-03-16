@@ -23,7 +23,7 @@ import {
   ChevronRight,
   Layers,
   MessageSquare,
-  Package
+  Package,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger
 } from "@/lib/components/ui/dropdown-menu";
 
-export type TrajectoryView = "timeline" | "chat" | "artifacts" | "timeline2";
+export type TrajectoryView = "timeline" | "chat" | "artifacts" | "timeline2" | "tree";
 
 interface TrajectoryStatusProps {
   trajectory: Trajectory;
@@ -177,6 +177,9 @@ export function TrajectoryStatus({
             <DropdownMenuItem onClick={() => onViewChange("artifacts")}>
               <Package className="h-4 w-4 mr-2" />
               Artifacts
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onViewChange("tree")}>
+              Tree
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

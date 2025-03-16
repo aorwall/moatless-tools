@@ -88,3 +88,14 @@ export function useCreateFlow() {
     },
   });
 }
+
+export function useDeleteFlow() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => flowsApi.deleteFlow(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["flows"] });
+    },
+  });
+}

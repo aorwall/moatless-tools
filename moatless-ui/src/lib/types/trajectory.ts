@@ -173,16 +173,16 @@ export interface Reward {
 }
 
 export interface Node {
-  nodeId: number;
+  node_id: number;
   reward?: Reward;
   children: Node[];
   executed: boolean;
-  userMessage?: string;
+  user_message?: string;
   thoughts?: string;
-  assistantMessage?: string;
-  actionSteps: ActionStep[];
+  assistant_message?: string;
+  action_steps: ActionStep[];
   error?: string;
-  fileContext?: FileContext;
+  file_context?: FileContext;
   completion?: Completion;
   warnings: string[];
   errors: string[];

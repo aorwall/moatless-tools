@@ -8,10 +8,8 @@ from pydantic import BaseModel, Field
 
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.artifacts.artifact import ArtifactChange
-from moatless.completion.model import (
-    Completion,
-    Usage,
-)
+
+from moatless.completion.stats import CompletionInvocation, Usage
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
@@ -22,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ActionStep(BaseModel):
     action: ActionArguments
     observation: Optional[Observation] = None
-    completion: Optional[Completion] = None
+    completion: Optional[CompletionInvocation] = None
 
     def is_executed(self) -> bool:
         """Check if this action step has been executed by verifying if it has observations."""
@@ -94,7 +92,9 @@ class Node(BaseModel):
 
     file_context: Optional[FileContext] = Field(None, description="The file context state associated with the node")
     # feedback: Optional[str] = Field(None, description="Feedback provided to the node")
-    completions: dict[str, Completion] = Field(default_factory=dict, description="The completions used in this node")
+    completions: dict[str, CompletionInvocation] = Field(
+        default_factory=dict, description="The completions used in this node"
+    )
     possible_actions: list[str] = Field(default_factory=list, description="List of possible action types for this node")
     is_duplicate: Optional[bool] = Field(None, description="Flag to indicate if the node is a duplicate")
     terminal: bool = Field(False, description="Flag to indicate if the node is a terminal node")
@@ -379,6 +379,8 @@ class Node(BaseModel):
         if not kwargs.get("exclude") or "children" not in kwargs.get("exclude", set()):
             node_dict["children"] = [child.model_dump(**kwargs) for child in self.children]
 
+        node_dict["timestamp"] = self.timestamp.isoformat()
+
         return node_dict
 
     @classmethod
@@ -428,6 +430,9 @@ class Node(BaseModel):
 
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
+
+        if node_data.get("timestamp"):
+            node_data["timestamp"] = datetime.fromisoformat(node_data["timestamp"])
 
         if node_data.get("feedback_data"):
             node_data["feedback_data"] = FeedbackData.model_validate(node_data["feedback_data"])

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from moatless.actions.action import CompletionModelMixin
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
-from moatless.completion.model import Completion
+from moatless.completion.stats import CompletionInvocation
 from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
@@ -76,6 +76,8 @@ class IdentifyMixin(CompletionModelMixin):
 
     def _initialize_completion_model(self):
         """Initialize the completion model with validation function for token limits"""
+        if not self.completion_model:
+            return
 
         async def validate_identified_code(
             structured_outputs: list[ResponseSchema],
@@ -108,11 +110,11 @@ class IdentifyMixin(CompletionModelMixin):
 
             return structured_outputs, text_response
 
-        self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
+        self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code)
 
     async def _identify_code(
         self, args: ActionArguments, view_context: FileContext, max_tokens: int
-    ) -> tuple[FileContext, Completion]:
+    ) -> tuple[FileContext, CompletionInvocation]:
         """Identify relevant code sections in a large context.
 
         Args:
@@ -142,7 +144,7 @@ class IdentifyMixin(CompletionModelMixin):
         identify_message = ChatCompletionUserMessage(role="user", content=content)
 
         messages = [identify_message]
-        completion_response = await self._completion_model.create_completion(messages=messages)
+        completion_response = await self.completion_model.create_completion(messages=messages)
 
         identified_context = FileContext(repo=self._repository)
         if completion_response.structured_outputs:
@@ -156,4 +158,4 @@ class IdentifyMixin(CompletionModelMixin):
                             add_extra=True,
                         )
 
-        return identified_context, completion_response.completion
+        return identified_context, completion_response.completion_invocation

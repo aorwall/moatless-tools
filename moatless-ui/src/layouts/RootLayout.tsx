@@ -1,107 +1,39 @@
 import { RunnerStatusBar } from "@/features/runner/components/RunnerStatusBar";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Outlet } from "react-router-dom";
+import { MainSidebar } from "@/lib/components/layouts/MainSidebar";
+import { SidebarProvider, SidebarTrigger } from "@/lib/components/ui/sidebar";
+import { PageBreadcrumbs } from "@/lib/components/layouts/PageBreadcrumbs";
+import { PageContainer } from "@/lib/components/layouts/PageContainer";
 
 export function RootLayout() {
-  const location = useLocation();
-
-  const isActivePath = (path: string) => {
-    return location.pathname.startsWith(path);
-  };
-
-  // Check if the current route is an evaluation instance page
-  const isEvaluationInstancePage =
-    /^\/swebench\/evaluation\/[^/]+\/[^/]+$/.test(location.pathname);
-
-  const showBetaFeatures = true;
-
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-10 border-b bg-background">
-        <div className="px-4">
-          <nav className="flex h-14 items-center justify-between">
-            <div className="flex items-center space-x-8">
-              <Link to="/" className="text-lg font-semibold">
-                Moatless Tools
-              </Link>
-              <div className="flex items-center space-x-4">
-                {showBetaFeatures && (
-                  <>
-                    <Link
-                      to="/trajectories"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                        isActivePath("/trajectories")
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      Trajectories
-                    </Link>
-                    <Link
-                      to="/loop"
-                      className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                        isActivePath("/loop")
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                      }`}
-                    >
-                      Run Loop
-                    </Link>
-                  </>
-                )}
-                <Link
-                  to="/swebench/evaluation"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/swebench/evaluation")
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  Evaluation
-                </Link>
-                <Link
-                  to="/settings/agents"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/agents")
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  Agents
-                </Link>
-                <Link
-                  to="/settings/models"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/models")
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  Models
-                </Link>
-                <Link
-                  to="/settings/flows"
-                  className={`px-3 py-2 text-sm font-medium transition-colors hover:text-primary ${
-                    isActivePath("/settings/flows")
-                      ? "text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                >
-                  Flows
-                </Link>
-              </div>
-            </div>
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full">
+        {/* Main Sidebar */}
+        <MainSidebar />
 
-            {/* Runner Status Bar */}
-            <div className="flex-shrink-0">
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Header - Full Width */}
+          <header className="sticky top-0 z-10 border-b bg-background w-full">
+            <div className="w-full px-4 h-14 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <SidebarTrigger />
+                <PageBreadcrumbs />
+              </div>
+              {/* Runner Status Bar */}
               <RunnerStatusBar />
             </div>
-          </nav>
-        </div>
-      </header>
+          </header>
 
-      <main>
-        <Outlet />
-      </main>
-    </div>
+          {/* Main Content - Uses PageContainer for consistent width */}
+          <main className="flex-1 overflow-auto">
+            <PageContainer>
+              <Outlet />
+            </PageContainer>
+          </main>
+        </div>
+      </div>
+    </SidebarProvider>
   );
 }

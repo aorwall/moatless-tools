@@ -59,8 +59,9 @@ ENV GENERATE_SOURCEMAP=true
 # Build the UI
 RUN poetry run build-ui
 
-# Create directories for mounted volumes
-RUN mkdir -p /data/moatless /data/repos /data/index_stores
+# Create directories for mounted volumes and set proper permissions
+RUN mkdir -p /data/moatless /data/repos /data/index_stores && \
+    chmod -R 777 /data
 
 # Set environment variables
 ENV PYTHONPATH=/app

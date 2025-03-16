@@ -1,15 +1,17 @@
 import logging
 import traceback
-from typing import Any
+from typing import Any, Optional, cast
 
 from opentelemetry import trace
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import Field, PrivateAttr
 
-from moatless.actions.action import Action, CompletionModelMixin
+from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
 )
+from moatless.completion.schema import ResponseSchema
+from moatless.context_data import current_action_step
 from moatless.agent.events import (
     ActionCreatedEvent,
     ActionExecutedEvent,
@@ -18,21 +20,19 @@ from moatless.agent.events import (
     RunAgentEvent,
 )
 from moatless.completion import BaseCompletionModel
-from moatless.completion.manager import create_completion_model
-from moatless.completion.model import Completion
+from moatless.completion.stats import CompletionInvocation, CompletionAttempt
 from moatless.component import MoatlessComponent
-from moatless.eventbus.base import BaseEventBus
 from moatless.exceptions import (
     CompletionError,
     CompletionRejectError,
     RejectError,
     RuntimeError,
 )
-from moatless.message_history import MessageHistoryGenerator
+from moatless.message_history.base import BaseMemory
+from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import ActionStep, Node
 from moatless.workspace import Workspace
 
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.agent")
@@ -40,131 +40,86 @@ tracer = trace.get_tracer("moatless.agent")
 
 class ActionAgent(MoatlessComponent):
     agent_id: str = Field(..., description="Agent ID")
+    model_id: Optional[str] = Field(None, description="Model ID")
+    description: Optional[str] = Field(None, description="Description of the agent")
 
-    system_prompt: str = Field(..., description="System prompt to be used for generating completions")
+    completion_model: Optional[BaseCompletionModel] = Field(
+        None, description="Completion model to be used for generating completions"
+    )
+
+    system_prompt: str = Field(
+        ..., description="System prompt to be used for generating completions"
+    )
     actions: list[Action] = Field(default_factory=list)
+    memory: BaseMemory = Field(
+        ...,
+        description="Message history generator to be used for generating completions",
+    )
 
-    _completion_model: BaseCompletionModel | None = PrivateAttr(default=None)
-    _message_generator: MessageHistoryGenerator | None = PrivateAttr(default=None)
     _action_map: dict[type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
     _workspace: Workspace | None = PrivateAttr(default=None)
 
-    def __init__(self, completion_model: BaseCompletionModel | None = None, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.completion_model = completion_model
 
-    @classmethod
-    def get_component_type(cls) -> str:
-        return "agent"
-
-    @classmethod
-    def _get_package(cls) -> str:
-        return "moatless.agent"
-
-    @classmethod
-    def _get_base_class(cls) -> type:
-        return ActionAgent
-
-    @property
-    def completion_model(self):
-        return self._completion_model
-
-    @property
-    def action_map(self):
-        if not self._action_map:
-            self._action_map = {action.args_schema: action for action in self.actions}
-
-        # Think action is not automatically added to the action map as it's sometimes used to replace thoughts
-        from moatless.actions.think import Think, ThinkArgs
-
-        if ThinkArgs not in self._action_map:
-            self._action_map[ThinkArgs] = Think()
-
-        return self._action_map
-
-    @completion_model.setter
-    def completion_model(self, completion_model: BaseCompletionModel | None):
-        """Set completion model on agent and all actions that support it"""
-        if completion_model is None:
-            self._completion_model = None
-            for action in self.actions:
-                if isinstance(action, CompletionModelMixin):
-                    action.completion_model = None
-        else:
-            self._completion_model = completion_model.clone()
-            self._message_generator = MessageHistoryGenerator.create(completion_model.message_history_type)
-            if self._workspace:
-                self._message_generator.workspace = self._workspace
-
-            action_args = [action.args_schema for action in self.actions]
-            if not action_args:
-                raise RuntimeError("No actions found")
-
-            self._completion_model.initialize(action_args, self.system_prompt)
-
-            for action in self.actions:
-                if hasattr(action, "completion_model"):
-                    action.completion_model = self._completion_model
-
-    @property
-    def workspace(self) -> Workspace:
-        if not self._workspace:
-            raise RuntimeError("Workspace not set")
-        return self._workspace
-
-    # TODO: Replace this with initialize method
-    @workspace.setter
-    def workspace(self, workspace: Workspace):
-        self._workspace = workspace
-        if self._message_generator:
-            self._message_generator.workspace = workspace
+        action_args: list[type[ActionArguments]] = []
         for action in self.actions:
-            action.workspace = workspace
+            self._action_map[action.args_schema] = action
+            action_args.append(action.args_schema)
 
-    async def initialize(self, workspace: Workspace):
-        self._workspace = workspace
-        if self._message_generator:
-            self._message_generator.workspace = workspace
-        for action in self.actions:
-            await action.initialize(workspace)
+        if not action_args:
+            raise RuntimeError("No actions found")
 
-    async def _emit_event(self, event: AgentEvent):
-        """Emit a pure agent event"""
-        await settings.event_bus.publish(event)
+        if self.completion_model:
+            # Cast action_args to the expected type since ActionArguments inherits from ResponseSchema
+            response_schemas = cast(list[type[ResponseSchema]], action_args)
+            self.completion_model.initialize(response_schemas, self.system_prompt)
 
     @tracer.start_as_current_span("ActionAgent._run")
     async def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
-        if not self._completion_model:
+        if not self.completion_model:
             raise RuntimeError("Completion model not set")
 
         if node.is_executed():
             raise RuntimeError("Node already executed")
 
+        if not self._workspace:
+            raise RuntimeError("Workspace not set")
+
         node.possible_actions = [action.name for action in self.actions]
 
-        # TODO: This is a hack to get the file context to work, remove when we got rid of the legacy file_context..
+        # TODO: This is a hack to get the file context to work with the existing repository, remove when we got rid of the legacy file_context..
         if node.file_context and not node.file_context._repo and self._workspace:
             node.file_context._repo = self._workspace.repository
 
         try:
-            await self._emit_event(RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id))
-            messages = await self._message_generator.generate_messages(node)
-            logger.info(f"Node{node.node_id}: Build action with {len(messages)} messages")
+            await self._emit_event(
+                RunAgentEvent(agent_id=self.agent_id, node_id=node.node_id)
+            )
+            messages = await self.memory.generate_messages(node, self._workspace)
+            logger.info(
+                f"Node{node.node_id}: Build action with {len(messages)} messages"
+            )
 
-            completion_response = await self._completion_model.create_completion(messages=messages)
-            node.completions["build_action"] = completion_response.completion
+            completion_response = await self.completion_model.create_completion(
+                messages=messages
+            )
+            if completion_response.completion_invocation:
+                node.completions["build_action"] = (
+                    completion_response.completion_invocation
+                )
 
             node.assistant_message = completion_response.text_response
             if not completion_response.structured_outputs:
                 raise RejectError("No action found")
 
-            if completion_response.thoughts:
-                node.thoughts = completion_response.thoughts
-
             if completion_response.structured_outputs:
-                node.action_steps = [ActionStep(action=action) for action in completion_response.structured_outputs]
-                # Emit action created events
+                node.action_steps = [
+                    ActionStep(action=action)
+                    for action in completion_response.structured_outputs
+                    if isinstance(action, ActionArguments)
+                ]
                 for step in node.action_steps:
                     await self._emit_event(
                         ActionCreatedEvent(
@@ -177,15 +132,11 @@ class ActionAgent(MoatlessComponent):
         except CompletionError as e:
             node.terminal = True
 
-            if e.last_completion:
-                logger.error(f"Node{node.node_id}: Build action failed with completion error: {e}")
-
-                node.completions["build_action"] = Completion.from_llm_completion(
-                    input_messages=e.messages if hasattr(e, "messages") else [],
-                    completion_response=e.last_completion,
-                    model=self.completion_model.model,
-                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
+            if e.completion_invocation:
+                logger.error(
+                    f"Node{node.node_id}: Build action failed with completion error: {e}"
                 )
+                node.completions["build_action"] = e.completion_invocation
             else:
                 logger.exception(f"Node{node.node_id}: Build action failed with error ")
 
@@ -200,7 +151,9 @@ class ActionAgent(MoatlessComponent):
                 )
                 return
             else:
-                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                node.error = (
+                    f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                )
                 await self._emit_event(
                     AgentErrorEvent(
                         agent_id=self.agent_id,
@@ -212,7 +165,9 @@ class ActionAgent(MoatlessComponent):
         except Exception as e:
             node.terminal = True
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
-            logger.error(f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}")
+            logger.error(
+                f"Node{node.node_id}: Build action failed with error: {e}. Type {type(e)}"
+            )
             await self._emit_event(
                 AgentErrorEvent(
                     agent_id=self.agent_id,
@@ -229,16 +184,22 @@ class ActionAgent(MoatlessComponent):
         duplicate_node = node.find_duplicate()
         if duplicate_node:
             node.is_duplicate = True
-            logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution.")
+            logger.info(
+                f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution."
+            )
             return
 
         action_names = [action_step.action.name for action_step in node.action_steps]
         logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
-        for action_step in node.action_steps:
+        for i, action_step in enumerate(node.action_steps):
+            current_action_step.set(i)  # Used in logging to identify the action step
             await self._execute(node, action_step)
+            current_action_step.set(None)
 
     @tracer.start_as_current_span("ActionAgent._execute_action_step")
-    async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:
+    async def _execute_action_step(
+        self, node: Node, action_step: ActionStep
+    ) -> Observation:
         action = self.action_map.get(type(action_step.action))
         if not action:
             logger.error(
@@ -258,7 +219,9 @@ class ActionAgent(MoatlessComponent):
             action_step.observation = await self._execute_action_step(node, action_step)
 
             if previous_context and node.file_context:
-                action_step.observation.artifact_changes = node.file_context.get_artifact_changes(previous_context)
+                action_step.observation.artifact_changes = (
+                    node.file_context.get_artifact_changes(previous_context)
+                )
 
             await self._emit_event(
                 ActionExecutedEvent(
@@ -269,11 +232,15 @@ class ActionAgent(MoatlessComponent):
             )
 
             if not action_step.observation:
-                logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
+                logger.warning(
+                    f"Node{node.node_id}: Action {action_step.action.name} returned no observation"
+                )
             else:
                 node.terminal = action_step.observation.terminal
                 if action_step.observation.execution_completion:
-                    action_step.completion = action_step.observation.execution_completion
+                    action_step.completion = (
+                        action_step.observation.execution_completion
+                    )
 
             logger.info(
                 f"Node{node.node_id}: Executed action: {action_step.action.name}. "
@@ -285,12 +252,9 @@ class ActionAgent(MoatlessComponent):
             )
 
         except CompletionError as e:
-            if e.last_completion:
-                action_step.completion = Completion.from_llm_completion(
-                    input_messages=e.messages,
-                    completion_response=e.last_completion,
-                    model=self.completion_model.model,
-                    usage=e.accumulated_usage if hasattr(e, "accumulated_usage") else None,
+            if e.completion_invocation and e.completion_invocation.last_attempt:
+                action_step.completion = CompletionAttempt(
+                    usage=e.completion_invocation.usage
                 )
 
             node.terminal = True
@@ -299,14 +263,62 @@ class ActionAgent(MoatlessComponent):
                 node.error = f"Completion validation error: {e.message}"
                 return
             else:
-                node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                node.error = (
+                    f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+                )
                 raise e
 
         except Exception as e:
-            logger.exception(f"Node{node.node_id}: Execution of action {action_step.action.name} failed.")
+            logger.exception(
+                f"Node{node.node_id}: Execution of action {action_step.action.name} failed."
+            )
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             node.terminal = True
             raise e
+
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "agent"
+
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.agent"
+
+    @classmethod
+    def _get_base_class(cls) -> type:
+        return ActionAgent
+
+    @property
+    def action_map(self):
+        return self._action_map
+
+    @property
+    def workspace(self) -> Workspace:
+        if not self._workspace:
+            raise RuntimeError("Workspace not set")
+        return self._workspace
+
+    # TODO: Replace this with initialize method
+    @workspace.setter
+    def workspace(self, workspace: Workspace):
+        self._workspace = workspace
+        for action in self.actions:
+            action.workspace = workspace
+
+    async def initialize(self, workspace: Workspace):
+        if not self.completion_model:
+            raise RuntimeError("Completion model not set")
+
+        self._workspace = workspace
+        for action in self.actions:
+            await action.initialize(workspace)
+
+    async def _emit_event(self, event: AgentEvent):
+        """Emit a pure agent event"""
+        from moatless.settings import get_event_bus
+
+        event_bus = await get_event_bus()
+        await event_bus.publish(event)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
@@ -315,8 +327,10 @@ class ActionAgent(MoatlessComponent):
         for action in self.actions:
             dump["actions"].append(action.model_dump(**kwargs))
 
+        dump["memory"] = self.memory.model_dump(**kwargs)
+
         if self.completion_model:
-            dump["model_id"] = self.completion_model.model_id
+            dump["completion_model"] = self.completion_model.model_dump(**kwargs)
 
         return dump
 
@@ -325,18 +339,32 @@ class ActionAgent(MoatlessComponent):
         if isinstance(obj, dict):
             obj = obj.copy()
 
-            obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
+            obj["actions"] = [
+                Action.model_validate(action_data)
+                for action_data in obj.get("actions", [])
+            ]
 
-            if "model_id" in obj:
-                obj["completion_model"] = create_completion_model(obj["model_id"])
+            if "memory" in obj:
+                obj["memory"] = BaseMemory.model_validate(obj["memory"])
+            else:
+                obj["memory"] = MessageHistoryGenerator()
+
+            if "completion_model" in obj:
+                obj["completion_model"] = BaseCompletionModel.model_validate(
+                    obj["completion_model"]
+                )
 
             instance = super().model_validate(obj)
 
             for action in instance.actions:
                 if not isinstance(action, Action):
-                    raise ValueError(f"Invalid action type: {type(action)}. Expected Action subclass.")
+                    raise ValueError(
+                        f"Invalid action type: {type(action)}. Expected Action subclass."
+                    )
                 if not hasattr(action, "args_schema"):
-                    raise ValueError(f"Action {action.__class__.__name__} has no args_schema attribute")
+                    raise ValueError(
+                        f"Action {action.__class__.__name__} has no args_schema attribute"
+                    )
                 instance._action_map[action.args_schema] = action
 
             return instance

@@ -3,10 +3,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Tuple, Type, TypeVar, cast
 
-from pydantic import BaseModel
 
-from moatless.completion.base import BaseCompletionModel
-from moatless.completion.model import Completion
+from moatless.completion.stats import CompletionInvocation
 from moatless.component import MoatlessComponent
 from moatless.node import Node, Reward
 
@@ -22,7 +20,7 @@ class BaseValueFunction(MoatlessComponent[VF]):
     }
 
     @abstractmethod
-    async def get_reward(self, node: Node) -> tuple[Reward, Optional[Completion]]:
+    async def get_reward(self, node: Node) -> tuple[Reward, Optional[CompletionInvocation]]:
         raise NotImplementedError("get_reward method must be implemented")
 
     @classmethod

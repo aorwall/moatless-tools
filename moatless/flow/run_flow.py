@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -9,7 +10,12 @@ from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.flow import AgenticFlow
 from moatless.repository.git import GitRepository
-from moatless.runner.utils import cleanup_job_logging, emit_event, run_async, setup_job_logging
+from moatless.runner.utils import (
+    cleanup_job_logging,
+    emit_event,
+    run_async,
+    setup_job_logging,
+)
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -19,14 +25,22 @@ def run_flow(project_id: str, trajectory_id: str) -> None:
     """Run an instance's agentic flow."""
     print(f"Running instance {trajectory_id} for project {project_id}")
 
-    trajectory_dir = get_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
+    from moatless.settings import ensure_managers_initialized
+
+    asyncio.run(ensure_managers_initialized())
+
+    trajectory_dir = get_trajectory_dir(
+        trajectory_id=trajectory_id, project_id=project_id
+    )
     original_handlers = setup_job_logging("run", trajectory_dir)
 
     repo_path = os.getenv("REPO_PATH", str(Path.cwd()))
     logger.info(f"Using repository path: {repo_path}")
     try:
         repository = GitRepository(repo_path=repo_path)
-        workspace = Workspace(repository=repository, environment=LocalBashEnvironment(cwd=repo_path))
+        workspace = Workspace(
+            repository=repository, environment=LocalBashEnvironment(cwd=repo_path)
+        )
 
         litellm.callbacks = [LogHandler()]
 

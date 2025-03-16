@@ -1,5 +1,4 @@
 import { RootLayout } from "@/layouts/RootLayout";
-import { SettingsLayout } from "@/layouts/SettingsLayout";
 import ErrorBoundary from "@/lib/components/ErrorBoundary";
 import { Toaster } from "@/lib/components/ui/sonner";
 import { WebSocketProvider } from "@/lib/providers/WebSocketProvider";
@@ -9,15 +8,13 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { TrajectoryPage } from "@/features/trajectory/pages/TrajectoryPage";
 import { AgentDetailPage } from "@/features/settings/agents/AgentDetailPage";
-import { AgentsLayout } from "@/features/settings/agents/AgentsLayout";
 import { AgentNewPage } from "@/features/settings/agents/AgentNewPage";
+import { AgentsPage } from "@/features/settings/agents/AgentsPage";
 import { FlowDetailPage } from "@/features/settings/flows/FlowDetailPage";
-import { FlowsLayout } from "@/features/settings/flows/FlowsLayout";
 import { FlowsPage } from "@/features/settings/flows/FlowsPage";
 import { NewFlowPage } from "@/features/settings/flows/NewFlowPage";
-import { ModelsPage } from "@/pages/settings/models";
+import { ModelsPage } from "@/features/settings/models/ModelsPage";
 import { ModelDetailPage } from "@/features/settings/models/ModelDetailPage";
-import { ModelsLayout } from "@/pages/settings/models/layout";
 
 import { EvaluationLayout } from "@/features/swebench/components/EvaluationLayout";
 import { EvaluationsPage } from "@/pages/swebench/evaluation";
@@ -54,19 +51,19 @@ function App() {
                 <Route path="loop" element={<RunLoopPage />} />
                 <Route path="runner" element={<RunnerDashboardPage />} />
 
-                <Route path="settings" element={<SettingsLayout />}>
-                  <Route path="agents" element={<AgentsLayout />}>
-                    <Route index element={<AgentDetailPage />} />
+                <Route path="settings">
+                  <Route path="agents">
+                    <Route index element={<AgentsPage />} />
                     <Route path="new" element={<AgentNewPage />} />
                     <Route path=":id" element={<AgentDetailPage />} />
                   </Route>
-                  <Route path="models" element={<ModelsLayout />}>
+                  <Route path="models">
                     <Route index element={<ModelsPage />} />
                     <Route path="base" element={<BaseModelsPage />} />
                     <Route path="create" element={<CreateModelPage />} />
                     <Route path=":id" element={<ModelDetailPage />} />
                   </Route>
-                  <Route path="flows" element={<FlowsLayout />}>
+                  <Route path="flows">
                     <Route index element={<FlowsPage />} />
                     <Route path="new" element={<NewFlowPage />} />
                     <Route path=":id" element={<FlowDetailPage />} />
@@ -86,11 +83,11 @@ function App() {
                       path=":evaluationId"
                       element={<EvaluationPage />}
                     />
-                    <Route element={<EvaluationLayout />}>
-                      <Route
-                        path=":evaluationId/:instanceId"
-                        element={<EvaluationInstancePage />}
-                      />
+                    <Route
+                      path=":evaluationId/:instanceId"
+                      element={<EvaluationLayout />}
+                    >
+                      <Route index element={<EvaluationInstancePage />} />
                     </Route>
                   </Route>
                 </Route>

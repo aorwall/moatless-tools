@@ -6,8 +6,6 @@ import time
 from pathlib import Path
 
 from moatless.codeblocks.module import Module
-from moatless.flow import SearchTree
-from moatless.flow.loop import AgenticLoop
 from moatless.repository import FileRepository
 from moatless.schema import FileWithSpans
 
@@ -27,6 +25,8 @@ def load_moatless_datasets(split: str | None = None):
     else:
         _load_moatless_dataset("lite")
         _load_moatless_dataset("verified")
+
+    logger.info(f"Loaded {len(_moatless_instances)} instances")
 
 
 def _load_moatless_dataset(split: str):
@@ -391,38 +391,6 @@ def calculate_estimated_context_window(instance, results):
                         change["closest_match_context_window"] = sum_tokens
 
     return expected_changes, sum_tokens
-
-
-def read_agentic_loops(dir: str) -> list[AgenticLoop]:
-    loops = []
-    for root, _, files in os.walk(dir):
-        loop_path = os.path.join(root, "loop.json")
-        if not os.path.exists(loop_path):
-            continue
-
-        with open(loop_path) as f:
-            loop = AgenticLoop.from_file(loop_path)
-            loops.append(loop)
-    return loops
-
-
-def read_search_trees(dir: str) -> list[SearchTree]:
-    search_trees = []
-    for root, _, files in os.walk(dir):
-        trajectory_path = os.path.join(root, "trajectory.json")
-        if not os.path.exists(trajectory_path):
-            continue
-
-        try:
-            if os.stat(trajectory_path).st_size == 0:
-                logger.warning(f"Empty trajectory file: {trajectory_path}")
-                continue
-
-            search_tree = SearchTree.from_file(trajectory_path)
-            search_trees.append(search_tree)
-        except Exception as e:
-            logger.exception(f"Failed to load trajectory from {trajectory_path}: {e}")
-    return search_trees
 
 
 def trace_metadata(instance_id: str, session_id: str, trace_name: str):

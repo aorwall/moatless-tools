@@ -12,9 +12,8 @@ from opentelemetry import trace
 from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
-from moatless.completion.model import Usage
+from moatless.completion.stats import Usage
 from moatless.component import MoatlessComponent
-from moatless.config.agent_config import get_agent
 from moatless.eventbus.base import BaseEventBus
 from moatless.storage.base import BaseStorage
 from moatless.context_data import (
@@ -33,7 +32,6 @@ from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
 
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.flow")
@@ -76,6 +74,8 @@ class AgenticFlow(MoatlessComponent):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        import moatless.settings as settings
+
         self._storage = kwargs.get("storage", settings.storage)
         self._event_bus = kwargs.get("event_bus", settings.event_bus)
 
@@ -99,11 +99,13 @@ class AgenticFlow(MoatlessComponent):
     ) -> "AgenticFlow":
         if not trajectory_id:
             trajectory_id = str(uuid.uuid4())
+        import moatless.settings as settings
 
         if not agent:
             if not agent_id:
                 raise ValueError("Either an agent or an agent ID must be provided.")
-            agent = get_agent(agent_id)
+
+            agent = settings.agent_manager.get_agent(agent_id)
 
         if not root:
             if not message:
@@ -140,7 +142,10 @@ class AgenticFlow(MoatlessComponent):
         self.agent.workspace = workspace
 
     async def run(
-        self, message: str | None = None, workspace: Workspace | None = None, storage: BaseStorage | None = None
+        self,
+        message: str | None = None,
+        workspace: Workspace | None = None,
+        storage: BaseStorage | None = None,
     ) -> Node:
         """Run the system with optional root node."""
         if not self.root:
@@ -220,7 +225,6 @@ class AgenticFlow(MoatlessComponent):
         event.trajectory_id = self.trajectory_id
 
         await self.persist()
-        logger.info(f"Emit event {event.event_type}")
         await self._event_bus.publish(event)
 
     async def _initialize_run_state(self):

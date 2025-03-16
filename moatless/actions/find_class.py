@@ -27,7 +27,7 @@ class FindClassArgs(SearchBaseArgs):
     )
 
     @model_validator(mode="after")
-    def validate_names(self) -> "FindClassArgs":
+    def validate_names(self):
         if not self.class_name.strip():
             raise ValueError("class_name cannot be empty")
         # Extract just the class name if a fully qualified name is provided

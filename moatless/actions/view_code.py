@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from moatless.actions.action import Action
+from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.identify_mixin import IdentifyMixin
 from moatless.actions.schema import (
     ActionArguments,
@@ -84,6 +84,8 @@ class ViewCodeArgs(ActionArguments):
                     files=[
                         CodeSpan(
                             file_path="auth/service.py",
+                            start_line=None,
+                            end_line=None,
                             span_ids=["AuthenticationService.authenticate"],
                         )
                     ],
@@ -107,12 +109,7 @@ class ViewCode(Action, IdentifyMixin):
         description="The maximum number of tokens in the requested code.",
     )
 
-    async def execute(
-        self,
-        args: ViewCodeArgs,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> Observation:
+    async def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
             raise ValueError("File context must be provided to execute the view action.")
 
@@ -133,12 +130,12 @@ class ViewCode(Action, IdentifyMixin):
 
             if not file:
                 message = f"The requested file {file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
-                properties["fail_reason"] = "file_not_found"
+                properties = {"fail_reason": "file_not_found"}
                 return Observation.create(message=message, properties=properties)
 
             if self._repository.is_directory(file_path):
                 message = f"The requested file {file_path} is a directory and not a file. Use the search functions to search for the code if you are unsure of the file path."
-                properties["fail_reason"] = "is_directory"
+                properties = {"fail_reason": "is_directory"}
                 return Observation.create(message=message, properties=properties)
 
         view_context = FileContext(repo=self._repository)
@@ -150,33 +147,43 @@ class ViewCode(Action, IdentifyMixin):
             if file_span.span_ids:
                 missing_span_ids = set()
                 found_span_ids = set()
-                if file_span.span_ids and not file.module:
-                    logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
-                    message = self.create_retry_message(file, "No span ids found. Is it empty?")
-                    properties["fail_reason"] = "invalid_file"
+                if file_span.span_ids and not file or not file.module:
+                    logger.warning(
+                        f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path if file else file_path}."
+                    )
+                    message = (
+                        self.create_retry_message(file, "No span ids found. Is it empty?")
+                        if file
+                        else f"No span ids found in {file_path}. Is it empty?"
+                    )
+                    properties = {"fail_reason": "invalid_file"}
                     return Observation.create(message=message, properties=properties)
 
                 for span_id in file_span.span_ids:
-                    block_span = file.module.find_span_by_id(span_id)
+                    block_span = file.module.find_span_by_id(span_id) if file and file.module else None
                     if not block_span:
                         # Try to find the relevant code block by code block identifier
                         block_identifier = span_id.split(".")[-1]
-                        blocks = file.module.find_blocks_with_identifier(block_identifier)
+                        blocks = (
+                            file.module.find_blocks_with_identifier(block_identifier) if file and file.module else []
+                        )
 
                         if not blocks:
                             missing_span_ids.add(span_id)
 
                         for block in blocks:
-                            view_context.add_span_to_context(
-                                file_path,
-                                block.belongs_to_span.span_id,
-                                add_extra=False,
-                            )
+                            if block and block.belongs_to_span and block.belongs_to_span.span_id:
+                                view_context.add_span_to_context(
+                                    file_path,
+                                    block.belongs_to_span.span_id,
+                                    add_extra=False,
+                                )
 
-                    elif block_span.initiating_block.type == CodeBlockType.CLASS:
+                    elif block_span.initiating_block and block_span.initiating_block.type == CodeBlockType.CLASS:
                         class_block = block_span.initiating_block
                         found_span_ids.add(block_span.span_id)
-                        view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
+                        if class_block and hasattr(class_block, "get_all_span_ids"):
+                            view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
                     else:
                         view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
 
@@ -188,7 +195,7 @@ class ViewCode(Action, IdentifyMixin):
             if not file_span.start_line and not file_span.span_ids:
                 view_context.add_file(file_path, show_all_spans=True)
 
-            if file.patch:
+            if file and file.patch:
                 view_file = view_context.get_file(file_path)
                 if view_file:
                     view_file.set_patch(file.patch)
@@ -200,7 +207,7 @@ class ViewCode(Action, IdentifyMixin):
 
         if view_context.is_empty():
             message = "\nThe specified code spans wasn't found."
-            properties["fail_reason"] = "no_spans_found"
+            properties = {"fail_reason": "no_spans_found"}
             summary = "The specified code spans wasn't found."
         else:
             message = "Here's the contents of the file where the not requested code spans have been commented out:\n"
@@ -218,7 +225,11 @@ class ViewCode(Action, IdentifyMixin):
                 summary = "The specified code spans has already been viewed in a previous action."
 
         if not added_new_spans:
-            properties["flags"] = ["no_spans_added"]
+            if "flags" not in properties:
+                properties = properties or {}
+                properties["flags"] = ["no_spans_added"]
+            else:
+                properties["flags"].append("no_spans_added")
 
         return Observation.create(
             message=message,

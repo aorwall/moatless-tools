@@ -155,7 +155,7 @@ class RunTests(Action):
                 )
             )
 
-        return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)
+        return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)  # type: ignore
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> list[str]:

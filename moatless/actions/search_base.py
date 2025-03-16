@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion.base import CompletionRetryError
-from moatless.completion.model import Completion
+from moatless.completion.stats import CompletionInvocation
 from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
@@ -116,19 +116,19 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
     def _initialize_completion_model(self):
         """Override mixin method to customize initialization"""
-        if self._completion_model:
+        if self.completion_model:
 
             async def validate_identified_code(
                 structured_outputs: list[ResponseSchema],
                 text_response: Optional[str],
-            ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+            ) -> tuple[list[ResponseSchema], Optional[str]]:
                 view_context = FileContext(repo=self._repository)
 
                 if not structured_outputs:
                     return structured_outputs, text_response
 
                 for identified_code in structured_outputs:
-                    if identified_code.identified_spans:
+                    if isinstance(identified_code, Identify) and identified_code.identified_spans:
                         for identified_spans in identified_code.identified_spans:
                             view_context.add_line_span_to_context(
                                 identified_spans.file_path,
@@ -146,7 +146,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
                 return structured_outputs, text_response
 
-            self._completion_model.initialize(
+            self.completion_model.initialize(
                 Identify, IDENTIFY_SYSTEM_PROMPT, post_validation_fn=validate_identified_code
             )
 
@@ -154,8 +154,8 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         if file_context is None:
             raise ValueError("File context must be provided to execute the search action.")
 
-        if not self.completion_model.initialized:
-            self._completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
+        if self.completion_model and not self.completion_model.initialized:
+            self.completion_model.initialize(Identify, IDENTIFY_SYSTEM_PROMPT)
 
         properties = {"search_hits": [], "search_tokens": 0}
 
@@ -196,7 +196,8 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         for file in file_context.files:
             if view_context.has_file(file.file_path) and file.patch:
                 context_file = view_context.get_file(file.file_path)
-                context_file.set_patch(file.patch)
+                if context_file is not None:
+                    context_file.set_patch(file.patch)
 
         new_span_ids = file_context.add_file_context(view_context)
 
@@ -261,7 +262,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
 
     async def _identify_code(
         self, args: SearchBaseArgs, search_result_ctx: FileContext
-    ) -> tuple[FileContext, Completion]:
+    ) -> tuple[FileContext, CompletionInvocation]:
         search_result_str = search_result_ctx.create_prompt(
             show_span_ids=True,
             show_line_numbers=True,
@@ -271,20 +272,23 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
             max_tokens=self.max_identify_prompt_tokens,
         )
 
+        if not self.completion_model:
+            raise ValueError("Completion model is not initialized")
+
         content = "Search request:"
         content += f"\n{args.to_prompt()}"
 
         content += "\n\nIdentify the relevant code sections in the search results to use them. "
         content += f"\n\n<search_results>\n{search_result_str}\n</search_result>\n"
-        identify_message = ChatCompletionUserMessage(role="user", content=content)
+        identify_message = ChatCompletionUserMessage(role="user", content=content)  # type: ignore
 
         messages = [identify_message]
-        completion_response = await self.completion_model.create_completion(messages=messages)
+        completion_response = await self.completion_model.create_completion(messages=messages)  # type: ignore
 
         view_context = FileContext(repo=self._repository)
         if completion_response.structured_outputs:
             for identified_code in completion_response.structured_outputs:
-                if identified_code.identified_spans:
+                if isinstance(identified_code, Identify) and identified_code.identified_spans:
                     for identified_spans in identified_code.identified_spans:
                         view_context.add_line_span_to_context(
                             identified_spans.file_path,
@@ -293,7 +297,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                             add_extra=True,
                         )
 
-        return view_context, completion_response.completion
+        return view_context, completion_response.completion_invocation
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> list[str]:

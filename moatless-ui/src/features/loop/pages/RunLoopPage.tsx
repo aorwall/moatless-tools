@@ -47,11 +47,11 @@ export function RunPage() {
     try {
       const attachmentsData = attachments
         ? await Promise.all(
-            Array.from(attachments).map(async (file) => ({
-              name: file.name,
-              data: await toBase64(file),
-            })),
-          )
+          Array.from(attachments).map(async (file) => ({
+            name: file.name,
+            data: await toBase64(file),
+          })),
+        )
         : undefined;
 
       const data = await startLoop.mutateAsync({
@@ -78,8 +78,8 @@ export function RunPage() {
     });
 
   return (
-    <div className="container mx-auto py-6 h-full overflow-y-auto">
-      <div className="max-w-4xl mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div>
         <h1 className="mb-6 text-2xl font-bold">Start Loop</h1>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid gap-6 md:grid-cols-2">

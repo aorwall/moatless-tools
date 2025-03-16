@@ -105,7 +105,7 @@ export function FormContainer({
 
         {/* Sticky Save Button */}
         <div className="fixed bottom-0 left-0 right-0 bg-background border-t p-4 flex justify-end">
-          <div className="max-w-4xl w-full mx-auto flex justify-end gap-2">
+          <div className="w-full flex justify-end gap-2">
             {actionButtons}
             <Button
               type="submit"

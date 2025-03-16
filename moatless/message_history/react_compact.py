@@ -11,6 +11,7 @@ from moatless.completion.schema import (
 from moatless.message_history.compact import CompactMessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class ReactCompactMessageHistoryGenerator(CompactMessageHistoryGenerator):
     disable_thoughts: bool = Field(default=False, description="Do not include thoughts messages in the history")
 
-    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
+    async def generate_messages(self, node: Node, workspace: Workspace) -> list[AllMessageValues]:
         node_messages = await self.get_node_messages(node)
         logger.info(f"Node messages: {len(node_messages)}")
 

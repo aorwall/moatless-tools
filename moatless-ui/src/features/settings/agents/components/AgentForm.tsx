@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/lib/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
-import { Loader2, Copy } from 'lucide-react';
+import { Loader2, Copy, Trash2 } from 'lucide-react';
 import { AgentConfig } from '@/lib/types/agent';
 import { SectionCard } from '@/lib/components/form/section-card';
 import { FormField } from '@/lib/components/form/form-field';
@@ -13,6 +13,18 @@ import { useActionStore } from '@/lib/stores/actionStore';
 import { createActionConfigFromSchema } from '@/features/settings/agents/utils/actionUtils';
 import { useMemory } from '@/lib/hooks/useFlowComponents';
 import { DynamicListItem, Field, TextField, NumberField, ToggleField } from '@/lib/components/form/types';
+import { useDeleteAgent } from '@/lib/hooks/useAgents';
+import { useNavigate } from 'react-router-dom';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/lib/components/ui/alert-dialog';
 
 interface AgentFormProps {
     agent: AgentConfig;
@@ -26,6 +38,9 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
     const { actions, fetchActions, getActionByClass } = useActionStore();
     const [formValues, setFormValues] = useState<Record<string, any>>(agent);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const navigate = useNavigate();
+    const deleteAgentMutation = useDeleteAgent();
 
     // Fetch actions on component mount
     useEffect(() => {
@@ -60,6 +75,16 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
             console.error('Error submitting form:', error);
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    // Function to handle agent deletion
+    const handleDeleteAgent = async () => {
+        try {
+            await deleteAgentMutation.mutateAsync(agent.agent_id);
+            navigate('/settings/agents');
+        } catch (error) {
+            console.error('Error deleting agent:', error);
         }
     };
 
@@ -204,6 +229,22 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
                                 Duplicate Agent
                             </Button>
                         )}
+                        {!isNew && (
+                            <Button
+                                type="button"
+                                variant="destructive"
+                                onClick={() => setDeleteDialogOpen(true)}
+                                disabled={deleteAgentMutation.isPending}
+                                className="gap-2"
+                            >
+                                {deleteAgentMutation.isPending ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                )}
+                                {deleteAgentMutation.isPending ? "Deleting..." : "Delete Agent"}
+                            </Button>
+                        )}
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting ? "Saving..." : "Save Changes"}
                         </Button>
@@ -277,6 +318,27 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
                     />
                 </SectionCard>
             </form>
+
+            {/* Delete Confirmation Dialog */}
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Agent</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Are you sure you want to delete the agent "{agent.agent_id}"? This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleDeleteAgent}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 } 

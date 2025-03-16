@@ -136,7 +136,7 @@ export function Chat({ trajectory }: ChatProps) {
   return (
     <div className="flex flex-col h-full w-full">
       <ScrollArea ref={scrollRef} className="flex-1 px-4">
-        <div className="mx-auto max-w-3xl space-y-6 py-4">
+        <div className="space-y-6 py-4">
           {messageGroups.map((group, groupIndex) => (
             <div
               key={groupIndex}

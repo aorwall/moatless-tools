@@ -3,8 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from moatless.completion.manager import ModelConfig
-from moatless.completion.model import Usage
+from moatless.completion.manager import BaseCompletionModel
+from moatless.completion.stats import Usage
 from moatless.evaluation.schema import Evaluation, EvaluationInstance
 from moatless.flow.schema import FlowConfig
 from moatless.runner.runner import JobInfo, RunnerInfo
@@ -180,7 +180,7 @@ class EvaluationResponseDTO(BaseModel):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     flow: FlowConfig
-    model: ModelConfig
+    model: BaseCompletionModel
     instances: list[EvaluationInstanceDTO]
 
 

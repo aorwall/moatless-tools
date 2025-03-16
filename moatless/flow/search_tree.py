@@ -6,7 +6,7 @@ from opentelemetry import trace
 from pydantic import ConfigDict, Field, model_validator
 
 from moatless.agent.agent import ActionAgent
-from moatless.completion.model import Usage
+from moatless.completion.stats import Usage
 from moatless.context_data import current_node_id
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.exceptions import RejectError, RuntimeError

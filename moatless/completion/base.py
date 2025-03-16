@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -8,13 +9,14 @@ from math import log
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import litellm
+from openai import APIConnectionError
 import tenacity
-from litellm import BadRequestError, RateLimitError
+from litellm.exceptions import BadRequestError
+from litellm.files.main import RateLimitError
 from opentelemetry import trace
 from pydantic import BaseModel, Field, PrivateAttr
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from moatless.completion.model import Completion, Usage
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionCachedContent,
@@ -23,26 +25,13 @@ from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
 )
+from moatless.completion.stats import CompletionAttempt, CompletionInvocation, Usage
 
-from moatless.events import BaseEvent
+from moatless.component import MoatlessComponent
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
-from moatless.schema import MessageHistoryType
-
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
-
-
-class CompletionEvent(BaseEvent):
-    scope: str = "completion"
-    model: str
-
-
-class CompletionRetryEvent(CompletionEvent):
-    event_type: str = "retry"
-    retry_count: int
-    message: str
 
 
 class CompletionRetryError(Exception):
@@ -75,24 +64,10 @@ class CompletionResponse(BaseModel):
 
     structured_outputs: list[ResponseSchema] = Field(default_factory=list)
     text_response: Optional[str] = Field(default=None)
-    completion: Optional[Completion] = Field(default=None)
-    thoughts: Optional[list[dict]] = Field(default=None)
-
-    @classmethod
-    def create(
-        cls,
-        text: str | None = None,
-        output: list[ResponseSchema] | ResponseSchema | None = None,
-        completion: Completion | None = None,
-    ) -> "CompletionResponse":
-        if isinstance(output, ResponseSchema):
-            outputs = [output]
-        elif isinstance(output, list):
-            outputs = output
-        else:
-            outputs = None
-
-        return cls(text_response=text, structured_outputs=outputs, completion=completion)
+    thought: Optional[str] = Field(default=None, description="Thought process from ReAct or similar models")
+    completion_invocation: Optional[CompletionInvocation] = Field(
+        default=None, description="The complete invocation data including all attempts"
+    )
 
     @property
     def structured_output(self) -> Optional[ResponseSchema]:
@@ -104,21 +79,25 @@ class CompletionResponse(BaseModel):
             )
         return self.structured_outputs[0] if self.structured_outputs else None
 
+    @property
+    def completion_attempts(self) -> List[CompletionAttempt]:
+        """Get the completion attempts from the invocation (for backward compatibility)"""
+        return self.completion_invocation.attempts if self.completion_invocation else []
+
 
 ValidationFunction = Callable[
-    [list[ResponseSchema], Optional[str], list[str]], Awaitable[tuple[list[ResponseSchema], Optional[str], list[str]]]
+    [list[ResponseSchema], Optional[str]], Awaitable[tuple[list[ResponseSchema], Optional[str]]]
 ]
 
 
-class BaseCompletionModel(BaseModel, ABC):
-    model_id: str = Field(..., description="The ID of the model")
+class BaseCompletionModel(MoatlessComponent, ABC):
+    model_id: Optional[str] = Field(default=None, description="The ID of the model")
     model: str = Field(..., description="The model to use for completion")
     temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
     max_tokens: Optional[int] = Field(2000, description="The maximum number of tokens to generate")
     timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
     model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
     model_api_key: Optional[str] = Field(default=None, description="The API key for the model")
-    response_format: LLMResponseFormat = Field(..., description="The response format expected from the LLM")
     metadata: Optional[dict] = Field(default=None, description="Additional metadata for the completion model")
     message_cache: bool = Field(
         default=True,
@@ -133,10 +112,7 @@ class BaseCompletionModel(BaseModel, ABC):
         description="Whether to disable to use thoughts at all.",
     )
     few_shot_examples: bool = Field(False, description="Whether to use few-shot examples for generating completions")
-    message_history_type: MessageHistoryType = Field(
-        default=MessageHistoryType.MESSAGES,
-        description="The type of message history to use",
-    )
+
     headers: dict[str, Any] = Field(default_factory=dict, description="Additional headers provided to LiteLLM")
     params: dict[str, Any] = Field(default_factory=dict, description="Additional parameters provided to LiteLLM")
     merge_same_role_messages: bool = Field(
@@ -151,6 +127,18 @@ class BaseCompletionModel(BaseModel, ABC):
 
     _completion_params: Optional[dict[str, Union[str, dict, list]]] = None
     _initialized: bool = False
+
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "completion_model"
+
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.completion"
+
+    @classmethod
+    def _get_base_class(cls) -> type:
+        return BaseCompletionModel
 
     def initialize(
         self,
@@ -179,9 +167,6 @@ class BaseCompletionModel(BaseModel, ABC):
         if not schemas:
             raise CompletionRuntimeError("At least one response schema must be provided")
 
-        if self.response_format == LLMResponseFormat.REACT and self.message_cache:
-            self.message_cache = False
-
         # Validate all schemas are subclasses of ResponseSchema
         for schema in schemas:
             if not issubclass(schema, ResponseSchema):
@@ -203,7 +188,6 @@ class BaseCompletionModel(BaseModel, ABC):
         if system_prompt:
             self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
 
-        self._event_bus = settings.event_bus
         self._initialized = True
 
     @property
@@ -213,7 +197,7 @@ class BaseCompletionModel(BaseModel, ABC):
     @tracer.start_as_current_span("BaseCompletionModel.create_completion")
     async def create_completion(
         self,
-        messages: list[dict],
+        messages: list[AllMessageValues],
         system_prompt: str | None = None,
     ) -> CompletionResponse:
         if not self._initialized:
@@ -293,7 +277,6 @@ class BaseCompletionModel(BaseModel, ABC):
 
         Returns:
             A dictionary of parameters to pass to the LLM API call. Common keys include:
-            - response_format: Dict specifying the response structure
             - tools: List of available tools/functions
             - tool_choice: How tools should be selected
             - function_call: Function call configuration
@@ -308,8 +291,8 @@ class BaseCompletionModel(BaseModel, ABC):
     ) -> CompletionResponse:
         """Execute completion with retries for validation errors"""
         retry_count = 0
-        accumulated_usage = Usage()
         completion_response = None
+        invocation = CompletionInvocation(model=self.model)
 
         @tenacity.retry(
             retry=tenacity.retry_if_exception_type(CompletionRetryError),
@@ -319,126 +302,130 @@ class BaseCompletionModel(BaseModel, ABC):
             before_sleep=lambda retry_state: logger.info(f"Retrying completion with {len(messages)} messages"),
         )
         async def _do_completion_with_validation():
-            nonlocal retry_count, accumulated_usage, completion_response
+            nonlocal retry_count, completion_response
             retry_count += 1
 
-            # Execute completion and get raw response
-            completion_response = await self._execute_completion(messages)
+            with invocation:
+                try:
+                    completion_response = await self._execute_completion(messages, invocation)
 
-            # Track usage from this attempt regardless of validation outcome
-            usage = Usage.from_completion_response(completion_response, self.model)
-            if usage:
-                accumulated_usage += usage
-            else:
-                logger.warning(f"No usage found for completion response: {completion_response}")
+                    if invocation.current_attempt:
+                        invocation.current_attempt.update_from_response(completion_response, self.model)
 
-            if not completion_response.choices or (
-                not completion_response.choices[0].message.content
-                and not completion_response.choices[0].message.tool_calls
-            ):
-                logger.error(f"Completion response is empty: {completion_response.model_dump_json(indent=2)}")
-                raise CompletionRejectError(
-                    "Completion response is empty",
-                    messages=messages,
-                    last_completion=completion_response,
-                    accumulated_usage=accumulated_usage,
-                )
-
-            try:
-                # Validate the response - may raise CompletionRetryError
-                structured_outputs, text_response = await self._validate_completion(
-                    completion_response=completion_response,
-                )
-
-                # Run post validation if provided and raise CompletionRetryError if it fails
-                if self._post_validation_fn:
-                    structured_outputs, text_response = await self._post_validation_fn(
-                        structured_outputs, text_response
-                    )
-            except CompletionRetryError as e:
-                await self._send_retry_event(retry_count, str(e))
-
-                tool_call_id = None
-                if (
-                    hasattr(completion_response.choices[0].message, "thinking")
-                    and completion_response.choices[0].message.thinking
-                ):
-                    content = []
-                    content.extend(completion_response.choices[0].message.thinking)
-                    if completion_response.choices[0].message.content:
-                        content.append(
-                            ChatCompletionTextObject(type="text", text=completion_response.choices[0].message.content)
+                    if not completion_response.choices or (
+                        not completion_response.choices[0].message.content
+                        and not completion_response.choices[0].message.tool_calls
+                    ):
+                        logger.error(f"Completion response is empty: {completion_response.model_dump_json(indent=2)}")
+                        if invocation.current_attempt:
+                            invocation.current_attempt.success = False
+                            invocation.current_attempt.failure_reason = "Empty response"
+                        raise CompletionRejectError(
+                            "Completion response is empty",
+                            completion_invocation=invocation,
                         )
 
-                    message_dump = completion_response.choices[0].message.model_dump()
-                    message_dump["content"] = content
-                    messages.append(message_dump)
-                else:
-                    if completion_response.choices[0].message.tool_calls:
-                        # TODO: Support multiple tool calls
-                        tool_call_id = completion_response.choices[0].message.tool_calls[0].id
-
-                    messages.append(completion_response.choices[0].message.model_dump())
-
-                if e.retry_messages:
-                    logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
-                    messages.extend(e.retry_messages)
-                else:
-                    logger.warning(f"Post validation failed with retry message: {e}")
-                    if tool_call_id:
-                        messages.append(
-                            ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)
+                    try:
+                        # Validate the response - may raise CompletionRetryError
+                        structured_outputs, text_response, thought = await self._validate_completion(
+                            completion_response=completion_response,
                         )
-                    else:
-                        messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
-                raise e
 
-            response_dict = completion_response.model_dump()
+                        # Run post validation if provided and raise CompletionRetryError if it fails
+                        if self._post_validation_fn:
+                            # Keep the thought value, only update structured_outputs and text_response
+                            structured_outputs, text_response = await self._post_validation_fn(
+                                structured_outputs, text_response
+                            )
 
-            completion = Completion.from_llm_completion(
-                input_messages=messages,
-                completion_response=response_dict,
-                model=self.model,
-                retries=retry_count,
-                usage=accumulated_usage,
-            )
+                        if invocation.current_attempt:
+                            invocation.current_attempt.success = True
 
-            return CompletionResponse(
-                structured_outputs=structured_outputs or [],
-                text_response=text_response,
-                completion=completion,
-            )
+                    except CompletionRetryError as e:
+                        if invocation.current_attempt:
+                            invocation.current_attempt.success = False
+                            invocation.current_attempt.failure_reason = str(e)
+
+                        tool_call_id = None
+                        if (
+                            hasattr(completion_response.choices[0].message, "thinking")
+                            and completion_response.choices[0].message.thinking
+                        ):
+                            content = []
+                            content.extend(completion_response.choices[0].message.thinking)
+                            if completion_response.choices[0].message.content:
+                                content.append(
+                                    ChatCompletionTextObject(
+                                        type="text", text=completion_response.choices[0].message.content
+                                    )
+                                )
+
+                            message_dump = completion_response.choices[0].message.model_dump()
+                            message_dump["content"] = content
+                            messages.append(message_dump)
+                        else:
+                            if completion_response.choices[0].message.tool_calls:
+                                # TODO: Support multiple tool calls
+                                tool_call_id = completion_response.choices[0].message.tool_calls[0].id
+
+                            messages.append(completion_response.choices[0].message.model_dump())
+
+                        if e.retry_messages:
+                            logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
+                            messages.extend(e.retry_messages)
+                        else:
+                            logger.warning(f"Post validation failed with retry message: {e}")
+                            if tool_call_id:
+                                messages.append(
+                                    ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)
+                                )
+                            else:
+                                messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
+                        raise e
+                except Exception as e:
+                    # Any exception will be handled by the context manager
+                    raise e
+
+                final_response = CompletionResponse(
+                    structured_outputs=structured_outputs or [],
+                    text_response=text_response,
+                    thought=thought,
+                    completion_invocation=invocation,
+                )
+                return final_response
 
         try:
-            return await _do_completion_with_validation()
+            result = await _do_completion_with_validation()
+            return result
         except CompletionRetryError as e:
             logger.warning(
                 f"Completion failed after {retry_count} retries. Exception: {e}. Completion response: {completion_response}"
             )
-            raise CompletionRejectError(
+            error = CompletionRejectError(
                 f"Completion failed after {retry_count} retries. Exception: {e}",
-                messages=messages,
-                last_completion=completion_response.model_dump() if completion_response else None,
-                accumulated_usage=accumulated_usage,
-            ) from e
+                completion_invocation=invocation,
+            )
+            raise error from e
         except CompletionRejectError as e:
+            # Add invocation data if not already present
+            if not hasattr(e, "completion_invocation") or not getattr(e, "completion_invocation"):
+                setattr(e, "completion_invocation", invocation)
             raise e
         except CompletionRuntimeError as e:
+            # Add invocation data if not already present
+            if not hasattr(e, "completion_invocation") or not getattr(e, "completion_invocation"):
+                setattr(e, "completion_invocation", invocation)
             raise e
         except Exception as e:
             logger.error(f"Completion failed after {retry_count} retries. Exception: {e}. Type: {type(e)}")
-            raise CompletionRuntimeError(
+            error = CompletionRuntimeError(
                 f"Completion failed after {retry_count} retries. Exception: {e}. Type: {type(e)}",
-                messages=messages,
-                last_completion=completion_response.model_dump() if completion_response else None,
-                accumulated_usage=accumulated_usage,
-            ) from e
+                completion_invocation=invocation,
+            )
+            raise error from e
 
     @tracer.start_as_current_span("BaseCompletionModel._execute_completion")
-    async def _execute_completion(
-        self,
-        messages: list[dict[str, str]],
-    ) -> Any:
+    async def _execute_completion(self, messages: list[dict[str, str]], invocation: CompletionInvocation) -> Any:
         """Execute a single completion attempt with LiteLLM.
 
         This method:
@@ -454,12 +441,14 @@ class BaseCompletionModel(BaseModel, ABC):
         Raises:
             CompletionRuntimeError: For provider errors
         """
-        params = self._completion_params.copy()
+        params = self._completion_params.copy() if self._completion_params else {}
         if self.params:
             params.update(self.params)
 
         if self.merge_same_role_messages:
             messages = self._merge_same_role_messages(messages)
+
+        attempt_count = 0
 
         @retry(
             retry=tenacity.retry_if_not_exception_type((BadRequestError, CompletionRuntimeError)),
@@ -471,44 +460,74 @@ class BaseCompletionModel(BaseModel, ABC):
             ),
         )
         async def _do_completion_with_rate_limit_retry():
-            try:
-                if "claude-3-" in self.model:
-                    self._inject_prompt_caching(messages)
+            nonlocal attempt_count
+            attempt_count += 1
 
-                if self.model_base_url:
-                    params["api_base"] = self.model_base_url
+            with invocation:
+                try:
+                    if "claude-3-" in self.model:
+                        self._inject_prompt_caching(messages)
 
-                if self.model_api_key:
-                    params["api_key"] = self.model_api_key
+                    if self.model_base_url:
+                        params["api_base"] = self.model_base_url
 
-                if self.headers:
-                    params["headers"] = self.headers
+                    if self.model_api_key:
+                        params["api_key"] = self.model_api_key
 
-                return await litellm.acompletion(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=self.temperature,
-                    messages=messages,
-                    metadata=self.metadata or {},
-                    timeout=self.timeout,
-                    **params,
-                )
+                    if self.headers:
+                        params["headers"] = self.headers
 
-            except BadRequestError as e:
-                if e.response:
-                    response_text = e.response.text
-                else:
-                    response_text = None
+                    response = await litellm.acompletion(
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature,
+                        messages=messages,
+                        metadata=self.metadata or {},
+                        timeout=self.timeout,
+                        **params,
+                    )
 
-                logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Response: {response_text}")
+                    if invocation.current_attempt:
+                        invocation.current_attempt.update_from_response(response, self.model)
+                        invocation.current_attempt.success = True
 
-                raise CompletionRuntimeError(message=str(e), messages=messages) from e
-            except RateLimitError:
-                raise  # Let tenacity handle the retry
-            except Exception as e:
-                logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Error: {e}")
+                    return response
 
-                raise CompletionRuntimeError(message=str(e), messages=messages) from e
+                except BadRequestError as e:
+                    if invocation.current_attempt:
+                        invocation.current_attempt.failure_reason = f"BadRequestError: {str(e)}"
+
+                    if e.response:
+                        response_text = e.response.text
+                    else:
+                        response_text = None
+
+                    logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Response: {response_text}")
+
+                    error = CompletionRuntimeError(message=str(e), completion_invocation=invocation)
+                    raise error from e
+
+                except APIConnectionError as e:
+                    if invocation.current_attempt:
+                        invocation.current_attempt.failure_reason = f"APIConnectionError: {str(e)}"
+
+                    logger.warning(f"API connection error: {e}")
+                    raise  # Let tenacity handle the retry
+
+                except RateLimitError as e:
+                    if invocation.current_attempt:
+                        invocation.current_attempt.failure_reason = f"RateLimitError: {str(e)}"
+
+                    raise  # Let tenacity handle the retry
+
+                except Exception as e:
+                    if invocation.current_attempt:
+                        invocation.current_attempt.failure_reason = f"Exception: {str(e)}"
+
+                    logger.exception(f"LiteLLM completion failed. Model: {self.model}, " f"Error: {e}")
+
+                    error = CompletionRuntimeError(message=str(e), completion_invocation=invocation)
+                    raise error from e
 
         return await _do_completion_with_rate_limit_retry()
 
@@ -534,28 +553,31 @@ class BaseCompletionModel(BaseModel, ABC):
         breakpoints_remaining = 3
         for message in reversed(messages):
             try:
+                content_obj = None
+
+                # Handle different message content types
                 if isinstance(message.get("content"), list):
-                    content = next((m for m in message["content"] if m.get("type") == "text"), None)
+                    content_obj = next((m for m in message["content"] if m.get("type") == "text"), None)
                 elif message.get("role") == "assistant" and not message.get("content") and message.get("tool_calls"):
-                    content = message["tool_calls"][-1]
+                    content_obj = message["tool_calls"][-1]
                 else:
-                    content = message
+                    content_obj = message
 
-                if content:
+                # Only apply cache control to dictionary objects
+                if content_obj and isinstance(content_obj, dict):
                     if breakpoints_remaining:
-                        content["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
+                        content_obj["cache_control"] = ChatCompletionCachedContent(type="ephemeral")
                         breakpoints_remaining -= 1
-                    elif "cache_control" in content:
-                        del content["cache_control"]
-
-                content = None
+                    elif "cache_control" in content_obj:
+                        # Delete cache control only from dictionary objects
+                        del content_obj["cache_control"]
             except Exception:
                 logger.exception(f"Error injecting prompt caching on message: {message}")
 
     @abstractmethod
     async def _validate_completion(
         self, completion_response: Any
-    ) -> tuple[list[ResponseSchema], Optional[str], list[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], Optional[str]]:
         """Validate and transform the LLM's response into a structured format.
 
         This method is responsible for:
@@ -571,62 +593,18 @@ class BaseCompletionModel(BaseModel, ABC):
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
+            - Optional thought string (for ReAct-style models)
         Raises:
             CompletionRejectError: If the response fails validation and should be retried
             CompletionRuntimeError: If the response indicates a fundamental problem
         """
         raise NotImplementedError
 
-    async def _send_retry_event(self, retry_count: int, message: str):
-        logger.info(f"Retrying completion for model: {self.model}, retry count: {retry_count}, message: {message}")
-        event = CompletionRetryEvent(
-            model=self.model,
-            retry_count=retry_count,
-            message=message,
-        )
-        await self._event_bus.publish(event)
-
     def clone(self, **kwargs) -> "BaseCompletionModel":
         """Create a copy of the completion model with optional parameter overrides."""
         model_data = self.model_dump()
         model_data.update(kwargs)
         return BaseCompletionModel.model_validate(model_data)
-
-    def model_dump(self, **kwargs):
-        dump = super().model_dump(**kwargs)
-        if "response_format" in dump:
-            dump["response_format"] = dump["response_format"].value
-        if "message_history_type" in dump:
-            dump["message_history_type"] = dump["message_history_type"].value
-        return dump
-
-    @classmethod
-    def create(cls, response_format: LLMResponseFormat, **kwargs):
-        if response_format == LLMResponseFormat.REACT:
-            from moatless.completion.react import ReActCompletionModel
-
-            return ReActCompletionModel(response_format=response_format, **kwargs)
-        elif response_format == LLMResponseFormat.TOOLS:
-            from moatless.completion.tool_call import ToolCallCompletionModel
-
-            return ToolCallCompletionModel(response_format=response_format, **kwargs)
-        elif response_format == LLMResponseFormat.JSON:
-            from moatless.completion.json import JsonCompletionModel
-
-            return JsonCompletionModel(response_format=response_format, **kwargs)
-        else:
-            raise ValueError(f"Unknown response format: {response_format}")
-
-    @classmethod
-    def model_validate(cls, obj):
-        if isinstance(obj, dict) and "response_format" in obj:
-            if isinstance(obj["response_format"], str):
-                obj["response_format"] = LLMResponseFormat(obj["response_format"])
-            if isinstance(obj["message_history_type"], str):
-                obj["message_history_type"] = MessageHistoryType(obj["message_history_type"])
-            return cls.create(**obj)
-
-        return obj
 
     def _merge_same_role_messages(self, messages: list[dict[str, str]]) -> list[dict[str, str]]:
         """Merge consecutive messages with the 'user' role into a single message.
@@ -680,40 +658,3 @@ class BaseCompletionModel(BaseModel, ABC):
             merged.append({"role": "user", "content": "\n".join(current_content)})
 
         return merged
-
-    def __str__(self) -> str:
-        """Return a nice string representation of the completion model."""
-        components = []
-
-        components.extend(
-            [
-                f"Model: {self.model}",
-                f"Response format: {self.response_format.value}",
-                f"Temperature: {self.temperature}",
-                f"Max tokens: {self.max_tokens}",
-                f"Timeout: {self.timeout}s",
-            ]
-        )
-
-        if self.model_base_url:
-            components.append(f"Base URL: {self.model_base_url}")
-
-        if self.metadata:
-            components.append(f"Metadata: {self.metadata}")
-
-        components.extend(
-            [
-                f"Message cache: {self.message_cache}",
-                f"Thoughts in action: {self.thoughts_in_action}",
-                f"Disable thoughts: {self.disable_thoughts}",
-                f"Few shot examples: {self.few_shot_examples}",
-                f"Message history type: {self.message_history_type.value}",
-                f"Merge same role messages: {self.merge_same_role_messages}",
-            ]
-        )
-
-        if self._response_schema:
-            schema_names = [schema.__name__ for schema in self._response_schema]
-            components.append(f"Response schemas: {', '.join(schema_names)}")
-
-        return f"Completion Model '{self.model}':\n" + "\n".join(f"- {c}" for c in components)

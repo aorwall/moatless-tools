@@ -11,12 +11,13 @@ from moatless.completion.schema import (
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
 
 class ReactMessageHistoryGenerator(MessageHistoryGenerator):
-    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
+    async def generate_messages(self, node: Node, workspace: Workspace) -> list[AllMessageValues]:
         previous_nodes = node.get_trajectory()
 
         messages = []

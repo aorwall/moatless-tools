@@ -55,11 +55,7 @@ def create_completion_item(completion: Any, label: str = "Completion") -> Timeli
         return TimelineItemDTO(
             label=label,
             type=TimelineItemType.COMPLETION,
-            content={
-                "usage": completion.usage.model_dump() if completion.usage else None,
-                "input": completion.input,
-                "response": completion.response,
-            },
+            content={"usage": completion.usage.model_dump() if completion.usage else None},
         )
     return None
 

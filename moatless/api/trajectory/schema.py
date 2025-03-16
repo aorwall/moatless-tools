@@ -1,12 +1,12 @@
 """Schema for trajectory data."""
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
 from moatless.artifacts.artifact import ArtifactChange
-from moatless.completion.model import Completion, Usage
+from moatless.completion.stats import Usage, CompletionInvocation
 
 
 class UsageDTO(BaseModel):
@@ -146,6 +146,71 @@ class RewardDTO(BaseModel):
     explanation: Optional[str] = None
 
 
+# Tree View Schema Classes
+class ItemType(str, Enum):
+    """Type of tree item."""
+
+    COMPLETION = "completion"
+    THOUGHT = "thought"
+    ACTION = "action"
+    NODE = "node"
+
+
+class BaseTreeItemDTO(BaseModel):
+    """Base class for tree items."""
+
+    id: str
+    type: str
+    label: str
+    detail: Optional[str] = None
+    time: Optional[str] = None
+
+
+class CompletionTreeItemDTO(BaseTreeItemDTO):
+    """Represents a completion item in the tree."""
+
+    type: str = ItemType.COMPLETION
+    tokens: Optional[int] = None
+    nodeId: str
+    parentId: Optional[str] = None
+
+
+class ThoughtTreeItemDTO(BaseTreeItemDTO):
+    """Represents a thought item in the tree."""
+
+    type: str = ItemType.THOUGHT
+    nodeId: str
+
+
+class ActionTreeItemDTO(BaseTreeItemDTO):
+    """Represents an action item in the tree."""
+
+    type: str = ItemType.ACTION
+    actionType: str
+    actionIndex: int
+    nodeId: str
+    children: Optional[list[Union["CompletionTreeItemDTO", "ThoughtTreeItemDTO", "ActionTreeItemDTO"]]] = Field(
+        default_factory=list
+    )
+
+
+class NodeTreeItemDTO(BaseTreeItemDTO):
+    """Represents a node item in the tree."""
+
+    type: str = ItemType.NODE
+    timestamp: str
+    parentNodeId: Optional[str] = None
+    children: Optional[
+        list[Union["NodeTreeItemDTO", "CompletionTreeItemDTO", "ThoughtTreeItemDTO", "ActionTreeItemDTO"]]
+    ] = Field(default_factory=list)
+
+
+class TreeItemDTO(BaseModel):
+    """Tree representation of trajectory data."""
+
+    items: list[NodeTreeItemDTO] = Field(default_factory=list)
+
+
 class NodeDTO(BaseModel):
     """Node information in the tree."""
 
@@ -155,7 +220,7 @@ class NodeDTO(BaseModel):
     reward: Optional[RewardDTO] = None
     userMessage: Optional[str] = None
     assistantMessage: Optional[str] = None
-    completion: Optional[Completion] = None
+    completion: Optional[CompletionInvocation] = None
     thoughts: Optional[str] = None
     actionSteps: list[ActionStepDTO] = []
     fileContext: Optional[FileContextDTO] = None

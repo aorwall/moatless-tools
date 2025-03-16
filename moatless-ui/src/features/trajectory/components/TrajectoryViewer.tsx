@@ -21,18 +21,15 @@ import {
   TabsTrigger,
 } from "@/lib/components/ui/tabs.tsx";
 import { Trajectory } from "@/lib/types/trajectory.ts";
-import { cn } from "@/lib/utils.ts";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
   List,
-  MessageSquare,
-  Package,
   Terminal,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-
+import { useTreeView } from "../hooks/useTreeView";
+import TreeView from "./tree-view/TreeView";
 interface TrajectoryViewerProps {
   trajectory: Trajectory;
   handleStart?: () => Promise<void>;
@@ -65,8 +62,15 @@ export function TrajectoryViewer({
   // New state for current view
   const [currentView, setCurrentView] = useState<TrajectoryView>(() => {
     const saved = localStorage.getItem("trajectoryViewerCurrentView");
-    return (saved as TrajectoryView) || "timeline";
+    return (saved as TrajectoryView) || "tree";
   });
+
+  const { treeData, loading: isTreeLoading, error: treeError } = useTreeView({
+    projectId: trajectory.project_id,
+    trajectoryId: trajectory.trajectory_id,
+  });
+
+  console.log(treeData);
 
   // Save preferences when they change
   useEffect(() => {
@@ -127,6 +131,8 @@ export function TrajectoryViewer({
           return <Chat trajectory={trajectory} />;
         case "artifacts":
           return <Artifacts trajectoryId={trajectory.trajectory_id} />;
+        case "tree":
+          return <TreeView trajectory={trajectory} treeData={treeData} loading={isTreeLoading} error={treeError} />
         default:
           return (
             <div className="flex items-center justify-center h-full p-4 text-muted-foreground">

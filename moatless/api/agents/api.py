@@ -2,17 +2,13 @@
 
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 
 from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
-from moatless.config.agent_config import (
-    create_agent,
-    delete_agent,
-    get_agent,
-    get_all_agents,
-    update_agent,
-)
+from moatless.agent.manager  import AgentConfigManager
+from moatless.api.dependencies import get_agent_manager
+
 from .schema import (
     ActionConfigDTO,
     ActionsResponseDTO,
@@ -30,7 +26,7 @@ def _convert_to_dto(agent_id: str, agent: ActionAgent) -> AgentConfigDTO:
         ActionConfigDTO(title=action.name, properties=action.model_dump(exclude={"action_class"}))
         for action in agent.actions
     ]
-    return AgentConfigDTO(id=agent_id, system_prompt=agent.system_prompt, actions=actions)
+    return AgentConfigDTO(agent_id=agent_id, system_prompt=agent.system_prompt, actions=actions, memory=agent.memory)
 
 
 router = APIRouter()
@@ -44,49 +40,63 @@ async def list_available_actions():
 
 
 @router.get("", response_model=AgentConfigsResponseDTO)
-async def list_agent_configs() -> AgentConfigsResponseDTO:
+async def list_agent_configs(agent_manager: AgentConfigManager = Depends(get_agent_manager)) -> AgentConfigsResponseDTO:
     """Get all agent configurations"""
-    configs = []
-    all_agents = get_all_agents()
-    for agent in all_agents:
-        configs.append(_convert_to_dto(agent.agent_id, agent))
-    return AgentConfigsResponseDTO(configs=configs)
+    try:
+        configs = []
+        all_agents = agent_manager.get_all_agents()
+        for agent in all_agents:
+            configs.append(_convert_to_dto(agent.agent_id, agent))
+        return AgentConfigsResponseDTO(configs=configs)
+    except Exception as e:
+        logger.exception(f"Error listing agent configs: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list agent configurations: {str(e)}")
 
 
-@router.get("/{agent_id}", response_model=AgentConfigDTO)
-async def read_agent_config(agent_id: str) -> AgentConfigDTO:
+@router.get("/{agent_id}")
+async def read_agent_config(agent_id: str, agent_manager: AgentConfigManager = Depends(get_agent_manager)):
     """Get configuration for a specific agent"""
-    agent = get_agent(agent_id)
-    return _convert_to_dto(agent_id, agent)
+    try:
+        agent = agent_manager.get_agent(agent_id)
+        return agent.model_dump(exclude_none=True)
+    except Exception as e:
+        logger.exception(f"Error retrieving agent config {agent_id}: {e}")
+        raise HTTPException(status_code=404, detail=f"Agent configuration not found: {str(e)}")
 
 
-@router.post("", response_model=AgentConfigDTO)
-async def create_agent_config_api(config: AgentConfigDTO) -> AgentConfigDTO:
+@router.post("")
+async def create_agent_config_api(config: dict, agent_manager: AgentConfigManager = Depends(get_agent_manager)) -> dict:
     """Create a new agent configuration"""
-    logger.info(f"Creating agent config with {len(config.actions)} actions")
+    # Manually validate the config
+    agent_config = ActionAgent.model_validate(config)
+    logger.info(f"Creating agent config with {len(agent_config.actions)} actions")
 
-    agent = _create_agent(agent_id=config.id, action_configs=config.actions, system_prompt=config.system_prompt)
-    created = create_agent(agent)
-    return _convert_to_dto(config.id, created)
+    created = await agent_manager.create_agent(agent_config)
+    # Return a dict representation instead of the object
+    return created.model_dump(exclude_none=True)
 
 
 @router.put("/{agent_id}")
-async def update_agent_config_api(agent_id: str, update: AgentConfigUpdateDTO):
+async def update_agent_config_api(
+    agent_id: str, update: dict, agent_manager: AgentConfigManager = Depends(get_agent_manager)
+):
     """Update configuration for a specific agent"""
-    logger.info(f"Updating agent config {agent_id} with {len(update.actions)} actions")
-    agent = _create_agent(agent_id=agent_id, action_configs=update.actions, system_prompt=update.system_prompt)
-    update_agent(agent)
+    # Manually validate the update
+    agent_update = ActionAgent.model_validate(update)
+    logger.info(f"Updating agent config {agent_id} with {len(agent_update.actions)} actions")
+    await agent_manager.update_agent(agent_update)
+    return {"status": "success"}
 
 
 @router.delete("/{agent_id}")
-async def delete_agent_config_api(agent_id: str):
+async def delete_agent_config_api(agent_id: str, agent_manager: AgentConfigManager = Depends(get_agent_manager)):
     """Delete an agent configuration"""
-    delete_agent(agent_id)
+    await agent_manager.delete_agent(agent_id)
 
 
-def _create_agent(agent_id: str, action_configs: list[ActionConfigDTO], system_prompt: str) -> ActionAgent:
+def _create_agent(agent_id: str, action_configs: list[ActionConfigDTO], system_prompt: str | None) -> ActionAgent:
     actions = []
     for action_config in action_configs:
         actions.append(Action.model_validate(action_config.properties))
     logger.info(f"Created actions: {actions}")
-    return ActionAgent(agent_id=agent_id, actions=actions, system_prompt=system_prompt)
+    return ActionAgent(agent_id=agent_id, actions=actions, system_prompt=system_prompt or "")

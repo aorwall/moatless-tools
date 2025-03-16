@@ -6,19 +6,20 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 
 from moatless.api.loop.schema import LoopResponseDTO
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.artifacts.file import FileArtifact, FileArtifactHandler
-from moatless.completion.manager import create_completion_model
-from moatless.config.agent_config import get_agent
+from moatless.completion.manager import ModelConfigManager
+from moatless.agent.manager  import AgentConfigManager
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.loop import AgenticLoop
 from moatless.repository.git import GitRepository
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
+from moatless.api.dependencies import get_agent_manager, get_model_manager
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,11 +40,17 @@ class LoopRequest(BaseModel):
     attachments: Optional[list[AttachmentData]] = Field(
         default=None, description="List of attachments with filename and base64 data"
     )
-    repository_path: str = Field(description="The path to the repository to use for the loop")
+    repository_path: str = Field(
+        description="The path to the repository to use for the loop"
+    )
 
 
 @router.post("", response_model=LoopResponseDTO)
-async def start_loop(request: LoopRequest):
+async def start_loop(
+    request: LoopRequest,
+    agent_manager: AgentConfigManager = Depends(get_agent_manager),
+    model_manager: ModelConfigManager = Depends(get_model_manager),
+):
     try:
         run_id = f"loop_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         trajectory_dir = get_moatless_trajectory_dir(run_id)
@@ -83,8 +90,8 @@ async def start_loop(request: LoopRequest):
                 )
 
         # Get the agent instance and completion model.
-        agent = get_agent(agent_id=request.agent_id)
-        completion_model = create_completion_model(request.model_id)
+        agent = agent_manager.get_agent(agent_id=request.agent_id)
+        completion_model = model_manager.create_completion_model(request.model_id)
         completion_model.metadata = {"trajectory_id": run_id}
 
         agent.workspace = workspace
@@ -101,9 +108,12 @@ async def start_loop(request: LoopRequest):
             max_cost=1.0,
         )
 
-        loop.persist()
+        await loop.persist()
 
-        return LoopResponseDTO(trajectory_id=trajectory_id, project_id=f"{request.agent_id}_{request.model_id}")
+        return LoopResponseDTO(
+            trajectory_id=trajectory_id,
+            project_id=f"{request.agent_id}_{request.model_id}",
+        )
     except Exception as e:
         logger.exception(f"Failed to start loop: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

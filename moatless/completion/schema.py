@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Iterable
 from typing import (
     ClassVar,
@@ -14,7 +15,8 @@ from typing import (
 from docstring_parser import parse
 from pydantic import BaseModel, Field, ValidationError
 
-from moatless.completion.model import logger
+
+logger = logging.getLogger(__name__)
 
 
 class ChatCompletionCachedContent(TypedDict):
@@ -121,6 +123,8 @@ AllMessageValues = Union[
 
 class NameDescriptor:
     def __get__(self, obj, cls=None) -> str:
+        if cls is None:
+            return "Unknown"
         if hasattr(cls, "model_config") and "title" in cls.model_config:
             return cls.model_config["title"]
         return cls.__name__
@@ -131,6 +135,19 @@ class ResponseSchema(BaseModel):
 
     @classmethod
     def description(cls):
+        """
+        Return the description of the schema.
+        First tries to get from docstring, then falls back to schema description.
+        """
+        # Direct docstring extraction
+        if cls.__doc__:
+            # Clean the docstring by removing leading/trailing whitespace and splitting by lines
+            doc_lines = [line.strip() for line in cls.__doc__.strip().split("\n") if line.strip()]
+            if doc_lines:
+                # Return the first non-empty line as the short description
+                return doc_lines[0]
+
+        # Fall back to schema description if docstring extraction fails
         return cls.model_json_schema().get("description", "")
 
     @classmethod
@@ -175,14 +192,14 @@ class ResponseSchema(BaseModel):
                 if k == "items" and isinstance(v, dict) and "$ref" in v:
                     # Handle array items that use $ref
                     ref_path = v["$ref"]
-                    if ref_path.startswith("#/$defs/"):
+                    if isinstance(ref_path, str) and ref_path.startswith("#/$defs/"):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
                             result[k] = defs[ref_name].copy()
                             continue
                 elif k == "$ref":
                     ref_path = v
-                    if ref_path.startswith("#/$defs/"):
+                    if isinstance(ref_path, str) and ref_path.startswith("#/$defs/"):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
                             # Create a new dict with all properties except $ref
@@ -311,16 +328,29 @@ class ResponseSchema(BaseModel):
 
             message = json_data
 
-            cleaned_message = "".join(char for char in message if ord(char) >= 32 or char in "\n\r\t")
-            if cleaned_message != message:
-                logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
-            message = cleaned_message
+            # Ensure message is a string
+            if not isinstance(message, str):
+                message_str = message.decode("utf-8") if isinstance(message, (bytes, bytearray)) else str(message)
+            else:
+                message_str = message
+
+            # Clean control characters
+            cleaned_chars = []
+            for char in message_str:
+                # Only keep printable characters and specific whitespace
+                if ord(char) >= 32 or char in "\n\r\t":
+                    cleaned_chars.append(char)
+            cleaned_message = "".join(cleaned_chars)
+
+            if cleaned_message != message_str:
+                logger.info(f"parse_json() Cleaned control chars: {repr(message_str)} -> {repr(cleaned_message)}")
+            message_str = cleaned_message
 
             # Replace None with null
-            message = message.replace(": None", ": null").replace(":None", ":null")
+            message_str = message_str.replace(": None", ": null").replace(":None", ":null")
 
             # Extract JSON and try parsing again
-            message, all_jsons = extract_json_from_message(message)
+            message, all_jsons = extract_json_from_message(message_str)
             if all_jsons:
                 if len(all_jsons) > 1:
                     logger.warning(f"Found multiple JSON objects, using the first one. All found: {all_jsons}")

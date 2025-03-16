@@ -1,5 +1,6 @@
 import pytest
 from pydantic import ValidationError, BaseModel, Field, ConfigDict
+from typing import Optional
 
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.string_replace import StringReplaceArgs
@@ -73,11 +74,13 @@ def test_structured_output_name_and_description():
     # Test class with Config.title and docstring
     class TestWithConfig(ResponseSchema):
         """This is a test description."""
-        class Config:
-            title = "CustomTitle"
+        model_config = {"title": "CustomTitle"}
 
     assert TestWithConfig.name == "CustomTitle"
-    assert TestWithConfig.description == "This is a test description."
+    # Debug: Print raw docstring and description method result
+    print(f"Raw docstring: {TestWithConfig.__doc__!r}")
+    print(f"Description method result: {TestWithConfig.description()!r}")
+    assert TestWithConfig.description() == "This is a test description."
 
     # Test class without Config.title but with docstring
     class TestWithoutConfig(ResponseSchema):
@@ -85,20 +88,20 @@ def test_structured_output_name_and_description():
         pass
 
     assert TestWithoutConfig.name == "TestWithoutConfig"
-    assert TestWithoutConfig.description == "Another test description."
+    assert TestWithoutConfig.description() == "Another test description."
 
     # Test class without Config.title or docstring
     class TestBare(ResponseSchema):
         pass
 
     assert TestBare.name == "TestBare"
-    assert TestBare.description == ""
+    assert TestBare.description() == ""
 
 def test_schema_without_refs():
     # Define a nested model
     class NestedModel(BaseModel):
         nested_field: str = Field(..., description="A nested field")
-        optional_field: int = Field(None, description="An optional nested field")
+        optional_field: Optional[int] = Field(None, description="An optional nested field")
 
     # Define the main model using StructuredOutput
     class MainSchema(ResponseSchema):
@@ -113,39 +116,53 @@ def test_schema_without_refs():
     import json
     print(json.dumps(schema, indent=2))
 
-    # Verify schema structure
-    assert schema["type"] == "function"
+    # Verify schema structure - using get() to avoid TypedDict access issues
+    assert schema.get("type") == "function"
     assert "function" in schema
-    assert schema["function"]["name"] == "MainSchema"
-    assert schema["function"]["description"] == "A test schema with nested model."
+    function_dict = schema.get("function", {})
+    assert function_dict.get("name") == "MainSchema"
+    assert function_dict.get("description") == "A test schema with nested model."
 
     # Verify parameters
-    params = schema["function"]["parameters"]
+    params = function_dict.get("parameters", {})
     assert "properties" in params
-    properties = params["properties"]
+    properties = params.get("properties", {})
 
     # Check main field
     assert "main_field" in properties
-    assert properties["main_field"]["description"] == "A main field"
-    assert properties["main_field"]["type"] == "string"
+    main_field_props = properties.get("main_field", {})
+    assert main_field_props.get("description") == "A main field"
+    assert main_field_props.get("type") == "string"
 
     # Check nested field structure - should be expanded, not using $ref
     assert "nested" in properties
-    assert "$ref" not in properties["nested"]
-    assert properties["nested"]["description"] == "A nested model field"
-    assert properties["nested"]["type"] == "object"
+    nested_props = properties.get("nested", {})
+    assert "$ref" not in nested_props
+    assert nested_props.get("description") == "A nested model field"
+    assert nested_props.get("type") == "object"
     
     # Verify nested model properties are expanded inline
-    assert "properties" in properties["nested"]
-    nested_props = properties["nested"]["properties"]
+    assert "properties" in nested_props
+    nested_obj_props = nested_props.get("properties", {})
     
-    assert "nested_field" in nested_props
-    assert nested_props["nested_field"]["description"] == "A nested field"
-    assert nested_props["nested_field"]["type"] == "string"
+    assert "nested_field" in nested_obj_props
+    nested_field_props = nested_obj_props.get("nested_field", {})
+    assert nested_field_props.get("description") == "A nested field"
+    assert nested_field_props.get("type") == "string"
 
-    assert "optional_field" in nested_props
-    assert nested_props["optional_field"]["description"] == "An optional nested field"
-    assert nested_props["optional_field"]["type"] == "integer"
+    assert "optional_field" in nested_obj_props
+    optional_field_props = nested_obj_props.get("optional_field", {})
+    assert optional_field_props.get("description") == "An optional nested field"
+    
+    # For Optional[int], Pydantic creates an anyOf schema with integer and null types
+    if "type" in optional_field_props:
+        assert optional_field_props.get("type") == "integer"
+    elif "anyOf" in optional_field_props:
+        # Check that anyOf contains both integer and null types
+        type_options = optional_field_props.get("anyOf", [])
+        has_integer = any(opt.get("type") == "integer" for opt in type_options)
+        has_null = any(opt.get("type") == "null" for opt in type_options)
+        assert has_integer and has_null, "Optional field should have both integer and null types in anyOf"
 
     # Verify no $ref is used anywhere in the schema
     def check_no_refs(obj):
@@ -176,32 +193,35 @@ def test_schema_with_array_refs():
     import json
     print(json.dumps(schema, indent=2))
 
-    # Verify schema structure
-    assert schema["type"] == "function"
+    # Verify schema structure - using get() to avoid TypedDict access issues
+    assert schema.get("type") == "function"
     assert "function" in schema
-    assert schema["function"]["name"] == "ArraySchema"
-    assert schema["function"]["description"] == "A test schema with array of nested models."
+    function_dict = schema.get("function", {})
+    assert function_dict.get("name") == "ArraySchema"
+    assert function_dict.get("description") == "A test schema with array of nested models."
 
     # Verify parameters
-    params = schema["function"]["parameters"]
+    params = function_dict.get("parameters", {})
     assert "properties" in params
-    properties = params["properties"]
+    properties = params.get("properties", {})
 
     # Check items field
     assert "items" in properties
-    assert properties["items"]["description"] == "A list of items"
-    assert properties["items"]["type"] == "array"
+    items_props = properties.get("items", {})
+    assert items_props.get("description") == "A list of items"
+    assert items_props.get("type") == "array"
     
     # Check items schema
-    items_schema = properties["items"]["items"]
+    items_schema = items_props.get("items", {})
     assert "$ref" not in items_schema
-    assert items_schema["type"] == "object"
+    assert items_schema.get("type") == "object"
     assert "properties" in items_schema
     
-    item_props = items_schema["properties"]
+    item_props = items_schema.get("properties", {})
     assert "item_field" in item_props
-    assert item_props["item_field"]["description"] == "An item field"
-    assert item_props["item_field"]["type"] == "string"
+    item_field_props = item_props.get("item_field", {})
+    assert item_field_props.get("description") == "An item field"
+    assert item_field_props.get("type") == "string"
 
     # Verify no $ref is used anywhere in the schema
     def check_no_refs(obj):

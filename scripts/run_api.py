@@ -4,8 +4,14 @@
 import argparse
 import logging
 import os
-from moatless.api import run_api
+import sys
 from dotenv import load_dotenv
+
+import uvicorn
+from watchfiles import watch
+from pathlib import Path
+
+from moatless.api.api import create_api
 
 
 def main():
@@ -15,6 +21,11 @@ def main():
         "--dev",
         action="store_true",
         help="Run in development mode with auto-reload"
+    )
+    parser.add_argument(
+        "--debug-watch",
+        action="store_true",
+        help="Debug file watching to see which files trigger reloads"
     )
     parser.add_argument(
         "--host",
@@ -34,8 +45,26 @@ def main():
     print(f"MOATLESS_DIR: {os.getenv('MOATLESS_DIR')}")
     print(f"MOATLESS_ACTIONS_PATH: {os.getenv('MOATLESS_ACTIONS_PATH')}")
     args = parser.parse_args()
-    run_api(dev_mode=args.dev, host=args.host, port=args.port)
+
+    if args.dev:
+        # Add more comprehensive exclusions
+        uvicorn.run(
+            "moatless.api.api:create_api",
+            host=args.host,
+            port=args.port,
+            reload=True,
+            reload_dirs=["moatless"],
+            reload_include=[
+                "*.py"
+            ],
+            factory=True,
+            log_level="info",
+        )
+    else:
+        logging.info("Starting API server")
+        api = create_api()
+        uvicorn.run(api, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
-    main() 
+    main()

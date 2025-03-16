@@ -3,6 +3,13 @@ module.exports = {
 	darkMode: ["class"],
 	content: ["./index.html", "./src/**/*.{ts,tsx,js,jsx}"],
 	theme: {
+		container: {
+			center: true,
+			padding: "1rem",
+			screens: {
+				"2xl": "1400px",
+			},
+		},
 		extend: {
 			borderRadius: {
 				lg: 'var(--radius)',
@@ -49,6 +56,16 @@ module.exports = {
 					'3': 'hsl(var(--chart-3))',
 					'4': 'hsl(var(--chart-4))',
 					'5': 'hsl(var(--chart-5))'
+				},
+				sidebar: {
+					DEFAULT: 'hsl(var(--sidebar-background))',
+					foreground: 'hsl(var(--sidebar-foreground))',
+					primary: 'hsl(var(--sidebar-primary))',
+					'primary-foreground': 'hsl(var(--sidebar-primary-foreground))',
+					accent: 'hsl(var(--sidebar-accent))',
+					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
+					border: 'hsl(var(--sidebar-border))',
+					ring: 'hsl(var(--sidebar-ring))'
 				}
 			},
 			keyframes: {
@@ -68,7 +85,7 @@ module.exports = {
 						height: '0'
 					}
 				},
-				'highlight': {
+				highlight: {
 					'0%, 100%': {
 						boxShadow: '0 0 0 0 transparent'
 					},
@@ -80,7 +97,7 @@ module.exports = {
 			animation: {
 				'accordion-down': 'accordion-down 0.2s ease-out',
 				'accordion-up': 'accordion-up 0.2s ease-out',
-				'highlight': 'highlight 1.5s ease-in-out'
+				highlight: 'highlight 1.5s ease-in-out'
 			}
 		}
 	},

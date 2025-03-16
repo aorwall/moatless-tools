@@ -6,10 +6,9 @@ from typing import Any, Dict, List, Optional, Type
 from pydantic import ValidationError
 
 from moatless.actions.schema import ActionArguments
-from moatless.actions.think import Think, ThinkArgs
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.json import JsonCompletionModel
-from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
+from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRuntimeError
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,13 @@ class ReActCompletionModel(JsonCompletionModel):
     4. Validating action sequence format
     """
 
-    def _prepare_system_prompt(self, system_prompt: str, response_schema: list[type[ResponseSchema]]) -> str:
+    def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Any]:
+        """Get the completion parameters for JSON completion."""
+        return {}
+
+    def _prepare_system_prompt(
+        self, system_prompt: str, response_schema: list[type[ResponseSchema]] | type[ResponseSchema]
+    ) -> str:
         """Add ReAct format instructions to system prompt.
 
         This method appends the ReAct format instructions and available
@@ -44,7 +49,8 @@ class ReActCompletionModel(JsonCompletionModel):
             return super()._prepare_system_prompt(system_prompt, response_schema)
 
         action_input_schemas = []
-        for action in response_schema:
+        schemas = [response_schema] if not isinstance(response_schema, list) else response_schema
+        for action in schemas:
             action_input_schemas.append(f" * {action.name} {action.format_schema_for_llm()}")
 
         input_schemas = "\n\n".join(action_input_schemas)
@@ -75,7 +81,7 @@ Important: You can include multiple Action blocks to perform sequential actions.
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[list[ResponseSchema], Optional[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], Optional[str]]:
         """Validate and parse ReAct format responses.
 
         This method:
@@ -91,6 +97,7 @@ Important: You can include multiple Action blocks to perform sequential actions.
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
+            - Optional thought string
 
         Raises:
             CompletionRejectError: For invalid format that should be retried
@@ -98,7 +105,8 @@ Important: You can include multiple Action blocks to perform sequential actions.
 
         # Fall back to JSON completion model if the action is not an ActionArguments
         if not self._supports_react_format():
-            return await super()._validate_completion(completion_response)
+            structured_outputs, text_response, thoughts = await super()._validate_completion(completion_response)
+            return structured_outputs, text_response, thoughts
 
         try:
             response_text = completion_response.choices[0].message.content
@@ -106,13 +114,13 @@ Important: You can include multiple Action blocks to perform sequential actions.
 
             # Get all action blocks
             thought, action_blocks = self._extract_action_blocks(response_text)
-            validated_actions = []
+            validated_actions: list[ResponseSchema] = []
 
             for i, action_input in enumerate(action_blocks):
                 action_name, action_input = self._parse_action(action_input)
                 action_class = self._get_action_class(action_name)
 
-                if action_input.strip().startswith("<") or action_input.strip().startswith("```"):
+                if action_input.strip().startswith("<") or action_input.strip().startswith("```xml"):
                     try:
                         action_request = action_class.model_validate_xml(action_input)
                     except Exception as e:
@@ -148,10 +156,8 @@ Important: You can include multiple Action blocks to perform sequential actions.
 
                 validated_actions.append(action_request)
 
-            if thought:
-                validated_actions.insert(0, ThinkArgs(thought=thought))  # type: ignore
-
-            return validated_actions, None
+            # Return the thought as the third return value instead of adding a ThinkArgs
+            return validated_actions, None, thought
         except CompletionRetryError as e:
             raise e
         except (ValueError, ValidationError) as e:
@@ -181,6 +187,10 @@ Important: You can include multiple Action blocks to perform sequential actions.
             thought_line = next(
                 (i for i, line in enumerate(lines) if line.lower().startswith(("thought:", "thoughts:"))), -1
             )
+
+            if thought_line == -1:
+                raise CompletionRetryError("The response is incorrect, it should start with 'Thoughts:'")
+
             action_line = next((i for i, line in enumerate(lines) if line.lower().startswith("action:")), -1)
 
             # Check if sections are in correct order
@@ -309,14 +319,14 @@ Important: You can include multiple Action blocks to perform sequential actions.
             ValueError: If action name is invalid
         """
         if not isinstance(self._response_schema, list):
-            schemas = [self._response_schema]
+            schemas = [self._response_schema] if self._response_schema else []
         else:
             schemas = self._response_schema
 
         # Find the matching action class
-        matching_actions = [a for a in schemas if hasattr(a, "name") and a.name == action_name]
+        matching_actions = [a for a in schemas if hasattr(a, "name") and getattr(a, "name") == action_name]
         if not matching_actions:
-            action_names = [a.name for a in schemas if hasattr(a, "name")]
+            action_names = [getattr(a, "name") for a in schemas if hasattr(a, "name")]
             raise ValueError(f"Unknown action: {action_name}. Available actions: {', '.join(action_names)}")
 
         return matching_actions[0]

@@ -534,6 +534,15 @@ class BaseStorage(abc.ABC):
 
         return evaluations
 
+    def get_trajectory_key(self, project_id: str | None = None, trajectory_id: str | None = None) -> str:
+        if project_id is None:
+            project_id = self._get_project_id()
+
+        if trajectory_id is None:
+            trajectory_id = self._get_trajectory_id()
+
+        return f"projects/{project_id}/trajs/{trajectory_id}"
+
     @classmethod
     def get_default_storage(cls) -> "BaseStorage":
         """

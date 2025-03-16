@@ -52,6 +52,10 @@ class FileStorage(BaseStorage):
 
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self.file_extension = file_extension
+        logger.info(f"File storage initialized in {self.base_dir}")
+
+    def __str__(self) -> str:
+        return f"FileStorage(base_dir={self.base_dir}, file_extension={self.file_extension})"
 
     def _get_path(self, key: str) -> Path:
         """
@@ -79,7 +83,7 @@ class FileStorage(BaseStorage):
         else:
             return self.base_dir / f"{normalized_key}.{self.file_extension}"
 
-    async def read(self, key: str) -> dict:
+    async def read(self, key: str) -> dict | list[dict]:
         """
         Read JSON data from a file.
 
@@ -145,7 +149,7 @@ class FileStorage(BaseStorage):
                     results.append(json.loads(line))
         return results
 
-    async def write(self, key: str, data: dict) -> None:
+    async def write(self, key: str, data: dict | list[dict]) -> None:
         """
         Write data to a file as JSON.
 
@@ -153,7 +157,12 @@ class FileStorage(BaseStorage):
             key: The key to write to
             data: The data to write
         """
+
         path = self._get_path(key)
+
+        if not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(json.dumps(data, indent=2, cls=DateTimeEncoder))
 

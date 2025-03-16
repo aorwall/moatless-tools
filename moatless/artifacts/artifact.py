@@ -196,7 +196,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         """
         raise NotImplementedError("Persist is not supported for this artifact type")
 
-    async def get_all_artifacts(self) -> list[ArtifactListItem]:
+    async def get_all_artifacts(self) -> list[Artifact]:
         """Get all artifacts managed by this handler as list items"""
         raise NotImplementedError("Get all artifacts is not supported for this artifact type")
 

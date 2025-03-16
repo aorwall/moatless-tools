@@ -67,6 +67,9 @@ class CodeModificationMixin:
         if not self.auto_run_tests:
             return ""
 
+        if not self._workspace:
+            raise RuntimeError("Workspace is not set")
+
         if not file_context.has_runtime:
             logger.warning(f"No runtime, cannot run tests for {file_path}")
             return ""

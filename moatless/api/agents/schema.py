@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 
 from moatless.actions.schema import ActionSchema
+from moatless.message_history.base import BaseMemory
 
 
 class ActionConfigDTO(BaseModel):
@@ -11,9 +12,12 @@ class ActionConfigDTO(BaseModel):
 class AgentConfigDTO(BaseModel):
     """Data transfer object for agent configuration."""
 
-    id: str = Field(..., description="The ID of the configuration")
+    agent_id: str = Field(..., description="The ID of the configuration")
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
     actions: list[ActionConfigDTO] = Field(default_factory=list, description="List of action names to enable")
+    memory: BaseMemory | None = Field(
+        None, description="Message history generator to be used for generating completions"
+    )
 
 
 class AgentConfigUpdateDTO(BaseModel):
@@ -21,6 +25,9 @@ class AgentConfigUpdateDTO(BaseModel):
 
     system_prompt: str | None = Field(None, description="System prompt to be used for generating completions")
     actions: list[ActionConfigDTO] = Field(default_factory=list, description="List of action names to enable")
+    memory: BaseMemory | None = Field(
+        None, description="Message history generator to be used for generating completions"
+    )
 
 
 class AgentConfigsResponseDTO(BaseModel):

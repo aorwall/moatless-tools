@@ -52,7 +52,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
     async def _validate_completion(
         self,
         completion_response: Any,
-    ) -> tuple[list[ResponseSchema], Optional[str]]:
+    ) -> tuple[list[ResponseSchema], Optional[str], Optional[str]]:
         """Validate tool call completion response.
 
         Args:
@@ -62,6 +62,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
             Tuple of:
             - List of validated structured outputs
             - Optional text response
+            - Optional thought string (always None for tool call model)
 
         Raises:
             CompletionRejectError: If validation fails
@@ -71,12 +72,12 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return [], content
+            return [], content, None
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()
         structured_outputs = []
-        valid_names = [s.name for s in self._response_schema]
+        valid_names = [s.name for s in self._response_schema] if self._response_schema else []
 
         retry_messages = []
         retry = False
@@ -110,10 +111,11 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
             # Find matching schema for tool
             schema = None
-            for s in self._response_schema:
-                if s.name == tool_name:
-                    schema = s
-                    break
+            if self._response_schema:
+                for s in self._response_schema:
+                    if s.name == tool_name:
+                        schema = s
+                        break
 
             if not schema:
                 retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} not found.")
@@ -136,7 +138,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
                 retry_messages=retry_messages,
             )
 
-        return structured_outputs, content
+        return structured_outputs, content, None
 
     def _get_response_model(self, tool_name: str) -> type[ResponseSchema]:
         """Get the response model for a tool name.
@@ -145,11 +147,17 @@ class ToolCallCompletionModel(BaseCompletionModel):
             tool_name: Name of the tool to find schema for
 
         Returns:
-            Matching ResponseSchema class or None if not found
+            Matching ResponseSchema class
+
+        Raises:
+            ValueError: If no matching schema is found
         """
-        for r in self._response_schema:
-            if r.name == tool_name:
-                return r
+        if self._response_schema:
+            for r in self._response_schema:
+                if r.name == tool_name:
+                    return r
+
+        raise ValueError(f"No response schema found for tool name: {tool_name}")
 
     def _generate_few_shot_examples(self) -> str:
         """Generate few-shot examples in tool call format"""
@@ -158,16 +166,17 @@ class ToolCallCompletionModel(BaseCompletionModel):
             return ""
 
         few_shot_examples = []
-        for schema in self._response_schema:
-            if hasattr(schema, "get_few_shot_examples"):
-                examples = schema.get_few_shot_examples()
-                if examples:
-                    for example in examples:
-                        action_json = {
-                            "action": example.action.model_dump(),
-                            "action_type": example.action.name,
-                        }
-                        prompt = f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
-                        few_shot_examples.append(prompt)
+        if self._response_schema:
+            for schema in self._response_schema:
+                if hasattr(schema, "get_few_shot_examples"):
+                    examples = schema.get_few_shot_examples()
+                    if examples:
+                        for example in examples:
+                            action_json = {
+                                "action": example.action.model_dump(),
+                                "action_type": example.action.name,
+                            }
+                            prompt = f"User: {example.user_input}\nAssistant:\n```json\n{json.dumps(action_json, indent=2)}\n```\n\n"
+                            few_shot_examples.append(prompt)
 
         return base_prompt + "\n".join(few_shot_examples)

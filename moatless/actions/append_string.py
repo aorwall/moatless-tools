@@ -63,6 +63,9 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         args: AppendStringArgs,
         file_context: FileContext | None = None,
     ) -> Observation:
+        if not file_context:
+            raise RuntimeError("File context is not set")
+
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:

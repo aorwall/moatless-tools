@@ -54,7 +54,7 @@ class ListFiles(Action):
         args: ListFilesArgs,
         file_context: FileContext | None = None,
     ) -> Observation:
-        if not file_context._repo:
+        if not file_context or not file_context._repo:
             raise RuntimeError("Repository not available for listing files.")
 
         try:

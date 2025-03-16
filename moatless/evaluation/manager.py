@@ -12,15 +12,13 @@ import aiofiles.os
 from opentelemetry import trace
 
 from moatless.benchmark.report import to_result
-from moatless.evaluation.run_instance import run_instance
 from moatless.evaluation.schema import (
     Evaluation,
-    EvaluationEvent,
     EvaluationInstance,
     EvaluationStatus,
     InstanceStatus,
 )
-from moatless.evaluation.utils import get_moatless_instance
+from moatless.evaluation.utils import get_moatless_instance, get_swebench_instance
 from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
@@ -90,8 +88,8 @@ class EvaluationManager:
         )
 
         for instance in evaluation.instances:
-            moatless_instance = get_moatless_instance(instance_id=instance.instance_id)
-            problem_statement = f"Solve the following issue:\n{moatless_instance['problem_statement']}"
+            swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
+            problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
             flow = self._flow_manager.create_flow(
                 id=evaluation.flow_id,
                 message=problem_statement,
@@ -192,6 +190,7 @@ class EvaluationManager:
 
     async def _handle_event(self, event: BaseEvent):
         """Handle events from evaluation runners."""
+        logger.info(f"Received event: {event}")
         if event.scope not in ["flow", "evaluation"]:
             return
 
@@ -201,7 +200,7 @@ class EvaluationManager:
 
         evaluation = await self._load_evaluation(event.project_id)
         if not evaluation:
-            logger.info(f"Received event with a project id not found in evaluations: {event.project_id}, skipping")
+            logger.debug(f"Received event with a project id not found in evaluations: {event.project_id}, skipping")
             return
 
         instance = evaluation.get_instance(event.trajectory_id)
@@ -544,6 +543,12 @@ class EvaluationManager:
 
             instance.error = None
             instance.error_at = None
+
+        flow = await AgenticFlow.from_trajectory_id(instance.instance_id, evaluation.evaluation_name)
+        if flow.root.get_last_node() and flow.root.get_last_node().error:
+            logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
+            flow.root.get_last_node().reset()
+            await flow.persist()
 
         # Skip if already evaluated
         if instance.status == InstanceStatus.EVALUATED:

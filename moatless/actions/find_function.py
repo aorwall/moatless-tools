@@ -7,6 +7,7 @@ from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs, logge
 from moatless.codeblocks import CodeBlockType
 from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeHit, SearchCodeResponse, SpanHit
+from moatless.repository.file import CodeFile
 
 
 class FindFunctionArgs(SearchBaseArgs):
@@ -29,7 +30,7 @@ class FindFunctionArgs(SearchBaseArgs):
     )
 
     @model_validator(mode="after")
-    def validate_names(self) -> "FindFunctionArgs":
+    def validate_names(self):
         if not self.function_name.strip():
             raise ValueError("function_name cannot be empty")
         if self.class_name is not None and not self.class_name.strip():
@@ -94,6 +95,8 @@ class FindFunction(SearchBaseAction):
 
         if args.class_name and args.file_pattern:
             file = self._repository.get_file(args.file_pattern)
+            if not file:
+                return SearchCodeResponse()
 
             span_ids = []
             if file and file.module:

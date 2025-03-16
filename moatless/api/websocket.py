@@ -137,7 +137,7 @@ class ConnectionManager:
 
     async def broadcast_event(self, event: BaseEvent):
         """Handle system events and broadcast them to subscribers or all clients."""
-        logger.debug(f"Broadcasting event: {event.scope}:{event.event_type}")
+        logger.info(f"Broadcasting event: {event.scope}:{event.event_type}")
 
         event_dict = event.model_dump(mode="json")
 
@@ -150,6 +150,7 @@ class ConnectionManager:
         # Only send flow and evaluation events to project subscribers
         if event_dict.get("scope") == "flow" or event_dict.get("scope") == "evaluation":
             if project_id and project_id in self.project_subscriptions:
+                logger.info(f"Broadcasting event to project subscribers: {project_id}")
                 for connection in self.project_subscriptions[project_id].copy():
                     # Skip if already notified via trajectory subscription
                     if connection in notified_connections:
@@ -163,6 +164,7 @@ class ConnectionManager:
                         await self.disconnect(connection)
 
         if trajectory_id and trajectory_id in self.trajectory_subscriptions:
+            logger.info(f"Broadcasting event to trajectory subscribers: {trajectory_id}")
             for connection in self.trajectory_subscriptions[trajectory_id].copy():
                 if connection in notified_connections:
                     continue

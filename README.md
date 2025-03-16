@@ -265,9 +265,6 @@ agent = CodingAgent.create(
     temperature=0.0, 
     max_tokens=4000,
     few_shot_examples=False, # We don't need few-shot examples for this model
-    
-    response_format=LLMResponseFormat.TOOLS,
-    message_history_type=MessageHistoryType.MESSAGES, # We must show the full message history to make us of claude's prompt cache
 )
 
 loop = AgenticLoop.create(
@@ -318,9 +315,6 @@ agent = CodingAgent.create(
     temperature=0.0,
     max_tokens=4000,
     few_shot_examples=True,
-    
-    response_format=LLMResponseFormat.REACT,
-    message_history_type=MessageHistoryType.REACT
 )
 
 loop = AgenticLoop.create(
@@ -346,7 +340,6 @@ if final_node:
 | `repository` | Repository | Required | Repository instance containing the codebase |
 | `code_index` | CodeIndex | None | Code index for semantic search functionality |
 | `runtime` | RuntimeEnvironment | None | Environment for running tests |
-| `message_history_type` | MessageHistoryType | From config | How to format the message history in the prompt ('messages', 'react', etc.) |
 | `thoughts_in_action` | bool | From config | Whether to include thoughts in action responses, used when the LLM can't provide the reasoning in the message content |
 | `disable_thoughts` | bool | From config | Whether to completely disable thought generation, used for reasoning models like o1 and Deepseek R1 |
 | `few_shot_examples` | bool | From config | Whether to use few-shot examples in prompts |

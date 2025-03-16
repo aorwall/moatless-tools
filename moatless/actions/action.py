@@ -3,7 +3,7 @@ from abc import ABC
 from typing import Any, ClassVar, Optional
 
 from opentelemetry import trace
-from pydantic import ConfigDict, PrivateAttr
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from moatless.actions.schema import (
     ActionArguments,
@@ -24,26 +24,35 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-class CompletionModelMixin:
+class CompletionModelMixin(BaseModel, ABC):
     """Mixin to provide completion model functionality to actions that need it"""
 
-    _completion_model: Optional[BaseCompletionModel] = PrivateAttr(default=None)
-
-    @property
-    def completion_model(self):
-        return self._completion_model
-
-    @completion_model.setter
-    def completion_model(self, value: Optional[BaseCompletionModel]):
-        if value is None:
-            self._completion_model = None
-        else:
-            self._completion_model = value.clone()
-            self._initialize_completion_model()
+    completion_model: Optional[BaseCompletionModel] = Field(
+        default=None,
+        description="Completion model to be used for generating completions",
+    )
 
     def _initialize_completion_model(self):
         """Override this method to customize completion model initialization"""
         pass
+
+    @model_validator(mode="after")
+    def initialize_completion_model(self):
+        """Automatically initialize the completion model if set"""
+        if self.completion_model:
+            self._initialize_completion_model()
+        return self
+
+    def model_completion_dump(self, dump: dict[str, Any]) -> dict[str, Any]:
+        if self.completion_model:
+            dump["completion_model"] = self.completion_model.model_dump()
+        return dump
+
+    @classmethod
+    def model_completion_validate(cls, obj: dict[str, Any]) -> dict[str, Any]:
+        if "completion_model" in obj:
+            obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
+        return obj
 
 
 class Action(MoatlessComponent, ABC):
@@ -66,9 +75,7 @@ class Action(MoatlessComponent, ABC):
         return Action
 
     @tracer.start_as_current_span("execute")
-    async def execute(
-        self, args: ActionArguments, file_context: FileContext | None = None
-    ) -> Observation:
+    async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """Execute the action."""
         if not self._workspace:
             raise RuntimeError("No workspace set")
@@ -76,9 +83,7 @@ class Action(MoatlessComponent, ABC):
         message = await self._execute(args, file_context=file_context)
         return Observation.create(message=message or "")
 
-    async def _execute(
-        self, args: ActionArguments, file_context: FileContext | None = None
-    ) -> str | None:
+    async def _execute(self, args: ActionArguments, file_context: FileContext | None = None) -> str | None:
         """Execute the action and return the updated FileContext."""
         raise NotImplementedError("Subclasses must implement this method.")
 
@@ -90,6 +95,7 @@ class Action(MoatlessComponent, ABC):
 
     async def initialize(self, workspace: Workspace):
         self._workspace = workspace
+        # No need to check for CompletionModelMixin - validation hooks will handle it
 
     # TODO: Replace this with initialize method
     @workspace.setter
@@ -106,6 +112,8 @@ class Action(MoatlessComponent, ABC):
 
     @property
     def _runtime(self) -> RuntimeEnvironment:
+        if not self.workspace.runtime:
+            raise RuntimeError("Runtime is not set")
         return self.workspace.runtime
 
     @property
@@ -160,9 +168,7 @@ class Action(MoatlessComponent, ABC):
         return None
 
     @classmethod
-    def get_action_by_args_class(
-        cls, args_class: type[ActionArguments]
-    ) -> type["Action"] | None:
+    def get_action_by_args_class(cls, args_class: type[ActionArguments]) -> type["Action"] | None:
         """
         Get the Action subclass corresponding to the given ActionArguments subclass.
 
@@ -174,10 +180,7 @@ class Action(MoatlessComponent, ABC):
         """
 
         def search_subclasses(current_class):
-            if (
-                hasattr(current_class, "args_schema")
-                and current_class.args_schema == args_class
-            ):
+            if hasattr(current_class, "args_schema") and current_class.args_schema == args_class:
                 return current_class
             for subclass in current_class.__subclasses__():
                 result = search_subclasses(subclass)
@@ -195,9 +198,7 @@ class Action(MoatlessComponent, ABC):
         cls._initialize_components()
         action_class = cls._get_components().get(action_name)
         if not action_class:
-            raise ValueError(
-                f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}"
-            )
+            raise ValueError(f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}")
         return action_class
 
     @classmethod
@@ -206,18 +207,8 @@ class Action(MoatlessComponent, ABC):
 
         action_class = cls.get_action_by_name(name)
         if not action_class:
-            raise ValueError(
-                f"Unknown action: {name}, available actions: {cls._get_components().keys()}"
-            )
+            raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
         return action_class(**kwargs)
-
-    def model_dump(self, **kwargs) -> dict[str, Any]:
-        dump = super().model_dump(**kwargs)
-
-        if isinstance(self, CompletionModelMixin) and self.completion_model:
-            dump["model_id"] = self.completion_model.model_id
-
-        return dump
 
     @classmethod
     def get_action_schema(cls) -> ActionSchema:
@@ -248,11 +239,26 @@ class Action(MoatlessComponent, ABC):
         """Get all available actions with their schema."""
         cls._initialize_components()
 
-        return [
-            action_class.get_action_schema()
-            for action_class in cls._get_components().values()
-        ]
+        return [action_class.get_action_schema() for action_class in cls._get_components().values()]
 
     @classmethod
     def get_class_name(cls) -> str:
         return f"{cls.__module__}.{cls.__name__}"
+
+    def model_dump(self, **kwargs) -> dict[str, Any]:
+        dump = super().model_dump(**kwargs)
+
+        if isinstance(self, CompletionModelMixin):
+            dump = self.model_completion_dump(dump)
+
+        return dump
+
+    @classmethod
+    def model_validate(cls, obj: Any) -> "Action":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+
+            if issubclass(cls, CompletionModelMixin):
+                obj = cls.model_completion_validate(obj)
+
+        return super().model_validate(obj)

@@ -1,0 +1,1 @@
+uvicorn moatless.api.api:create_api --host 0.0.0.0 --port 8000 --reload --reload-dir moatless --reload-include "*.py"

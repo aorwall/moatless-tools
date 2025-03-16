@@ -89,6 +89,9 @@ class CreateFile(Action, CodeActionValueMixin, CodeModificationMixin):
         file_context: FileContext | None = None,
         workspace: Workspace | None = None,
     ) -> Observation:
+        if not file_context:
+            raise RuntimeError("File context is not set")
+
         if args.path.startswith("/repo"):
             args.path = args.path[5:]
         if args.path.startswith("/"):

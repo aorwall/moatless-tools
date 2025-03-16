@@ -45,11 +45,22 @@ class GlobTool(Action):
         if not self.workspace:
             raise ValueError("Workspace is required to run glob matching")
 
-        if not self.workspace.repository and not hasattr(self.workspace.repository, "matching_files"):
+        if not self.workspace.repository:
             raise ValueError("Repository is required to run glob matching")
 
+        if not hasattr(self.workspace.repository, "matching_files"):
+            raise ValueError("Repository does not support glob matching")
+
         try:
-            files = await self.workspace.repository.matching_files(args.pattern)
+            from moatless.repository.file import FileRepository
+
+            repo = self.workspace.repository
+            if isinstance(repo, FileRepository):
+                files: list[str] = await repo.matching_files(args.pattern)
+            else:
+                # Fallback for other repository types that might implement matching_files
+                files: list[str] = await getattr(repo, "matching_files")(args.pattern)
+
             if args.max_results and len(files) > args.max_results:
                 files = files[: args.max_results]
 

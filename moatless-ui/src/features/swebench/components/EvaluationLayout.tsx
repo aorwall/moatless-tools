@@ -18,7 +18,7 @@ export function EvaluationLayout() {
 
   if (!evaluationId) {
     return (
-      <div className="h-full flex items-center justify-center p-4">
+      <div className="h-full flex items-center justify-center">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>Missing evaluation ID</AlertDescription>
@@ -29,7 +29,7 @@ export function EvaluationLayout() {
 
   if (isError) {
     return (
-      <div className="h-full flex items-center justify-center p-4">
+      <div className="h-full flex items-center justify-center">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -44,7 +44,7 @@ export function EvaluationLayout() {
 
   if (!evaluation) {
     return (
-      <div className="h-full flex items-center justify-center p-4">
+      <div className="h-full flex items-center justify-center">
         <Card className="max-w-md">
           <CardContent className="py-6">
             <div className="flex items-center justify-center gap-2">
@@ -58,22 +58,9 @@ export function EvaluationLayout() {
   }
 
   return (
-    <div className="h-[calc(100vh-56px)] w-full">
+    <div className="h-full w-full">
       <ResizablePanelGroup direction="horizontal" className="h-full">
         <ResizablePanel defaultSize={15} minSize={0}>
-          {instanceId && (
-            <div className="p-4 border-b">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(`/swebench/evaluation/${evaluationId}`)}
-                className="flex items-center gap-2"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Back to Evaluation
-              </Button>
-            </div>
-          )}
           <InstanceList
             evaluation={evaluation}
             selectedInstanceId={instanceId}

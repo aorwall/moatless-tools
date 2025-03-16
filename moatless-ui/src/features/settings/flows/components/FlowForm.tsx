@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/lib/components/ui/button';
 import { Alert, AlertDescription, AlertTitle } from '@/lib/components/ui/alert';
-import { Loader2, Copy } from 'lucide-react';
+import { Loader2, Copy, Trash2 } from 'lucide-react';
 import { FlowConfigSchema, type FlowConfig } from '../types';
 import { SectionCard } from '@/lib/components/form/section-card';
 import { FormField } from '@/lib/components/form/form-field';
@@ -12,6 +12,18 @@ import { ComponentSelector } from '@/lib/components/form/component-selector';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { useAgents } from '@/lib/hooks/useAgents';
+import { useDeleteFlow } from '@/lib/hooks/useFlows';
+import { useNavigate } from 'react-router-dom';
+import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from '@/lib/components/ui/alert-dialog';
 
 interface FlowFormProps {
     flow: FlowConfig;
@@ -23,6 +35,9 @@ interface FlowFormProps {
 export function FlowForm({ flow, onSubmit, onDuplicate, isNew = false }: FlowFormProps) {
     // Fetch the list of agents
     const { data: agents, isLoading: isLoadingAgents } = useAgents();
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const navigate = useNavigate();
+    const deleteFlowMutation = useDeleteFlow();
 
     const form = useForm<FlowConfig>({
         resolver: zodResolver(FlowConfigSchema),
@@ -54,18 +69,48 @@ export function FlowForm({ flow, onSubmit, onDuplicate, isNew = false }: FlowFor
         onSubmit(formData as FlowConfig);
     };
 
+    // Function to handle flow deletion
+    const handleDeleteFlow = async () => {
+        try {
+            await deleteFlowMutation.mutateAsync(flow.id);
+            navigate('/settings/flows');
+        } catch (error) {
+            console.error('Error deleting flow:', error);
+        }
+    };
+
     // Custom action buttons for the form
-    const actionButtons = onDuplicate ? (
-        <Button
-            type="button"
-            variant="outline"
-            onClick={onDuplicate}
-            className="flex items-center gap-2"
-        >
-            <Copy className="h-4 w-4" />
-            Duplicate Flow
-        </Button>
-    ) : null;
+    const actionButtons = (
+        <>
+            {onDuplicate && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onDuplicate}
+                    className="flex items-center gap-2"
+                >
+                    <Copy className="h-4 w-4" />
+                    Duplicate Flow
+                </Button>
+            )}
+            {!isNew && (
+                <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={() => setDeleteDialogOpen(true)}
+                    disabled={deleteFlowMutation.isPending}
+                    className="gap-2"
+                >
+                    {deleteFlowMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                        <Trash2 className="h-4 w-4" />
+                    )}
+                    {deleteFlowMutation.isPending ? "Deleting..." : "Delete Flow"}
+                </Button>
+            )}
+        </>
+    );
 
     // If form is loading, show loading spinner
     if (form.formState.isValidating && !form.formState.isDirty) {
@@ -96,6 +141,19 @@ export function FlowForm({ flow, onSubmit, onDuplicate, isNew = false }: FlowFor
                     description="Configure the basic settings for your flow"
                 >
                     <div className="space-y-4">
+                        {/* Flow ID field for new flows */}
+                        {isNew && (
+                            <FormField label="Flow ID" htmlFor="id" tooltip="A unique identifier for this flow">
+                                <Input
+                                    id="id"
+                                    value={formValues.id || ''}
+                                    onChange={(e) => handleFieldChange('id', e.target.value)}
+                                    placeholder="Enter a unique identifier for the flow"
+                                    required
+                                />
+                            </FormField>
+                        )}
+
                         <FormField label="Description" htmlFor="description" tooltip="A brief description of what this flow does">
                             <Textarea
                                 id="description"
@@ -243,6 +301,27 @@ export function FlowForm({ flow, onSubmit, onDuplicate, isNew = false }: FlowFor
                 )}
 
             </form>
+
+            {/* Delete Confirmation Dialog */}
+            <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Delete Flow</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Are you sure you want to delete the flow "{flow.id}"? This action cannot be undone.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction
+                            onClick={handleDeleteFlow}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                        >
+                            Delete
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </div>
     );
 } 

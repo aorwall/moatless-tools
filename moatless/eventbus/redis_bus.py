@@ -38,7 +38,7 @@ class RedisEventBus(BaseEventBus):
         self._redis_available = False
         self._initialized = False
 
-        logger.debug(f"Initialized RedisEventBus with Redis URL: {self._redis_url}")
+        logger.info(f"Initialized RedisEventBus with Redis URL: {self._redis_url}")
 
     async def _check_redis_available(self) -> None:
         """Check if Redis is available."""
@@ -86,7 +86,7 @@ class RedisEventBus(BaseEventBus):
                         event_dict = json.loads(data_str)
 
                         event = BaseEvent.model_validate(event_dict)
-                        logger.info(
+                        logger.debug(
                             f"Received event {event.scope} {event.event_type} for trajectory {event.trajectory_id} and project {event.project_id}"
                         )
 

@@ -10,7 +10,7 @@ from moatless.benchmark.swebench import (
     get_repo_dir_name,
 )
 from moatless.benchmark.swebench.utils import create_repository
-from moatless.benchmark.utils import get_moatless_instances
+from moatless.evaluation.utils import get_moatless_instances
 from moatless.index.settings import IndexSettings
 from moatless.index.code_index import CodeIndex
 

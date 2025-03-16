@@ -17,13 +17,11 @@ export function FormPageLayout({
     className
 }: FormPageLayoutProps) {
     return (
-        <div className="flex h-full w-full overflow-auto">
-            <div className={cn(
-                'mx-auto w-full p-6 max-w-3xl', // Default max-width
-                className
-            )}>
-                {children}
-            </div>
+        <div className={cn(
+            'h-full w-full',
+            className
+        )}>
+            {children}
         </div>
     );
 } 

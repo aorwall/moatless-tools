@@ -1,12 +1,14 @@
 import type React from "react";
+import { cn } from "@/lib/utils";
 
 interface ContentContainerProps {
   children: React.ReactNode;
+  className?: string;
 }
 
-export function ContentContainer({ children }: ContentContainerProps) {
+export function ContentContainer({ children, className }: ContentContainerProps) {
   return (
-    <div className="max-w-4xl mx-auto p-6 bg-white shadow-lg rounded-lg">
+    <div className={cn("bg-white shadow-lg rounded-lg", className)}>
       {children}
     </div>
   );
