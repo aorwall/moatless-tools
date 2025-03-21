@@ -10,7 +10,7 @@ import uuid
 
 from moatless.actions.action import CompletionModelMixin
 from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.api.trajectory.trajectory_utils import convert_nodes
+from moatless.flow.trajectory_utils import convert_nodes
 from moatless.benchmark.swebench.utils import (
     create_index_async,
     create_repository_async,
@@ -24,7 +24,6 @@ from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
     CompletionDTO,
-    CompletionInputMessage,
     CompletionOutput,
     ExecuteNodeRequest,
     FlowConfig,
@@ -40,6 +39,7 @@ from moatless.flow.trajectory_tree import create_node_tree
 from moatless.node import Node
 from moatless.repository.git import GitRepository
 from moatless.runner.runner import BaseRunner, JobStatus
+from moatless.runner.kubernetes_runner import KubernetesRunner
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
@@ -168,7 +168,11 @@ class FlowManager:
 
     async def _load_configs(self):
         """Load configurations from JSON file."""
-        configs = await self._storage.read("flows")
+        try:
+            configs = await self._storage.read("flows")
+        except KeyError:
+            logger.warning("No flow configs found")
+            configs = []
 
         # Copy global config to local path if it doesn't exist
         if not configs:
@@ -266,32 +270,23 @@ class FlowManager:
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
             flow._storage = self._storage
 
-            nodes = convert_nodes(flow.root)
+            # nodes = convert_nodes(flow.root)
             flow_status_info = flow.get_status()
 
             if not flow.is_finished():
                 job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
-                if job_status == JobStatus.RUNNING:
-                    flow_status = FlowStatus.RUNNING
-                elif job_status == JobStatus.QUEUED:
-                    flow_status = FlowStatus.PENDING
-                elif len(flow.root.children) == 0:
-                    flow_status = FlowStatus.CREATED
-                else:
-                    flow_status = FlowStatus.PAUSED
-            elif flow.root.get_last_node() and flow.root.get_last_node().error:
-                flow_status = FlowStatus.ERROR
             else:
-                flow_status = FlowStatus.COMPLETED
+                job_status = JobStatus.COMPLETED
 
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
                 project_id=flow.project_id,
-                status=flow_status,
+                status=flow_status_info.status,
+                job_status=job_status,
                 system_status=flow_status_info,
                 agent_id=flow.agent.agent_id,
                 model_id=flow.agent.model_id,
-                nodes=nodes,
+                # nodes=nodes,
                 usage=flow.total_usage(),
             )
         except Exception as e:
@@ -496,6 +491,32 @@ class FlowManager:
         Returns:
             Dict containing the log contents and metadata
         """
+        # First, try to get logs from the runner if it's a job log file or no specific file is requested
+        if not file_name or file_name == "job.log":
+            runner_logs = await self._runner.get_job_logs(project_id, trajectory_id)
+            if runner_logs:
+                # Get the list of local log files
+                logs_dir = get_trajectory_dir(project_id, trajectory_id) / "logs"
+                file_list = [{"name": "job.log", "modified": datetime.now(timezone.utc).isoformat()}]
+
+                # Add local log files to the file list if they exist
+                if logs_dir.exists():
+                    local_log_files = sorted(
+                        list(logs_dir.glob("*.log")), key=lambda p: p.stat().st_mtime, reverse=True
+                    )
+                    file_list.extend(
+                        [
+                            {
+                                "name": f.name,
+                                "modified": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat(),
+                            }
+                            for f in local_log_files
+                        ]
+                    )
+
+                return {"logs": runner_logs, "files": file_list, "current_file": "job.log", "source": "runner"}
+
+        # Fall back to local file-based logs (existing implementation)
         trajectory_dir = get_trajectory_dir(project_id, trajectory_id)
         logs_dir = trajectory_dir / "logs"
 
@@ -516,8 +537,17 @@ class FlowManager:
             for f in log_files
         ]
 
+        # Add the job log file to the list if we have a runner
+        if await self._runner.job_exists(project_id, trajectory_id):
+            file_list.insert(0, {"name": "job.log", "modified": datetime.now(timezone.utc).isoformat()})
+
         # If a specific file is requested, try to find it
         if file_name:
+            if file_name == "job.log":
+                # This case would have been handled above, but if we reached here,
+                # it means the runner logs weren't available
+                raise ValueError("Job logs not available")
+
             target_file = logs_dir / file_name
             if not target_file.exists() or not target_file.is_file():
                 raise ValueError(f"Log file {file_name} not found")
@@ -530,11 +560,7 @@ class FlowManager:
         with open(current_file, "r") as f:
             log_content = f.read()
 
-        return {
-            "logs": log_content,
-            "files": file_list,
-            "current_file": current_file.name,
-        }
+        return {"logs": log_content, "files": file_list, "current_file": current_file.name, "source": "file"}
 
     async def get_completions(self, project_id: str, trajectory_id: str, node_id: str, action_step: int | None = None):
         """Get the completions for a specific node.

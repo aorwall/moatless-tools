@@ -1,4 +1,5 @@
 from datetime import datetime
+from token import OP
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -14,8 +15,27 @@ class SWEBenchInstanceDTO(BaseModel):
     """Schema for a SWEBench instance"""
 
     instance_id: str = Field(..., description="Unique identifier for the instance")
-    problem_statement: str = Field(..., description="Problem statement for the instance")
+    dataset: str = Field(..., description="Dataset name for the instance")
+    repo: str = Field(..., description="Repository name for the instance")
     resolved_count: int = Field(..., description="Number of agents that have resolved this instance")
+    file_count: int = Field(..., description="Number of files in expected_spans")
+
+
+class FullSWEBenchInstanceDTO(SWEBenchInstanceDTO):
+    """Full details schema for a SWEBench instance"""
+
+    problem_statement: Optional[str] = Field(None, description="Problem statement for the instance")
+    golden_patch: Optional[str] = Field(None, description="Golden patch for the instance")
+    test_patch: Optional[str] = Field(None, description="Test patch for the instance")
+    expected_spans: Optional[dict] = Field(None, description="Expected spans for the instance")
+    test_file_spans: Optional[dict] = Field(None, description="Test file spans for the instance")
+
+    base_commit: Optional[str] = Field(None, description="Base commit for the instance")
+    fail_to_pass: Optional[list[str]] = Field(None, description="Tests that failed but should pass with the fix")
+    pass_to_pass: Optional[list[str]] = Field(None, description="Tests that passed and should continue to pass")
+    resolved_by: Optional[list[dict]] = Field(
+        None, description="List of agents that resolved this instance with their approach"
+    )
 
 
 class SWEBenchValidationRequestDTO(BaseModel):
@@ -136,9 +156,9 @@ class EvaluationListItemDTO(BaseModel):
 
 def get_instance_status(instance: EvaluationInstance) -> str:
     """Get the status of an instance, including resolved/failed states."""
-    if instance.evaluated_at and instance.resolved:
+    if instance.resolved:
         return "resolved"
-    elif instance.evaluated_at and instance.resolved is False:
+    elif instance.resolved is False:
         return "failed"
     elif instance.job_status:
         return instance.job_status.value
@@ -192,6 +212,7 @@ class EvaluationRequestDTO(BaseModel):
     name: str
     num_concurrent_instances: int = 1
     dataset: str
+    instance_ids: list[str]
     max_iterations: int = 10
     max_expansions: int = 1
 

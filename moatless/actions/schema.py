@@ -33,19 +33,15 @@ class ActionArguments(ResponseSchema, ABC):
         return cls(**tool_args)
 
     def equals(self, other: "ActionArguments") -> bool:
-        return self.model_dump(exclude={"thoughts"}) == other.model_dump(
-            exclude={"thoughts"}
-        )
+        return self.model_dump(exclude={"thoughts"}) == other.model_dump(exclude={"thoughts"})
 
     def to_prompt(self):
         prompt = f"Action: {self.name}\n"
-        prompt += "\n".join(
-            [f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()]
-        )
+        prompt += "\n".join([f"  {k}: {v}" for k, v in self.model_dump(exclude={"thoughts"}).items()])
         return prompt
 
     def short_summary(self) -> str:
-        return f"{self.name}()"
+        return ""
 
     @model_validator(mode="before")
     @classmethod
@@ -80,11 +76,7 @@ class ActionArguments(ResponseSchema, ABC):
             full_module_name = f"moatless.actions.{module_name}"
             module = importlib.import_module(full_module_name)
             for name, obj in module.__dict__.items():
-                if (
-                    isinstance(obj, type)
-                    and issubclass(obj, ActionArguments)
-                    and obj != ActionArguments
-                ):
+                if isinstance(obj, type) and issubclass(obj, ActionArguments) and obj != ActionArguments:
                     _action_args[name] = obj
 
     @classmethod
@@ -94,16 +86,11 @@ class ActionArguments(ResponseSchema, ABC):
             action_args_class_path = obj.pop("action_args_class", None)
 
             if action_args_class_path:
-                if (
-                    action_args_class_path
-                    == "moatless.actions.request_context.RequestMoreContextArgs"
-                ):
+                if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
                     action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
 
                 if action_args_class_path.startswith("moatless.actions.edit"):
-                    action_args_class_path = (
-                        "moatless.actions.claude_text_editor.EditActionArguments"
-                    )
+                    action_args_class_path = "moatless.actions.claude_text_editor.EditActionArguments"
 
                 module_name, class_name = action_args_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
@@ -121,13 +108,9 @@ class Observation(BaseModel):
         None,
         description="Summary of the observation, will be displayed in summarised message history.",
     )
-    terminal: bool = Field(
-        False, description="Indicates if this action results in a terminal state"
-    )
-
-    properties: Optional[dict[str, Any]] = Field(
-        default_factory=dict, description="Additional properties"
-    )
+    terminal: bool = Field(False, description="Indicates if this action results in a terminal state")
+    error: Optional[str] = Field(None, description="Error message if the action fails")
+    properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
     execution_completion: Optional[CompletionInvocation] = Field(
         None, description="Completion created when executing the action"
     )
@@ -157,9 +140,7 @@ class Observation(BaseModel):
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        data["artifact_changes"] = [
-            change.model_dump() for change in self.artifact_changes
-        ]
+        data["artifact_changes"] = [change.model_dump() for change in self.artifact_changes]
         if self.execution_completion:
             data["execution_completion"] = self.execution_completion.model_dump()
         else:
@@ -171,13 +152,10 @@ class Observation(BaseModel):
         if isinstance(obj, dict):
             obj = obj.copy()
             obj["artifact_changes"] = [
-                ArtifactChange.model_validate(change)
-                for change in obj.get("artifact_changes", [])
+                ArtifactChange.model_validate(change) for change in obj.get("artifact_changes", [])
             ]
             if obj.get("execution_completion"):
-                obj["execution_completion"] = CompletionInvocation.model_validate(
-                    obj["execution_completion"]
-                )
+                obj["execution_completion"] = CompletionInvocation.model_validate(obj["execution_completion"])
         return super().model_validate(obj)
 
 

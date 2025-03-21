@@ -6,8 +6,7 @@ from typing import (
     List,
     Literal,
     Optional,
-    Required,
-    Self,
+    TypeVar,
     TypedDict,
     Union,
 )
@@ -18,13 +17,16 @@ from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
+# Define a type variable as a replacement for Self in Python 3.10
+T = TypeVar("T")
+
 
 class ChatCompletionCachedContent(TypedDict):
     type: Literal["ephemeral"]
 
 
 class ChatCompletionToolParamFunctionChunk(TypedDict, total=False):
-    name: Required[str]
+    name: str
     description: str
     parameters: dict
 
@@ -49,7 +51,7 @@ class ChatCompletionThinkingObject(TypedDict):
 
 
 class ChatCompletionImageUrlObject(TypedDict, total=False):
-    url: Required[str]
+    url: str
     detail: str
 
 
@@ -90,7 +92,7 @@ class ChatCompletionAssistantToolCall(TypedDict):
 
 
 class ChatCompletionMessage(TypedDict, total=False):
-    role: Required[Literal["assistant", "user", "tool"]]
+    role: Literal["assistant", "user", "tool"]
     content: Optional[MessageContent]
 
 
@@ -107,8 +109,8 @@ class ChatCompletionToolMessage(ChatCompletionMessage):
 
 
 class ChatCompletionSystemMessage(TypedDict, total=False):
-    role: Required[Literal["system"]]
-    content: Required[Union[str, list]]
+    role: Literal["system"]
+    content: Union[str, list]
     name: str
     cache_control: Optional[ChatCompletionCachedContent]
 
@@ -267,7 +269,7 @@ class ResponseSchema(BaseModel):
         }
 
     @classmethod
-    def model_validate_xml(cls, xml_text: str) -> Self:
+    def model_validate_xml(cls, xml_text: str) -> T:
         """Parse XML format into model fields."""
         parsed_input = {}
         # Get fields from the class's schema
@@ -302,7 +304,7 @@ class ResponseSchema(BaseModel):
         cls,
         json_data: str | bytes | bytearray,
         **kwarg,
-    ) -> Self:
+    ) -> T:
         if not json_data:
             raise ValidationError("Message is empty")
 

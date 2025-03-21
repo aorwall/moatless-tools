@@ -1,4 +1,5 @@
 import abc
+import os
 import logging
 from typing import TypeVar, Optional, cast, Union, Type, Any, List
 from pathlib import Path
@@ -243,7 +244,7 @@ class BaseStorage(abc.ABC):
         Read data from a project.
 
         Args:
-            key: The identifier for the data to read
+            key: The identifier for the data
             project_id: The project ID (defaults to current project context if None)
 
         Returns:
@@ -255,7 +256,11 @@ class BaseStorage(abc.ABC):
         """
         project_id = self._get_project_id(project_id)
         project_key = f"projects/{project_id}/{key}"
-        return await self.read(project_key)
+        try:
+            return await self.read(project_key)
+        except KeyError:
+            logger.warning(f"No data found for project key: {project_key}")
+            return {}
 
     async def write_to_project(self, key: str, data: dict, project_id: Optional[str] = None) -> None:
         """

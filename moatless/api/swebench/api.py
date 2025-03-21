@@ -29,6 +29,9 @@ from .schema import (
     SWEBenchInstanceDTO,
     SWEBenchInstancesResponseDTO,
     get_instance_status,
+    FullSWEBenchInstanceDTO,
+    SWEBenchValidationRequestDTO,
+    SWEBenchValidationResponseDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +52,7 @@ async def create_evaluation(
         dataset_name=request.dataset,
         flow_id=request.flow_id,
         model_id=request.model_id,
+        instance_ids=request.instance_ids,
     )
 
     return map_to_evaluation_response(evaluation, model_manager, flow_manager)
@@ -225,18 +229,56 @@ async def retry_instance(
 
 @router.get("/instances", response_model=SWEBenchInstancesResponseDTO)
 async def list_instances(
-    page: int = 1, limit: int = 20, sort_by: str = "instance_id", order: str = "asc", search: Optional[str] = None
+    page: int = 1,
+    limit: int = 20,
+    sort_by: str = "instance_id",
+    order: str = "asc",
+    search: Optional[str] = None,
+    dataset: Optional[str] = None,
+    repo: Optional[str] = None,
+    min_resolved: int = 0,
+    max_resolved: int = 1000,
+    min_files: int = 0,
+    max_files: int = 1000,
 ):
     """List all available SWEBench instances with pagination, sorting, and search."""
     try:
         instances = get_moatless_instances()
 
-        # Filter instances by search query
-        if search:
-            instances = {k: v for k, v in instances.items() if search.lower() in v["instance_id"].lower()}
+        # Filter by search query, dataset, repo, resolved count, and file count
+        filtered_instances = {}
+        for k, v in instances.items():
+            # Filter by search query (in instance_id and problem statement)
+            if (
+                search
+                and search.lower() not in v["instance_id"].lower()
+                and search.lower() not in v["problem_statement"].lower()
+            ):
+                continue
+
+            # Filter by dataset
+            if dataset and not any(d["dataset"] == dataset for d in v.get("datasets", [])):
+                continue
+
+            # Filter by repository
+            if repo and repo.lower() not in v["repo"].lower():
+                continue
+
+            # Filter by resolved count
+            resolved_count = len(v.get("resolved_by", []))
+            if resolved_count < min_resolved or resolved_count > max_resolved:
+                continue
+
+            # Filter by file count (count only expected_spans)
+            file_count = len(v.get("expected_spans", {}))
+            if file_count < min_files or file_count > max_files:
+                continue
+
+            # Add to filtered instances
+            filtered_instances[k] = v
 
         # Sort instances
-        sorted_instances = sorted(instances.values(), key=lambda x: x[sort_by], reverse=(order == "desc"))
+        sorted_instances = sorted(filtered_instances.values(), key=lambda x: x[sort_by], reverse=(order == "desc"))
 
         # Apply pagination
         start = (page - 1) * limit
@@ -247,14 +289,60 @@ async def list_instances(
             instances=[
                 SWEBenchInstanceDTO(
                     instance_id=instance["instance_id"],
-                    problem_statement=instance["problem_statement"],
+                    repo=instance["repo"],
+                    dataset=instance["dataset"],
                     resolved_count=len(instance.get("resolved_by", [])),
+                    file_count=len(instance.get("expected_spans", {})),
                 )
                 for instance in paginated_instances
             ]
         )
     except Exception as e:
         logger.exception(f"Failed to list instances: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/instances/{instance_id}", response_model=FullSWEBenchInstanceDTO)
+async def get_instance(instance_id: str):
+    """Fetch a specific SWEBench instance by ID."""
+    try:
+        instance = get_moatless_instance(instance_id)
+        if not instance:
+            raise HTTPException(status_code=404, detail=f"Instance {instance_id} not found")
+
+        # Convert string test lists to actual lists if they exist
+        fail_to_pass = instance.get("fail_to_pass")
+        if isinstance(fail_to_pass, str):
+            try:
+                fail_to_pass = eval(fail_to_pass)  # Safe because we control the data
+            except:
+                fail_to_pass = []
+
+        pass_to_pass = instance.get("pass_to_pass")
+        if isinstance(pass_to_pass, str):
+            try:
+                pass_to_pass = eval(pass_to_pass)  # Safe because we control the data
+            except:
+                pass_to_pass = []
+
+        return FullSWEBenchInstanceDTO(
+            instance_id=instance["instance_id"],
+            repo=instance["repo"],
+            dataset=instance["dataset"],
+            problem_statement=instance["problem_statement"],
+            resolved_count=len(instance.get("resolved_by", [])),
+            file_count=len(instance.get("expected_spans", {})),
+            golden_patch=instance["golden_patch"],
+            test_patch=instance["test_patch"],
+            expected_spans=instance["expected_spans"],
+            test_file_spans=instance["test_file_spans"],
+            base_commit=instance.get("base_commit"),
+            fail_to_pass=fail_to_pass,
+            pass_to_pass=pass_to_pass,
+            resolved_by=instance.get("resolved_by"),
+        )
+    except Exception as e:
+        logger.exception(f"Failed to get instance {instance_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

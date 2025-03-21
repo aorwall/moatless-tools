@@ -36,7 +36,11 @@ class AgentConfigManager:
 
     async def _load_configs(self):
         """Load configurations from JSON file."""
-        configs = await self._storage.read("agents")
+        try:
+            configs = await self._storage.read("agents")
+        except KeyError:
+            logger.warning("No agent configs found")
+            configs = []
 
         # Copy global config to local path if it doesn't exist
         if not configs:

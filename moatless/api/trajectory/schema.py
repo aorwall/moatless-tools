@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.stats import Usage, CompletionInvocation
+from moatless.flow.schema import NodeDTO
 
 
 class UsageDTO(BaseModel):
@@ -209,36 +210,6 @@ class TreeItemDTO(BaseModel):
     """Tree representation of trajectory data."""
 
     items: list[NodeTreeItemDTO] = Field(default_factory=list)
-
-
-class NodeDTO(BaseModel):
-    """Node information in the tree."""
-
-    nodeId: int
-    children: list["NodeDTO"] = Field(default_factory=list, description="Children nodes of this node")
-    executed: bool = Field(default=False, description="Whether this node has been executed")
-    reward: Optional[RewardDTO] = None
-    userMessage: Optional[str] = None
-    assistantMessage: Optional[str] = None
-    completion: Optional[CompletionInvocation] = None
-    thoughts: Optional[str] = None
-    actionSteps: list[ActionStepDTO] = []
-    fileContext: Optional[FileContextDTO] = None
-    error: Optional[str] = None
-    warnings: list[str] = []
-    errors: list[str] = []
-    usage: Optional[Usage] = None
-    terminal: bool = Field(default=False, description="Whether this node is in a terminal state")
-    allNodeErrors: list[str] = Field(
-        default_factory=list,
-        description="All errors from this node, including action steps and file context",
-    )
-    allNodeWarnings: list[str] = Field(
-        default_factory=list,
-        description="All warnings from this node, including action steps and file context",
-    )
-    testResultsSummary: Optional[TestResultsSummaryDTO] = None
-    items: list[TimelineItemDTO] = Field(default_factory=list, description="Timeline items for this node")
 
 
 class TrajectoryDTO(BaseModel):

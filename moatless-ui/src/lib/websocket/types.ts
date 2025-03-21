@@ -70,7 +70,7 @@ export type BatchedNotification = {
 export const WS_CONFIG = {
     // Default to environment variables, fallback to computed values
     BASE_URL: import.meta.env.VITE_WS_URL || getDefaultWebSocketUrl(),
-    PATH: import.meta.env.VITE_WS_PATH || '/api/ws',
+    PATH: import.meta.env.VITE_WS_PATH || '/ws',
     RETRY_DELAY: 1000, // 1 second initial retry delay
     MAX_RETRIES: 5,
     RECONNECT_BACKOFF_FACTOR: 1.5,
@@ -85,7 +85,7 @@ export const WS_CONFIG = {
 // Helper function to compute default WebSocket URL
 function getDefaultWebSocketUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = import.meta.env.VITE_API_HOST || 'localhost:8000';
+    const host = import.meta.env.VITE_API_HOST || window.location.host;
     return `${protocol}//${host}`;
 }
 

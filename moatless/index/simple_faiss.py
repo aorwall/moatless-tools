@@ -286,7 +286,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
         """Create a SimpleFaissVectorStore from a persist directory (async version)."""
         fs = fs or fsspec.filesystem("file")
         if not fs.exists(persist_dir):
-            raise ValueError(f"No existing index store found at {persist_dir}.")
+            raise ValueError(f"Directory {persist_dir} does not exist. Cannot load index store.")
 
         if fs and not isinstance(fs, LocalFileSystem):
             raise NotImplementedError("FAISS only supports local storage for now.")

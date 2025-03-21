@@ -7,13 +7,13 @@ from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):
-    PENDING = "pending"
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELED = "canceled"
-    NOT_FOUND = "not_found"
+    PENDING = "pending"  # Job created but not yet scheduled
+    INITIALIZING = "initializing"  # Pod scheduled, containers being created/pulled/setup
+    RUNNING = "running"  # Pod is running and executing the task
+    COMPLETED = "completed"  # Job finished successfully
+    FAILED = "failed"  # Job execution failed
+    CANCELED = "canceled"  # Job was manually canceled
+    NOT_FOUND = "not_found"  # Job not found in the system
 
 
 class RunnerStatus(str, Enum):
@@ -33,10 +33,12 @@ class JobInfo(BaseModel):
 
     id: str
     status: JobStatus
+    project_id: Optional[str] = None
+    trajectory_id: Optional[str] = None
     enqueued_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    exc_info: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
 
 
 class EvaluationJobStatus(BaseModel):
@@ -96,16 +98,16 @@ class JobsStatusSummary(BaseModel):
 
     project_id: str
     total_jobs: int = 0
-    queued_jobs: int = 0
+    pending_jobs: int = 0
+    initializing_jobs: int = 0
     running_jobs: int = 0
     completed_jobs: int = 0
     failed_jobs: int = 0
     canceled_jobs: int = 0
-    pending_jobs: int = 0
     job_ids: dict[str, list[str]] = Field(
         default_factory=lambda: {
             "pending": [],
-            "queued": [],
+            "initializing": [],
             "running": [],
             "completed": [],
             "failed": [],
@@ -183,3 +185,16 @@ class BaseRunner(ABC):
     async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
         """Get a summary of job statuses for the given project."""
         pass
+
+    async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:
+        """Get logs for a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            String containing the logs if available, None otherwise
+        """
+        # Default implementation returns None - each runner can override as needed
+        return None

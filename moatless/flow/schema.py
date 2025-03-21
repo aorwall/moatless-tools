@@ -5,12 +5,12 @@ from typing import Any, List, Literal, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from moatless.api.trajectory.schema import NodeDTO
 from moatless.artifacts.artifact import ArtifactHandler
-from moatless.completion.stats import Usage
+from moatless.completion.stats import CompletionInvocation, Usage
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
+from moatless.node import Reward
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
@@ -262,6 +262,32 @@ class ExecuteNodeRequest(BaseModel):
     node_id: int
 
 
+class NodeDTO(BaseModel):
+    """Node information in the tree."""
+
+    nodeId: int
+    children: list["NodeDTO"] = Field(default_factory=list, description="Children nodes of this node")
+    executed: bool = Field(default=False, description="Whether this node has been executed")
+    reward: Optional[Reward] = None
+    userMessage: Optional[str] = None
+    assistantMessage: Optional[str] = None
+    completion: Optional[CompletionInvocation] = None
+    thoughts: Optional[str] = None
+    error: Optional[str] = None
+    warnings: list[str] = []
+    errors: list[str] = []
+    usage: Optional[Usage] = None
+    terminal: bool = Field(default=False, description="Whether this node is in a terminal state")
+    allNodeErrors: list[str] = Field(
+        default_factory=list,
+        description="All errors from this node, including action steps and file context",
+    )
+    allNodeWarnings: list[str] = Field(
+        default_factory=list,
+        description="All warnings from this node, including action steps and file context",
+    )
+
+
 class TrajectoryResponseDTO(BaseModel):
     """Data transfer object for trajectory responses."""
 
@@ -309,7 +335,7 @@ class CompletionDTO(BaseModel):
     """Data transfer object for completions."""
 
     system_prompt: Optional[str] = None
-    input: List[CompletionInputMessage] = None
+    input: Optional[List[CompletionInputMessage]] = None
     output: Optional[CompletionOutput] = None
     original_input: Optional[dict] = None
     original_output: Optional[dict] = None

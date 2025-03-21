@@ -243,6 +243,7 @@ export interface Trajectory {
   trajectory_id: string;
   project_id: string;
   status: "running" | "error" | "finished" | "unknown";
+  job_status?: "pending" | "initializing" | "running" | "completed" | "failed" | "canceled" | "not_found";
   agent_id: string;
   model_id: string;
   system_status: TrajectoryStatus;

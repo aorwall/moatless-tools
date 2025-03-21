@@ -14,6 +14,7 @@ export interface EvaluationRequest {
   name: string;
   dataset: string;
   num_concurrent_instances: number;
+  instance_ids?: string[];
 }
 
 export interface EvaluationInstance {

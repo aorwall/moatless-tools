@@ -8,14 +8,15 @@ from datetime import datetime
 from typing import List
 
 from opentelemetry import trace
-from testbeds.schema import EvaluationResult, TraceItem
+from testbeds.schema import EvaluationResult, TraceItem, TestbedSummary
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
 
 from moatless.exceptions import RuntimeError
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
+from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.testing.schema import TestResult, TestStatus
 from moatless.schema import RankedFileSpan
 
 logger = logging.getLogger(__name__)
@@ -44,10 +45,10 @@ class TestbedEnvironment(RuntimeEnvironment):
         if instance_id:
             self.instance_id = instance_id
         else:
-            self.instance_id = instance["instance_id"]
+            self.instance_id = instance["instance_id"] if instance else None
 
         if not self.instance_id:
-            raise RuntimeError("No instance ID provided")
+            raise RuntimeError("No instance ID or testbed ID provided")
 
         self.tests_to_ignore = []
         self.log_dir = log_dir
@@ -56,10 +57,158 @@ class TestbedEnvironment(RuntimeEnvironment):
         self._client = None
         self.rerun_failing_tests = rerun_failing_tests
         self.include_relevant_files = include_relevant_files
+        self.testbed_id = None
 
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(testbed_sdk=TestbedSDK(), repository=repository, instance=instance, **kwargs)
+
+    @tracer.start_as_current_span("TestbedEnvironment.__aenter__")
+    async def __aenter__(self):
+        """Enter the async context manager."""
+        logger.info(f"Setting up testbed environment for instance {self.instance_id}")
+
+        if self.testbed_id:
+            logger.info(f"Using existing testbed ID: {self.testbed_id}")
+        else:
+            client = await self.testbed_sdk.create_async_client(
+                instance_id=self.instance_id, log_dir=self.log_dir, run_id=self.run_id
+            )
+
+            try:
+                testbed = await client.get_or_create_testbed_async()
+                self.testbed_id = testbed.testbed_id
+                logger.info(f"Created new testbed with ID: {self.testbed_id}")
+
+            finally:
+                # Don't destroy the client here since we're just getting the testbed ID
+                # and not performing other operations
+                pass
+
+        return self
+
+    @tracer.start_as_current_span("TestbedEnvironment.__aexit__")
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit the async context manager."""
+        if self.testbed_id:
+            logger.info(f"Destroying testbed with ID: {self.testbed_id}")
+            client = await self.testbed_sdk.create_async_client(
+                instance_id=self.instance_id, testbed_id=self.testbed_id, log_dir=self.log_dir, run_id=self.run_id
+            )
+            try:
+                await client.destroy()
+                logger.info(f"Testbed {self.testbed_id} destroyed")
+            except Exception as e:
+                logger.error(f"Error destroying testbed {self.testbed_id}: {e}")
+
+    @tracer.start_as_current_span("TestbedEnvironment.run_tests")
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
+        async with await self.testbed_sdk.create_async_client(
+            instance_id=self.instance_id,
+            testbed_id=self.testbed_id,
+            log_dir=self.log_dir,
+            run_id=self.run_id,
+        ) as client:
+            logger.info(f"Starting test run for instance {self.instance_id} with run_id {self.run_id}.")
+            response = await client.run_tests(test_files=test_files, patch=patch, timeout=600)
+            logger.info(f"Test run response test results: {len(response.test_results)}")
+        log_content = ""
+
+        if response.output:
+            log_content = "# Test Run\n\n"
+            log_content += f"Files: {test_files}"
+            if patch:
+                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+            log_content += f"\n\n## Log:\n{response.output}\n"
+
+        if response.test_results:
+            log_content += "\n\n## Testbed test results:"
+            test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
+            log_content += f"```json\n{test_results_json}\n```"
+
+        # Filter using cached tests first
+        test_results = self._filter_failing_tests(response.test_results, patch=patch)
+
+        # Now check for failures only in the filtered results
+        if (
+            self.rerun_failing_tests
+            and patch
+            and any(test.status in [TestStatus.ERROR, TestStatus.FAILED] for test in test_results)
+        ):
+            # Only run baseline tests if we haven't cached any failing tests yet
+            if not self.tests_to_ignore:
+                # Get list of failing test files
+                failing_test_files = {
+                    test.file_path for test in test_results if test.status in [TestStatus.ERROR, TestStatus.FAILED]
+                }
+
+                async with await self.testbed_sdk.create_async_client(
+                    instance_id=self.instance_id,
+                    testbed_id=self.testbed_id,
+                    log_dir=self.log_dir,
+                    run_id=self.run_id,
+                ) as client:
+                    baseline_response = await client.run_tests(
+                        test_files=list(failing_test_files), patch=None, timeout=600
+                    )
+                    logger.info(f"Baseline response test results: {len(baseline_response.test_results)}")
+
+                self._filter_failing_tests(baseline_response.test_results, patch=None)
+                # Re-filter the results with any newly cached tests
+                test_results = self._filter_failing_tests(response.test_results, patch=patch)
+
+        mapped_results = await self._map_test_results_to_issues(test_results)
+
+        # Cache results if caching is enabled
+        if self._test_cache is not None:
+            cache_key = self._generate_cache_key(test_files, patch)
+            self._test_cache[cache_key] = mapped_results
+
+        return mapped_results
+
+    @tracer.start_as_current_span("TestbedEnvironment.evaluate")
+    async def evaluate(self, patch: str) -> EvaluationResult | None:
+        async with await self.testbed_sdk.create_async_client(
+            instance_id=self.instance_id,
+            testbed_id=self.testbed_id,
+            log_dir=self.log_dir,
+            run_id=self.run_id,
+        ) as client:
+            logger.info(f"Starting evaluation for instance {self.instance_id} with run_id {self.run_id}.")
+
+            log_content = ""
+            try:
+                if not patch.endswith("\n"):
+                    patch += "\n"
+
+                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+
+                evaluation_result = await client.run_evaluation(patch=patch)
+
+                if evaluation_result.output:
+                    log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
+
+                log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
+
+                return evaluation_result
+
+            except TestbedError as e:
+                logger.error(f"Error running evaluation. Cause: {e}")
+                log_content += f"\n\n## Error:\n{e}"
+            except Exception as e:
+                logger.exception("Error running evaluation")
+                log_content += f"\n\n## Error:\n{e}"
+                import traceback
+
+                traceback = traceback.format_exc()
+                log_content += f"\n\n# Traceback:\n{traceback}"
+            finally:
+                if self.log_dir:
+                    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    with open(f"{self.log_dir}/{datetime_str}_evaluation.md", "w") as f:
+                        f.write(log_content)
+
+        return None
 
     def _generate_cache_key(self, test_files: list[str] | None, patch: str | None = None) -> str:
         """Generate a unique cache key based on test files and patch content"""
@@ -115,106 +264,6 @@ class TestbedEnvironment(RuntimeEnvironment):
             )
 
         return filtered_results
-
-    @tracer.start_as_current_span("TestbedEnvironment.run_tests")
-    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
-        async with await self.testbed_sdk.create_async_client(
-            instance_id=self.instance_id, log_dir=self.log_dir, run_id=self.run_id
-        ) as client:
-            logger.info(f"Starting test run for instance {self.instance_id} with run_id {self.run_id}.")
-            response = await client.run_tests(test_files=test_files, patch=patch, timeout=600)
-            logger.info(f"Test run response test results: {len(response.test_results)}")
-        log_content = ""
-
-        if response.output:
-            log_content = "# Test Run\n\n"
-            log_content += f"Files: {test_files}"
-            if patch:
-                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
-            log_content += f"\n\n## Log:\n{response.output}\n"
-
-        if response.test_results:
-            log_content += "\n\n## Testbed test results:"
-            test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
-            log_content += f"```json\n{test_results_json}\n```"
-
-        # Filter using cached tests first
-        test_results = self._filter_failing_tests(response.test_results, patch=patch)
-
-        # Now check for failures only in the filtered results
-        if (
-            self.rerun_failing_tests
-            and patch
-            and any(test.status in [TestStatus.ERROR, TestStatus.FAILED] for test in test_results)
-        ):
-            # Only run baseline tests if we haven't cached any failing tests yet
-            if not self.tests_to_ignore:
-                # Get list of failing test files
-                failing_test_files = {
-                    test.file_path for test in test_results if test.status in [TestStatus.ERROR, TestStatus.FAILED]
-                }
-
-                async with await self.testbed_sdk.create_async_client(
-                    instance_id=self.instance_id, log_dir=self.log_dir, run_id=self.run_id
-                ) as client:
-                    baseline_response = await client.run_tests(
-                        test_files=list(failing_test_files), patch=None, timeout=600
-                    )
-                    logger.info(f"Baseline response test results: {len(baseline_response.test_results)}")
-
-                self._filter_failing_tests(baseline_response.test_results, patch=None)
-                # Re-filter the results with any newly cached tests
-                test_results = self._filter_failing_tests(response.test_results, patch=patch)
-
-        mapped_results = await self._map_test_results_to_issues(test_results)
-
-        # Cache results if caching is enabled
-        if self._test_cache is not None:
-            cache_key = self._generate_cache_key(test_files, patch)
-            self._test_cache[cache_key] = mapped_results
-
-        return mapped_results
-
-    @tracer.start_as_current_span("TestbedEnvironment.evaluate")
-    async def evaluate(self, patch: str) -> EvaluationResult | None:
-        async with await self.testbed_sdk.create_async_client(
-            instance_id=self.instance_id, log_dir=self.log_dir
-        ) as client:
-            logger.info(f"Starting evaluation for instance {self.instance_id} with run_id {self.run_id}.")
-
-            log_content = ""
-            try:
-                if not patch.endswith("\n"):
-                    patch += "\n"
-
-                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
-
-                evaluation_result = await client.run_evaluation(patch=patch)
-
-                if evaluation_result.output:
-                    log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
-
-                log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
-
-                return evaluation_result
-
-            except TestbedError as e:
-                logger.error(f"Error running evaluation. Cause: {e}")
-                log_content += f"\n\n## Error:\n{e}"
-            except Exception as e:
-                logger.exception("Error running evaluation")
-                log_content += f"\n\n## Error:\n{e}"
-                import traceback
-
-                traceback = traceback.format_exc()
-                log_content += f"\n\n# Traceback:\n{traceback}"
-            finally:
-                if self.log_dir:
-                    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    with open(f"{self.log_dir}/{datetime_str}_evaluation.md", "w") as f:
-                        f.write(log_content)
-
-        return None
 
     async def _get_code_block(self, file_path: str, line_number: int):
         file = self.repository.get_file(file_path)

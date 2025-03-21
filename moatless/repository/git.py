@@ -2,6 +2,7 @@ import asyncio
 import builtins
 import logging
 import os
+import subprocess
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field
@@ -113,6 +114,10 @@ class GitRepository(FileRepository):
                 shutil.rmtree(repo_path)
             raise
 
+    def reset(self):
+        self._repo.git.clean("-fd")
+        self._repo.git.reset("--hard")
+
     @classmethod
     def from_dict(cls, data: dict):
         return cls.from_repo(
@@ -127,12 +132,6 @@ class GitRepository(FileRepository):
             "repo_path": self.repo_path,
             "git_repo_url": self.repo_url,
             "commit": self.initial_commit,
-        }
-
-    def snapshot(self) -> dict:
-        return {
-            "commit": self.current_commit,
-            "patch": self.diff(),
         }
 
     def create_empty_file(self, file_path: str):
@@ -199,7 +198,7 @@ class GitRepository(FileRepository):
                 response = self.completion.create_text_completion(
                     messages=[ChatCompletionUserMessage(role="user", content=prompt)],
                 )
-                return response.choices[0].message.content.strip()
+                return str(response.choices[0].message.content.strip())
             except Exception as e:
                 logging.error(f"Error generating commit message: {e}")
 

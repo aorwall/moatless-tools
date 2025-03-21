@@ -54,6 +54,7 @@ class RQRunner(BaseRunner):
         else:
             raise ValueError("REDIS_URL environment variable not set")
 
+        logger.info(f"Connecting to Redis at {self.redis_url}")
         self.redis_conn = Redis.from_url(self.redis_url)
         self.queue = MoatlessQueue(connection=self.redis_conn, default_timeout=3600)
         self.logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class RQRunner(BaseRunner):
         """
 
         if await self.job_exists(project_id, trajectory_id):
+            logger.info(f"Job {project_id}_{trajectory_id} already exists, skipping")
             return False
 
         job_id = self._job_id(project_id, trajectory_id)

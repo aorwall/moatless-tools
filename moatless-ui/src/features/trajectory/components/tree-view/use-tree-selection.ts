@@ -11,28 +11,28 @@ export function useTreeSelection() {
       const nodeItem = item as NodeItem
       setSelectedItem({
         id: item.id,
-        nodeId: item.id,
+        node_id: nodeItem.node_id,
         type: "node",
-        parentId: nodeItem.parentNodeId,
+        parent_id: nodeItem.parent_node_id,
       })
     } else if (item.type === "completion") {
       const completionItem = item as CompletionItem
       setSelectedItem({
         id: item.id,
-        nodeId: completionItem.nodeId,
+        node_id: completionItem.node_id,
         type: "completion",
-        parentId: completionItem.parentId,
+        parent_id: completionItem.parent_id,
       })
     } else if (item.type === "thought") {
       setSelectedItem({
         id: item.id,
-        nodeId: (item as ThoughtItem).nodeId,
+        node_id: (item as ThoughtItem).node_id,
         type: "thought",
       })
     } else if (item.type === "action") {
       setSelectedItem({
         id: item.id,
-        nodeId: (item as ActionItem).nodeId,
+        node_id: (item as ActionItem).node_id,
         type: "action",
       })
     }

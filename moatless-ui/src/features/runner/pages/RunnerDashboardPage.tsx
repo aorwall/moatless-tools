@@ -295,22 +295,9 @@ export function RunnerDashboardPage() {
       )}
 
       {/* Jobs List */}
-      <Tabs defaultValue="active">
-        <TabsList>
-          <TabsTrigger value="active">Active Jobs ({activeJobs})</TabsTrigger>
-          <TabsTrigger value="all">All Jobs ({jobs.length})</TabsTrigger>
-        </TabsList>
-        <TabsContent value="active" className="mt-4">
-          <RunnerJobsList
-            jobs={jobs.filter(
-              (job) => job.status === "queued" || job.status === "running",
-            )}
-          />
-        </TabsContent>
-        <TabsContent value="all" className="mt-4">
-          <RunnerJobsList jobs={jobs} />
-        </TabsContent>
-      </Tabs>
+      <RunnerJobsList
+        jobs={jobs}
+      />
     </div>
   );
 }

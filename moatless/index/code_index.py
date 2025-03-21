@@ -123,6 +123,28 @@ class CodeIndex:
         return sorted(matched_files)
 
     @classmethod
+    def from_persist_dir(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
+        """Synchronous version of from_persist_dir"""
+
+        vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
+
+        docstore, settings = (
+            SimpleDocumentStore.from_persist_dir(persist_dir),
+            IndexSettings.from_persist_dir(persist_dir),
+        )
+
+        code_block_index = CodeBlockIndex.from_persist_dir(persist_dir)
+
+        return cls(
+            file_repo=file_repo,
+            vector_store=vector_store,
+            docstore=docstore,
+            settings=settings,
+            code_block_index=code_block_index,
+            **kwargs,
+        )
+
+    @classmethod
     async def from_persist_dir_async(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
         """Asynchronous version of from_persist_dir"""
         # Run CPU-intensive synchronous operations in a thread pool
@@ -139,7 +161,7 @@ class CodeIndex:
             loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir),
         )
 
-        inverted_index = await CodeBlockIndex.from_persist_dir(persist_dir)
+        inverted_index = await CodeBlockIndex.from_persist_dir_async(persist_dir)
 
         return cls(
             file_repo=file_repo,
@@ -864,9 +886,7 @@ class CodeIndex:
         embedded_tokens = sum([count_tokens(node.get_content(), self._settings.embed_model) for node in embedded_nodes])
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {embedded_tokens} tokens")
 
-        # TODO: Create a new code block index
-        self._code_block_index.blocks_by_class_name = blocks_by_class_name
-        self._code_block_index.blocks_by_function_name = blocks_by_function_name
+        self._code_block_index = CodeBlockIndex(blocks_by_class_name, blocks_by_function_name)
 
         return len(embedded_nodes), embedded_tokens
 

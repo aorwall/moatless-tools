@@ -3,7 +3,7 @@ import { z } from "zod";
 // Enum definitions matching backend
 export enum JobStatus {
   PENDING = "pending",
-  QUEUED = "queued",
+  INITIALIZING = "initializing",
   RUNNING = "running",
   COMPLETED = "completed",
   FAILED = "failed",
@@ -20,10 +20,12 @@ export enum RunnerStatus {
 export const JobInfoSchema = z.object({
   id: z.string(),
   status: z.nativeEnum(JobStatus),
+  project_id: z.string().nullable(),
+  trajectory_id: z.string().nullable(),
   enqueued_at: z.string().datetime().nullable(),
   started_at: z.string().datetime().nullable(),
   ended_at: z.string().datetime().nullable(),
-  exc_info: z.string().nullable(),
+  metadata: z.record(z.any()).nullable(),
 });
 
 export const RunnerInfoSchema = z.object({

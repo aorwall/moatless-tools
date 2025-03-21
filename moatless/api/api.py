@@ -5,7 +5,8 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+import secrets
+from typing import Any, Optional
 import asyncio
 from datetime import datetime
 
@@ -13,14 +14,18 @@ from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
     HTTPException,
+    Header,
     Request,
     UploadFile,
+    status,
     Depends,
+    Response,
 )
+
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from pydantic import ConfigDict
 
 from moatless.api.agents.api import router as agent_router
 from moatless.api.artifacts.api import router as artifact_router
@@ -31,19 +36,16 @@ from moatless.api.swebench.api import router as swebench_router
 from moatless.api.swebench.schema import RunnerResponseDTO
 from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.api.trajectory.trajectory_utils import (
+from moatless.flow.trajectory_utils import (
     load_trajectory_from_file,
 )
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
-from moatless.eventbus.base import BaseEventBus
-from moatless.logging_config import get_logger, setup_logging
-from moatless.runner.rq import RQRunner
 from moatless.runner.runner import BaseRunner, JobsStatusSummary
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
-from moatless.api.dependencies import get_runner, get_event_bus
+from moatless.api.dependencies import get_runner
 
 import moatless.settings as settings
 
@@ -52,6 +54,34 @@ filter_external_warnings()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+security = HTTPBasic()
+
+
+# Basic Auth settings
+auth_enabled = os.environ.get("MOATLESS_AUTH_ENABLED", "false").lower() == "true"
+auth_username = os.environ.get("MOATLESS_AUTH_USERNAME", "admin")
+auth_password = os.environ.get("MOATLESS_AUTH_PASSWORD", "password")
+
+
+async def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify credentials for basic authentication.
+
+    Skip authentication if auth_enabled is False in settings.
+    """
+    if not auth_enabled:
+        return True
+
+    correct_username = secrets.compare_digest(credentials.username, auth_username)
+    correct_password = secrets.compare_digest(credentials.password, auth_password)
+
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
@@ -64,6 +94,66 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         json_encoders={datetime: lambda dt: dt.isoformat()},
         model_config={"exclude_none": True},
     )
+
+    # Apply authentication to the main API if enabled
+    if auth_enabled:
+        # Add authentication middleware to catch all requests
+        @api.middleware("http")
+        async def auth_middleware(request: Request, call_next):
+            # Skip authentication for OPTIONS requests (CORS preflight)
+            if request.method == "OPTIONS":
+                return await call_next(request)
+
+            # Skip authentication for specific paths if needed
+            path = request.url.path
+            public_paths = [
+                "/api/health",  # Health check endpoint
+                "/docs",  # Swagger UI
+                "/redoc",  # ReDoc UI
+                "/openapi.json",  # OpenAPI schema
+            ]
+            if any(path == public_path for public_path in public_paths):
+                return await call_next(request)
+
+            # Get authorization header
+            auth_header = request.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Basic "):
+                return Response(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    headers={"WWW-Authenticate": "Basic"},
+                    content="Authentication required",
+                )
+
+            try:
+                import base64
+
+                credentials_bytes = base64.b64decode(auth_header[6:])
+                credentials_str = credentials_bytes.decode("utf-8")
+                username, password = credentials_str.split(":", 1)
+
+                # Verify credentials
+                correct_username = secrets.compare_digest(username, auth_username)
+                correct_password = secrets.compare_digest(password, auth_password)
+
+                if not (correct_username and correct_password):
+                    return Response(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        headers={"WWW-Authenticate": "Basic"},
+                        content="Invalid credentials",
+                    )
+            except Exception:
+                return Response(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    headers={"WWW-Authenticate": "Basic"},
+                    content="Invalid credentials format",
+                )
+
+            # If we get here, credentials are valid
+            return await call_next(request)
+
+        logger.info(f"Basic authentication enabled with username: {auth_username}")
+    else:
+        logger.info("Authentication is disabled")
 
     @api.on_event("startup")
     async def startup_event():
@@ -84,22 +174,6 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         event_bus = settings.event_bus
         if event_bus:
             await event_bus.unsubscribe(handle_event)
-
-    FastAPIInstrumentor.instrument_app(api)
-
-    origins = [
-        "http://localhost:5173",  # Development frontend
-        "http://127.0.0.1:5173",
-    ]
-
-    api.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,  # Replace "*" with specific origins
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        expose_headers=["*"],  # Add this to expose headers to the client
-    )
 
     router = FastAPI(title="Moatless API")
 
@@ -125,9 +199,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             try:
                 artifact = workspace.get_artifact(type, id)
                 if not artifact:
-                    raise HTTPException(
-                        status_code=404, detail=f"Artifact {id} not found"
-                    )
+                    raise HTTPException(status_code=404, detail=f"Artifact {id} not found")
                 return artifact.to_ui_representation()
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e))
@@ -155,35 +227,26 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 json.dump(trajectory_data, f)
             return load_trajectory_from_file(temp_file_path)
         except Exception as e:
-            raise HTTPException(
-                status_code=400, detail=f"Invalid trajectory file: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid trajectory file: {str(e)}")
 
     @router.get("/runner", response_model=RunnerResponseDTO)
     async def get_runner_info(
         runner: BaseRunner = Depends(get_runner),
     ) -> RunnerResponseDTO:
         """Get the runner"""
-        return RunnerResponseDTO(
-            info=await runner.get_runner_info(), jobs=await runner.get_jobs()
-        )
+        return RunnerResponseDTO(info=await runner.get_runner_info(), jobs=await runner.get_jobs())
 
     @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
-    async def get_job_status_summary(
-        project_id: str, runner: BaseRunner = Depends(get_runner)
-    ) -> JobsStatusSummary:
+    async def get_job_status_summary(project_id: str, runner: BaseRunner = Depends(get_runner)) -> JobsStatusSummary:
         """Get a summary of job statuses for a project"""
         return await runner.get_job_status_summary(project_id)
 
     @router.post("/runner/jobs/{project_id}/cancel")
-    async def cancel_jobs(
-        project_id: str, request: Request, runner: BaseRunner = Depends(get_runner)
-    ):
+    async def cancel_jobs(project_id: str, request: Request, runner: BaseRunner = Depends(get_runner)):
         """Cancel jobs for a project"""
         data = (
             await request.json()
-            if request.headers.get("content-length")
-            and int(request.headers.get("content-length", "0")) > 0
+            if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0
             else None
         )
         trajectory_id = data.get("trajectory_id") if data else None
@@ -191,9 +254,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         return {"status": "success", "message": "Job(s) canceled successfully"}
 
     @router.post("/runner/jobs/{project_id}/{trajectory_id}/retry")
-    async def retry_job(
-        project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)
-    ):
+    async def retry_job(project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)):
         """Retry a failed job"""
         success = await runner.retry_job(project_id, trajectory_id)
         if success:
@@ -209,9 +270,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     router.include_router(model_router, prefix="/models", tags=["models"])
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
     router.include_router(swebench_router, prefix="/swebench", tags=["swebench"])
-    router.include_router(
-        trajectory_router, prefix="/trajectories", tags=["trajectories"]
-    )
+    router.include_router(trajectory_router, prefix="/trajectories", tags=["trajectories"])
     router.include_router(loop_router, prefix="/loop", tags=["loop"])
     router.include_router(artifact_router, prefix="/artifacts", tags=["artifacts"])
 
@@ -239,9 +298,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 return await html_app.get_response("index.html", scope)
 
             # Mount static files for assets
-            api.mount(
-                "/assets", StaticFiles(directory=str(ui_path / "assets")), name="assets"
-            )
+            api.mount("/assets", StaticFiles(directory=str(ui_path / "assets")), name="assets")
 
             # Add the catch-all route for SPA
             @api.get("/{full_path:path}")
@@ -274,9 +331,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                     @api.get("/")
                     async def serve_root(request: Request):
                         scope = request.scope
-                        scope.update(
-                            {"path": "/index.html", "method": "GET", "type": "http"}
-                        )
+                        scope.update({"path": "/index.html", "method": "GET", "type": "http"})
                         return await html_app.get_response("index.html", scope)
 
                     # Mount static files for assets
@@ -292,9 +347,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                         if full_path.startswith("api/"):
                             raise HTTPException(status_code=404, detail="Not found")
                         try:
-                            return await html_app.get_response(
-                                "index.html", request.scope
-                            )
+                            return await html_app.get_response("index.html", request.scope)
                         except Exception as e:
                             logger.error(f"Error serving SPA: {e}")
                             raise HTTPException(status_code=404, detail="Not found")
@@ -311,6 +364,31 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         logger.info("API extras not installed, UI will not be served")
         # Mount API router even if no UI support
         api.mount("/api", router)
+
+    FastAPIInstrumentor.instrument_app(api, excluded_urls="health")
+
+    # Get allowed origins from environment variable or use defaults
+    cors_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    if cors_origins_env:
+        origins = cors_origins_env.split(",")
+    else:
+        origins = [
+            "http://localhost:5173",  # Development frontend
+            "http://127.0.0.1:5173",
+            "http://localhost:8000",  # API server
+            "http://127.0.0.1:8000",
+        ]
+
+    logger.info(f"CORS allowed origins: {origins}")
+
+    api.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+        expose_headers=["*"],  # Add this to expose headers to the client
+    )
 
     return api
 

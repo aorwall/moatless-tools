@@ -1,4 +1,8 @@
 import logging
+from typing import List, Optional, Dict, Any, Tuple
+import os
+import time
+import re
 
 from pydantic import ConfigDict, Field, PrivateAttr
 
@@ -8,14 +12,12 @@ from moatless.actions.schema import (
     Observation,
     RewardScaleEntry,
 )
-
 from moatless.artifacts.artifact import ArtifactChange
-from testbeds.schema import TestStatus
-
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.testing.schema import TestResult, TestStatus
+from moatless.testing.test_output_parser import TestOutputParser
+from moatless.testing.schema import TestFile
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -67,8 +69,8 @@ class RunTests(Action):
 
     async def initialize(self, workspace: Workspace):
         await super().initialize(workspace)
-        if not self._runtime or not self._repository:
-            raise ValueError("Runtime environment or repository not set for RunTests action")
+        if not workspace.runtime:
+            raise ValueError("Runtime is not available for RunTests action")
 
     async def execute(
         self,
@@ -81,8 +83,10 @@ class RunTests(Action):
         if file_context is None:
             raise ValueError("File context must be provided to execute the run tests action.")
 
-        if file_context._runtime is None:
-            raise ValueError("Runtime must be provided to execute the run tests action.")
+        # Ensure workspace is set on file_context if needed
+        if not hasattr(file_context, "workspace") or file_context.workspace is None:
+            if self._workspace:
+                file_context.workspace = self._workspace
 
         # Separate non-existent files and directories from valid test files
         non_existent_files = []
@@ -114,22 +118,21 @@ class RunTests(Action):
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_file_objects = await file_context.run_tests(test_files)
+        test_file_objects = await self.run_tests(test_files=test_files)
 
         response_msg = ""
 
-        failure_details = file_context.get_test_failure_details(test_files=args.test_files)
+        failure_details = TestFile.get_test_failure_details(test_file_objects, file_paths=args.test_files)
         if failure_details:
             response_msg += f"\n{failure_details}"
 
-        summary = f"\n{file_context.get_test_summary(args.test_files)}"
+        summary = f"\n{TestFile.get_test_summary(test_file_objects, file_paths=args.test_files)}"
         response_msg += summary
 
         artifact_changes = []
 
         logger.info(f"Running tests for {len(args.test_files)} files")
-        for test_file in file_context.test_files:
-            logger.info(f"Running tests for {test_file.file_path}")
+        for test_file in test_file_objects:
             if test_file.file_path not in args.test_files:
                 continue
 
@@ -156,6 +159,65 @@ class RunTests(Action):
             )
 
         return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)  # type: ignore
+
+    async def run_tests(self, test_files: list[str], patch: str | None = None) -> list[TestFile]:
+        """
+        Runs the tests specified in the test_files list.
+
+        Args:
+            test_files: List of test file paths to run
+            timeout_seconds: Optional timeout for test execution in seconds
+
+        Returns:
+            list[TestFile]: List of TestFile objects with test results
+        """
+        if not test_files:
+            logger.warning("No test files provided, skipping test execution")
+            return []
+
+        logger.info(f"Running tests: {test_files}")
+
+        # Create TestFile objects for each test file
+        test_file_objects = []
+
+        for file_path in test_files:
+            if not os.path.exists(file_path):
+                logger.warning(f"Test file does not exist: {file_path}")
+                continue
+
+            test_file = TestFile(file_path=file_path)
+            test_file_objects.append(test_file)
+
+        if not test_file_objects:
+            logger.warning("No valid test files found")
+            return []
+
+        # Run the tests
+        start_time = time.time()
+        test_results = await self._workspace.runtime.run_tests(test_files=test_files, patch=patch)
+        end_time = time.time()
+        test_duration = end_time - start_time
+        logger.info(f"Tests completed in {test_duration:.2f} seconds")
+
+        # Parse the output and update test_file objects
+        for test_file in test_file_objects:
+            # Filter test results for this file
+            file_test_results = [
+                result for result in test_results if result.file_path and result.file_path == test_file.file_path
+            ]
+
+            test_file.test_results = file_test_results
+            if file_test_results:
+                logger.info(
+                    f"Test results for {test_file.file_path}: "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.PASSED)} passed, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.FAILED)} failed, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.ERROR)} errors"
+                )
+            else:
+                logger.warning(f"No test results found for {test_file.file_path}")
+
+        return test_file_objects
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> list[str]:

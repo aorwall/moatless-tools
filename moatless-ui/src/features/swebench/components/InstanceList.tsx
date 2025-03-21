@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/lib/components/ui/select";
+import { ScrollArea } from "@/lib/components/ui/scroll-area";
 import { useState, ElementType, useMemo } from "react";
 
 interface InstanceListProps {
@@ -94,8 +95,8 @@ export function InstanceList({
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-none border-b bg-gray-50/50 px-3 py-3">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="shrink-0 border-b bg-gray-50/50 px-3 py-3">
         <div className="space-y-2">
           <Select
             value={filters.status}
@@ -127,7 +128,7 @@ export function InstanceList({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {filteredInstances.map((instance) => {
           return (
             <Link
@@ -136,7 +137,7 @@ export function InstanceList({
               className={cn(
                 "block border-b px-4 py-3 transition-colors hover:bg-gray-50",
                 selectedInstanceId === instance.instance_id &&
-                  "bg-blue-50 hover:bg-blue-50",
+                "bg-blue-50 hover:bg-blue-50",
               )}
             >
               <div className="flex items-start gap-3">

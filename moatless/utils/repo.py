@@ -35,7 +35,7 @@ def get_repo_async_lock_path(repo_url: str) -> str:
 def repo_operation_lock(repo_url: str):
     """Context manager to ensure thread-safe git operations on a repository."""
     lock_path = get_repo_lock_path(repo_url)
-    lock = filelock.FileLock(lock_path, timeout=60)  # 1 minute timeout for sync operations
+    lock = filelock.FileLock(lock_path, timeout=300)
     try:
         lock.acquire()
         yield
@@ -48,7 +48,7 @@ def repo_operation_lock(repo_url: str):
 async def repo_operation_async_lock(repo_url: str):
     """Async context manager for thread-safe git operations."""
     lock_path = get_repo_async_lock_path(repo_url)
-    lock = filelock.FileLock(lock_path, timeout=300)  # Increase timeout to 5 minutes
+    lock = filelock.FileLock(lock_path, timeout=300)
 
     try:
         # Add exponential backoff retry logic
@@ -99,9 +99,9 @@ def setup_github_repo(repo: str, base_commit: str, base_dir: str = "/tmp/repos")
         os.makedirs(path)
         logger.info(f"Directory '{path}' was created.")
 
-    with repo_operation_lock(repo_url):
-        maybe_clone(repo_url, path)
-        checkout_commit(path, base_commit)
+    # with repo_operation_lock(repo_url):
+    maybe_clone(repo_url, path)
+    checkout_commit(path, base_commit)
     return path
 
 
@@ -125,42 +125,8 @@ def verify_commit_exists(repo_dir: str, commit: str) -> bool:
 
 
 def clone_and_checkout(repo_url, repo_dir, commit):
-    with repo_operation_lock(repo_url):
-        if os.path.exists(f"{repo_dir}/.git"):
-            if verify_commit_exists(repo_dir, commit):
-                subprocess.run(
-                    ["git", "checkout", commit],
-                    cwd=repo_dir,
-                    check=True,
-                    text=True,
-                    capture_output=True,
-                )
-                logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
-                return
-            else:
-                logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
-                subprocess.run(
-                    ["rm", "-rf", repo_dir],
-                    check=True,
-                    text=True,
-                    capture_output=True,
-                )
-
-        try:
-            logger.info(f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}")
-            subprocess.run(
-                ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir],
-                check=True,
-                text=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["git", "fetch", "--depth", "1", "origin", commit],
-                cwd=repo_dir,
-                check=True,
-                text=True,
-                capture_output=True,
-            )
+    if os.path.exists(f"{repo_dir}/.git"):
+        if verify_commit_exists(repo_dir, commit):
             subprocess.run(
                 ["git", "checkout", commit],
                 cwd=repo_dir,
@@ -168,26 +134,43 @@ def clone_and_checkout(repo_url, repo_dir, commit):
                 text=True,
                 capture_output=True,
             )
-            logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
-        except subprocess.CalledProcessError as e:
-            logger.warning(f"Shallow clone failed, attempting full clone: {e.stderr}")
-            if os.path.exists(f"{repo_dir}/.git") and verify_commit_exists(repo_dir, commit):
-                subprocess.run(
-                    ["git", "checkout", commit],
-                    cwd=repo_dir,
-                    check=True,
-                    text=True,
-                    capture_output=True,
-                )
-                logger.info(f"Another process created repo with commit {commit}, using that")
-                return
-
+            logger.info(f"Found existing repo with commit {commit} at {repo_dir}")
+            return
+        else:
+            logger.warning(f"Existing repo at {repo_dir} doesn't have commit {commit}, recloning")
             subprocess.run(
-                ["git", "clone", repo_url, repo_dir],
+                ["rm", "-rf", repo_dir],
                 check=True,
                 text=True,
                 capture_output=True,
             )
+
+    try:
+        logger.info(f"Attempting shallow clone of {repo_url} at commit {commit} to {repo_dir}")
+        subprocess.run(
+            ["git", "clone", "--depth", "1", "--no-single-branch", repo_url, repo_dir],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "fetch", "--depth", "1", "origin", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
+    except subprocess.CalledProcessError as e:
+        logger.warning(f"Shallow clone failed, attempting full clone: {e.stderr}")
+        if os.path.exists(f"{repo_dir}/.git") and verify_commit_exists(repo_dir, commit):
             subprocess.run(
                 ["git", "checkout", commit],
                 cwd=repo_dir,
@@ -195,7 +178,23 @@ def clone_and_checkout(repo_url, repo_dir, commit):
                 text=True,
                 capture_output=True,
             )
-            logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
+            logger.info(f"Another process created repo with commit {commit}, using that")
+            return
+
+        subprocess.run(
+            ["git", "clone", repo_url, repo_dir],
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "checkout", commit],
+            cwd=repo_dir,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+        logger.info(f"Successfully cloned {repo_url} and checked out commit {commit} in {repo_dir}")
 
 
 async def async_clone_and_checkout(repo_url, repo_dir, commit):

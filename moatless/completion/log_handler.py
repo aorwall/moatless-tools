@@ -65,7 +65,7 @@ class LogHandler(CustomLogger):
         elif kwargs.get("original_response"):
             original_response = self.parse_response(kwargs.get("original_response"))
         else:
-            logger.warning(f"No response found in kwargs: {kwargs}")
+            logger.debug(f"No response found in kwargs: {kwargs}")
             original_response = None
 
         if "additional_args" in kwargs and kwargs.get("additional_args").get("complete_input_dict"):

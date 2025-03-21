@@ -102,7 +102,7 @@ def setup_job_logging(job_type: str, trajectory_dir: Path) -> list[logging.Handl
 
     # Add console handler for WARN and ERROR
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.WARNING)
+    console_handler.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)

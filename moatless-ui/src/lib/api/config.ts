@@ -1,8 +1,9 @@
 export const API_CONFIG = {
-  baseUrl: "http://localhost:8000/api",
+  baseUrl: import.meta.env.VITE_API_BASE_URL || "/api",
   defaultHeaders: {
     "Content-Type": "application/json",
   },
+  useCredentials: !!(import.meta.env.VITE_API_BASE_URL),
 } as const;
 
 export class ApiError extends Error {
@@ -49,7 +50,7 @@ export async function apiRequest<T>(
         ...API_CONFIG.defaultHeaders,
         ...fetchOptions.headers,
       },
-      credentials: "include",
+      credentials: API_CONFIG.useCredentials ? "include" : "same-origin",
     });
 
     if (!response.ok) {

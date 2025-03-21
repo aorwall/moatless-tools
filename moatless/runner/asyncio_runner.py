@@ -292,58 +292,73 @@ class AsyncioRunner(BaseRunner):
         Returns:
             A JobsStatusSummary object
         """
-        # Initialize counters
-        total = 0
-        queued = 0
-        running = 0
-        completed = 0
-        failed = 0
-        canceled = 0
-        pending = 0
+        summary = JobsStatusSummary(project_id=project_id)
 
-        # Collect job IDs by status
-        job_ids = {
-            "queued": [],
-            "running": [],
-            "completed": [],
-            "failed": [],
-            "canceled": [],
-            "pending": [],
-        }
-
-        # Count jobs by status
+        # Count jobs for the project by status
         for job_id, meta in self.job_metadata.items():
-            if job_id.startswith(f"{project_id}:"):
-                total += 1
-                status = meta["status"]
+            # Check if job belongs to this project
+            if not job_id.startswith(f"{project_id}:"):
+                continue
 
-                if status == JobStatus.QUEUED:
-                    queued += 1
-                    job_ids["queued"].append(job_id)
-                elif status == JobStatus.RUNNING:
-                    running += 1
-                    job_ids["running"].append(job_id)
-                elif status == JobStatus.COMPLETED:
-                    completed += 1
-                    job_ids["completed"].append(job_id)
-                elif status == JobStatus.FAILED:
-                    failed += 1
-                    job_ids["failed"].append(job_id)
-                elif status == JobStatus.CANCELED:
-                    canceled += 1
-                    job_ids["canceled"].append(job_id)
-                elif status == JobStatus.PENDING:
-                    pending += 1
-                    job_ids["pending"].append(job_id)
+            summary.total_jobs += 1
+            status = meta["status"]
 
-        return JobsStatusSummary(
-            project_id=project_id,
-            total_jobs=total,
-            queued_jobs=queued,
-            running_jobs=running,
-            completed_jobs=completed,
-            failed_jobs=failed,
-            canceled_jobs=canceled,
-            pending_jobs=pending,
-            job_ids=job_ids,
-        )
+            # Update counts and job ID lists based on status
+            if status == JobStatus.PENDING:
+                summary.pending_jobs += 1
+                summary.job_ids["pending"].append(job_id)
+            elif status == JobStatus.INITIALIZING:
+                summary.initializing_jobs += 1
+                summary.job_ids["initializing"].append(job_id)
+            elif status == JobStatus.RUNNING:
+                summary.running_jobs += 1
+                summary.job_ids["running"].append(job_id)
+            elif status == JobStatus.COMPLETED:
+                summary.completed_jobs += 1
+                summary.job_ids["completed"].append(job_id)
+            elif status == JobStatus.FAILED:
+                summary.failed_jobs += 1
+                summary.job_ids["failed"].append(job_id)
+            elif status == JobStatus.CANCELED:
+                summary.canceled_jobs += 1
+                summary.job_ids["canceled"].append(job_id)
+
+        return summary
+
+    async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:
+        """Get logs for a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            String containing the logs if available, None otherwise
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+
+        # Check if the job exists
+        if job_id not in self.job_metadata:
+            return None
+
+        # For AsyncioRunner, we don't capture logs directly, so we'll return basic job status information
+        meta = self.job_metadata[job_id]
+        status = meta["status"]
+
+        logs = [
+            f"Job ID: {job_id}",
+            f"Status: {status}",
+            f"Enqueued at: {meta['enqueued_at']}",
+        ]
+
+        if meta["started_at"]:
+            logs.append(f"Started at: {meta['started_at']}")
+
+        if meta["ended_at"]:
+            logs.append(f"Ended at: {meta['ended_at']}")
+
+        if meta.get("exc_info") and status == JobStatus.FAILED:
+            logs.append("\nError Information:")
+            logs.append(meta["exc_info"])
+
+        return "\n".join(logs)

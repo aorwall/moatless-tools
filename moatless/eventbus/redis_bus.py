@@ -31,7 +31,9 @@ class RedisEventBus(BaseEventBus):
         super().__init__(storage=storage)
         self.subscribers: List[Callable] = []
 
-        self._redis_url = redis_url or os.environ.get("REDIS_URL", "redis://localhost:6379")
+        self._redis_url = redis_url or os.environ.get("REDIS_URL")
+        if not self._redis_url:
+            raise ValueError("REDIS_URL environment variable not set")
         self._redis: redis.Redis = redis.from_url(self._redis_url)
         self._pubsub = self._redis.pubsub()
         self._listener_task: Optional[asyncio.Task] = None
@@ -168,5 +170,8 @@ class RedisEventBus(BaseEventBus):
         """Run an async callback with error handling."""
         try:
             await callback(event)
+        except json.JSONDecodeError as jde:
+            logger.error(f"JSON decoding error when processing event {event.event_type} for {event.project_id}: {jde}")
+            logger.info(f"Event details: {event}")
         except Exception as e:
-            logger.exception(f"Error in async subscriber {callback.__name__}: {e}")
+            logger.exception(f"Failed to send event {event} to {callback.__name__}")

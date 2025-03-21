@@ -120,26 +120,53 @@ class CodeBlockIndex:
         """Get all blocks for a given function name."""
         return self._blocks_by_function_name.get(function_name, [])
 
-    async def persist(self, persist_dir: str):
+    def persist(self, persist_dir: str):
         """Save all indexes to disk."""
         # Convert tuples to lists for JSON serialization
         blocks_by_class_name = {k: [list(t) for t in v] for k, v in self._blocks_by_class_name.items()}
 
         blocks_by_function_name = {k: [list(t) for t in v] for k, v in self._blocks_by_function_name.items()}
 
-        async with aiofiles.open(os.path.join(persist_dir, "blocks_by_class_name.json"), "w") as f:
-            await f.write(json.dumps(blocks_by_class_name, indent=2))
+        with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "w") as f:
+            f.write(json.dumps(blocks_by_class_name, indent=2))
 
-        async with aiofiles.open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
-            await f.write(json.dumps(blocks_by_function_name, indent=2))
+        with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
+            f.write(json.dumps(blocks_by_function_name, indent=2))
 
         # Save tree index
         inverted_indexes = {"file_tree": self._file_tree}
-        async with aiofiles.open(os.path.join(persist_dir, "inverted_indexes.json"), "w") as f:
-            await f.write(json.dumps(inverted_indexes, indent=2))
+        with open(os.path.join(persist_dir, "inverted_indexes.json"), "w") as f:
+            f.write(json.dumps(inverted_indexes, indent=2))
 
     @classmethod
-    async def from_persist_dir(cls, persist_dir: str) -> "CodeBlockIndex":
+    def from_persist_dir(cls, persist_dir: str) -> "CodeBlockIndex":
+        """Load indexes from disk."""
+        blocks_by_class_name = {}
+        blocks_by_function_name = {}
+
+        if os.path.exists(os.path.join(persist_dir, "blocks_by_class_name.json")):
+            with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "r") as f:
+                blocks_by_class_name = json.load(f)
+
+        if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
+            with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "r") as f:
+                blocks_by_function_name = json.load(f)
+
+        instance = cls(
+            blocks_by_class_name=blocks_by_class_name,
+            blocks_by_function_name=blocks_by_function_name,
+        )
+
+        # Load tree index if it exists
+        if os.path.exists(os.path.join(persist_dir, "inverted_indexes.json")):
+            with open(os.path.join(persist_dir, "inverted_indexes.json"), "r") as f:
+                inverted_indexes = json.load(f)
+                instance._file_tree = inverted_indexes.get("file_tree", {})
+
+        return instance
+
+    @classmethod
+    async def from_persist_dir_async(cls, persist_dir: str) -> "CodeBlockIndex":
         """Load indexes from disk."""
         blocks_by_class_name = {}
         blocks_by_function_name = {}

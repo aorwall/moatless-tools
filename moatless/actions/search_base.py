@@ -242,7 +242,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
             search_result = await self._search_for_alternative_suggestion(args)
             alternative_suggestion = True
             logger.info(
-                f"{self.name}: No relevant search results found. Will use alternative suggestion with {search_result.hits} hits."
+                f"{self.name}: No relevant search results found. Will use alternative suggestion with {len(search_result.hits)} hits."
             )
 
         span_count = 0

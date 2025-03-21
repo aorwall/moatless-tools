@@ -3,8 +3,9 @@ from enum import Enum
 from typing import Optional, Union, cast
 
 from pydantic import BaseModel, Field
-from regex import F
 
+from moatless.actions.schema import ActionArguments
+from moatless.actions.semantic_search import SemanticSearchArgs
 from moatless.actions.think import ThinkArgs
 from moatless.completion.stats import CompletionInvocation
 from moatless.node import Node
@@ -65,9 +66,7 @@ class ActionTreeItem(BaseTreeItem):
     type: str = ItemType.ACTION
     action_name: str
     action_index: int
-    children: list[Union["CompletionTreeItem", "ThoughtTreeItem", "ActionTreeItem"]] = (
-        Field(default_factory=list)
-    )
+    children: list[Union["CompletionTreeItem", "ThoughtTreeItem", "ActionTreeItem"]] = Field(default_factory=list)
 
 
 class NodeTreeItem(BaseTreeItem):
@@ -120,9 +119,22 @@ def get_execution_time(step) -> str:
     return ""
 
 
-def create_node_tree_item(
-    node: Node, parent_node_id: int | None = None
-) -> NodeTreeItem:
+def get_action_detail(action: ActionArguments) -> str:
+    """Get detail string for an action."""
+    if isinstance(action, ThinkArgs):
+        return f'("{action.thought[:20]}...")' if len(action.thought) > 20 else f'("{action.thought}")'
+
+    if isinstance(action, SemanticSearchArgs):
+        return f'("{action.query[:20]}...")' if len(action.query) > 20 else f'("{action.query}")'
+
+    # return first property that is set
+    for key, value in action.model_dump().items():
+        if value:
+            return f"({key}={value[:20]}...)" if len(value) > 20 else f"({key}={value})"
+    return ""
+
+
+def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> NodeTreeItem:
     # Create node item
     timestamp = get_timestamp(node)
     node_item = NodeTreeItem(
@@ -160,9 +172,7 @@ def create_node_tree_item(
         thought_item = ThoughtTreeItem(
             id=f"{node_item.id}-thought",
             label="Thought",
-            detail=f'("{node.thoughts.text[:20]}...")'
-            if len(node.thoughts.text) > 20
-            else f'("{node.thoughts.text}")',
+            detail=f'("{node.thoughts.text[:20]}...")' if len(node.thoughts.text) > 20 else f'("{node.thoughts.text}")',
             node_id=node_item.node_id,
         )
         node_item.children.append(thought_item)
@@ -177,7 +187,7 @@ def create_node_tree_item(
         action_item = ActionTreeItem(
             id=action_id,
             label=step.action.name,
-            detail=f'("{step.action.short_summary()}")',
+            detail=get_action_detail(step.action),
             # time=get_execution_time(step),
             action_name=step.action.name,
             action_index=i,
@@ -187,9 +197,7 @@ def create_node_tree_item(
 
         # Add action completion if available
         if step.observation and step.observation.execution_completion:
-            completion_time = (
-                f"{step.observation.execution_completion.duration_sec:.2f}s"
-            )
+            completion_time = f"{step.observation.execution_completion.duration_sec:.2f}s"
 
             if step.observation.execution_completion.usage:
                 tokens = (
@@ -407,15 +415,9 @@ def _append_ascii_node(
 
                 if action_child.type == ItemType.COMPLETION:
                     completion = cast(CompletionTreeItem, action_child)
-                    tokens_display = (
-                        f" ({completion.tokens} tokens)" if completion.tokens else ""
-                    )
-                    action_child_line = (
-                        f"Completion {completion.detail or ''}{tokens_display}"
-                    )
-                    tree_lines.append(
-                        f"{action_child_prefix}{action_child_connection}{action_child_line}"
-                    )
+                    tokens_display = f" ({completion.tokens} tokens)" if completion.tokens else ""
+                    action_child_line = f"Completion {completion.detail or ''}{tokens_display}"
+                    tree_lines.append(f"{action_child_prefix}{action_child_connection}{action_child_line}")
 
     # Process node children
     for i, child_node in enumerate(child_nodes):

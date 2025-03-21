@@ -456,14 +456,6 @@ class StringReplace(Action, CodeActionValueMixin, CodeModificationMixin):
 
         summary = f"The file {path} has been edited. Review the changes and make sure they are as expected. Edit the file again if necessary. Remember to verify the changes by running tests and adding new tests if necessary."
 
-        test_summary = await self.run_tests(
-            file_path=str(path),
-            file_context=file_context,
-        )
-
-        if test_summary:
-            message += f"\n\n{test_summary}"
-
         return Observation.create(
             message=message,
             summary=summary,

@@ -5,9 +5,9 @@ import logging
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field, asdict
 from math import log
-from typing import Dict, List, Optional, Set, Tuple, Literal, Any
+from typing import Dict, List, Optional, Set, Tuple, Literal, Any, Union, TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from pydantic.json_schema import JsonSchemaMode
@@ -26,8 +26,9 @@ from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
 from moatless.repository.git import GitRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment, TestResult, TestStatus
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import FileWithSpans
+from moatless.testing.schema import TestFile
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
@@ -1127,11 +1128,6 @@ class ContextFile(BaseModel):
         return self._is_new
 
 
-class TestFile(BaseModel):
-    file_path: str = Field(..., description="The path to the test file.")
-    test_results: list[TestResult] = Field(default_factory=list, description="List of test results.")
-
-
 class FileContext(BaseModel):
     shadow_mode: bool = Field(default=True)
 
@@ -1412,10 +1408,19 @@ class FileContext(BaseModel):
         return context_file
 
     def get_context_files(self) -> list[ContextFile]:
+        """
+        Returns all context files that exist in the repository.
+
+        Returns:
+            list[ContextFile]: A list of all context files
+        """
         file_paths = list(self._files.keys())
-        return [
-            self.get_context_file(file_path) for file_path in file_paths if self.get_context_file(file_path) is not None
-        ]
+        result = []
+        for file_path in file_paths:
+            context_file = self.get_context_file(file_path)
+            if context_file is not None:
+                result.append(context_file)
+        return result
 
     def context_size(self):
         if self._repo:
@@ -1441,7 +1446,6 @@ class FileContext(BaseModel):
 
     def reset(self):
         self._files = {}
-        self._test_files = {}
 
     def is_empty(self):
         return not self._files
@@ -1494,15 +1498,24 @@ class FileContext(BaseModel):
         return cloned_context
 
     def has_patch(self, ignore_tests: bool = False):
-        return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
+        """
+        Checks if any files in the context have patches.
 
-    def has_test_patch(self):
-        return any(file.patch for file in self._files.values() if is_test(file.file_path))
+        Args:
+            ignore_tests: Whether to ignore test files when checking for patches
+
+        Returns:
+            bool: True if any file has a patch, False otherwise
+        """
+        return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
 
     def generate_git_patch(self, ignore_tests: bool = False) -> str:
         """
         Generates a full patch for all files with changes in the FileContext.
         The patch is formatted like a git diff.
+
+        Args:
+            ignore_tests: Whether to ignore test files when generating the patch
 
         Returns:
             str: A git-diff-like patch string containing all file changes.
@@ -1523,6 +1536,7 @@ class FileContext(BaseModel):
 
         Args:
             old_context: The previous FileContext to compare against
+            include_patches: Whether to include files with different content (patches)
 
         Returns:
             set[str]: Set of file paths that have different content or spans between the two contexts
@@ -1747,20 +1761,15 @@ class FileContext(BaseModel):
         Returns:
             Tuple[int, int, int]: A tuple containing (passed_count, failure_count, error_count)
         """
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
+        from moatless.actions.run_tests import RunTests
 
-        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
-        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
-        passed_count = len(all_results) - failure_count - error_count
-
-        return (passed_count, failure_count, error_count)
+        return RunTests.get_test_counts(self)
 
     async def run_tests(self, test_files: list[str] | None = None) -> list[TestFile]:
         """
         Runs tests using the runtime environment and groups results by file.
-        Preserves all test files in context, even those without results.
+
+        This is a wrapper around RunTests.run_tests to maintain backward compatibility.
 
         Args:
             test_files (List[str] | None): Optional list of test files to run.
@@ -1769,61 +1778,15 @@ class FileContext(BaseModel):
         Returns:
             List[TestFile]: List of test results grouped by file
         """
+        from moatless.actions.run_tests import RunTests
 
-        if not self._runtime:
-            raise ValueError("Runtime environment not set for FileContext to run tests")
-
-        if test_files:
-            for test_file in test_files:
-                self.add_test_file(test_file)
-                if not self.has_file(test_file):
-                    logger.info(f"Adding test file: {test_file} to context")
-                    self.add_file(test_file, add_extra=False)
-        elif self._test_files:
-            test_files = list(self._test_files.keys())
-        else:
-            logger.warning("No test files in context to run tests")
-            return []
-
-        patch = self.generate_git_patch()
-
-        # If specific test files provided, only run those
-        if test_files:
-            test_results = await self._runtime.run_tests(patch=patch, test_files=test_files)
-        else:
-            test_results = await self._runtime.run_tests(patch=patch)
-
-        # Group results by file
-        results_by_file = {}
-        for result in test_results:
-            if result.file_path:
-                if result.file_path not in results_by_file:
-                    results_by_file[result.file_path] = []
-                results_by_file[result.file_path].append(result)
-            else:
-                logger.warning(f"Test result missing file path: {result}")
-
-        # Update test results for existing test files
-        for test_file in self._test_files.values():
-            test_file.test_results = results_by_file.get(test_file.file_path, [])
-
-        # Add summary log
-        test_summary = []
-        for test_file in self._test_files.values():
-            status_counts = {}
-            for result in test_file.test_results:
-                if result.status not in status_counts:
-                    status_counts[result.status] = 0
-                status_counts[result.status] += 1
-            test_summary.append(f" - {test_file.file_path}: {len(test_file.test_results)} tests. {status_counts}")
-
-        logger.info(f"Test summary by file:{chr(10)}{chr(10).join(test_summary)}")
-
-        return list(self._test_files.values())
+        return await RunTests.run_tests(self, test_files)
 
     def add_test_file(self, file_path: str) -> TestFile:
-        """Test summary
+        """
         Adds a new test file path to the context if it doesn't already exist.
+
+        This is a wrapper around RunTests.add_test_file to maintain backward compatibility.
 
         Args:
             file_path (str): Path to the test file
@@ -1831,172 +1794,58 @@ class FileContext(BaseModel):
         Returns:
             TestFile: The new or existing TestFile object
         """
-        if file_path in self._test_files:
-            return self._test_files[file_path]
+        from moatless.actions.run_tests import RunTests
 
-        test_file = TestFile(file_path=file_path, test_results=[])
-        self._test_files[file_path] = test_file
-        logger.debug(f"Added test file: {file_path}")
-
-        return test_file
-
-    def get_updated_test_results(self, previous_context: "FileContext") -> set[str]:
-        """
-        Gets test files that have different results from the previous context.
-
-        Args:
-            previous_context: The previous FileContext to compare against
-
-        Returns:
-            Set[str]: Set of file paths that have updated test results
-        """
-        updated_files = set()
-
-        for file_path, test_file in self._test_files.items():
-            prev_test_file = previous_context._test_files.get(file_path)
-            if not prev_test_file or test_file.test_results != prev_test_file.test_results:
-                updated_files.add(file_path)
-
-        return updated_files
+        return RunTests.add_test_file(self, file_path)
 
     def get_test_summary(self, test_files: Optional[list[str]] = None) -> str:
         """
-        Returns a summary of test results, optionally filtered by specified test files.
-        If test_files is provided, only shows results for those files.
-        Lists each file with its own results followed by an overall summary.
+        Returns a summary of test results.
+
+        This is a wrapper around RunTests.get_test_summary to maintain backward compatibility.
 
         Args:
-            test_files (Optional[List[str]]): Optional list of test files to include in the summary
+            test_files: Optional list of test files to include in the summary
 
         Returns:
             str: Summary string of test results
         """
-        from testbeds.schema import TestStatus
+        from moatless.actions.run_tests import RunTests
 
-        # Filter test files if specified
-        included_test_files = {}
-        if test_files:
-            for file_path in test_files:
-                if file_path in self._test_files:
-                    included_test_files[file_path] = self._test_files[file_path]
-        else:
-            included_test_files = self._test_files
-
-        if not included_test_files:
-            return "No test results available."
-
-        # Collect results and generate per-file summaries
-        all_results = []
-        per_file_summary = []
-
-        for file_path, test_file in included_test_files.items():
-            file_results = test_file.test_results
-            all_results.extend(file_results)
-
-            # Calculate stats for this file
-            file_failure_count = sum(1 for r in file_results if r.status == TestStatus.FAILED)
-            file_error_count = sum(1 for r in file_results if r.status == TestStatus.ERROR)
-            file_passed_count = len(file_results) - file_failure_count - file_error_count
-
-            # Add to per-file summary
-            per_file_summary.append(
-                f"* {file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors"
-            )
-
-        # Calculate overall stats
-        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
-        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
-        passed_count = len(all_results) - failure_count - error_count
-
-        # Combine per-file summary with overall summary
-        summary = "\n".join(per_file_summary)
-        summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors."
-
-        return summary
+        return RunTests.get_test_summary(self, test_files)
 
     def get_test_failure_details(
         self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[list[str]] = None
     ) -> str:
         """
         Returns detailed output for each failed or errored test result.
-        For long messages, shows the first and last portions with middle truncated.
-        If test_files is provided, only shows details for those files.
+
+        This is a wrapper around RunTests.get_test_failure_details to maintain backward compatibility.
 
         Args:
-            max_tokens (int): Maximum total tokens for all test details
-            max_chars_per_test (int): Maximum characters per test message before truncating
-            test_files (Optional[List[str]]): Optional list of test files to include in the details
+            max_tokens: Maximum total tokens for all test details
+            max_chars_per_test: Maximum characters per test message before truncating
+            test_files: Optional list of test files to include in the details
 
         Returns:
             str: Formatted string containing details of failed tests
         """
-        from testbeds.schema import TestStatus
+        from moatless.actions.run_tests import RunTests
 
-        # Filter test files if specified
-        included_test_files = {}
-        if test_files:
-            for file_path in test_files:
-                if file_path in self._test_files:
-                    included_test_files[file_path] = self._test_files[file_path]
-        else:
-            included_test_files = self._test_files
-
-        sum_tokens = 0
-        test_result_strings = []
-        for file_path, test_file in included_test_files.items():
-            for result in test_file.test_results:
-                if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.message:
-                    attributes = ""
-                    if result.file_path:
-                        attributes += f"{result.file_path}"
-                        if result.span_id:
-                            attributes += f" {result.span_id}"
-                        if result.line:
-                            attributes += f", line: {result.line}"
-
-                    if len(result.message) > max_chars_per_test:
-                        # Show first and last portions of the message
-                        chars_per_section = max_chars_per_test // 2
-                        start_section = result.message[:chars_per_section]
-                        end_section = result.message[-chars_per_section:]
-                        truncated_message = f"{start_section}\n\n... {len(result.message) - max_chars_per_test} characters truncated ...\n\n{end_section}"
-                    else:
-                        truncated_message = result.message
-
-                    test_result_str = f"* {result.status.value} {attributes}>\n```\n{truncated_message}\n```\n"
-                    test_result_tokens = count_tokens(test_result_str)
-                    if sum_tokens + test_result_tokens > max_tokens:
-                        break
-
-                    sum_tokens += test_result_tokens
-                    test_result_strings.append(test_result_str)
-
-        return "\n".join(test_result_strings) if test_result_strings else ""
+        return RunTests.get_test_failure_details(self, max_tokens, max_chars_per_test, test_files)
 
     def get_test_status(self) -> Optional["TestStatus"]:
         """
         Returns the overall test status based on all test results.
-        Returns ERROR if any test has error status,
-        FAILED if any test has failed status,
-        PASSED if all tests passed,
-        or None if no test results exist.
+
+        This is a wrapper around RunTests.get_test_status to maintain backward compatibility.
 
         Returns:
             Optional[TestStatus]: The overall test status
         """
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
+        from moatless.actions.run_tests import RunTests
 
-        if not all_results:
-            return None
-
-        if any(r.status == TestStatus.ERROR for r in all_results):
-            return TestStatus.ERROR
-        elif any(r.status == TestStatus.FAILED for r in all_results):
-            return TestStatus.FAILED
-        else:
-            return TestStatus.PASSED
+        return RunTests.get_test_status(self)
 
     def was_edited(self) -> bool:
         """
@@ -2027,7 +1876,7 @@ class FileContext(BaseModel):
         return [file_path for file_path, file in self._files.items() if file.is_new]
 
     def persist(self):
-        """Persist all files in the context"""
+        """Persist all files in the context by saving them to the repository"""
         for file_path, file in self._files.items():
             if file.patch:
                 self.repository.save_file(file_path, file.content)

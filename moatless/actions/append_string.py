@@ -111,14 +111,6 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
             "Edit the file again if necessary."
         )
 
-        test_summary = await self.run_tests(
-            file_path=str(path),
-            file_context=file_context,
-        )
-
-        if test_summary:
-            message += f"\n\n{test_summary}"
-
         return Observation.create(
             message=message,
             summary=message,

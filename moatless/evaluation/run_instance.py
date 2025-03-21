@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+from pathlib import Path
+import subprocess
 import time
 import traceback
 from datetime import datetime, timezone
@@ -10,21 +12,22 @@ from typing import Any, Dict, List, Optional
 import litellm
 from dotenv import load_dotenv
 from opentelemetry import trace
+from moatless.storage.base import BaseStorage
+from testbeds.schema import SWEbenchInstance
 
-from moatless.benchmark.swebench.utils import create_index_async, create_repository
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import EvaluationEvent
-from moatless.evaluation.utils import get_swebench_instance
 from moatless.flow.flow import AgenticFlow
+from moatless.index.code_index import CodeIndex
 from moatless.node import Node
-from moatless.repository.repository import Repository
-from moatless.runner.utils import cleanup_job_logging, setup_job_logging
+from moatless.repository.git import GitRepository
+from moatless.runtime.local import LocalEnvironment
 from moatless.runtime.testbed import TestbedEnvironment
-from moatless.telemetry import run_async, setup_telemetry
-from moatless.utils.moatless import get_moatless_trajectory_dir
+from moatless.telemetry import setup_telemetry
 from moatless.workspace import Workspace
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")
 
@@ -32,77 +35,69 @@ load_dotenv()
 setup_telemetry()
 
 
-def run_instance(project_id: str, trajectory_id: str) -> None:
-    """Run an instance's agentic flow."""
-    print(f"Running instance {trajectory_id} for project {project_id}")
-    from moatless.settings import get_storage
+async def run_instance_async(project_id: str, trajectory_id: str):
+    from moatless.settings import get_storage, get_event_bus
 
-    trajectory_dir = get_moatless_trajectory_dir(trajectory_id=trajectory_id, project_id=project_id)
-    print(f"Setting up job logging for run in {trajectory_dir}")
-    original_handlers = setup_job_logging("run", trajectory_dir)
-
-    storage = asyncio.run(get_storage())
+    storage = await get_storage()
+    event_bus = await get_event_bus()
 
     litellm.callbacks = [LogHandler(storage=storage)]
 
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
 
+    settings = await storage.read_from_trajectory(key="settings", trajectory_id=trajectory_id, project_id=project_id)
+    if not settings:
+        logger.error("Trajectory settings not found.")
+        raise ValueError("Settings not found")
+
     try:
-        swebench_instance = get_swebench_instance(instance_id=trajectory_id)
-        repository = create_repository(swebench_instance, repo_base_dir="/tmp/moatless_repos")
+        instance_path = os.environ.get("INSTANCE_PATH")
+        if not instance_path:
+            raise ValueError("INSTANCE_PATH is not set")
+        if not Path(instance_path).exists():
+            raise ValueError(f"Instance file not found at {instance_path}")
+        with open(instance_path) as f:
+            swebench_instance = SWEbenchInstance.model_validate(json.load(f))
 
-        testbed_log_dir = trajectory_dir / "testbed_logs"
-        os.makedirs(testbed_log_dir, exist_ok=True)
+        logger.info(f"Loaded instance: {swebench_instance.instance_id}")
 
-        runtime = TestbedEnvironment(
-            repository=repository,
+        repo_path = os.environ.get("REPO_DIR")
+        if not repo_path:
+            raise ValueError("REPO_DIR is not set")
+        logger.info(f"Using repo path: {repo_path}")
+
+        # Set repository path as safe directory to avoid ownership issues
+        try:
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", repo_path],
+                check=True,
+                capture_output=True,
+            )
+            logger.info(f"Added {repo_path} to git safe.directory")
+        except subprocess.CalledProcessError as e:
+            logger.warning(f"Failed to set safe.directory: {e.stderr.decode('utf-8')}")
+
+        repository = GitRepository(repo_path=repo_path)
+        repository.reset()
+
+        runtime = LocalEnvironment(
+            repo_path=Path(repo_path),
             instance_id=trajectory_id,
-            log_dir=str(testbed_log_dir),
+            swebench_instance=swebench_instance,
+            storage=storage,
             enable_cache=True,
         )
 
-        flow = run_async(
-            _run_instance(
-                evaluation_name=project_id,
-                instance_id=trajectory_id,
-                repository=repository,
-                runtime=runtime,
-                swebench_instance=swebench_instance,
-            )
-        )
-        evaluate_instance(
-            evaluation_name=project_id,
-            instance_id=trajectory_id,
-            root_node=flow.root,
-            runtime=runtime,
-        )
-    except Exception as e:
-        logger.exception(f"Error running instance {trajectory_id}")
-        _emit_event(
-            evaluation_name=project_id,
-            instance_id=trajectory_id,
-            scope="evaluation",
-            event_type="error",
-            data={"error": str(e)},
-        )
-        raise e
-    finally:
-        cleanup_job_logging(original_handlers)
+        index_store_dir = os.environ.get("INDEX_STORE_DIR")
+        if not index_store_dir:
+            raise ValueError("INDEX_STORE_DIR is not set")
 
+        logger.info(f"Using index store dir: {index_store_dir}")
+        code_index = CodeIndex.from_persist_dir(
+            persist_dir=index_store_dir,
+            file_repo=repository,
+        )
 
-async def _run_instance(
-    evaluation_name: str,
-    instance_id: str,
-    repository: Repository,
-    runtime: TestbedEnvironment,
-    swebench_instance: dict,
-) -> AgenticFlow:
-    logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
-    with tracer.start_as_current_span(f"run_instance_{instance_id}"):
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
-        print(f"Setting up job logging for run in {trajectory_dir}")
-
-        code_index = await create_index_async(swebench_instance, repository=repository)
         workspace = Workspace(
             repository=repository,
             code_index=code_index,
@@ -110,35 +105,60 @@ async def _run_instance(
             legacy_workspace=True,
         )
 
-        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
+        trajectory_dict = await storage.read_from_trajectory(
+            key="trajectory", trajectory_id=trajectory_id, project_id=project_id
+        )
+
+        flow = AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
         await flow.run(workspace=workspace)
-        logger.info(f"Flow completed for instance {instance_id}")
+        logger.info(f"Flow completed for instance {trajectory_id}")
 
-    return flow
+        await evaluate_instance(
+            evaluation_name=project_id,
+            instance_id=trajectory_id,
+            root_node=flow.root,
+            runtime=runtime,
+            storage=storage,
+        )
+
+    except Exception as e:
+        logger.exception(f"Error running instance {trajectory_id}")
+        await _emit_event(
+            evaluation_name=project_id,
+            instance_id=trajectory_id,
+            scope="evaluation",
+            event_type="error",
+            data={"error": str(e)},
+        )
+        raise e
 
 
-def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, runtime: TestbedEnvironment) -> None:
+async def evaluate_instance(
+    evaluation_name: str, instance_id: str, root_node: Node, runtime: TestbedEnvironment, storage: BaseStorage
+) -> None:
     """Evaluate an instance's results."""
     with tracer.start_as_current_span(f"evaluate_instance_{instance_id}"):
-        trajectory_dir = get_moatless_trajectory_dir(trajectory_id=instance_id, project_id=evaluation_name)
+        trajectory_key = storage.get_trajectory_key()
         leaf_nodes = root_node.get_leaf_nodes()
-        eval_result_path = trajectory_dir / "eval_result.json"
+        eval_result_path = f"{trajectory_key}/eval_result"
 
         eval_result: Optional[dict[str, Any]] = None
-        if os.path.exists(eval_result_path):
+        if await storage.exists(eval_result_path):
             try:
-                with open(eval_result_path) as f:
-                    loaded = json.load(f)
-                if "node_results" in loaded:
-                    eval_result = loaded
-                elif len(loaded) > 0:
-                    eval_result = {
-                        "node_results": loaded,
-                        "status": "started",
-                        "start_time": datetime.now(timezone.utc).isoformat(),
-                    }
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse {eval_result_path}")
+                eval_result = await storage.read_from_trajectory(
+                    key="eval_result", trajectory_id=instance_id, project_id=evaluation_name
+                )
+            except Exception:
+                logger.warning(f"Failed to read {eval_result_path}")
+
+        if eval_result and "node_results" in eval_result:
+            eval_result = eval_result
+        elif eval_result and len(eval_result) > 0:
+            eval_result = {
+                "node_results": eval_result,
+                "status": "started",
+                "start_time": datetime.now(timezone.utc).isoformat(),
+            }
 
         if not eval_result:
             eval_result = {
@@ -151,7 +171,7 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
             logger.info(f"All leaf nodes evaluated for instance {instance_id}")
             return
 
-        _emit_event(evaluation_name, instance_id, "evaluation", "started")
+        await _emit_event(evaluation_name, instance_id, "evaluation", "started")
 
         for i, leaf_node in enumerate(unevaluated_nodes):
             logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(unevaluated_nodes)})")
@@ -165,7 +185,7 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
                 continue
             start_time = time.time()
             try:
-                result = run_async(runtime.evaluate(patch=patch))
+                result = await runtime.evaluate(patch=patch)
                 if result:
                     eval_result["node_results"][str(leaf_node.node_id)] = result.model_dump()
                     logger.info(f"Evaluated node {leaf_node.node_id} in {time.time()-start_time:.2f}s")
@@ -174,13 +194,14 @@ def evaluate_instance(evaluation_name: str, instance_id: str, root_node: Node, r
                 eval_result["error"] = traceback.format_exc()
             finally:
                 eval_result["duration"] = time.time() - start_time
-                with open(eval_result_path, "w") as f:
-                    json.dump(eval_result, f, indent=2)
+                await storage.write_to_trajectory(
+                    key="eval_result", data=eval_result, trajectory_id=instance_id, project_id=evaluation_name
+                )
 
-        _emit_event(evaluation_name, instance_id, "evaluation", "completed")
+        await _emit_event(evaluation_name, instance_id, "evaluation", "completed")
 
 
-def _emit_event(
+async def _emit_event(
     evaluation_name: str,
     instance_id: str,
     scope: str,
@@ -199,6 +220,6 @@ def _emit_event(
     try:
         from moatless.settings import event_bus
 
-        run_async(event_bus.publish(event))
+        await event_bus.publish(event)
     except Exception as e:
         logger.error(f"Failed to publish event {event_type}: {e}")

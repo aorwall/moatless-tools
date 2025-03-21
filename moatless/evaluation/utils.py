@@ -4,6 +4,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
@@ -18,24 +19,64 @@ _moatless_datasets = {}
 
 
 def load_moatless_datasets(split: str | None = None):
+    """
+    Load all instances from the dataset index.
+    The split parameter is kept for backward compatibility but is ignored.
+    """
     global _moatless_instances
 
+    # Path to the dataset index file
+    index_path = os.path.join(os.path.dirname(__file__), "datasets", "dataset_index.json")
+
+    try:
+        if os.path.exists(index_path):
+            with open(index_path) as f:
+                dataset_index = json.load(f)
+
+                # Process all instances from the index
+                for instance in dataset_index.get("instances", []):
+                    instance_id = instance["instance_id"]
+
+                    # Add dataset information
+                    if "datasets" in instance and instance["datasets"]:
+                        # Use the highest priority dataset (last in the list based on our priority order)
+                        top_dataset = instance["datasets"][-1]
+                        instance["dataset"] = top_dataset["dataset"]
+
+                    _moatless_instances[instance_id] = instance
+
+                logger.info(f"Loaded {len(_moatless_instances)} instances from dataset index")
+        else:
+            logger.warning(f"Dataset index file not found: {index_path}")
+            # Fall back to the old loading method
+            _load_legacy_datasets(split)
+    except Exception as e:
+        logger.error(f"Error loading dataset index: {e}")
+        # Fall back to the old loading method
+        _load_legacy_datasets(split)
+
+
+def _load_legacy_datasets(split: str | None = None):
+    """Legacy method to load datasets from individual files."""
     if split:
         _load_moatless_dataset(split)
     else:
         _load_moatless_dataset("lite")
         _load_moatless_dataset("verified")
 
-    logger.info(f"Loaded {len(_moatless_instances)} instances")
+    logger.info(f"Loaded {len(_moatless_instances)} instances using legacy method")
 
 
 def _load_moatless_dataset(split: str):
+    """Legacy method to load a single dataset file."""
     global _moatless_instances
 
     file_path = os.path.join(os.path.dirname(__file__), f"swebench_{split}_all_evaluations.json")
     with open(file_path) as f:
         dataset = json.load(f)
-        _moatless_instances.update({d["instance_id"]: d for d in dataset})
+        for d in dataset:
+            d["dataset"] = split
+            _moatless_instances[d["instance_id"]] = d
 
 
 def get_moatless_instances(split: str | None = None):
@@ -432,6 +473,6 @@ def get_moatless_dataset_splits() -> dict[str, dict]:
     return _moatless_datasets
 
 
-def get_moatless_dataset_split(name: str) -> dict:
+def get_moatless_dataset_split(name: str) -> dict[str, Any] | None:
     """Get a dataset by name."""
     return get_moatless_dataset_splits().get(name, None)

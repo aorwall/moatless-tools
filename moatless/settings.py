@@ -36,30 +36,11 @@ async def initialize_managers():
     from moatless.flow.manager import FlowManager
     from moatless.evaluation.manager import EvaluationManager
 
-    global model_manager, agent_manager, flow_manager, evaluation_manager, event_bus, runner, storage
+    global model_manager, agent_manager, flow_manager, evaluation_manager
 
-    event_bus = None
-    runner = None
-
-    storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
-
-    if os.environ.get("REDIS_URL"):
-        logger.info(f"Use RQ Runner and Redis Event Bus with redis url: {os.environ.get('REDIS_URL')}")
-        try:
-            from moatless.eventbus.redis_bus import RedisEventBus
-            from moatless.runner.rq import RQRunner
-
-            event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
-            runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
-        except Exception as e:
-            logger.error(f"Failed to initialize event bus and runner: {e}")
-            raise e
-    else:
-        logger.info("Use Local Runner and Local Event Bus")
-        event_bus = LocalEventBus()
-        runner = AsyncioRunner()
-
-    await event_bus.initialize()
+    event_bus = await get_event_bus()
+    runner = await get_runner()
+    storage = await get_storage()
 
     try:
         logger.info("Initializing manager singletons...")
@@ -135,30 +116,59 @@ async def get_flow_manager():
 
 async def get_event_bus():
     """Get the event bus instance."""
-    await ensure_managers_initialized()
+    global event_bus
 
     if event_bus is None:
-        raise RuntimeError("Event bus not initialized")
+        if os.environ.get("REDIS_URL"):
+            logger.info(f"Use RQ Runner and Redis Event Bus with redis url: {os.environ.get('REDIS_URL')}")
+            try:
+                from moatless.eventbus.redis_bus import RedisEventBus
+                from moatless.runner.rq import RQRunner
+
+                event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
+            except Exception as e:
+                logger.error(f"Failed to initialize event bus and runner: {e}")
+                raise e
+        else:
+            logger.info("Use Local Runner and Local Event Bus")
+            event_bus = LocalEventBus(storage=storage)
+
+    await event_bus.initialize()
 
     return event_bus
 
 
 async def get_runner():
     """Get the runner instance."""
-    await ensure_managers_initialized()
+    global runner
 
     if runner is None:
-        raise RuntimeError("Runner not initialized")
+        runner_type = os.environ.get("MOATLESS_RUNNER")
+        if runner_type == "kubernetes":
+            from moatless.runner.kubernetes_runner import KubernetesRunner
+
+            runner = KubernetesRunner()
+        elif runner_type == "rq":
+            from moatless.runner.rq import RQRunner
+
+            runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
+        else:
+            logger.info("Use Local Runner and Local Event Bus")
+            runner = AsyncioRunner()
 
     return runner
 
 
 async def get_storage():
     """Get the storage instance."""
-    await ensure_managers_initialized()
-
+    global storage
     if storage is None:
-        raise RuntimeError("Storage not initialized")
+        if os.environ.get("MOATLESS_STORAGE") == "s3":
+            from moatless.storage.s3_storage import S3Storage
+
+            storage = S3Storage()
+        else:
+            storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
 
     return storage
 

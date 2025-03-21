@@ -158,8 +158,8 @@ class ClaudeEditTool(Action, CodeModificationMixin, CompletionModelMixin):
         **data,
     ):
         super().__init__(**data)
-        self._str_replace = StringReplace(auto_run_tests=self.auto_run_tests)
-        self._create_file = CreateFile(auto_run_tests=self.auto_run_tests)
+        self._str_replace = StringReplace()
+        self._create_file = CreateFile()
         self._view_code = ViewCode(completion_model=self.completion_model)
 
     def _initialize_completion_model(self):
@@ -216,14 +216,6 @@ class ClaudeEditTool(Action, CodeModificationMixin, CompletionModelMixin):
 
         if not self._runtime:
             return observation
-
-        test_summary = await self.run_tests(
-            file_path=str(path),
-            file_context=file_context,
-        )
-
-        if test_summary:
-            observation.message += f"\n\n{test_summary}"
 
         return observation
 

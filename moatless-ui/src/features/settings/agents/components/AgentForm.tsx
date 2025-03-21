@@ -129,12 +129,15 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
                 }
             });
 
+            // Extract all properties except action_class for values
+            const { action_class, ...actionProperties } = action;
+
             return {
                 id: action.action_class,
                 name: actionSchema.title || action.action_class,
                 description: actionSchema.description || '',
                 fields,
-                values: action.properties || {}
+                values: actionProperties // Use the extracted properties as values
             };
         }).filter(Boolean) as DynamicListItem[];
 
@@ -195,8 +198,7 @@ export function AgentForm({ agent, onSubmit, onDuplicate, isNew = false }: Agent
         // Convert DynamicListItems back to ActionConfig objects
         const actions = items.map(item => ({
             action_class: item.id,
-            title: item.name,
-            properties: item.values
+            ...item.values // Spread values directly onto the action object instead of nesting them
         }));
 
         handleFieldChange('actions', actions);

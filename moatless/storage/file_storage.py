@@ -13,10 +13,13 @@ from typing import Union, Optional, List, Dict, Any
 from datetime import datetime
 
 import aiofiles
-
+from opentelemetry import trace
 from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)
+
+
+tracer = trace.get_tracer(__name__)
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -83,6 +86,7 @@ class FileStorage(BaseStorage):
         else:
             return self.base_dir / f"{normalized_key}.{self.file_extension}"
 
+    @tracer.start_as_current_span("FileStorage.read")
     async def read(self, key: str) -> dict | list[dict]:
         """
         Read JSON data from a file.
@@ -91,7 +95,7 @@ class FileStorage(BaseStorage):
             key: The key to read
 
         Returns:
-            The parsed JSON data
+            The parsed JSON data or an empty dict if the file is empty
 
         Raises:
             KeyError: If the key does not exist
@@ -102,6 +106,9 @@ class FileStorage(BaseStorage):
 
         async with aiofiles.open(path, "r", encoding="utf-8") as f:
             content = await f.read()
+            if not content.strip():
+                logger.warning(f"Empty content found for key: {key}, returning empty dict")
+                return {}
             return json.loads(content)
 
     async def read_raw(self, key: str) -> str:
@@ -149,6 +156,7 @@ class FileStorage(BaseStorage):
                     results.append(json.loads(line))
         return results
 
+    @tracer.start_as_current_span("FileStorage.write")
     async def write(self, key: str, data: dict | list[dict]) -> None:
         """
         Write data to a file as JSON.
@@ -235,33 +243,56 @@ class FileStorage(BaseStorage):
         path = self._get_path(key)
         return path.exists()
 
+    @tracer.start_as_current_span("FileStorage.list_keys")
     async def list_keys(self, prefix: str = "") -> list[str]:
         """
         List all keys with the given prefix.
 
         Args:
-            prefix: The prefix to filter keys by
+            prefix: The prefix to filter keys by. Can be a directory path like '/path/to'
+                   or a file prefix like '/path/to/file_'
 
         Returns:
             A list of keys
         """
         normalized_prefix = self.normalize_key(prefix)
-        all_keys = await self._list_all_keys()
 
+        # Convert the normalized prefix into a filesystem path
         if normalized_prefix:
-            return [key for key in all_keys if key.startswith(normalized_prefix)]
+            prefix_path = self.base_dir / normalized_prefix.replace("/", os.path.sep)
         else:
-            return all_keys
+            prefix_path = self.base_dir
 
-    async def _list_all_keys(self) -> list[str]:
+        # If prefix_path points to an existing directory, list all files inside it
+        if prefix_path.is_dir():
+            return await self._list_keys_in_dir(prefix_path)
+
+        # If not a directory, it might be a file prefix
+        # Get the parent directory and the file prefix
+        parent_dir = prefix_path.parent
+        file_prefix = prefix_path.name
+
+        if parent_dir.is_dir():
+            # Only look in this specific directory for files with the given prefix
+            return await self._list_keys_with_prefix(parent_dir, file_prefix)
+
+        # Fallback to empty list if path doesn't exist at all
+        return []
+
+    async def _list_keys_in_dir(self, directory: Path) -> list[str]:
         """
-        List all keys in the storage.
+        List all keys in a specific directory.
+
+        Args:
+            directory: Directory path to list keys from
 
         Returns:
-            A list of all keys
+            A list of keys
         """
         keys = []
-        for path in self.base_dir.glob(f"**/*.{self.file_extension}"):
+        # Only search in the specified directory and its immediate subdirectories
+        # This is more efficient than globbing the entire file system
+        for path in directory.glob(f"**/*.{self.file_extension}"):
             # Get relative path to base_dir
             rel_path = path.relative_to(self.base_dir)
             # Remove file extension
@@ -270,6 +301,39 @@ class FileStorage(BaseStorage):
             key = key.replace(os.path.sep, "/")
             keys.append(key)
         return keys
+
+    async def _list_keys_with_prefix(self, directory: Path, prefix: str) -> list[str]:
+        """
+        List all keys in a directory that start with a specific prefix.
+
+        Args:
+            directory: Directory path to search in
+            prefix: File prefix to match
+
+        Returns:
+            A list of keys
+        """
+        keys = []
+        # Only search for files matching the prefix in the specified directory
+        # This is much more efficient than scanning the entire file system
+        for path in directory.glob(f"{prefix}*.{self.file_extension}"):
+            # Get relative path to base_dir
+            rel_path = path.relative_to(self.base_dir)
+            # Remove file extension
+            key = str(rel_path.with_suffix(""))
+            # Replace path separators with forward slashes
+            key = key.replace(os.path.sep, "/")
+            keys.append(key)
+        return keys
+
+    async def _list_all_keys(self) -> list[str]:
+        """
+        List all keys in the storage.
+
+        Returns:
+            A list of all keys
+        """
+        return await self._list_keys_in_dir(self.base_dir)
 
     async def assert_exists(self, key: str) -> None:
         """

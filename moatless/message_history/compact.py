@@ -31,7 +31,7 @@ class NodeMessage(BaseModel):
 class CompactMessageHistoryGenerator(MessageHistoryGenerator):
     message_cache: bool = Field(default=False, description="Cache the message history if the LLM supports it")
 
-    async def generate_messages(self, node: Node) -> list[AllMessageValues]:
+    async def generate_messages(self, node: Node, workspace: Workspace) -> list[AllMessageValues]:
         messages = []
 
         node_messages = await self.get_node_messages(node)
@@ -90,7 +90,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
         return messages
 
-    async def get_node_messages(self, node: Node, workspace: Workspace) -> list[NodeMessage]:
+    async def get_node_messages(self, node: Node) -> list[NodeMessage]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
         Respects token limits while preserving ViewCode context.

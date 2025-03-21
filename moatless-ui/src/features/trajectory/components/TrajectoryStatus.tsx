@@ -24,6 +24,8 @@ import {
   Layers,
   MessageSquare,
   Package,
+  Pause,
+  HelpCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
@@ -66,18 +68,36 @@ export function TrajectoryStatus({
       case "error":
         return <AlertCircle className="h-4 w-4 text-destructive" />;
       case "finished":
+      case "completed":
         return <CheckCircle2 className="h-4 w-4 text-success" />;
       case "running":
+      case "initializing":
+      case "pending":
         return <Loader2 className="h-4 w-4 animate-spin" />;
+      case "canceled":
+        return <Pause className="h-4 w-4 text-warning" />;
+      case "failed":
+        return <AlertCircle className="h-4 w-4 text-destructive" />;
+      case "not_found":
+        return <HelpCircle className="h-4 w-4 text-muted-foreground" />;
       default:
         return null;
     }
   };
 
-  // Check if the trajectory can be started (not running or finished)
+  // Get the job status or fall back to trajectory status
+  const jobStatus = trajectory.job_status?.toLowerCase();
+
+  // Check if the job is active (running, pending, or initializing)
+  const isJobActive =
+    jobStatus === "pending" ||
+    jobStatus === "initializing" ||
+    jobStatus === "running";
+
+  // Check if the trajectory can be started
   const canStart =
-    trajectory.status.toLowerCase() !== "running" &&
-    trajectory.status.toLowerCase() !== "completed";
+    !isJobActive &&
+    jobStatus !== "completed";
 
   // Check if the trajectory has been started or not
   const hasStarted =
@@ -85,7 +105,7 @@ export function TrajectoryStatus({
     trajectory.system_status.started_at !== null;
 
   // Check if the trajectory can be retried (not running)
-  const canRetry = trajectory.status.toLowerCase() !== "running" && hasStarted;
+  const canRetry = !isJobActive && hasStarted;
 
   const handleStartClick = async () => {
     if (!handleStart) return;
@@ -120,11 +140,11 @@ export function TrajectoryStatus({
     });
   };
 
-  // Periodically refetch trajectory status when running
+  // Periodically refetch trajectory status when job is active
   useEffect(() => {
     let intervalId: number | undefined;
 
-    if (trajectory.status.toLowerCase() === "running") {
+    if (isJobActive) {
       intervalId = window.setInterval(() => {
         queryClient.invalidateQueries({
           queryKey: trajectoryKeys.detail(
@@ -141,7 +161,7 @@ export function TrajectoryStatus({
       }
     };
   }, [
-    trajectory.status,
+    isJobActive,
     trajectory.project_id,
     trajectory.trajectory_id,
     queryClient,
@@ -210,7 +230,8 @@ export function TrajectoryStatus({
       );
     }
 
-    if (trajectory.status.toLowerCase() === "running") {
+    // Show cancel button if job is active
+    if (isJobActive) {
       actionButtons.push(
         <Button
           key="cancel"
@@ -309,12 +330,37 @@ export function TrajectoryStatus({
     >
       {/* Status Badge */}
       <Badge
-        variant={trajectory?.status === "error" ? "destructive" : "default"}
+        variant={
+          trajectory?.status === "error" || trajectory?.job_status === "failed"
+            ? "destructive"
+            : trajectory?.job_status === "canceled"
+              ? "outline"
+              : "default"
+        }
         className="flex items-center gap-1 h-7 px-3"
       >
-        {getStatusIcon(trajectory?.status)}
+        {getStatusIcon(trajectory?.job_status || trajectory?.status)}
         {trajectory?.status}
       </Badge>
+
+      {/* Job Status Badge (only shown when different from main status) */}
+      {trajectory.job_status && trajectory.job_status.toLowerCase() !== trajectory.status.toLowerCase() && (
+        <Badge
+          variant={
+            trajectory.job_status === "failed"
+              ? "destructive"
+              : trajectory.job_status === "canceled"
+                ? "outline"
+                : trajectory.job_status === "completed"
+                  ? "default"
+                  : "secondary"
+          }
+          className="flex items-center gap-1 h-7 px-3"
+        >
+          {getStatusIcon(trajectory.job_status)}
+          Job: {trajectory.job_status}
+        </Badge>
+      )}
 
       {/* Main Stats Group */}
       <div className="flex items-center gap-3 text-xs">

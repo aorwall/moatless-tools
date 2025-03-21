@@ -58,16 +58,16 @@ export function EvaluationLayout() {
   }
 
   return (
-    <div className="h-full w-full">
+    <div className="h-[calc(100vh-58px)] overflow-hidden">
       <ResizablePanelGroup direction="horizontal" className="h-full">
-        <ResizablePanel defaultSize={15} minSize={0}>
+        <ResizablePanel defaultSize={15} minSize={0} className="h-full">
           <InstanceList
             evaluation={evaluation}
             selectedInstanceId={instanceId}
           />
         </ResizablePanel>
         <ResizableHandle className="bg-border hover:bg-ring" />
-        <ResizablePanel defaultSize={85}>
+        <ResizablePanel defaultSize={85} className="h-full">
           <Outlet />
         </ResizablePanel>
       </ResizablePanelGroup>

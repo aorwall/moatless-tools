@@ -112,7 +112,7 @@ async def get_completions(
 
 
 @router.get("/{project_id}/{trajectory_id}/completions/{node_id}/action/{action_step}")
-async def get_completions(
+async def get_completions_by_action_step(
     project_id: str,
     trajectory_id: str,
     node_id: str,

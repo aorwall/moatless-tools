@@ -25,6 +25,7 @@ import {
   CheckCircle,
   AlertCircle,
   XCircleIcon,
+  InfoIcon,
 } from "lucide-react";
 import { dateTimeFormat } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/lib/components/ui/tooltip";
+import { JobDetailsDialog } from "./JobDetailsDialog";
 
 interface RunnerJobsListProps {
   jobs: JobInfo[];
@@ -45,6 +47,8 @@ export function RunnerJobsList({
   isLoading = false,
 }: RunnerJobsListProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [selectedJob, setSelectedJob] = useState<JobInfo | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const cancelJob = useCancelJob();
   const retryJob = useRetryJob();
 
@@ -56,17 +60,10 @@ export function RunnerJobsList({
     return jobs.filter((job) => job.status === statusFilter);
   }, [jobs, statusFilter]);
 
-  // Parse project and trajectory IDs from job ID
-  const parseJobId = (id: string) => {
-    // Format: run_projectId_trajectoryId
-    const parts = id.split("_");
-    if (parts.length >= 3) {
-      return {
-        projectId: parts[1],
-        trajectoryId: parts.slice(2).join("_"), // In case trajectory_id contains underscores
-      };
-    }
-    return { projectId: "", trajectoryId: "" };
+  // Handle opening job details
+  const handleViewDetails = (job: JobInfo) => {
+    setSelectedJob(job);
+    setDetailsOpen(true);
   };
 
   // Get status badge for a job
@@ -81,13 +78,13 @@ export function RunnerJobsList({
             Running
           </Badge>
         );
-      case JobStatus.QUEUED:
+      case JobStatus.INITIALIZING:
         return (
           <Badge
             variant="outline"
             className="bg-yellow-50 text-yellow-700 border-yellow-200"
           >
-            Queued
+            Initializing
           </Badge>
         );
       case JobStatus.COMPLETED:
@@ -130,18 +127,16 @@ export function RunnerJobsList({
   };
 
   // Handle cancel button click
-  const handleCancel = (jobId: string) => {
-    const { projectId, trajectoryId } = parseJobId(jobId);
-    if (projectId && trajectoryId) {
-      cancelJob.mutate({ projectId, trajectoryId });
+  const handleCancel = (job: JobInfo) => {
+    if (job.project_id && job.trajectory_id) {
+      cancelJob.mutate({ projectId: job.project_id, trajectoryId: job.trajectory_id });
     }
   };
 
   // Handle retry button click
-  const handleRetry = (jobId: string) => {
-    const { projectId, trajectoryId } = parseJobId(jobId);
-    if (projectId && trajectoryId) {
-      retryJob.mutate({ projectId, trajectoryId });
+  const handleRetry = (job: JobInfo) => {
+    if (job.project_id && job.trajectory_id) {
+      retryJob.mutate({ projectId: job.project_id, trajectoryId: job.trajectory_id });
     }
   };
 
@@ -157,12 +152,12 @@ export function RunnerJobsList({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Jobs</SelectItem>
-              <SelectItem value="queued">Queued</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="initializing">Initializing</SelectItem>
               <SelectItem value="running">Running</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
               <SelectItem value="failed">Failed</SelectItem>
               <SelectItem value="canceled">Canceled</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -191,47 +186,56 @@ export function RunnerJobsList({
                 </TableCell>
               </TableRow>
             ) : (
-              filteredJobs.map((job) => {
-                const { projectId, trajectoryId } = parseJobId(job.id);
-                return (
-                  <TableRow key={job.id}>
-                    <TableCell className="font-mono text-xs">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="cursor-help">{job.id}</span>
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            <p>Project: {projectId}</p>
-                            <p>Trajectory: {trajectoryId}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </TableCell>
-                    <TableCell>{getStatusBadge(job.status)}</TableCell>
-                    <TableCell className="text-sm">
-                      {job.enqueued_at
-                        ? dateTimeFormat.format(new Date(job.enqueued_at))
-                        : "-"}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.started_at
-                        ? dateTimeFormat.format(new Date(job.started_at))
-                        : "-"}
-                    </TableCell>
-                    <TableCell className="text-sm">
-                      {job.ended_at
-                        ? dateTimeFormat.format(new Date(job.ended_at))
-                        : "-"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {(job.status === JobStatus.QUEUED ||
-                          job.status === JobStatus.RUNNING) && (
+              filteredJobs.map((job) => (
+                <TableRow key={job.id}>
+                  <TableCell className="font-mono text-xs">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="cursor-help">{job.id}</span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Project: {job.project_id || "-"}</p>
+                          <p>Trajectory: {job.trajectory_id || "-"}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </TableCell>
+                  <TableCell>{getStatusBadge(job.status)}</TableCell>
+                  <TableCell className="text-sm">
+                    {job.enqueued_at
+                      ? dateTimeFormat.format(new Date(job.enqueued_at))
+                      : "-"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {job.started_at
+                      ? dateTimeFormat.format(new Date(job.started_at))
+                      : "-"}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {job.ended_at
+                      ? dateTimeFormat.format(new Date(job.ended_at))
+                      : "-"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      {/* Info button */}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleViewDetails(job)}
+                      >
+                        <InfoIcon className="h-4 w-4 text-blue-500" />
+                        <span className="sr-only">View Details</span>
+                      </Button>
+
+                      {(job.status === JobStatus.PENDING ||
+                        job.status === JobStatus.INITIALIZING ||
+                        job.status === JobStatus.RUNNING) && (
                           <Button
                             variant="ghost"
                             size="icon"
-                            onClick={() => handleCancel(job.id)}
+                            onClick={() => handleCancel(job)}
                             disabled={cancelJob.isPending}
                           >
                             <XCircle className="h-4 w-4 text-red-500" />
@@ -239,45 +243,50 @@ export function RunnerJobsList({
                           </Button>
                         )}
 
-                        {job.status === JobStatus.FAILED && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleRetry(job.id)}
-                            disabled={retryJob.isPending}
-                          >
-                            <Play className="h-4 w-4 text-green-500" />
-                            <span className="sr-only">Retry</span>
-                          </Button>
-                        )}
+                      {job.status === JobStatus.FAILED && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleRetry(job)}
+                          disabled={retryJob.isPending}
+                        >
+                          <Play className="h-4 w-4 text-green-500" />
+                          <span className="sr-only">Retry</span>
+                        </Button>
+                      )}
 
-                        {job.status === JobStatus.FAILED && job.exc_info && (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button variant="ghost" size="icon">
-                                  <AlertCircle className="h-4 w-4 text-amber-500" />
-                                  <span className="sr-only">View Error</span>
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-md">
-                                <p className="font-bold">Error:</p>
-                                <pre className="text-xs mt-1 max-h-40 overflow-auto p-2 bg-muted rounded">
-                                  {job.exc_info}
-                                </pre>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+                      {job.status === JobStatus.FAILED && job.metadata?.error && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button variant="ghost" size="icon">
+                                <AlertCircle className="h-4 w-4 text-amber-500" />
+                                <span className="sr-only">View Error</span>
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-md">
+                              <p className="font-bold">Error:</p>
+                              <pre className="text-xs mt-1 max-h-40 overflow-auto p-2 bg-muted rounded">
+                                {job.metadata.error}
+                              </pre>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>
       </div>
+
+      <JobDetailsDialog
+        job={selectedJob}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+      />
     </div>
   );
 }

@@ -42,6 +42,7 @@ class EvaluationManager:
         self.storage = storage
         self.eventbus = eventbus
         self._flow_manager = flow_manager
+        self._cached_datasets = {}
 
     async def initialize(self):
         await self.eventbus.subscribe(self._handle_event)
@@ -111,12 +112,22 @@ class EvaluationManager:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
         new_evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{evaluation.flow_id}_{evaluation.model_id}_{evaluation.dataset_name}"
+        logger.info(
+            f"Cloning evaluation {evaluation_name} to {new_evaluation_name} with {len(evaluation.instances)} instances, dataset {evaluation.dataset_name}"
+        )
+
+        if evaluation.dataset_name == "instance_ids":
+            instance_ids = [i.instance_id for i in evaluation.instances]
+            logger.info(f"Cloning evaluation {evaluation_name} with {len(instance_ids)} instances")
+        else:
+            instance_ids = None
 
         return await self.create_evaluation(
             evaluation.flow_id,
             evaluation.model_id,
             evaluation_name=new_evaluation_name,
             dataset_name=evaluation.dataset_name,
+            instance_ids=instance_ids,
         )
 
     @tracer.start_as_current_span("EvaluationManager.start_evaluation")
@@ -176,7 +187,7 @@ class EvaluationManager:
                     project_id=evaluation_name, trajectory_id=instance.instance_id
                 )
 
-                if job_status in [JobStatus.RUNNING, JobStatus.QUEUED]:
+                if job_status in [JobStatus.RUNNING, JobStatus.INITIALIZING]:
                     evaluation_is_running = True
 
         if evaluation_is_completed:
@@ -232,7 +243,7 @@ class EvaluationManager:
 
     async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance):
         """Process the results of a trajectory and update the instance with the results."""
-        if instance.status == InstanceStatus.EVALUATED:
+        if instance.status == InstanceStatus.EVALUATED and instance.resolved is not None:
             return instance
 
         # Check if the instance information exists in storage
@@ -428,6 +439,7 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
+        logger.info(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:
             await self._process_trajectory_results(evaluation, instance)
 
@@ -489,13 +501,17 @@ class EvaluationManager:
 
     def get_dataset_instance_ids(self, dataset_name: str) -> list[str]:
         """Get instance IDs for a dataset."""
+        if dataset_name in self._cached_datasets:
+            return self._cached_datasets[dataset_name]
+
         dataset_path = Path(__file__).parent / "datasets" / f"{dataset_name}_dataset.json"
         if not dataset_path.exists():
             raise ValueError(f"Dataset {dataset_name} not found at {dataset_path}")
 
         with open(dataset_path) as f:
             dataset = json.load(f)
-            return dataset["instance_ids"]
+            self._cached_datasets[dataset_name] = dataset["instance_ids"]
+            return self._cached_datasets[dataset_name]
 
     async def get_evaluation_instance(self, evaluation_name: str, instance_id: str) -> EvaluationInstance:
         """Get an instance from an evaluation."""

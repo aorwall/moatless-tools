@@ -68,7 +68,9 @@ def setup_azure_monitor() -> None:
     global _tracer
     _tracer = trace.get_tracer(__name__)
 
-    logger.info("Initialized Azure Monitor OpenTelemetry tracing")
+    logging.getLogger("azure").setLevel(logging.WARNING)
+
+    logger.info("Initialized Azure Monitor OpenTelemetry tracing.")
 
 
 def setup_telemetry() -> None:
@@ -128,74 +130,6 @@ def restore_trace_context(carrier: dict[str, str]) -> None:
     """
     ctx = TraceContextTextMapPropagator().extract(carrier=carrier)
     context.attach(ctx)
-
-
-def wrap_with_trace(
-    name: str,
-    attributes: Optional[dict[str, Any]] = None,
-    kind: Optional[trace.SpanKind] = None,
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """Decorator that wraps a function with trace context handling and span creation.
-
-    This is particularly useful for RQ job functions where we want to:
-    1. Restore the trace context from the parent process
-    2. Create a new span for the job
-    3. Handle errors appropriately
-    4. Restore context data variables
-
-    Args:
-        name: Name for the span
-        attributes: Optional static span attributes
-        kind: Optional span kind
-
-    Returns:
-        Decorator function that handles trace context
-    """
-
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        @wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            # Extract trace context and context data from kwargs if present
-            trace_context = kwargs.pop("_trace_context", {})
-            context_data = kwargs.pop("_context_data", {})
-
-            # Restore trace context if present
-            if trace_context:
-                restore_trace_context(trace_context)
-
-            # Restore context data if present
-            context_tokens = []
-            if context_data:
-                for var_name, value in context_data.items():
-                    if hasattr(contextvars, var_name):
-                        var = getattr(contextvars, var_name)
-                        token = var.set(value)
-                        context_tokens.append((var, token))
-
-            # Get any dynamic attributes
-            span_attributes = {}
-            if attributes:
-                span_attributes.update(attributes)
-
-            # Start new span
-            with instrument_span(name, attributes=span_attributes, kind=kind) as span:
-                try:
-                    result = func(*args, **kwargs)
-                    span.set_status(Status(StatusCode.OK))
-                    return result
-                except Exception as e:
-                    span.set_status(Status(StatusCode.ERROR), str(e))
-                    span.record_exception(e)
-                    logger.exception(f"Error in {name}")
-                    raise
-                finally:
-                    # Reset context vars
-                    for var, token in context_tokens:
-                        var.reset(token)
-
-        return wrapper
-
-    return decorator
 
 
 def extract_context_data() -> dict[str, Any]:

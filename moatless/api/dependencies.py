@@ -1,6 +1,10 @@
 """Dependency functions for FastAPI routes."""
 
 import logging
+import os
+import secrets
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from moatless.completion.manager import ModelConfigManager
 from moatless.agent.manager import AgentConfigManager
