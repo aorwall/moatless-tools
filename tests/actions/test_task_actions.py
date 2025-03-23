@@ -69,8 +69,7 @@ def context_setup():
 @pytest.fixture
 def task_handler(file_storage, context_setup):
     """Create a TaskHandler using the test FileStorage."""
-    handler = TaskHandler()
-    handler._storage = file_storage
+    handler = TaskHandler(file_storage)
     return handler
 
 

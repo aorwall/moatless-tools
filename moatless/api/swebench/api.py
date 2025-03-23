@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from moatless.completion.manager import ModelConfigManager
 from moatless.evaluation.manager import EvaluationManager
-from moatless.evaluation.schema import Evaluation, EvaluationInstance
+from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationSummary
 from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instance, get_moatless_instances
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import TrajectoryResponseDTO
@@ -88,19 +88,10 @@ async def clone_evaluation(
     return map_to_evaluation_response(evaluation, model_manager, flow_manager)
 
 
-@router.get("/evaluations", response_model=EvaluationListResponseDTO)
+@router.get("/evaluations")
 async def list_evaluations(evaluation_manager: EvaluationManager = Depends(get_evaluation_manager)):
     """List all evaluations with their status summaries."""
-    try:
-        evaluations = await evaluation_manager.list_evaluations()
-
-        response_items = [EvaluationListItemDTO.from_evaluation(eval) for eval in evaluations]
-
-        return EvaluationListResponseDTO(evaluations=response_items)
-
-    except Exception as e:
-        logger.exception(f"Failed to list evaluations: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await evaluation_manager.list_evaluation_summaries()
 
 
 @router.post("/evaluations/{evaluation_name}/start", response_model=EvaluationResponseDTO)
@@ -188,7 +179,7 @@ async def get_evaluation_jobs_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/evaluations/{evaluation_name}/jobs/cancel", response_model=CancelJobsResponseDTO)
+@router.post("/evaluations/{evaluation_name}/jobs/cancel")
 async def cancel_evaluation_jobs(
     evaluation_name: str, evaluation_manager: EvaluationManager = Depends(get_evaluation_manager)
 ):
@@ -197,15 +188,8 @@ async def cancel_evaluation_jobs(
         # Get job status summary first to know what we're canceling
         summary = await evaluation_manager.runner.get_job_status_summary(evaluation_name)
 
-        # Cancel all jobs and set evaluation status to PAUSED
         await evaluation_manager.cancel_evaluation(evaluation_name)
 
-        return CancelJobsResponseDTO(
-            project_id=evaluation_name,
-            canceled_queued_jobs=summary.queued_jobs,
-            canceled_running_jobs=summary.running_jobs,
-            message=f"Successfully canceled {summary.queued_jobs + summary.running_jobs} jobs for evaluation {evaluation_name}",
-        )
     except Exception as e:
         logger.exception(f"Failed to cancel jobs: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -387,6 +371,7 @@ def map_to_evaluation_response(
                 completed_at=instance.completed_at,
                 evaluated_at=instance.evaluated_at,
                 error_at=instance.error_at,
+                iterations=instance.iterations,
                 resolved=instance.resolved,
                 resolved_by=get_resolved_by(instance),
                 reward=instance.reward,

@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 class AgentConfigManager:
     """Manages agent configurations."""
 
-    def __init__(self, storage: BaseStorage | None = None):
+    def __init__(self, storage: BaseStorage):
         """Initialize the agent config manager."""
         self._configs = {}
         logger.info("Loading agent configs")
-        self._storage = storage or settings.storage
+        self._storage = storage
 
     async def initialize(self):
         """Initialize the agent config manager."""
@@ -37,7 +37,7 @@ class AgentConfigManager:
     async def _load_configs(self):
         """Load configurations from JSON file."""
         try:
-            configs = await self._storage.read("agents")
+            configs = await self._storage.read("agents.json")
         except KeyError:
             logger.warning("No agent configs found")
             configs = []
@@ -50,7 +50,7 @@ class AgentConfigManager:
                     # Copy global config to local path
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        await self._storage.write("agents", global_config)
+                        await self._storage.write("agents.json", global_config)
                     logger.info("Copied global config to local path")
                 else:
                     logger.info("No global agent configs found")
@@ -72,7 +72,7 @@ class AgentConfigManager:
         try:
             configs = list(self._configs.values())
             logger.info(f"Saving agent configs to {path}")
-            await self._storage.write("agents", configs)
+            await self._storage.write("agents.json", configs)
         except Exception as e:
             logger.error(f"Failed to save agent configs: {e}")
 

@@ -11,7 +11,9 @@ current_project_id = contextvars.ContextVar[str | None]("current_project_id", de
 
 def get_moatless_dir() -> Path:
     """Get the moatless directory."""
-    return Path(os.getenv("MOATLESS_DIR", ".moatless"))
+    if not os.getenv("MOATLESS_DIR"):
+        raise ValueError("MOATLESS_DIR environment variable is not set")
+    return Path(os.getenv("MOATLESS_DIR"))
 
 
 def get_projects_dir() -> Path:

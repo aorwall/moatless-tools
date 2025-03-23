@@ -6,6 +6,7 @@ from typing import Any, Callable, List, Optional
 
 import redis.asyncio as redis
 
+from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.events import BaseEvent
 from moatless.eventbus.base import BaseEventBus
 from moatless.storage.base import BaseStorage
@@ -156,7 +157,17 @@ class RedisEventBus(BaseEventBus):
         Args:
             event: The event to publish
         """
+
+        if event.project_id is None:
+            event.project_id = current_project_id.get()
+
+        if event.trajectory_id is None:
+            event.trajectory_id = current_trajectory_id.get()
+
         await self._save_event(event)
+
+        # Also save to Redis
+        await self._save_event_to_redis(event)
 
         try:
             event_data = event.model_dump(mode="json")
@@ -175,3 +186,89 @@ class RedisEventBus(BaseEventBus):
             logger.info(f"Event details: {event}")
         except Exception as e:
             logger.exception(f"Failed to send event {event} to {callback.__name__}")
+
+    async def _save_event_to_redis(self, event: BaseEvent) -> None:
+        """
+        Save an event to Redis.
+
+        Args:
+            event: The event to save
+        """
+        if not self._redis_available:
+            logger.warning("Redis unavailable, cannot save event to Redis")
+            return
+
+        project_id = event.project_id
+        trajectory_id = event.trajectory_id
+
+        if not project_id or not trajectory_id:
+            logger.warning(f"Cannot save event to Redis without project_id and trajectory_id: {event}")
+            return
+
+        key = f"moatless:events:{project_id}:{trajectory_id}"
+
+        try:
+            event_data = event.model_dump(mode="json")
+            serialized = json.dumps(event_data)
+            # redis.asyncio.Redis.rpush is already a coroutine function
+            await self._redis.rpush(key, serialized)
+            logger.debug(f"Saved event to Redis: {event.event_type}")
+        except Exception as e:
+            logger.exception(f"Error saving event to Redis: {e}")
+
+    async def _read_events_from_redis(self, project_id: str, trajectory_id: str) -> List[BaseEvent]:
+        """
+        Read events for a specific project and trajectory from Redis.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            A list of BaseEvent objects
+        """
+        if not self._redis_available:
+            logger.warning("Redis unavailable, cannot read events from Redis")
+            return []
+
+        key = f"moatless:events:{project_id}:{trajectory_id}"
+
+        try:
+            # redis.asyncio.Redis.lrange is already a coroutine function
+            event_strings = await self._redis.lrange(key, 0, -1)
+            events = []
+
+            for event_str in event_strings:
+                try:
+                    event_str_decoded = event_str.decode("utf-8") if isinstance(event_str, bytes) else event_str
+                    event_dict = json.loads(event_str_decoded)
+                    event = BaseEvent.model_validate(event_dict)
+                    events.append(event)
+                except Exception as e:
+                    logger.exception(f"Error parsing event: {e}")
+
+            logger.debug(f"Read {len(events)} events from Redis for {project_id}/{trajectory_id}")
+            return events
+        except Exception as e:
+            logger.exception(f"Error reading events from Redis: {e}")
+            return []
+
+    async def read_events(self, project_id: str, trajectory_id: str) -> List[BaseEvent]:
+        """
+        Read events for a specific project and trajectory from Redis or fallback to storage.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            A list of BaseEvent objects
+        """
+        # Try to read from Redis first
+        events = await self._read_events_from_redis(project_id, trajectory_id)
+
+        # If no events in Redis or Redis is unavailable, fall back to storage
+        if not events and self._storage:
+            events = await super().read_events(project_id, trajectory_id)
+
+        return events

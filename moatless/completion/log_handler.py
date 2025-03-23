@@ -9,7 +9,7 @@ from moatless.context_data import current_node_id, current_action_step
 from moatless.storage.base import BaseStorage
 
 
-logger = logging.getLogger("LiteLLM-Logger")
+logger = logging.getLogger()
 
 IGNORE_KWARGS = ["response", "api_key", "async_complete_streaming_response"]
 
@@ -19,43 +19,42 @@ class LogHandler(CustomLogger):
         super().__init__()
         self._storage = storage
 
-    async def _get_log_key(self, filename: str | None = None):
+    async def _get_log_path(self, filename: str | None = None):
         now = datetime.now()
         node_id = current_node_id.get()
         action_step = current_action_step.get()
 
-        trajectory_key = self._storage.get_trajectory_key()
+        trajectory_key = self._storage.get_trajectory_path()
 
         if not filename:
             filename = "completion"
 
-        log_key = f"{trajectory_key}/completions/"
+        log_path = f"{trajectory_key}/completions/"
 
         if node_id:
+            log_path += f"node_{node_id}"
             if action_step is not None:
-                log_key += f"action_{node_id}_{action_step}"
-            else:
-                log_key += f"node_{node_id}"
+                log_path += f"_action_{action_step}"
 
             if node_id:
                 counter = 1
-                retry_log_key = f"{log_key}_call_{counter}"
+                retry_log_path = f"{log_path}/{counter}.json"
 
-                while await self._storage.exists(retry_log_key):
+                while await self._storage.exists(retry_log_path):
                     counter += 1
-                    retry_log_key = f"{log_key}_call_{counter}"
+                    retry_log_path = f"{log_path}/{counter}.json"
 
-                log_key = retry_log_key
+                log_path = retry_log_path
         else:
-            log_key += f"{now.strftime('%Y%m%d_%H%M%S')}_{filename}"
+            log_path += f"{now.strftime('%Y%m%d_%H%M%S')}_{filename}"
 
-        return log_key
+        return log_path
 
     async def _write_to_file_async(self, data: dict):
-        log_key = await self._get_log_key()
+        log_path = await self._get_log_path()
 
         try:
-            await self._storage.write(key=log_key, data=data)
+            await self._storage.write(path=log_path, data=data)
         except Exception as e:
             logger.error(f"Failed to write log: {e}")
 

@@ -4,6 +4,7 @@ from typing import Optional, Union, cast
 
 from pydantic import BaseModel, Field
 
+from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments
 from moatless.actions.semantic_search import SemanticSearchArgs
 from moatless.actions.think import ThinkArgs
@@ -125,12 +126,15 @@ def get_action_detail(action: ActionArguments) -> str:
         return f'("{action.thought[:20]}...")' if len(action.thought) > 20 else f'("{action.thought}")'
 
     if isinstance(action, SemanticSearchArgs):
-        return f'("{action.query[:20]}...")' if len(action.query) > 20 else f'("{action.query}")'
+        return f'("{action.query[:40]}...")' if len(action.query) > 40 else f'("{action.query}")'
+
+    if isinstance(action, RunTestsArgs):
+        return f"({action.test_files})"
 
     # return first property that is set
     for key, value in action.model_dump().items():
-        if value:
-            return f"({key}={value[:20]}...)" if len(value) > 20 else f"({key}={value})"
+        if value and key != "thought":
+            return f"({key}={value[:40]}...)" if len(value) > 40 else f"({key}={value})"
     return ""
 
 

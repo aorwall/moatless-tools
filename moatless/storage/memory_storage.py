@@ -24,31 +24,31 @@ class MemoryStorage(BaseStorage):
         """Initialize an empty in-memory storage."""
         self._data: dict[str, dict] = {}
 
-    async def read(self, key: str) -> dict:
+    async def read(self, path: str) -> dict:
         """Read binary data from memory."""
-        normalized_key = self.normalize_key(key)
+        normalized_key = self.normalize_path(path)
         if normalized_key not in self._data:
-            raise KeyError(f"Key '{key}' does not exist")
+            raise KeyError(f"Key '{path}' does not exist")
         return self._data[normalized_key]
 
     async def write(self, key: str, data: dict) -> None:
         """Write binary data to memory."""
-        normalized_key = self.normalize_key(key)
+        normalized_key = self.normalize_path(key)
         self._data[normalized_key] = data
 
     async def delete(self, key: str) -> None:
         """Delete data from memory."""
-        normalized_key = self.normalize_key(key)
+        normalized_key = self.normalize_path(key)
         if normalized_key not in self._data:
             raise KeyError(f"Key '{key}' does not exist")
         del self._data[normalized_key]
 
     async def exists(self, key: str) -> bool:
         """Check if a key exists in memory."""
-        normalized_key = self.normalize_key(key)
+        normalized_key = self.normalize_path(key)
         return normalized_key in self._data
 
-    async def list_keys(self, prefix: str = "") -> list[str]:
+    async def list_paths(self, prefix: str = "") -> list[str]:
         """
         List all keys with the given prefix.
 
@@ -58,7 +58,7 @@ class MemoryStorage(BaseStorage):
         Returns:
             A list of keys that match the prefix
         """
-        normalized_prefix = self.normalize_key(prefix)
+        normalized_prefix = self.normalize_path(prefix)
 
         # When prefix is empty, return all keys
         if not normalized_prefix:

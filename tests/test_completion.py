@@ -11,7 +11,7 @@ from moatless.actions.find_function import FindFunctionArgs
 from moatless.actions.schema import ActionArguments
 from moatless.actions.string_replace import StringReplaceArgs
 from moatless.completion.base import BaseCompletionModel, LLMResponseFormat, CompletionResponse
-from moatless.completion.model import Usage, Completion
+from moatless.completion.stats import Usage
 from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRejectError
 

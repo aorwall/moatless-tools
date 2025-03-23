@@ -62,6 +62,8 @@ class DockerRunner(BaseRunner):
             # Determine fully qualified function name
             if isinstance(job_func, str):
                 fully_qualified_name = job_func
+                func_module = job_func.rsplit(".", 1)[0]
+                func_name = job_func.rsplit(".", 1)[1]
             else:
                 # If it's a callable, get the fully qualified name
                 func_module = job_func.__module__
@@ -131,8 +133,13 @@ class DockerRunner(BaseRunner):
                 # Update Python path to include mounted source
                 cmd.extend(["-e", "PYTHONPATH=/opt/moatless:$PYTHONPATH"])
 
-            # Add image name and command
-            cmd.extend([image_name, "/usr/bin/python", "-m", "moatless.runner.worker"])
+            # Create Python command to import and call the function with project_id and trajectory_id
+            python_command = (
+                f"from {func_module} import {func_name}; import sys; {func_name}('{project_id}', '{trajectory_id}')"
+            )
+
+            # Run the command
+            cmd.extend([image_name, "/usr/bin/python", "-c", python_command])
 
             # Run the container
             self.logger.info(f"Running Docker container with command: {' '.join(cmd)}")

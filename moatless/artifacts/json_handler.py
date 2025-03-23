@@ -4,6 +4,7 @@ from typing import TypeVar
 
 from pydantic import PrivateAttr
 
+from moatless import settings
 from moatless.artifacts.artifact import (
     Artifact,
     ArtifactHandler,
@@ -29,7 +30,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
     _storage: BaseStorage = PrivateAttr()
     _artifacts: dict[str, T] = PrivateAttr(default={})
 
-    def __init__(self, storage: BaseStorage | None = None, **kwargs):
+    def __init__(self, storage: BaseStorage, **kwargs):
         """
         Initialize the JsonArtifactHandler.
 
@@ -40,7 +41,9 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         """
 
         super().__init__(**kwargs)
-        self._storage = storage or settings.storage
+        if not storage:
+            raise ValueError("Storage is required")
+        self._storage = storage
 
     @classmethod
     @abstractmethod
@@ -62,15 +65,15 @@ class JsonArtifactHandler(ArtifactHandler[T]):
 
         self._artifacts = {}
 
+        path = f"{self.type}.json"
+
         # If storage doesn't have our key, return empty
-        if not await self._storage.exists(self.type):
-            logger.info(
-                f"No artifacts found for type {self.type}. Creating empty artifact store."
-            )
+        if not await self._storage.exists(path):
+            logger.info(f"No artifacts found for type {self.type}. Creating empty artifact store.")
             return
 
         try:
-            artifact_data = await self._storage.read_from_trajectory(self.type)
+            artifact_data = await self._storage.read_from_trajectory(path)
             artifact_class = self.get_artifact_class()
 
             for item in artifact_data["artifacts"]:
@@ -154,11 +157,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
                 search_value = criterion.value
 
                 # Handle string case sensitivity
-                if (
-                    isinstance(field_value, str)
-                    and isinstance(search_value, str)
-                    and not criterion.case_sensitive
-                ):
+                if isinstance(field_value, str) and isinstance(search_value, str) and not criterion.case_sensitive:
                     field_value = field_value.lower()
                     search_value = search_value.lower()
 
@@ -189,9 +188,10 @@ class JsonArtifactHandler(ArtifactHandler[T]):
 
     async def _save_artifacts(self) -> None:
         """Save artifacts to storage"""
+        path = f"{self.type}.json"
         artifact_data = [artifact.model_dump() for artifact in self._artifacts.values()]
         artifacts_dict = {"artifacts": artifact_data}
-        await self._storage.write_to_trajectory(self.type, artifacts_dict)
+        await self._storage.write_to_trajectory(path, artifacts_dict)
 
     def generate_id(self) -> str:
         """Generate a unique ID for an artifact"""

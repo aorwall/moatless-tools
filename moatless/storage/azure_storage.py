@@ -8,6 +8,7 @@ data to Azure Blob Storage.
 import json
 import logging
 from datetime import datetime
+import os
 from typing import Union, List, Optional
 from io import BytesIO
 
@@ -21,6 +22,10 @@ from moatless.storage.base import BaseStorage
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
+# Suppress Azure HTTP logging
+logger = logging.getLogger("azure.core.pipeline.policies.http_logging_policy")
+logger.setLevel(logging.WARNING)
+
 
 class DateTimeEncoder(json.JSONEncoder):
     """Custom JSON encoder that handles datetime objects."""
@@ -31,7 +36,7 @@ class DateTimeEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class AzureStorage(BaseStorage):
+class AzureBlobStorage(BaseStorage):
     """
     Storage implementation that uses Azure Blob Storage.
 
@@ -39,105 +44,79 @@ class AzureStorage(BaseStorage):
     data to Azure Blob Storage.
     """
 
-    def __init__(self, connection_string: str, container_name: str = "moatless", file_extension: str = "json"):
+    def __init__(self, connection_string: str | None = None, container_name: str = "moatless-tools"):
         """
         Initialize an AzureStorage instance.
 
         Args:
             connection_string: Azure Storage connection string
             container_name: Name of the container to use
-            file_extension: The file extension to use for stored files
         """
-        self.connection_string = connection_string
+        self.connection_string = connection_string or os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        if not self.connection_string:
+            raise ValueError("Azure Storage connection string is required")
+
         self.container_name = container_name
-        self.file_extension = file_extension
 
-        # Create async blob service client
-        self.blob_service_client = AsyncBlobServiceClient.from_connection_string(connection_string)
-        self.container_client = self.blob_service_client.get_container_client(container_name)
-
-        logger.info(f"Azure storage initialized with container {container_name}")
+        try:
+            self.blob_service_client = AsyncBlobServiceClient.from_connection_string(self.connection_string)
+            self.container_client = self.blob_service_client.get_container_client(self.container_name)
+            logger.info(f"Successfully created Azure Blob Service client connection to {self.container_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Azure Blob Storage: {e}")
+            raise
 
     def __str__(self) -> str:
-        return f"AzureStorage(container={self.container_name}, file_extension={self.file_extension})"
+        return f"AzureStorage(container={self.container_name})"
 
-    def _get_blob_name(self, key: str) -> str:
+    def _get_blob_name(self, path: str) -> str:
         """
-        Get the blob name for a key.
+        Get the blob name for a path.
 
         Args:
-            key: The key to convert to a blob name
+            path: The path to convert to a blob name
 
         Returns:
-            The blob name for the key
+            The blob name for the path
         """
-        normalized_key = self.normalize_key(key)
-        return f"{normalized_key}.{self.file_extension}"
+        return self.normalize_path(path)
 
-    @tracer.start_as_current_span("AzureStorage.read")
-    async def read(self, key: str) -> dict | list[dict]:
-        """
-        Read JSON data from a blob.
-
-        Args:
-            key: The key to read
-
-        Returns:
-            The parsed JSON data or an empty dict if the blob is empty
-
-        Raises:
-            KeyError: If the key does not exist
-        """
-        blob_name = self._get_blob_name(key)
-        try:
-            blob_client = self.container_client.get_blob_client(blob_name)
-            download_stream = await blob_client.download_blob()
-            content = await download_stream.readall()
-            content_str = content.decode("utf-8")
-
-            if not content_str.strip():
-                logger.warning(f"Empty content found for key: {key}, returning empty dict")
-                return {}
-            return json.loads(content_str)
-        except ResourceNotFoundError:
-            raise KeyError(f"No data found for key: {key}")
-
-    async def read_raw(self, key: str) -> str:
+    async def read_raw(self, path: str) -> str:
         """
         Read raw string data from a blob without parsing.
 
         Args:
-            key: The key to read
+            path: The path to read
 
         Returns:
             The raw blob contents as a string
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         try:
             blob_client = self.container_client.get_blob_client(blob_name)
             download_stream = await blob_client.download_blob()
             content = await download_stream.readall()
             return content.decode("utf-8")
         except ResourceNotFoundError:
-            raise KeyError(f"No data found for key: {key}")
+            raise KeyError(f"No data found for path: {path}")
 
-    async def read_lines(self, key: str) -> List[dict]:
+    async def read_lines(self, path: str) -> List[dict]:
         """
         Read data from a JSONL blob, parsing each line as a JSON object.
 
         Args:
-            key: The key to read
+            path: The path to read
 
         Returns:
             A list of parsed JSON objects, one per line
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         try:
             blob_client = self.container_client.get_blob_client(blob_name)
             download_stream = await blob_client.download_blob()
@@ -151,45 +130,30 @@ class AzureStorage(BaseStorage):
                     results.append(json.loads(line))
             return results
         except ResourceNotFoundError:
-            raise KeyError(f"No data found for key: {key}")
+            raise KeyError(f"No data found for path: {path}")
 
-    @tracer.start_as_current_span("AzureStorage.write")
-    async def write(self, key: str, data: dict | list[dict]) -> None:
-        """
-        Write data to a blob as JSON.
-
-        Args:
-            key: The key to write to
-            data: The data to write
-        """
-        blob_name = self._get_blob_name(key)
-        blob_client = self.container_client.get_blob_client(blob_name)
-
-        content = json.dumps(data, indent=2, cls=DateTimeEncoder)
-        await blob_client.upload_blob(content.encode("utf-8"), overwrite=True)
-
-    async def write_raw(self, key: str, data: str) -> None:
+    async def write_raw(self, path: str, data: str) -> None:
         """
         Write raw string data to a blob.
 
         Args:
-            key: The key to write to
+            path: The path to write to
             data: The string data to write
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         blob_client = self.container_client.get_blob_client(blob_name)
         await blob_client.upload_blob(data.encode("utf-8"), overwrite=True)
 
-    async def append(self, key: str, data: Union[dict, str]) -> None:
+    async def append(self, path: str, data: Union[dict, str]) -> None:
         """
         Append data to an existing blob.
 
         Args:
-            key: The key to append to
+            path: The path to append to
             data: The data to append. If dict, it will be serialized as JSON.
                  If string, it will be written as-is with a newline.
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         blob_client = self.container_client.get_blob_client(blob_name)
 
         # Convert to JSON string if it's a dict
@@ -213,65 +177,69 @@ class AzureStorage(BaseStorage):
 
         await blob_client.upload_blob(content, overwrite=True)
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, path: str) -> None:
         """
         Delete a blob.
 
         Args:
-            key: The key to delete
+            path: The path to delete
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         try:
             blob_client = self.container_client.get_blob_client(blob_name)
             await blob_client.delete_blob()
         except ResourceNotFoundError:
-            raise KeyError(f"No data found for key: {key}")
+            raise KeyError(f"No data found for path: {path}")
 
-    async def exists(self, key: str) -> bool:
+    async def exists(self, path: str) -> bool:
         """
         Check if a blob exists.
 
         Args:
-            key: The key to check
+            path: The path to check
 
         Returns:
             True if the blob exists, False otherwise
         """
-        blob_name = self._get_blob_name(key)
+        blob_name = self._get_blob_name(path)
         blob_client = self.container_client.get_blob_client(blob_name)
+
+        # Log the full URL being accessed for debugging
+        logger.info(f"Checking existence of blob at: {blob_client.url}")
+
         try:
             await blob_client.get_blob_properties()
             return True
         except ResourceNotFoundError:
             return False
+        except Exception as e:
+            # Log any unexpected errors
+            logger.error(f"Error checking if blob exists: {e}")
+            # Re-raise non-ResourceNotFound errors
+            if not isinstance(e, ResourceNotFoundError):
+                raise
 
-    async def list_keys(self, prefix: str = "") -> list[str]:
+    async def list_paths(self, prefix: str = "") -> list[str]:
         """
-        List all keys with the given prefix.
+        List all paths with the given prefix.
 
         Args:
-            prefix: The prefix to filter keys by
+            prefix: The prefix to filter paths by
 
         Returns:
-            A list of keys
+            A list of paths
         """
-        normalized_prefix = self.normalize_key(prefix)
+        normalized_prefix = self.normalize_path(prefix)
         prefix_with_ext = f"{normalized_prefix}" if normalized_prefix else ""
 
-        keys = []
+        paths = []
         async for blob in self.container_client.list_blobs(name_starts_with=prefix_with_ext):
-            # Remove file extension and normalize path
-            key = (
-                blob.name[: -len(f".{self.file_extension}")]
-                if blob.name.endswith(f".{self.file_extension}")
-                else blob.name
-            )
-            keys.append(key)
+            paths.append(blob.name)
 
-        return keys
+        return paths
 
     async def close(self) -> None:
         """

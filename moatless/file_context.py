@@ -8,9 +8,9 @@ import subprocess
 from dataclasses import dataclass, field, asdict
 from math import log
 from typing import Dict, List, Optional, Set, Tuple, Literal, Any, Union, TYPE_CHECKING
+from unittest import TestResult
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from pydantic.json_schema import JsonSchemaMode
 from unidiff import Hunk, PatchSet
 
 from moatless.artifacts.artifact import ArtifactChange
@@ -1129,8 +1129,11 @@ class ContextFile(BaseModel):
 
 
 class FileContext(BaseModel):
-    shadow_mode: bool = Field(default=True)
-
+    shadow_mode: bool = Field(default=True, description="Set to true to not write changes to disk.")
+    show_code_blocks: bool = Field(
+        False,
+        description="Whether to show the parsed code blocks in the response or just the line span.",
+    )
     _repo: Repository | None = PrivateAttr(None)
     _runtime: RuntimeEnvironment | None = PrivateAttr(None)
 
@@ -1754,98 +1757,28 @@ class FileContext(BaseModel):
             span_ids.extend(file.span_ids)
         return len(span_ids)
 
-    def get_test_counts(self) -> tuple[int, int, int]:
-        """
-        Returns counts of passed, failed, and errored tests.
+    def add_test_file(self, file_path: str, test_results: list[TestResult]) -> TestFile:
+        if file_path in self._test_files.key():
+            self._test_files[file_path].test_results = test_results
+        else:
+            self._test_files[file_path] = TestFile(file_path=file_path, test_results=test_results)
 
-        Returns:
-            Tuple[int, int, int]: A tuple containing (passed_count, failure_count, error_count)
-        """
-        from moatless.actions.run_tests import RunTests
+        return self._test_files[file_path]
 
-        return RunTests.get_test_counts(self)
+    def add_test_files(self, test_files: list[TestFile]):
+        for test_file in test_files:
+            self.add_test_file(test_file.file_path, test_file.test_results)
 
-    async def run_tests(self, test_files: list[str] | None = None) -> list[TestFile]:
-        """
-        Runs tests using the runtime environment and groups results by file.
-
-        This is a wrapper around RunTests.run_tests to maintain backward compatibility.
-
-        Args:
-            test_files (List[str] | None): Optional list of test files to run.
-                                         If provided, adds these files to context before running.
-
-        Returns:
-            List[TestFile]: List of test results grouped by file
-        """
-        from moatless.actions.run_tests import RunTests
-
-        return await RunTests.run_tests(self, test_files)
-
-    def add_test_file(self, file_path: str) -> TestFile:
-        """
-        Adds a new test file path to the context if it doesn't already exist.
-
-        This is a wrapper around RunTests.add_test_file to maintain backward compatibility.
-
-        Args:
-            file_path (str): Path to the test file
-
-        Returns:
-            TestFile: The new or existing TestFile object
-        """
-        from moatless.actions.run_tests import RunTests
-
-        return RunTests.add_test_file(self, file_path)
-
-    def get_test_summary(self, test_files: Optional[list[str]] = None) -> str:
-        """
-        Returns a summary of test results.
-
-        This is a wrapper around RunTests.get_test_summary to maintain backward compatibility.
-
-        Args:
-            test_files: Optional list of test files to include in the summary
-
-        Returns:
-            str: Summary string of test results
-        """
-        from moatless.actions.run_tests import RunTests
-
-        return RunTests.get_test_summary(self, test_files)
+    def get_test_summary(self) -> str:
+        return TestFile.get_test_summary(self._test_files.values())
 
     def get_test_failure_details(
         self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[list[str]] = None
     ) -> str:
-        """
-        Returns detailed output for each failed or errored test result.
+        return TestFile.get_test_failure_details(self._test_files.values(), max_tokens, max_chars_per_test, test_files)
 
-        This is a wrapper around RunTests.get_test_failure_details to maintain backward compatibility.
-
-        Args:
-            max_tokens: Maximum total tokens for all test details
-            max_chars_per_test: Maximum characters per test message before truncating
-            test_files: Optional list of test files to include in the details
-
-        Returns:
-            str: Formatted string containing details of failed tests
-        """
-        from moatless.actions.run_tests import RunTests
-
-        return RunTests.get_test_failure_details(self, max_tokens, max_chars_per_test, test_files)
-
-    def get_test_status(self) -> Optional["TestStatus"]:
-        """
-        Returns the overall test status based on all test results.
-
-        This is a wrapper around RunTests.get_test_status to maintain backward compatibility.
-
-        Returns:
-            Optional[TestStatus]: The overall test status
-        """
-        from moatless.actions.run_tests import RunTests
-
-        return RunTests.get_test_status(self)
+    def get_test_status(self):
+        return TestFile.get_test_status(self._test_files.values())
 
     def was_edited(self) -> bool:
         """

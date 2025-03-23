@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import logging
 import os
 from pathlib import Path
@@ -21,30 +22,40 @@ from moatless.workspace import Workspace
 logger = logging.getLogger(__name__)
 
 
-def run_flow(project_id: str, trajectory_id: str) -> None:
+async def run_flow(project_id: str, trajectory_id: str) -> None:
     """Run an instance's agentic flow."""
     print(f"Running instance {trajectory_id} for project {project_id}")
 
-    from moatless.settings import ensure_managers_initialized
+    from moatless.settings import ensure_managers_initialized, get_storage
 
     asyncio.run(ensure_managers_initialized())
 
-    trajectory_dir = get_trajectory_dir(
-        trajectory_id=trajectory_id, project_id=project_id
+    storage = await get_storage()
+
+    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = Path(f"/data/logs/logs_{date_str}.log")
+    original_handlers = setup_job_logging(log_path=log_path)
+
+    settings = await storage.read_from_trajectory(
+        path="settings.json", trajectory_id=trajectory_id, project_id=project_id
     )
-    original_handlers = setup_job_logging("run", trajectory_dir)
+    if not settings:
+        logger.error("Settings not found")
+        raise ValueError("Settings not found")
 
     repo_path = os.getenv("REPO_PATH", str(Path.cwd()))
     logger.info(f"Using repository path: {repo_path}")
     try:
         repository = GitRepository(repo_path=repo_path)
-        workspace = Workspace(
-            repository=repository, environment=LocalBashEnvironment(cwd=repo_path)
+        workspace = Workspace(repository=repository, environment=LocalBashEnvironment(cwd=repo_path))
+
+        litellm.callbacks = [LogHandler(storage=storage)]
+
+        trajectory_dict = await storage.read_from_trajectory(
+            path="trajectory.json", trajectory_id=trajectory_id, project_id=project_id
         )
 
-        litellm.callbacks = [LogHandler()]
-
-        flow = AgenticFlow.from_dir(trajectory_dir=trajectory_dir)
+        flow = AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
 
         if flow.is_finished():
             logger.warning(f"Flow already finished for instance {trajectory_id}")

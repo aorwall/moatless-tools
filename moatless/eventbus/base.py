@@ -147,4 +147,4 @@ class BaseEventBus(abc.ABC):
         """
         Get the key for the events file.
         """
-        return f"projects/{project_id}/trajs/{trajectory_id}/events"
+        return f"projects/{project_id}/trajs/{trajectory_id}/events.jsonl"

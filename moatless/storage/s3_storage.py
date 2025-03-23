@@ -45,7 +45,6 @@ class S3Storage(BaseStorage):
         aws_access_key_id: str | None = None,
         aws_secret_access_key: str | None = None,
         endpoint_url: str | None = None,
-        file_extension: str = "json",
     ):
         """
         Initialize an S3Storage instance.
@@ -56,14 +55,12 @@ class S3Storage(BaseStorage):
             aws_access_key_id: AWS access key ID (optional, will use boto3 default)
             aws_secret_access_key: AWS secret access key (optional, will use boto3 default)
             endpoint_url: Custom endpoint URL for S3 (useful for Minio, etc.)
-            file_extension: The file extension to use for stored files
         """
         self.bucket_name = bucket_name or os.getenv("MOATLESS_S3_BUCKET_NAME")
         self.region_name = region_name or os.getenv("MOATLESS_S3_REGION_NAME")
         self.aws_access_key_id = aws_access_key_id
         self.aws_secret_access_key = aws_secret_access_key
         self.endpoint_url = endpoint_url
-        self.file_extension = file_extension
 
         # Connection params dict for aioboto3
         self.conn_params = {
@@ -84,78 +81,38 @@ class S3Storage(BaseStorage):
         logger.info(f"S3 storage initialized with bucket {bucket_name}")
 
     def __str__(self) -> str:
-        return f"S3Storage(bucket={self.bucket_name}, region={self.region_name}, file_extension={self.file_extension})"
+        return f"S3Storage(bucket={self.bucket_name}, region={self.region_name})"
 
-    def _get_object_key(self, key: str) -> str:
+    def _get_object_path(self, path: str) -> str:
         """
-        Get the S3 object key for a storage key.
+        Get the S3 object path for a storage path.
 
         Args:
-            key: The key to convert to an S3 object key
+            path: The path to convert to an S3 object path
 
         Returns:
-            The S3 object key
+            The S3 object path
         """
-        normalized_key = self.normalize_key(key)
-        return f"{normalized_key}.{self.file_extension}"
+        return self.normalize_path(path)
 
-    @tracer.start_as_current_span("S3Storage.read")
-    async def read(self, key: str) -> dict | list[dict]:
-        """
-        Read JSON data from an S3 object.
-
-        Args:
-            key: The key to read
-
-        Returns:
-            The parsed JSON data or an empty dict if the object is empty
-
-        Raises:
-            KeyError: If the key does not exist
-        """
-        object_key = self._get_object_key(key)
-
-        try:
-            async with self.session.resource(**self.conn_params) as s3:
-                obj = await s3.Object(self.bucket_name, object_key)
-                response = await obj.get()
-
-                # Get the body as bytes and decode to string
-                streaming_body = response["Body"]
-                content = await streaming_body.read()
-                content_str = content.decode("utf-8")
-
-                if not content_str.strip():
-                    logger.warning(f"Empty content found for key: {key}, returning empty dict")
-                    return {}
-
-                return json.loads(content_str)
-
-        except ClientError as e:
-            if e.response["Error"]["Code"] == "NoSuchKey":
-                raise KeyError(f"No data found for key: {key}")
-            else:
-                # Re-raise other AWS errors
-                raise
-
-    async def read_raw(self, key: str) -> str:
+    async def read_raw(self, path: str) -> str:
         """
         Read raw string data from an S3 object without parsing.
 
         Args:
-            key: The key to read
+            path: The path to read
 
         Returns:
             The raw object contents as a string
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         try:
             async with self.session.resource(**self.conn_params) as s3:
-                obj = await s3.Object(self.bucket_name, object_key)
+                obj = await s3.Object(self.bucket_name, object_path)
                 response = await obj.get()
 
                 # Get the body as bytes and decode to string
@@ -165,29 +122,29 @@ class S3Storage(BaseStorage):
 
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
-                raise KeyError(f"No data found for key: {key}")
+                raise KeyError(f"No data found for path: {path}")
             else:
                 # Re-raise other AWS errors
                 raise
 
-    async def read_lines(self, key: str) -> List[dict]:
+    async def read_lines(self, path: str) -> List[dict]:
         """
         Read data from a JSONL S3 object, parsing each line as a JSON object.
 
         Args:
-            key: The key to read
+            path: The path to read
 
         Returns:
             A list of parsed JSON objects, one per line
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         try:
             async with self.session.resource(**self.conn_params) as s3:
-                obj = await s3.Object(self.bucket_name, object_key)
+                obj = await s3.Object(self.bucket_name, object_path)
                 response = await obj.get()
 
                 # Get the body as bytes and decode to string
@@ -204,51 +161,35 @@ class S3Storage(BaseStorage):
 
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey":
-                raise KeyError(f"No data found for key: {key}")
+                raise KeyError(f"No data found for path: {path}")
             else:
                 # Re-raise other AWS errors
                 raise
 
-    @tracer.start_as_current_span("S3Storage.write")
-    async def write(self, key: str, data: dict | list[dict]) -> None:
-        """
-        Write data to an S3 object as JSON.
-
-        Args:
-            key: The key to write to
-            data: The data to write
-        """
-        object_key = self._get_object_key(key)
-        content = json.dumps(data, indent=2, cls=DateTimeEncoder)
-
-        async with self.session.resource(**self.conn_params) as s3:
-            obj = await s3.Object(self.bucket_name, object_key)
-            await obj.put(Body=content.encode("utf-8"), ContentType="application/json")
-
-    async def write_raw(self, key: str, data: str) -> None:
+    async def write_raw(self, path: str, data: str) -> None:
         """
         Write raw string data to an S3 object.
 
         Args:
-            key: The key to write to
+            path: The path to write to
             data: The string data to write
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         async with self.session.resource(**self.conn_params) as s3:
-            obj = await s3.Object(self.bucket_name, object_key)
+            obj = await s3.Object(self.bucket_name, object_path)
             await obj.put(Body=data.encode("utf-8"), ContentType="text/plain")
 
-    async def append(self, key: str, data: Union[dict, str]) -> None:
+    async def append(self, path: str, data: Union[dict, str]) -> None:
         """
         Append data to an existing S3 object.
 
         Args:
-            key: The key to append to
+            path: The path to append to
             data: The data to append. If dict, it will be serialized as JSON.
                  If string, it will be written as-is with a newline.
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         # Convert to JSON string if it's a dict
         if isinstance(data, dict):
@@ -263,55 +204,55 @@ class S3Storage(BaseStorage):
         # S3 doesn't support direct appends, so we need to download, modify, and re-upload
         try:
             # Try to get existing content
-            existing_content = await self.read_raw(key)
+            existing_content = await self.read_raw(path)
             content = existing_content + line
         except KeyError:
             # If object doesn't exist, just use the new line
             content = line
 
         # Upload the combined content
-        await self.write_raw(key, content)
+        await self.write_raw(path, content)
 
-    async def delete(self, key: str) -> None:
+    async def delete(self, path: str) -> None:
         """
         Delete an S3 object.
 
         Args:
-            key: The key to delete
+            path: The path to delete
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         try:
             async with self.session.resource(**self.conn_params) as s3:
-                obj = await s3.Object(self.bucket_name, object_key)
+                obj = await s3.Object(self.bucket_name, object_path)
                 await obj.load()  # This raises exception if object doesn't exist
                 await obj.delete()
 
         except ClientError as e:
             if e.response["Error"]["Code"] == "NoSuchKey" or e.response["Error"]["Code"] == "404":
-                raise KeyError(f"No data found for key: {key}")
+                raise KeyError(f"No data found for path: {path}")
             else:
                 # Re-raise other AWS errors
                 raise
 
-    async def exists(self, key: str) -> bool:
+    async def exists(self, path: str) -> bool:
         """
         Check if an S3 object exists.
 
         Args:
-            key: The key to check
+            path: The path to check
 
         Returns:
             True if the object exists, False otherwise
         """
-        object_key = self._get_object_key(key)
+        object_path = self._get_object_path(path)
 
         try:
             async with self.session.resource(**self.conn_params) as s3:
-                obj = await s3.Object(self.bucket_name, object_key)
+                obj = await s3.Object(self.bucket_name, object_path)
                 await obj.load()
                 return True
         except ClientError as e:
@@ -321,66 +262,66 @@ class S3Storage(BaseStorage):
                 # Re-raise other AWS errors
                 raise
 
-    @tracer.start_as_current_span("S3Storage.list_keys")
-    async def list_keys(self, prefix: str = "", delimiter: str = "/") -> list[str]:
+    @tracer.start_as_current_span("S3Storage.list_paths")
+    async def list_paths(self, prefix: str = "", delimiter: str = "/") -> list[str]:
         """
-        List keys with the given prefix.
+        List paths with the given prefix.
 
         Args:
-            prefix: The prefix to filter keys by
+            prefix: The prefix to filter paths by
             delimiter: The delimiter character to use for directory-like structure (default: '/')
 
         Returns:
-            A list of keys at the specified directory level (not recursive)
+            A list of paths at the specified directory level (not recursive)
         """
-        normalized_prefix = self.normalize_key(prefix)
+        normalized_prefix = self.normalize_path(prefix)
 
         # Ensure prefix ends with delimiter if it represents a directory
         if normalized_prefix and not normalized_prefix.endswith(delimiter):
             normalized_prefix = f"{normalized_prefix}{delimiter}"
 
-        keys = []
+        paths = []
         directory_paths = set()
 
-        logger.info(f"Listing keys with prefix: {normalized_prefix}")
+        logger.info(f"Listing paths with prefix: {normalized_prefix}")
 
         async with self.session.resource(**self.conn_params) as s3:
             bucket = await s3.Bucket(self.bucket_name)
 
             # Get all objects with the prefix
             async for obj in bucket.objects.filter(Prefix=normalized_prefix):
-                # Extract key
-                key = obj.key
+                # Extract path
+                path = obj.key
+                logger.info(f"Listing key: {path}")
 
                 # Skip the prefix directory itself
-                if key == normalized_prefix:
+                if path == normalized_prefix:
                     continue
 
                 # Check if this is a direct child of the prefix or a deeper descendant
-                rel_key = key[len(normalized_prefix) :] if normalized_prefix else key
+                rel_path = path[len(normalized_prefix) :] if normalized_prefix else path
 
                 # Skip entries that don't have content (directory markers)
-                if not rel_key:
+                if not rel_path:
                     continue
 
                 # For non-recursive listing, we need to handle directories
-                if delimiter in rel_key:
+                if delimiter in rel_path:
                     # This is a deeper path, extract just the top-level directory
-                    child_path = rel_key.split(delimiter)[0]
-                    directory_path = f"{normalized_prefix}{child_path}"
+                    child_path = rel_path.split(delimiter)[0]
+                    directory_path = f"{normalized_prefix}{child_path}{delimiter}"
                     directory_paths.add(directory_path)
                 else:
-                    # This is a direct child, include it
-                    file_path = key
-                    # Remove file extension if present
-                    if file_path.endswith(f".{self.file_extension}"):
-                        file_path = file_path[: -len(f".{self.file_extension}")]
-                    keys.append(file_path)
+                    paths.append(path)
 
-        # Add directories to the result
-        keys.extend(directory_paths)
+        # No need to add directory paths when listing contents of a specific folder
+        if normalized_prefix:
+            return paths
 
-        return keys
+        # Add directories to the result only for top-level browsing
+        paths.extend(directory_paths)
+
+        return paths
 
     async def close(self) -> None:
         """

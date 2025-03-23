@@ -7,7 +7,6 @@ from moatless.actions.finish import FinishArgs
 from moatless.actions.schema import Observation, ActionArguments
 from moatless.file_context import FileContext
 from moatless.node import ActionStep, Node
-from moatless.message_history import MessageHistoryType
 from moatless.repository.repository import InMemRepository
 
 
@@ -109,89 +108,3 @@ def test_node_model_dump():
     # Test with exclude_none=True 
     none_dump = root.model_dump(exclude_none=True)
     assert "reward" not in none_dump  # 'reward' should be excluded as it's None
-
-
-
-def test_persist_tree_non_root():
-    # Create a root node and a child node
-    root = Node(node_id=0)
-    child = Node(node_id=1)
-    root.add_child(child)
-
-    # Attempt to persist the child node (which should fail)
-    with pytest.raises(ValueError, match="Only root nodes can be persisted."):
-        child.persist_tree("dummy_path.json")
-
-
-def test_generate_message_history():
-    repo = InMemRepository()
-    repo.save_file("file1.py", """def method1():
-    return "original1"
-""")
-    repo.save_file("file2.py", """def method2():
-    return "original2"
-    
-def method3():
-    return "original3"
-""")
-
-    root = Node(node_id=0, file_context=FileContext(repo=repo))
-    root.message = "Initial task"
-
-    node1 = Node(node_id=1)
-    node1.action = TestActionArguments()
-    node1.file_context = FileContext(repo=repo)
-    node1.file_context.add_span_to_context("file1.py", "method1")
-    node1.observation = Observation(message="Added method1 to context")
-    root.add_child(node1)
-
-    node2 = Node(node_id=2)
-    node2.action = TestActionArguments()
-    node2.file_context = node1.file_context.clone()
-    node2.file_context.add_span_to_context("file2.py", "method2")
-    node2.observation = Observation(message="Added method2 to context")
-    node1.add_child(node2)
-
-    node3 = Node(node_id=3)
-    node3.action = TestActionArguments()
-    node3.file_context = node2.file_context.clone()
-    node3.file_context.add_file("file1.py").apply_changes("""def method1():
-    return "modified1"
-""")
-    node3.observation = Observation(message="Modified method1")
-    node2.add_child(node3)
-
-    node4 = Node(node_id=4)
-    node4.action = TestActionArguments()
-    node4.file_context = node3.file_context.clone()
-    node4.file_context.add_span_to_context("file2.py", "method3")
-    node4.observation = Observation(message="Added method3 to context")
-    node3.add_child(node4)
-
-    node5 = Node(node_id=5)
-    node4.add_child(node5)
-
-    messages = node2.generate_message_history(MessageHistoryType.MESSAGES)
-    assert len(messages) == 3
-    assert "def method1()" in messages[2].content
-
-    messages = node3.generate_message_history(MessageHistoryType.MESSAGES)
-    assert len(messages) == 5
-    assert "def method1()" in messages[2].content
-    assert "def method1()" not in messages[4].content
-    assert "def method2()" in messages[4].content
-
-    messages = node4.generate_message_history(MessageHistoryType.MESSAGES)
-    assert len(messages) == 7
-    assert "def method1()" not in messages[2].content
-    assert "def method1()" in messages[6].content
-    assert "def method2()" in messages[4].content
-
-    messages = node5.generate_message_history(MessageHistoryType.MESSAGES)
-    assert len(messages) == 9
-    assert "def method1()" in messages[6].content
-    assert "def method2()" not in messages[4].content
-    assert "def method2()" in messages[8].content
-    assert "def method3()" in messages[8].content
-
-    print("\n".join([m.model_dump_json(indent=2) for m in messages]))

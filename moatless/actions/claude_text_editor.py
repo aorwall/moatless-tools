@@ -235,12 +235,9 @@ class ClaudeEditTool(Action, CodeModificationMixin, CompletionModelMixin):
         self._str_replace.workspace = value
         self._create_file.workspace = value
 
-    @completion_model.setter
-    def completion_model(self, value: Optional[BaseCompletionModel]):
-        if value is None:
-            self._view_code.completion_model = None
-        else:
-            self._view_code.completion_model = value.clone()
+    def _initialize_completion_model(self):
+        if self.completion_model:
+            self._view_code.completion_model = self.completion_model.clone()
             self._view_code._initialize_completion_model()
 
     def validate_path(self, file_context: FileContext, command: str, path: Path) -> str | None:

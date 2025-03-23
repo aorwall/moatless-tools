@@ -49,34 +49,6 @@ async def get_flow_manager() -> FlowManager:
     return settings.flow_manager
 
 
-async def get_event_bus() -> BaseEventBus:
-    """Get the event bus instance."""
-    await settings.ensure_managers_initialized()
-
-    if settings.event_bus is None:
-        raise RuntimeError("Event bus not initialized")
-
-    return settings.event_bus
-
-
-async def get_runner() -> BaseRunner:
-    """Get the runner instance."""
-    await settings.ensure_managers_initialized()
-
-    if settings.runner is None:
-        raise RuntimeError("Runner not initialized")
-
-    return settings.runner
-
-
-async def get_storage() -> BaseStorage:
-    """Get the storage instance."""
-    if settings.storage is None:
-        raise RuntimeError("Storage not initialized")
-
-    return settings.storage
-
-
 async def get_evaluation_manager() -> EvaluationManager:
     """Get the evaluation manager instance, ensuring it's initialized."""
     await settings.ensure_managers_initialized()

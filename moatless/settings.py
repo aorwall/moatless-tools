@@ -15,9 +15,9 @@ logger = logging.getLogger(__name__)
 if not os.environ.get("MOATLESS_DIR"):
     raise ValueError("MOATLESS_DIR environment variable is not set")
 
-storage = None
-event_bus = None
-runner = None
+_storage = None
+_event_bus = None
+_runner = None
 
 model_manager = None
 agent_manager = None
@@ -116,21 +116,21 @@ async def get_flow_manager():
 
 async def get_event_bus():
     """Get the event bus instance."""
-    global event_bus
+    global _event_bus
 
-    if event_bus is None:
+    if _event_bus is None:
+        storage = await get_storage()
         if os.environ.get("REDIS_URL"):
             logger.info(f"Use RQ Runner and Redis Event Bus with redis url: {os.environ.get('REDIS_URL')}")
             try:
                 from moatless.eventbus.redis_bus import RedisEventBus
-                from moatless.runner.rq import RQRunner
 
                 event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
             except Exception as e:
                 logger.error(f"Failed to initialize event bus and runner: {e}")
                 raise e
         else:
-            logger.info("Use Local Runner and Local Event Bus")
+            logger.info("Use Local Event Bus")
             event_bus = LocalEventBus(storage=storage)
 
     await event_bus.initialize()
@@ -140,9 +140,9 @@ async def get_event_bus():
 
 async def get_runner():
     """Get the runner instance."""
-    global runner
+    global _runner
 
-    if runner is None:
+    if _runner is None:
         runner_type = os.environ.get("MOATLESS_RUNNER")
         if runner_type == "kubernetes":
             from moatless.runner.kubernetes_runner import KubernetesRunner
@@ -153,7 +153,7 @@ async def get_runner():
 
             runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
         else:
-            logger.info("Use Local Runner and Local Event Bus")
+            logger.info("Use Local Runner")
             runner = AsyncioRunner()
 
     return runner
@@ -161,12 +161,23 @@ async def get_runner():
 
 async def get_storage():
     """Get the storage instance."""
-    global storage
-    if storage is None:
+    global _storage
+    if _storage is None:
+        logger.info(f"Using {os.environ.get('MOATLESS_STORAGE')} storage")
+
         if os.environ.get("MOATLESS_STORAGE") == "s3":
             from moatless.storage.s3_storage import S3Storage
 
             storage = S3Storage()
+        elif os.environ.get("MOATLESS_STORAGE") == "azure":
+            from moatless.storage.azure_storage import AzureBlobStorage
+
+            logger.info(
+                f"Using Azure storage with connection string: {os.environ.get('AZURE_STORAGE_CONNECTION_STRING')}"
+            )
+
+            storage = AzureBlobStorage()
+            logger.info(f"Storage: {storage}")
         else:
             storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
 

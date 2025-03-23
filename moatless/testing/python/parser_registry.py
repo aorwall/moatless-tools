@@ -1,12 +1,13 @@
 from typing import Dict, List, Optional, Type
-
-from moatless.testing.schema import TestResult
+import logging
+from moatless.testing.schema import TestResult, TestStatus
 from moatless.testing.test_output_parser import TestOutputParser
 from moatless.testing.python.pytest_parser import PyTestParser
 from moatless.testing.python.django_parser import DjangoParser
 from moatless.testing.python.sympy_parser import SympyParser
 from moatless.testing.python.seaborn_parser import SeabornParser
 
+logger = logging.getLogger(__name__)
 
 # Map repository names to their respective parser classes
 REPO_TO_PARSER_CLASS: Dict[str, Type[TestOutputParser]] = {
@@ -58,7 +59,18 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
         List[TestResult]: List of parsed test results
     """
     parser = get_parser_for_repo(repo)
+    logger.info(f"Parsing log for {repo} with {parser}")
     test_results = parser.parse_test_output(log, file_path)
+
+    if not test_results:
+        return [
+            TestResult(
+                file_path=file_path,
+                failure_output=log,
+                status=TestStatus.ERROR,
+                error_details=log,
+            )
+        ]
 
     # Skip testbed prefix in file paths
     for result in test_results:

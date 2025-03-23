@@ -207,6 +207,28 @@ class CodeIndex:
         return await cls.from_persist_dir_async(persist_dir, file_repo)
 
     @classmethod
+    def from_index_name(cls, index_name: str, file_repo: Repository, index_store_dir: Optional[str] = None):
+        """Synchronous version of from_index_name"""
+        if not index_store_dir:
+            index_store_dir = os.getenv("INDEX_STORE_DIR")
+
+        persist_dir = os.path.join(index_store_dir, index_name)
+        if os.path.exists(persist_dir):
+            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
+            return cls.from_persist_dir(persist_dir, file_repo)
+        else:
+            logger.info(f"No existing index found at {persist_dir}.")
+
+        if os.getenv("INDEX_STORE_URL"):
+            index_store_url = os.getenv("INDEX_STORE_URL")
+        else:
+            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20250118-voyage-code-3/"
+
+        store_url = os.path.join(index_store_url, f"{index_name}.zip")
+        logger.info(f"Downloading existing index {index_name} from {store_url}.")
+        return cls.from_url(store_url, file_repo)
+
+    @classmethod
     async def from_index_name_async(
         cls,
         index_name: str,

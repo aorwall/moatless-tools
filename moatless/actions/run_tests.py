@@ -88,7 +88,6 @@ class RunTests(Action):
             if self._workspace:
                 file_context.workspace = self._workspace
 
-        # Separate non-existent files and directories from valid test files
         non_existent_files = []
         directories = []
         test_files = []
@@ -106,19 +105,29 @@ class RunTests(Action):
             else:
                 test_files.append(test_file)
 
-        if not test_files:
-            error_details = []
-            if non_existent_files:
-                error_details.append(f"Files not found: {', '.join(non_existent_files)}")
-            if directories:
-                error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
+        error_details = []
+        if non_existent_files:
+            error_details.append(f"Files not found: {', '.join(non_existent_files)}")
+        if directories:
+            error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
 
+        if not test_files:
             return Observation.create(
                 message="Unable to run tests: " + "; ".join(error_details),
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_file_objects = await self.run_tests(test_files=test_files)
+        patch = file_context.generate_git_patch()
+        start_time = time.time()
+        test_results = await self._workspace.runtime.run_tests(test_files=test_files, patch=patch)
+
+        end_time = time.time()
+        test_duration = end_time - start_time
+        logger.info(f"Tests completed in {test_duration:.2f} seconds")
+
+        test_file_objects = self.create_test_files(test_file_paths=test_files, test_results=test_results)
+
+        file_context.add_test_files(test_file_objects)
 
         response_msg = ""
 
@@ -158,49 +167,18 @@ class RunTests(Action):
                 )
             )
 
+        if error_details:
+            response_msg += f"\n{error_details}"
+
         return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)  # type: ignore
 
-    async def run_tests(self, test_files: list[str], patch: str | None = None) -> list[TestFile]:
-        """
-        Runs the tests specified in the test_files list.
-
-        Args:
-            test_files: List of test file paths to run
-            timeout_seconds: Optional timeout for test execution in seconds
-
-        Returns:
-            list[TestFile]: List of TestFile objects with test results
-        """
-        if not test_files:
-            logger.warning("No test files provided, skipping test execution")
-            return []
-
-        logger.info(f"Running tests: {test_files}")
-
-        # Create TestFile objects for each test file
-        test_file_objects = []
-
-        for file_path in test_files:
-            if not os.path.exists(file_path):
-                logger.warning(f"Test file does not exist: {file_path}")
-                continue
-
-            test_file = TestFile(file_path=file_path)
-            test_file_objects.append(test_file)
-
-        if not test_file_objects:
-            logger.warning("No valid test files found")
-            return []
-
-        # Run the tests
-        start_time = time.time()
-        test_results = await self._workspace.runtime.run_tests(test_files=test_files, patch=patch)
-        end_time = time.time()
-        test_duration = end_time - start_time
-        logger.info(f"Tests completed in {test_duration:.2f} seconds")
+    def create_test_files(self, test_file_paths: list[str], test_results: list[TestResult]) -> list[TestFile]:
+        test_files = []
 
         # Parse the output and update test_file objects
-        for test_file in test_file_objects:
+        for test_file_path in test_file_paths:
+            test_file = TestFile(file_path=test_file_path)
+
             # Filter test results for this file
             file_test_results = [
                 result for result in test_results if result.file_path and result.file_path == test_file.file_path
@@ -217,7 +195,9 @@ class RunTests(Action):
             else:
                 logger.warning(f"No test results found for {test_file.file_path}")
 
-        return test_file_objects
+            test_files.append(test_file)
+
+        return test_files
 
     @classmethod
     def get_evaluation_criteria(cls, trajectory_length) -> list[str]:

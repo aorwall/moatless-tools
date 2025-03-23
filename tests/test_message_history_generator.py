@@ -13,7 +13,7 @@ from moatless.file_context import FileContext
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
 from moatless.repository.repository import InMemRepository
-from moatless.runtime.runtime import TestResult, TestStatus
+from moatless.testing.schema import TestResult, TestStatus
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
 

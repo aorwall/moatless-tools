@@ -50,13 +50,3 @@ def test_get_action_by_args_class():
     assert Action.get_action_by_args_class(StringReplaceArgs) == StringReplace
     assert Action.get_action_by_args_class(ViewCodeArgs) == ViewCode
     assert Action.get_action_by_args_class(SemanticSearchArgs) == SemanticSearch
-
-def test_get_action_by_name():
-    assert Action.get_action_by_name("Finish") == Finish
-    assert Action.get_action_by_name("StringReplace") == StringReplace
-    assert Action.get_action_by_name("ViewCode") == ViewCode
-    assert Action.get_action_by_name("SemanticSearch") == SemanticSearch
-    assert Action.get_action_by_name("FindFunction") == FindFunction
-
-    with pytest.raises(ValueError):
-        Action.get_action_by_name("NonExistentAction")

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
-from moatless.agent.manager  import AgentConfigManager
+from moatless.agent.manager import AgentConfigManager
 from moatless.api.dependencies import get_agent_manager
 
 from .schema import (

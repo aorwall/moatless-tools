@@ -1,14 +1,14 @@
 """WebSocket module for Moatless API."""
 
 import json
+import logging
 from typing import Dict, Set
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from moatless.events import BaseEvent
-from moatless.logging_config import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class ConnectionManager:

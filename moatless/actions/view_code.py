@@ -109,6 +109,11 @@ class ViewCode(Action, IdentifyMixin):
         description="The maximum number of tokens in the requested code.",
     )
 
+    show_code_blocks: bool = Field(
+        False,
+        description="Whether to show the parsed code blocks in the response or just the line span.",
+    )
+
     async def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
             raise ValueError("File context must be provided to execute the view action.")
@@ -187,7 +192,14 @@ class ViewCode(Action, IdentifyMixin):
                     else:
                         view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
 
-            if file_span.start_line:
+            if file_span.start_line is not None:
+                # count lines of file.content
+                lines = file.content.split("\n")
+                if file_span.start_line > len(lines):
+                    message = f"The requested start line {file_span.start_line} is greater than the number of lines in the file {len(lines)}."
+                    properties = {"fail_reason": "start_line_greater_than_file_length"}
+                    return Observation.create(message=message, properties=properties)
+
                 view_context.add_line_span_to_context(
                     file_path, file_span.start_line, file_span.end_line, add_extra=False
                 )

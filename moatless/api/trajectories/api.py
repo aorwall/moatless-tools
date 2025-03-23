@@ -4,7 +4,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from moatless.api.dependencies import get_flow_manager, get_storage, get_event_bus
+from moatless.settings import get_flow_manager, get_storage
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import (
     ExecuteNodeRequest,
@@ -13,7 +13,6 @@ from moatless.flow.schema import (
     TrajectoryResponseDTO,
 )
 from moatless.storage.base import BaseStorage
-from moatless.eventbus.base import BaseEventBus
 
 
 logger = logging.getLogger(__name__)
@@ -91,8 +90,8 @@ async def get_trajectory_events(
     Returns:
         The trajectory events
     """
-    key = storage.get_trajectory_key(project_id, trajectory_id)
-    key = f"{key}/events"
+    key = storage.get_trajectory_path(project_id, trajectory_id)
+    key = f"{key}/events.jsonl"
 
     if not await storage.exists(key):
         logger.info(f"No events found for key {key}")

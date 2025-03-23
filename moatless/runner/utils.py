@@ -78,39 +78,38 @@ def run_async(coro, span_name: str | None = None):
     return loop.run_until_complete(_run_with_context())
 
 
-def setup_job_logging(job_type: str, trajectory_dir: Path) -> list[logging.Handler]:
+def setup_job_logging(log_path: Path) -> list[logging.Handler]:
     """Set up logging for a job and return the original handlers for cleanup.
 
     Args:
-        instance_id: The ID of the instance being processed
-        job_type: Type of job (run/eval) for log file naming
-        trajectory_dir: Directory for trajectory-specific logs
+        log_path: Path to the log file
+
 
     Returns:
         List of original handlers that should be restored after job completion
     """
 
-    # Set up trajectory-specific logging
-    log_dir = trajectory_dir / "logs"
+    log_dir = log_path.parent
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # Set root logger to WARN to filter out INFO from non-moatless packages
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
+
+    logging.getLogger("azure").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
     original_handlers = root_logger.handlers[:]
     for handler in original_handlers:
         root_logger.removeHandler(handler)
 
-    # Add console handler for WARN and ERROR
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # Add file handler for INFO and above
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"{timestamp}_{job_type}.log"
-    file_handler = logging.FileHandler(str(log_dir / log_filename))
+    file_handler = logging.FileHandler(str(log_path))
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)

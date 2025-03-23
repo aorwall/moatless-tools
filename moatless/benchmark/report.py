@@ -238,24 +238,6 @@ def create_trajectory_stats(
 
             result.actions[action_name] += 1
 
-            if node.file_context and node.file_context.test_files:
-                passed, failed, errored = node.file_context.get_test_counts()
-                failed_test_count = failed + errored
-
-                if result.initial_failed_tests is None:
-                    result.initial_failed_tests = failed_test_count
-
-                if passed + failed + errored > result.max_tests_run:
-                    result.max_tests_run = passed + failed + errored
-
-                if failed_test_count > result.max_failed_tests:
-                    result.max_failed_tests = failed_test_count
-
-                if node.is_terminal():
-                    result.final_failed_tests = failed_test_count
-                    if failed_test_count > 0:
-                        result.flags.append("has_failed_tests")
-
             if node.observation and node.observation.properties:
                 if "flags" in node.observation.properties:
                     for flag in node.observation.properties["flags"]:

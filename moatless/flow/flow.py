@@ -11,6 +11,7 @@ from typing import Any, Optional, Union
 from opentelemetry import trace
 from pydantic import ConfigDict, Field, PrivateAttr
 
+from moatless import storage
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.component import MoatlessComponent
@@ -51,9 +52,6 @@ class AgenticFlow(MoatlessComponent):
     _root: Optional[Node] = PrivateAttr(default=None)
     _status: FlowStatusInfo = PrivateAttr(default_factory=FlowStatusInfo)
 
-    _storage: BaseStorage = PrivateAttr()
-    _event_bus: BaseEventBus = PrivateAttr()
-
     @classmethod
     def get_component_type(cls) -> str:
         return "flow"
@@ -72,13 +70,6 @@ class AgenticFlow(MoatlessComponent):
             raise ValueError("Root node is not set")
         return self._root
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        import moatless.settings as settings
-
-        self._storage = kwargs.get("storage", settings.storage)
-        self._event_bus = kwargs.get("event_bus", settings.event_bus)
-
     @classmethod
     def create(
         cls,
@@ -93,8 +84,6 @@ class AgenticFlow(MoatlessComponent):
         max_expansions: Optional[int] = None,
         max_cost: Optional[float] = None,
         shadow_mode: bool = True,
-        storage: BaseStorage | None = None,
-        event_bus: BaseEventBus | None = None,
         **kwargs,
     ) -> "AgenticFlow":
         if not trajectory_id:
@@ -127,10 +116,8 @@ class AgenticFlow(MoatlessComponent):
             **kwargs,
         )
 
-        instance._storage = storage or settings.storage
-        instance._event_bus = event_bus or settings.event_bus
-
         instance._root = root
+
         return instance
 
     @property
@@ -145,7 +132,6 @@ class AgenticFlow(MoatlessComponent):
         self,
         message: str | None = None,
         workspace: Workspace | None = None,
-        storage: BaseStorage | None = None,
     ) -> Node:
         """Run the system with optional root node."""
         if not self.root:
@@ -153,9 +139,6 @@ class AgenticFlow(MoatlessComponent):
 
         if workspace:
             await self.agent.initialize(workspace)
-
-        if storage:
-            self._storage = storage
 
         # TODO: Workaround to set repo on existing nodes
         for node in self.root.get_all_nodes():
@@ -225,15 +208,23 @@ class AgenticFlow(MoatlessComponent):
         event.trajectory_id = self.trajectory_id
 
         await self.persist()
-        await self._event_bus.publish(event)
+
+        from moatless.settings import get_event_bus
+
+        event_bus = await get_event_bus()
+        await event_bus.publish(event)
 
     async def _initialize_run_state(self):
         """Initialize or restore system run state and logging"""
 
+        from moatless.settings import get_storage
+
+        storage = await get_storage()
+
         # Initialize or restore status
-        if await self._storage.exists_in_trajectory("status", self.project_id, self.trajectory_id):
+        if await storage.exists_in_trajectory("status.json", self.project_id, self.trajectory_id):
             try:
-                status_data = await self._storage.read_from_trajectory("status", self.project_id, self.trajectory_id)
+                status_data = await storage.read_from_trajectory("status.json", self.project_id, self.trajectory_id)
                 existing_status = FlowStatusInfo.model_validate(status_data)
 
                 # Resume previous run
@@ -274,9 +265,10 @@ class AgenticFlow(MoatlessComponent):
     async def _save_status(self):
         """Save current status to status.json"""
         self._status.metadata = self.metadata
-        await self._storage.write_to_trajectory(
-            "status", self._status.model_dump(), self.project_id, self.trajectory_id
-        )
+        from moatless.settings import get_storage
+
+        storage = await get_storage()
+        await storage.write_to_trajectory("status.json", self._status.model_dump(), self.project_id, self.trajectory_id)
 
     def get_node_by_id(self, node_id: int) -> Node | None:
         """Get a node by its ID."""
@@ -298,11 +290,14 @@ class AgenticFlow(MoatlessComponent):
             "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
         }
 
-        await self._storage.write_to_trajectory("trajectory", trajectory_data, self.project_id, self.trajectory_id)
+        from moatless.settings import get_storage
+
+        storage = await get_storage()
+        await storage.write_to_trajectory("trajectory.json", trajectory_data, self.project_id, self.trajectory_id)
 
         # TODO: Only save on creation
         flow_settings = self.model_dump(exclude_none=True)
-        await self._storage.write_to_trajectory("settings", flow_settings, self.project_id, self.trajectory_id)
+        await storage.write_to_trajectory("settings.json", flow_settings, self.project_id, self.trajectory_id)
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""
@@ -373,15 +368,14 @@ class AgenticFlow(MoatlessComponent):
     async def from_trajectory_id(
         cls,
         trajectory_id: str,
-        project_id: str | None = None,
-        storage: BaseStorage | None = None,
+        project_id: str,
     ) -> "AgenticFlow":
-        import moatless.settings as settings
+        from moatless.settings import get_storage
 
-        storage = storage or settings.storage
-        traj_dict = await storage.read_from_trajectory("trajectory", project_id, trajectory_id)
-        flow_dict = await storage.read_from_trajectory("settings", project_id, trajectory_id)
-        return cls.from_dicts(flow_dict, traj_dict)
+        storage = await get_storage()
+        traj_dict = await storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
+        flow_dict = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+        return cls.from_dicts(flow_dict, traj_dict, storage)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""

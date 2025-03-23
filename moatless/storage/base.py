@@ -1,12 +1,24 @@
 import abc
+import json
 import os
 import logging
 from typing import TypeVar, Optional, cast, Union, Type, Any, List
 from pathlib import Path
+from datetime import datetime
 
 from moatless.context_data import get_project_dir, get_trajectory_dir, current_project_id, current_trajectory_id
 
 logger = logging.getLogger(__name__)
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles datetime objects."""
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
+
 
 T = TypeVar("T")
 
@@ -48,152 +60,157 @@ class BaseStorage(abc.ABC):
         """Reset the singleton instance. Mainly useful for testing."""
         cls._instance = None
 
-    @abc.abstractmethod
-    async def read(self, key: str) -> dict:
+    async def read(self, path: str) -> dict | list[dict] | str:
         """
-        Read data from storage.
+        Read JSON data from a file.
 
         Args:
-            key: The identifier for the data to read
+            path: The path to read
 
         Returns:
-            The data associated with the key
+            The parsed JSON data or an empty dict if the file is empty
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        pass
+        content = await self.read_raw(path)
+        if content.strip().startswith("{") or content.strip().startswith("[") or path.endswith(".json"):
+            return json.loads(content)
+        else:
+            return content
 
     @abc.abstractmethod
-    async def read_raw(self, key: str) -> str:
+    async def read_raw(self, path: str) -> str:
         """
         Read raw data from storage without parsing.
 
         Args:
-            key: The identifier for the data to read
+            path: The identifier for the data to read
 
         Returns:
             The raw data as a string
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
         pass
 
     @abc.abstractmethod
-    async def read_lines(self, key: str) -> List[dict]:
+    async def read_lines(self, path: str) -> List[dict]:
         """
         Read data from a JSONL or similar line-based format.
 
         Args:
-            key: The identifier for the data to read
+            path: The identifier for the data to read
 
         Returns:
             A list of data objects, one per line
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
         pass
 
-    @abc.abstractmethod
-    async def write(self, key: str, data: dict) -> None:
+    async def write(self, path: str, data: dict | list[dict] | str) -> None:
         """
-        Write data to storage.
+        Write data to a file as JSON.
 
         Args:
-            key: The identifier for the data
+            path: The path to write to
             data: The data to write
         """
-        pass
+        if isinstance(data, str):
+            await self.write_raw(path, data)
+        else:
+            await self.write_raw(path, json.dumps(data, indent=2, cls=DateTimeEncoder))
 
     @abc.abstractmethod
-    async def write_raw(self, key: str, data: str) -> None:
+    async def write_raw(self, path: str, data: str) -> None:
         """
         Write raw string data to storage.
 
         Args:
-            key: The identifier for the data
+            path: The identifier for the data
             data: The string data to write
         """
         pass
 
     @abc.abstractmethod
-    async def append(self, key: str, data: Union[dict, str]) -> None:
+    async def append(self, path: str, data: Union[dict, str]) -> None:
         """
         Append data to an existing file.
 
         Args:
-            key: The identifier for the data
+            path: The identifier for the data
             data: The data to append. If dict, it will be serialized as JSON.
                  If string, it will be written as-is with a newline.
         """
         pass
 
     @abc.abstractmethod
-    async def delete(self, key: str) -> None:
+    async def delete(self, path: str) -> None:
         """
         Delete data from storage.
 
         Args:
-            key: The identifier for the data to delete
+            path: The identifier for the data to delete
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
         pass
 
     @abc.abstractmethod
-    async def exists(self, key: str) -> bool:
+    async def exists(self, path: str) -> bool:
         """
         Check if data exists in storage.
 
         Args:
-            key: The identifier for the data to check
+            path: The identifier for the data to check
 
         Returns:
             True if the data exists, False otherwise
         """
         pass
 
-    async def assert_exists(self, key: str) -> None:
+    async def assert_exists(self, path: str) -> None:
         """
         Assert that data exists in storage.
 
         Args:
-            key: The identifier for the data to check
+            path: The identifier for the data to check
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
         """
-        if not await self.exists(key):
-            raise KeyError(f"Key '{key}' does not exist")
+        if not await self.exists(path):
+            raise KeyError(f"Path '{path}' does not exist")
 
     @abc.abstractmethod
-    async def list_keys(self, prefix: str = "") -> list[str]:
+    async def list_paths(self, prefix: str = "") -> list[str]:
         """
-        List all keys in storage with the given prefix.
+        List all paths in storage with the given prefix.
 
         Args:
-            prefix: The prefix to filter keys by
+            prefix: The prefix to filter paths by
 
         Returns:
-            A list of keys
+            A list of paths
         """
         pass
 
-    def normalize_key(self, key: str) -> str:
+    def normalize_path(self, path: str) -> str:
         """
-        Normalize a key to ensure consistent format.
+        Normalize a path to ensure consistent format.
 
         Args:
-            key: The key to normalize
+            path: The path to normalize
 
         Returns:
-            The normalized key
+            The normalized path
         """
         # Remove leading/trailing slashes and whitespace
-        return key.strip().strip("/")
+        return path.strip().strip("/")
 
     def _get_project_id(self, project_id: Optional[str] = None) -> str:
         """
@@ -239,35 +256,35 @@ class BaseStorage(abc.ABC):
 
         return trajectory_id_context
 
-    async def read_from_project(self, key: str, project_id: Optional[str] = None) -> dict:
+    async def read_from_project(self, path: str, project_id: Optional[str] = None) -> dict | list[dict] | str:
         """
         Read data from a project.
 
         Args:
-            key: The identifier for the data
+            path: The identifier for the data
             project_id: The project ID (defaults to current project context if None)
 
         Returns:
-            The data associated with the key
+            The data associated with the path
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
             ValueError: If no project ID is provided and no project context is set
         """
         project_id = self._get_project_id(project_id)
-        project_key = f"projects/{project_id}/{key}"
+        project_path = f"projects/{project_id}/{path}"
         try:
-            return await self.read(project_key)
+            return await self.read(project_path)
         except KeyError:
-            logger.warning(f"No data found for project key: {project_key}")
+            logger.warning(f"No data found for project path: {project_path}")
             return {}
 
-    async def write_to_project(self, key: str, data: dict, project_id: Optional[str] = None) -> None:
+    async def write_to_project(self, path: str, data: dict, project_id: Optional[str] = None) -> None:
         """
         Write data to a project.
 
         Args:
-            key: The identifier for the data
+            path: The identifier for the data
             data: The data to write
             project_id: The project ID (defaults to current project context if None)
 
@@ -275,92 +292,59 @@ class BaseStorage(abc.ABC):
             ValueError: If no project ID is provided and no project context is set
         """
         project_id = self._get_project_id(project_id)
-        project_key = f"projects/{project_id}/{key}"
-        await self.write(project_key, data)
+        project_path = f"projects/{project_id}/{path}"
+        await self.write(project_path, data)
 
-    async def delete_from_project(self, key: str, project_id: Optional[str] = None) -> None:
+    async def exists_in_project(self, path: str, project_id: Optional[str] = None) -> bool:
         """
-        Delete data from a project.
+        Check if a path exists in a project.
 
         Args:
-            key: The identifier for the data to delete
-            project_id: The project ID (defaults to current project context if None)
-
-        Raises:
-            KeyError: If the key does not exist
-            ValueError: If no project ID is provided and no project context is set
-        """
-        project_id = self._get_project_id(project_id)
-        project_key = f"projects/{project_id}/{key}"
-        await self.delete(project_key)
-
-    async def exists_in_project(self, key: str, project_id: Optional[str] = None) -> bool:
-        """
-        Check if a key exists in a project.
-
-        Args:
-            key: The identifier to check
+            path: The identifier to check
             project_id: The project ID (defaults to current project context if None)
 
         Returns:
-            True if the key exists, False otherwise
+            True if the path exists, False otherwise
 
         Raises:
             ValueError: If no project ID is provided and no project context is set
         """
         project_id = self._get_project_id(project_id)
-        project_key = f"projects/{project_id}/{key}"
-        return await self.exists(project_key)
-
-    # Shorter aliases for project operations
-    async def p_read(self, key: str, project_id: Optional[str] = None) -> dict:
-        """Shorthand for read_from_project."""
-        return await self.read_from_project(key, project_id)
-
-    async def p_write(self, key: str, data: dict, project_id: Optional[str] = None) -> None:
-        """Shorthand for write_to_project."""
-        await self.write_to_project(key, data, project_id)
-
-    async def p_delete(self, key: str, project_id: Optional[str] = None) -> None:
-        """Shorthand for delete_from_project."""
-        await self.delete_from_project(key, project_id)
-
-    async def p_exists(self, key: str, project_id: Optional[str] = None) -> bool:
-        """Shorthand for exists_in_project."""
-        return await self.exists_in_project(key, project_id)
+        project_path = f"projects/{project_id}/{path}"
+        return await self.exists(project_path)
 
     async def read_from_trajectory(
-        self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
-    ) -> dict:
+        self, path: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
+    ) -> dict | list[dict] | str:
         """
         Read data from a trajectory.
 
         Args:
-            key: The identifier for the data to read
+            path: The identifier for the data to read
             project_id: The project ID (defaults to current project context if None)
             trajectory_id: The trajectory ID (defaults to current trajectory context if None)
 
         Returns:
-            The data associated with the key
+            The data associated with the path
 
         Raises:
-            KeyError: If the key does not exist
+            KeyError: If the path does not exist
             ValueError: If no project ID or trajectory ID is provided and none is in context
         """
         project_id = self._get_project_id(project_id)
         trajectory_id = self._get_trajectory_id(trajectory_id)
 
-        trajectory_key = f"projects/{project_id}/trajs/{trajectory_id}/{key}"
-        return await self.read(trajectory_key)
+        trajectory_path = f"projects/{project_id}/trajs/{trajectory_id}/{path}"
+        return await self.read(trajectory_path)
 
     async def write_to_trajectory(
-        self, key: str, data: dict, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
+        self, path: str, data: dict, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
     ) -> None:
         """
         Write data to a trajectory.
 
         Args:
-            key: The identifier for the data
+            path: The identifier for the data
             data: The data to write
             project_id: The project ID (defaults to current project context if None)
             trajectory_id: The trajectory ID (defaults to current trajectory context if None)
@@ -371,43 +355,22 @@ class BaseStorage(abc.ABC):
         project_id = self._get_project_id(project_id)
         trajectory_id = self._get_trajectory_id(trajectory_id)
 
-        trajectory_key = f"projects/{project_id}/trajs/{trajectory_id}/{key}"
-        await self.write(trajectory_key, data)
-
-    async def delete_from_trajectory(
-        self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
-    ) -> None:
-        """
-        Delete data from a trajectory.
-
-        Args:
-            key: The identifier for the data to delete
-            project_id: The project ID (defaults to current project context if None)
-            trajectory_id: The trajectory ID (defaults to current trajectory context if None)
-
-        Raises:
-            KeyError: If the key does not exist
-            ValueError: If no project ID or trajectory ID is provided and none is in context
-        """
-        project_id = self._get_project_id(project_id)
-        trajectory_id = self._get_trajectory_id(trajectory_id)
-
-        trajectory_key = f"projects/{project_id}/trajs/{trajectory_id}/{key}"
-        await self.delete(trajectory_key)
+        trajectory_path = f"projects/{project_id}/trajs/{trajectory_id}/{path}"
+        await self.write(trajectory_path, data)
 
     async def exists_in_trajectory(
-        self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
+        self, path: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
     ) -> bool:
         """
-        Check if a key exists in a trajectory.
+        Check if a path exists in a trajectory.
 
         Args:
-            key: The identifier to check
+            path: The identifier to check
             project_id: The project ID (defaults to current project context if None)
             trajectory_id: The trajectory ID (defaults to current trajectory context if None)
 
         Returns:
-            True if the key exists, False otherwise
+            True if the path exists, False otherwise
 
         Raises:
             ValueError: If no project ID or trajectory ID is provided and none is in context
@@ -415,131 +378,23 @@ class BaseStorage(abc.ABC):
         project_id = self._get_project_id(project_id)
         trajectory_id = self._get_trajectory_id(trajectory_id)
 
-        trajectory_key = f"projects/{project_id}/trajs/{trajectory_id}/{key}"
-        return await self.exists(trajectory_key)
+        trajectory_path = f"projects/{project_id}/trajs/{trajectory_id}/{path}"
+        return await self.exists(trajectory_path)
 
     async def assert_exists_in_trajectory(
-        self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
+        self, path: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
     ) -> None:
         """
-        Assert that a key exists in a trajectory.
+        Assert that a path exists in a trajectory.
         """
 
         project_id = self._get_project_id(project_id)
         trajectory_id = self._get_trajectory_id(trajectory_id)
 
-        trajectory_key = f"projects/{project_id}/trajs/{trajectory_id}/{key}"
-        await self.assert_exists(trajectory_key)
+        trajectory_path = f"projects/{project_id}/trajs/{trajectory_id}/{path}"
+        await self.assert_exists(trajectory_path)
 
-    # Shorter aliases for trajectory operations
-    async def t_read(self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None) -> dict:
-        """Shorthand for read_from_trajectory."""
-        return await self.read_from_trajectory(key, project_id, trajectory_id)
-
-    async def t_write(
-        self, key: str, data: dict, project_id: Optional[str] = None, trajectory_id: Optional[str] = None
-    ) -> None:
-        """Shorthand for write_to_trajectory."""
-        await self.write_to_trajectory(key, data, project_id, trajectory_id)
-
-    async def t_delete(self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None) -> None:
-        """Shorthand for delete_from_trajectory."""
-        await self.delete_from_trajectory(key, project_id, trajectory_id)
-
-    async def t_exists(self, key: str, project_id: Optional[str] = None, trajectory_id: Optional[str] = None) -> bool:
-        """Shorthand for exists_in_trajectory."""
-        return await self.exists_in_trajectory(key, project_id, trajectory_id)
-
-    async def list_projects(self) -> list[str]:
-        """
-        List all projects in storage.
-
-        Returns:
-            A list of project IDs
-        """
-        # Get all keys starting with "projects/"
-        keys = await self.list_keys("projects")
-
-        # Extract project IDs from keys
-        project_ids = set()
-        for key in keys:
-            parts = key.split("/")
-            if len(parts) > 1:
-                project_ids.add(parts[1])
-
-        return sorted(list(project_ids))
-
-    async def list_trajectories(self, project_id: str) -> list[str]:
-        """
-        List all trajectories in a project.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            A list of trajectory IDs
-        """
-        # Get all keys starting with "projects/{project_id}/trajs/"
-        keys = await self.list_keys(f"projects/{project_id}/trajs")
-
-        # Extract trajectory IDs from keys
-        trajectory_ids = set()
-        for key in keys:
-            parts = key.split("/")
-            if len(parts) > 3 and parts[0] == "projects" and parts[1] == project_id and parts[2] == "trajs":
-                trajectory_ids.add(parts[3])
-
-        return sorted(list(trajectory_ids))
-
-    async def list_evaluations(self) -> list[dict]:
-        """
-        List all evaluations in storage.
-
-        Returns:
-            A list of evaluation data dictionaries
-        """
-        # Get all project IDs that could be evaluations (starting with "eval_")
-        project_ids = await self.list_projects()
-        evaluation_ids = [pid for pid in project_ids if pid.startswith("eval_")]
-
-        # Get evaluation data for each evaluation ID
-        evaluations = []
-        for eval_id in evaluation_ids:
-            try:
-                # First try direct evaluation.json in project directory
-                if await self.exists(f"projects/{eval_id}/evaluation.json"):
-                    eval_data = await self.read(f"projects/{eval_id}/evaluation.json")
-                    evaluations.append(eval_data)
-                    continue
-
-                # Then try other patterns without needing context
-                try:
-                    # Try using the evaluation ID as the explicit project ID
-                    if await self.exists_in_project("evaluation", eval_id):
-                        eval_data = await self.read_from_project("evaluation", eval_id)
-                        evaluations.append(eval_data)
-                        continue
-                except ValueError:
-                    # This is expected if there's no context
-                    pass
-
-                # Finally try the evaluation/{id} pattern under default
-                try:
-                    key = f"evaluation/{eval_id}"
-                    # Use a temporary override for the project ID
-                    eval_data = await self.read(f"projects/default/{key}")
-                    evaluations.append(eval_data)
-                except (KeyError, FileNotFoundError):
-                    # This is also expected if the eval doesn't exist
-                    pass
-
-            except Exception as e:
-                # Log but don't crash on evaluation read errors
-                logger.error(f"Error reading evaluation {eval_id}: {e}")
-
-        return evaluations
-
-    def get_trajectory_key(self, project_id: str | None = None, trajectory_id: str | None = None) -> str:
+    def get_trajectory_path(self, project_id: str | None = None, trajectory_id: str | None = None) -> str:
         if project_id is None:
             project_id = self._get_project_id()
 
@@ -547,12 +402,3 @@ class BaseStorage(abc.ABC):
             trajectory_id = self._get_trajectory_id()
 
         return f"projects/{project_id}/trajs/{trajectory_id}"
-
-    @classmethod
-    def get_default_storage(cls) -> "BaseStorage":
-        """
-        Get the default storage backend.
-        """
-        from moatless.storage.file_storage import FileStorage
-
-        return FileStorage()

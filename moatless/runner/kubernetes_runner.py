@@ -32,6 +32,7 @@ class KubernetesRunner(BaseRunner):
         timeout_seconds: int = 3600,
         service_account: str | None = None,
         kubernetes_provider: str | None = None,
+        node_selector: dict | None = None,
     ):
         """Initialize the runner with Kubernetes client configuration.
 
@@ -42,13 +43,16 @@ class KubernetesRunner(BaseRunner):
             timeout_seconds: Timeout for jobs
             service_account: Service account to use for jobs
             kubernetes_provider: Kubernetes provider to use
+            node_selector: Node selector labels for job pods (default: {"node-purpose": "testbeds"})
         """
         self.namespace = namespace or os.getenv("KUBERNETES_RUNNER_NAMESPACE", "moatless-tools")
         self.image = image
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
         self.service_account = service_account
-        self.kubernetes_provider = kubernetes_provider
+        self.kubernetes_provider = kubernetes_provider or os.getenv("KUBERNETES_RUNNER_PROVIDER", "in-cluster")
+        logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
+        self.node_selector = node_selector or {"node-purpose": "testbed-dev"}
         self.logger = logging.getLogger(__name__)
 
         # Load the Kubernetes configuration
@@ -224,10 +228,13 @@ class KubernetesRunner(BaseRunner):
             None
         """
         try:
+            project_label = self._get_project_label(project_id)
+
             if trajectory_id is None:
                 # Cancel all jobs for the project
                 self.logger.info(f"Canceling all jobs for project {project_id}")
-                label_selector = f"app=moatless-worker,project_id={project_id}"
+
+                label_selector = f"app=moatless-worker,project_id={project_label}"
 
                 # List all jobs for this project
                 jobs = self.batch_v1.list_namespaced_job(
@@ -915,6 +922,7 @@ class KubernetesRunner(BaseRunner):
             "moatless.ai/project-id": project_id,
             "moatless.ai/trajectory-id": trajectory_id,
             "moatless.ai/function": func_name,
+            "cluster-autoscaler.kubernetes.io/safe-to-evict": "false",  # Prevent autoscaler from evicting this pod
         }
 
         # Prepare environment variables
@@ -926,11 +934,7 @@ class KubernetesRunner(BaseRunner):
 
         # Add API key environment variables
         for key, value in os.environ.items():
-            if key.endswith("API_KEY"):
-                env_vars.append(client.V1EnvVar(name=key, value=value))
             if key.startswith("MOATLESS_"):
-                env_vars.append(client.V1EnvVar(name=key, value=value))
-            if key.startswith("AWS_"):
                 env_vars.append(client.V1EnvVar(name=key, value=value))
 
         # Add OpenTelemetry context if available
@@ -968,42 +972,64 @@ class KubernetesRunner(BaseRunner):
             client.V1VolumeMount(name="nltk-data", mount_path="/data/nltk_data"),
         ]
 
-        # Create the job container
-        container = client.V1Container(
-            name="worker",
-            image=self._get_image_name(trajectory_id),
-            image_pull_policy="Always",
-            command=["/usr/bin/python"],
-            args=["-m", "moatless.runner.worker"],
-            env=env_vars,
-            volume_mounts=volume_mounts,
-            resources=client.V1ResourceRequirements(
-                requests={"cpu": "100m", "memory": "1Gi"},
-                limits={"cpu": "2", "memory": "4Gi"},
-            ),
-        )
-
         # Create tolerations for spot instances etc
-        tolerations = []
+        tolerations = [
+            # Add default toleration for testbeds node-purpose
+            client.V1Toleration(
+                key="node-purpose",
+                operator="Equal",
+                value="testbeds",
+                effect="NoSchedule",
+            )
+        ]
+
+        # Add provider-specific tolerations
         if self.kubernetes_provider == "azure":
-            tolerations = [
+            tolerations.append(
                 client.V1Toleration(
                     key="kubernetes.azure.com/scalesetpriority",
                     operator="Equal",
                     value="spot",
                     effect="NoSchedule",
                 )
-            ]
+            )
 
         # Create the pod template
         pod_template = client.V1PodTemplateSpec(
             metadata=client.V1ObjectMeta(labels=labels, annotations=annotations),
             spec=client.V1PodSpec(
-                containers=[container],
+                containers=[
+                    client.V1Container(
+                        name="worker",
+                        image=self._get_image_name(trajectory_id),
+                        image_pull_policy="Always",
+                        command=["/usr/bin/python"],
+                        args=[
+                            "-c",
+                            f"from {func_name.rsplit('.', 1)[0]} import {func_name.rsplit('.', 1)[1]}; import sys; {func_name.rsplit('.', 1)[1]}('{project_id}', '{trajectory_id}')",
+                        ],
+                        env=env_vars,
+                        env_from=[
+                            client.V1EnvFromSource(
+                                config_map_ref=client.V1ConfigMapEnvSource(name="moatless-tools-env", optional=False)
+                            ),
+                            client.V1EnvFromSource(
+                                secret_ref=client.V1SecretEnvSource(name="moatless-tools-secrets", optional=False)
+                            ),
+                        ],
+                        volume_mounts=volume_mounts,
+                        resources=client.V1ResourceRequirements(
+                            requests={"cpu": "100m", "memory": "1Gi"},
+                            limits={"cpu": "1", "memory": "2Gi"},
+                        ),
+                        working_dir="/opt/moatless",
+                    )
+                ],
                 volumes=volumes,
                 restart_policy="Never",
                 service_account_name=self.service_account,
                 tolerations=tolerations,
+                node_selector=self.node_selector,
             ),
         )
 

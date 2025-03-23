@@ -5,6 +5,7 @@ This module contains wrapper functions for RQ jobs that avoid circular imports.
 """
 
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,6 @@ def run_evaluation_instance(project_id: str, trajectory_id: str) -> None:
         # Dynamically import the run_instance function
         # This avoids circular imports that can occur when importing at module level
         from moatless.evaluation.run_instance import run_instance_async
-        import asyncio
 
         asyncio.run(run_instance_async(project_id, trajectory_id))
 

@@ -68,8 +68,6 @@ def setup_azure_monitor() -> None:
     global _tracer
     _tracer = trace.get_tracer(__name__)
 
-    logging.getLogger("azure").setLevel(logging.WARNING)
-
     logger.info("Initialized Azure Monitor OpenTelemetry tracing.")
 
 

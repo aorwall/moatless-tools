@@ -1,24 +1,19 @@
 import json
 import logging
-import os
-import random
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import aiofiles
-import aiofiles.os
 from opentelemetry import trace
 
-from moatless.benchmark.report import to_result
 from moatless.evaluation.schema import (
     Evaluation,
     EvaluationInstance,
     EvaluationStatus,
     InstanceStatus,
+    EvaluationSummary,
 )
-from moatless.evaluation.utils import get_moatless_instance, get_swebench_instance
+from moatless.evaluation.utils import get_swebench_instance
 from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
@@ -73,7 +68,7 @@ class EvaluationManager:
             instance_ids = self.get_dataset_instance_ids(dataset_name)
             logger.info(f"Found {len(instance_ids)} instances in dataset {dataset_name}")
 
-        if await self.storage.exists_in_project("evaluation", evaluation_name):
+        if await self.storage.exists_in_project("evaluation.json", project_id=evaluation_name):
             raise ValueError("Evaluation already exists")
 
         evaluation = Evaluation(
@@ -248,7 +243,7 @@ class EvaluationManager:
 
         # Check if the instance information exists in storage
         if not await self.storage.exists_in_trajectory(
-            "trajectory",
+            "trajectory.json",
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
         ):
@@ -257,9 +252,7 @@ class EvaluationManager:
 
         try:
             flow = await AgenticFlow.from_trajectory_id(
-                trajectory_id=instance.instance_id,
-                project_id=evaluation.evaluation_name,
-                storage=self.storage,
+                trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
             )
             instance.usage = flow.total_usage()
 
@@ -305,11 +298,19 @@ class EvaluationManager:
                 instance.iterations = len(flow.root.get_all_nodes())
 
             if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
-                eval_result = await self.storage.read_from_trajectory(
-                    "eval_result",
-                    project_id=evaluation.evaluation_name,
-                    trajectory_id=instance.instance_id,
-                )
+                leaf_nodes = flow.root.get_leaf_nodes()
+
+                # Just consider the instance resolved if any node is resolved for now...
+                for node in leaf_nodes:
+                    evaluation_key = f"projects/{evaluation.evaluation_name}/trajs/{instance.instance_id}/evaluation/node_{node.node_id}/report.json"
+                    if await self.storage.exists(evaluation_key):
+                        eval_result = await self.storage.read(evaluation_key)
+
+                        if instance.instance_id in eval_result:
+                            instance.resolved = eval_result[instance.instance_id].get("resolved", None)
+
+                            if instance.resolved:
+                                break
 
                 event = next(
                     (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
@@ -330,18 +331,6 @@ class EvaluationManager:
                 if event:
                     instance.evaluated_at = event.timestamp
 
-                if not eval_result:
-                    logger.debug(f"Evaluation result not found for instance: {instance.instance_id}")
-                    return
-
-                benchmark_result = to_result(
-                    node=flow.root,
-                    eval_report=eval_result,
-                    instance_id=instance.instance_id,
-                )
-
-                instance.benchmark_result = benchmark_result.model_dump()
-                instance.resolved = benchmark_result.resolved
                 if instance.status != InstanceStatus.EVALUATED:
                     instance.status = InstanceStatus.EVALUATED
                     logger.info(f"Synced instance {instance.instance_id} evaluated at {instance.evaluated_at}")
@@ -460,44 +449,75 @@ class EvaluationManager:
             # Save the evaluation data using the project storage
             # Use model_dump_json for serialization
             await self.storage.write_to_project(
-                "evaluation",
+                "evaluation.json",
                 json.loads(evaluation.model_dump_json()),
                 project_id=evaluation.evaluation_name,
             )
+
+            # Also update the evaluation summary for fast lookups
+            await self._update_evaluation_summary(evaluation)
         except Exception as e:
             logger.error(f"Failed to save evaluation {evaluation.evaluation_name}: {e}")
 
+    async def _update_evaluation_summary(self, evaluation: Evaluation):
+        """Update or create a lightweight evaluation summary for the evaluation."""
+        try:
+            summary = EvaluationSummary.from_evaluation(evaluation)
+
+            all_summaries = await self._load_all_summaries()
+            all_summaries[evaluation.evaluation_name] = json.loads(summary.model_dump_json())
+
+            await self.storage.write("evaluation_summaries.json", all_summaries)
+
+        except Exception as e:
+            logger.error(f"Failed to update evaluation summary for {evaluation.evaluation_name}: {e}")
+
+    async def _load_all_summaries(self) -> dict:
+        """Load all evaluation summaries from a single file."""
+        try:
+            if await self.storage.exists("evaluation_summaries.json"):
+                return await self.storage.read("evaluation_summaries.json")
+            else:
+                return {}
+        except Exception as e:
+            logger.error(f"Failed to load evaluation summaries: {e}")
+            return {}
+
+    async def list_evaluation_summaries(self) -> list[EvaluationSummary]:
+        """List all evaluation summaries."""
+        summaries = []
+
+        # Check if the evaluation_summaries file exists
+        exists = await self.storage.exists("evaluation_summaries.json")
+        if not exists:
+            raise ValueError("Evaluation summaries file not found")
+
+        # Load all summaries from the single file
+        all_summaries = await self._load_all_summaries()
+
+        # Convert dictionary values to EvaluationSummary objects
+        for summary_data in all_summaries.values():
+            try:
+                summary = EvaluationSummary.model_validate(summary_data)
+                summaries.append(summary)
+            except Exception as e:
+                logger.error(f"Error loading evaluation summary: {e}")
+
+        # Sort summaries by creation time, newest first
+        return sorted(
+            summaries,
+            key=lambda x: x.created_at if x.created_at else datetime.min,
+            reverse=True,
+        )
+
     async def _load_evaluation(self, evaluation_name: str) -> Optional[Evaluation]:
         """Load evaluation metadata from storage."""
-        # Check if the evaluation exists in storage
-        if await self.storage.exists_in_project("evaluation", evaluation_name):
-            # Load the evaluation data from project storage
-            data = await self.storage.read_from_project("evaluation", evaluation_name)
+        if await self.storage.exists_in_project("evaluation.json", project_id=evaluation_name):
+            data = await self.storage.read_from_project("evaluation.json", project_id=evaluation_name)
             evaluation = Evaluation.model_validate(data)
             return evaluation
         else:
             return None
-
-    async def list_evaluations(self) -> list[Evaluation]:
-        """List all evaluations with their metadata."""
-        evaluations = []
-        project_ids = await self.storage.list_projects()
-        evaluation_ids = [pid for pid in project_ids if pid.startswith("eval_")]
-        for eval_id in evaluation_ids:
-            try:
-                if await self.storage.exists(f"projects/{eval_id}/evaluation"):
-                    eval_data = await self.storage.read(f"projects/{eval_id}/evaluation")
-                    evaluations.append(Evaluation.model_validate(eval_data))
-                    continue
-            except Exception as e:
-                logger.error(f"Error parsing evaluation data: {e}")
-
-        # Sort evaluations by creation time, newest first
-        return sorted(
-            evaluations,
-            key=lambda x: x.created_at if x.created_at else datetime.min,
-            reverse=True,
-        )
 
     def get_dataset_instance_ids(self, dataset_name: str) -> list[str]:
         """Get instance IDs for a dataset."""
@@ -525,7 +545,7 @@ class EvaluationManager:
         # If not found in the evaluation object, try to load it from storage
         try:
             data = await self.storage.read_from_trajectory(
-                "instance", project_id=evaluation_name, trajectory_id=instance_id
+                "instance.json", project_id=evaluation_name, trajectory_id=instance_id
             )
             return EvaluationInstance.model_validate(data)
         except (KeyError, ValueError):
@@ -632,10 +652,10 @@ class EvaluationManager:
             try:
                 # Try to read the instance data from trajectory storage
                 if await self.storage.exists_in_trajectory(
-                    "instance", project_id=evaluation_name, trajectory_id=instance_id
+                    "instance.json", project_id=evaluation_name, trajectory_id=instance_id
                 ):
                     instance_data = await self.storage.read_from_trajectory(
-                        "instance",
+                        "instance.json",
                         project_id=evaluation_name,
                         trajectory_id=instance_id,
                     )

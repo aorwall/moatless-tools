@@ -56,10 +56,12 @@ class ModelConfigManager:
 
     _instance: Optional["ModelConfigManager"] = None
 
-    def __init__(self, storage: BaseStorage | None = None):
+    def __init__(self, storage: BaseStorage):
         """Initialize the model config manager."""
         self._base_configs = self._load_base_configs()
-        self._storage = storage or settings.storage
+        if not storage:
+            raise ValueError("Storage is required")
+        self._storage = storage
         self._user_configs: dict[str, BaseCompletionModel] = {}
 
     async def initialize(self):
@@ -94,10 +96,10 @@ class ModelConfigManager:
     async def _load_user_configs(self) -> None:
         """Load user model configurations from JSON file."""
 
-        if not await self._storage.exists("models"):
+        if not await self._storage.exists("models.json"):
             return
 
-        models_configs = await self._storage.read("models")
+        models_configs = await self._storage.read("models.json")
 
         logger.info(f"Loading {len(models_configs)} model configs from {self._storage}")
 
@@ -110,7 +112,7 @@ class ModelConfigManager:
         try:
             logger.info(f"Saving user model configs to {self._storage}")
             dumps = [v.model_dump() for k, v in self._user_configs.items()]
-            await self._storage.write("models", dumps)
+            await self._storage.write("models.json", dumps)
         except Exception as e:
             raise Exception(f"Failed to save user model configs: {e}") from e
 

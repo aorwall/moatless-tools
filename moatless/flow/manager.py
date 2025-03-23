@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import uuid
 
+from regex import F
+
 from moatless.actions.action import CompletionModelMixin
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.flow.trajectory_utils import convert_nodes
@@ -169,7 +171,7 @@ class FlowManager:
     async def _load_configs(self):
         """Load configurations from JSON file."""
         try:
-            configs = await self._storage.read("flows")
+            configs = await self._storage.read("flows.json")
         except KeyError:
             logger.warning("No flow configs found")
             configs = []
@@ -181,7 +183,7 @@ class FlowManager:
                 if global_path.exists():
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        await self._storage.write("flows", global_config)
+                        await self._storage.write("flows.json", global_config)
                     logger.info("Copied global config to local path")
                 else:
                     logger.info("No global tree configs found")
@@ -201,9 +203,7 @@ class FlowManager:
         path = self._get_config_path()
         try:
             configs = list(self._configs.values())
-            logger.info(f"Saving flow configs to {path}")
-            with open(path, "w") as f:
-                json.dump(configs, f, indent=2)
+            await self._storage.write("flows.json", configs)
         except Exception as e:
             logger.error(f"Failed to save flow configs: {e}")
 
@@ -262,11 +262,11 @@ class FlowManager:
 
     async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
-        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
+        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
 
         try:
-            trajectory_data = await self._storage.read_from_trajectory("trajectory", project_id, trajectory_id)
-            settings_data = await self._storage.read_from_trajectory("settings", project_id, trajectory_id)
+            trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
+            settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
             flow._storage = self._storage
 
@@ -296,35 +296,7 @@ class FlowManager:
     async def list_trajectories(self, project_id: str | None = None) -> list:
         """Get all trajectories."""
 
-        moatless_dir = get_moatless_dir()
-        trajectories = []
-        logger.info(f"Listing trajectories in {moatless_dir}")
-
-        for project_dir in get_projects_dir().iterdir():
-            logger.info(f"Project directory: {project_dir}")
-            if project_dir.is_dir():
-                for trajectory_id in os.listdir(project_dir):
-                    trajectory_path = project_dir / trajectory_id
-                    project_id = project_dir.name
-                    if trajectory_path.is_dir():
-                        try:
-                            status_path = trajectory_path / "status.json"
-                            if status_path.exists():
-                                status = FlowStatusInfo.model_validate_json(status_path.read_text())
-                            else:
-                                status = FlowStatusInfo(status=FlowStatus.CREATED)
-                            if status:
-                                # Create TrajectoryListItem from status
-                                trajectory_item = TrajectoryListItem(
-                                    **status.model_dump(),
-                                    project_id=project_id,
-                                    trajectory_id=trajectory_id,
-                                )
-                                trajectories.append(trajectory_item)
-                        except Exception as e:
-                            logger.error(f"Error loading trajectory {trajectory_id}: {e}")
-
-        return trajectories
+        raise NotImplementedError("Not implemented yet")
 
     async def start_trajectory(self, project_id: str, trajectory_id: str):
         """Start a trajectory."""
@@ -416,8 +388,7 @@ class FlowManager:
             # TODO: This is for testing purposes, should be derived from settings and executed by a worker
             repository = await create_repository_async(swebench_instance)
             code_index = await create_index_async(instance=swebench_instance, repository=repository)
-            runtime = TestbedEnvironment(repository=repository, instance_id=trajectory_id)
-            workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
+            workspace = Workspace(repository=repository, code_index=code_index)
         else:
             workspace = Workspace(environment=LocalBashEnvironment())
 
@@ -491,55 +462,40 @@ class FlowManager:
         Returns:
             Dict containing the log contents and metadata
         """
+        file_list = []
+
         # First, try to get logs from the runner if it's a job log file or no specific file is requested
         if not file_name or file_name == "job.log":
             runner_logs = await self._runner.get_job_logs(project_id, trajectory_id)
             if runner_logs:
                 # Get the list of local log files
                 logs_dir = get_trajectory_dir(project_id, trajectory_id) / "logs"
-                file_list = [{"name": "job.log", "modified": datetime.now(timezone.utc).isoformat()}]
+                file_list = [{"name": "job.log"}]
 
                 # Add local log files to the file list if they exist
                 if logs_dir.exists():
                     local_log_files = sorted(
                         list(logs_dir.glob("*.log")), key=lambda p: p.stat().st_mtime, reverse=True
                     )
-                    file_list.extend(
-                        [
-                            {
-                                "name": f.name,
-                                "modified": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat(),
-                            }
-                            for f in local_log_files
-                        ]
-                    )
+                    file_list.extend([{"name": f.name} for f in local_log_files])
 
                 return {"logs": runner_logs, "files": file_list, "current_file": "job.log", "source": "runner"}
 
-        # Fall back to local file-based logs (existing implementation)
-        trajectory_dir = get_trajectory_dir(project_id, trajectory_id)
-        logs_dir = trajectory_dir / "logs"
+        log_dir_path = f"projects/{project_id}/trajs/{trajectory_id}/logs"
 
-        if not logs_dir.exists():
-            return {"logs": "", "files": [], "current_file": None}
-
-        log_files = sorted(list(logs_dir.glob("*.log")), key=lambda p: p.stat().st_mtime, reverse=True)
-
+        logger.info(f"Listing log files for {self._storage}")
+        log_files = await self._storage.list_paths(log_dir_path)
+        logger.info(f"Log files: {log_files}")
         if not log_files:
             return {"logs": "", "files": [], "current_file": None}
 
         # Get a list of all log files with their modified times
-        file_list = [
-            {
-                "name": f.name,
-                "modified": datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat(),
-            }
-            for f in log_files
-        ]
+        file_list = [{"name": f.split("/")[-1]} for f in log_files]
+        file_list.sort(key=lambda x: x["name"], reverse=True)
 
         # Add the job log file to the list if we have a runner
         if await self._runner.job_exists(project_id, trajectory_id):
-            file_list.insert(0, {"name": "job.log", "modified": datetime.now(timezone.utc).isoformat()})
+            file_list.insert(0, {"name": "job.log"})
 
         # If a specific file is requested, try to find it
         if file_name:
@@ -548,19 +504,18 @@ class FlowManager:
                 # it means the runner logs weren't available
                 raise ValueError("Job logs not available")
 
-            target_file = logs_dir / file_name
-            if not target_file.exists() or not target_file.is_file():
+            target_file = f"{log_dir_path}/{file_name}"
+            if not await self._storage.exists(target_file):
                 raise ValueError(f"Log file {file_name} not found")
             current_file = target_file
         else:
             # Otherwise return the most recent log file
             current_file = log_files[0]
 
-        # Read the log contents
-        with open(current_file, "r") as f:
-            log_content = f.read()
+        log_content = await self._storage.read(current_file)
+        current_file_name = current_file.split("/")[-1]
 
-        return {"logs": log_content, "files": file_list, "current_file": current_file.name, "source": "file"}
+        return {"logs": log_content, "files": file_list, "current_file": current_file_name}
 
     async def get_completions(self, project_id: str, trajectory_id: str, node_id: str, action_step: int | None = None):
         """Get the completions for a specific node.
@@ -575,16 +530,21 @@ class FlowManager:
         """
         from moatless.utils.completion_parser import parse_completion
 
-        trajectory_key = self._storage.get_trajectory_key(project_id, trajectory_id)
+        trajectory_key = self._storage.get_trajectory_path(project_id, trajectory_id)
 
         if action_step is not None:
-            log_keys = await self._storage.list_keys(f"{trajectory_key}/completions/action_{node_id}_{action_step}")
+            log_keys = await self._storage.list_paths(
+                f"{trajectory_key}/completions/node_{node_id}_action_{action_step}/"
+            )
         else:
-            log_keys = await self._storage.list_keys(f"{trajectory_key}/completions/node_{node_id}")
+            log_keys = await self._storage.list_paths(f"{trajectory_key}/completions/node_{node_id}/")
 
         completions = []
 
+        logger.info(f"Found {len(log_keys)} completions for node {node_id} and action {action_step}: {log_keys}")
+
         for log_key in log_keys:
+            logger.info(f"Reading completion from {log_key}")
             raw_completion = await self._storage.read(log_key)
 
             try:
@@ -608,7 +568,7 @@ class FlowManager:
         return tree_node.model_dump()
 
     async def get_node(self, project_id: str, trajectory_id: str, node_id: int) -> dict:
-        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
+        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
 
         root_node = await self.read_trajectory_node(project_id, trajectory_id)
         node = root_node.get_node_by_id(node_id)
@@ -618,8 +578,8 @@ class FlowManager:
         return node.model_dump(exclude={"children", "parent"})
 
     async def read_trajectory_node(self, project_id: str, trajectory_id: str) -> Node:
-        await self._storage.assert_exists_in_trajectory("trajectory", project_id, trajectory_id)
+        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
 
-        trajectory_data = await self._storage.read_from_trajectory("trajectory", project_id, trajectory_id)
+        trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
 
         return Node.from_dict(trajectory_data)

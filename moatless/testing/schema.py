@@ -82,21 +82,25 @@ class TestFile(BaseModel):
             # Calculate stats for this file
             file_failure_count = sum(1 for r in file_results if r.status == TestStatus.FAILED)
             file_error_count = sum(1 for r in file_results if r.status == TestStatus.ERROR)
-            file_passed_count = len(file_results) - file_failure_count - file_error_count
+            file_skipped_count = sum(1 for r in file_results if r.status == TestStatus.SKIPPED)
+            file_passed_count = len(file_results) - file_failure_count - file_error_count - file_skipped_count
 
             # Add to per-file summary
             per_file_summary.append(
-                f"* {test_file.file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors"
+                f"* {test_file.file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors, {file_skipped_count} skipped"
             )
 
         # Calculate overall stats
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
-        passed_count = len(all_results) - failure_count - error_count
+        skipped_count = sum(1 for r in all_results if r.status == TestStatus.SKIPPED)
+        passed_count = len(all_results) - failure_count - error_count - skipped_count
 
         # Combine per-file summary with overall summary
         summary = "\n".join(per_file_summary)
-        summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors."
+        summary += (
+            f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors, {skipped_count} skipped."
+        )
 
         return summary
 

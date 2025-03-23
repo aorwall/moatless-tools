@@ -6,17 +6,23 @@ from moatless.actions.view_code import (
 from moatless.benchmark.swebench import create_repository
 from moatless.evaluation.utils import get_moatless_instance
 from moatless.file_context import FileContext
+from moatless.workspace import Workspace
+import pytest
 
 
-def test_request_non_existing_method():
+@pytest.mark.asyncio
+async def test_request_non_existing_method():
     instance_id = "django__django-11039"
     instance = get_moatless_instance(instance_id)
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
-
-    action = ViewCode(
-        repository=repository
-    )
+    
+    # Create a workspace with the repository
+    workspace = Workspace(repository=repository)
+    
+    # Initialize the ViewCode action with the workspace using the async initialize method
+    action = ViewCode(repository=repository)
+    await action.initialize(workspace)
 
     args = ViewCodeArgs(
         scratch_pad="def non_existing_method():",
@@ -28,19 +34,23 @@ def test_request_non_existing_method():
         ],
     )
 
-    output = action.execute(args, file_context)
+    output = await action.execute(args, file_context)
     print(output.message)
 
 
-def test_request_many_spans():
+@pytest.mark.asyncio
+async def test_request_many_spans():
     instance_id = "django__django-11039"
     instance = get_moatless_instance(instance_id)
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
-
-    action = ViewCode(
-        repository=repository
-    )
+    
+    # Create a workspace with the repository
+    workspace = Workspace(repository=repository)
+    
+    # Initialize the ViewCode action with the workspace using the async initialize method
+    action = ViewCode(repository=repository)
+    await action.initialize(workspace)
 
     args = ViewCodeArgs(
         scratch_pad="Adding relevant code spans for the sqlmigrate logic to modify the output_transaction assignment.",
@@ -68,7 +78,7 @@ def test_request_many_spans():
         ],
     )
 
-    output = action.execute(args, file_context)
+    output = await action.execute(args, file_context)
 
     print(file_context.model_dump())
     print(output.message)

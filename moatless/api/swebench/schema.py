@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from moatless.completion.manager import BaseCompletionModel
 from moatless.completion.stats import Usage
-from moatless.evaluation.schema import Evaluation, EvaluationInstance
+from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationStatusSummary
 from moatless.flow.schema import FlowConfig
 from moatless.runner.runner import JobInfo, RunnerInfo
 
@@ -88,71 +88,6 @@ class EvaluationListItemDTO(BaseModel):
     resolved_count: int = 0
     failed_count: int = 0
 
-    @classmethod
-    def from_evaluation(cls, evaluation: Evaluation) -> "EvaluationListItemDTO":
-        """Build EvaluationListItemDTO from Evaluation object."""
-        # Initialize counters for token usage
-        total_cost = 0
-        prompt_tokens = 0
-        completion_tokens = 0
-        cached_tokens = 0
-        resolved_count = 0
-        failed_count = 0
-
-        # Create status summary
-        summary = EvaluationStatusSummaryDTO()
-
-        for instance in evaluation.instances:
-            # Get status using the helper function
-            status = get_instance_status(instance)
-
-            # Update status summary counters
-            if status == "pending":
-                summary.pending += 1
-            elif status == "running":
-                summary.running += 1
-            elif status == "evaluating":
-                summary.evaluating += 1
-            elif status == "completed":
-                summary.completed += 1
-            elif status == "error":
-                summary.error += 1
-
-            # Count resolved/failed instances
-            if instance.resolved is True:
-                summary.resolved += 1
-                resolved_count += 1
-            elif instance.resolved is False:
-                summary.failed += 1
-                failed_count += 1
-
-            # Add up token usage if benchmark_result exists
-            if instance.benchmark_result:
-                result = instance.benchmark_result
-                total_cost += result.get("total_cost", 0)
-                prompt_tokens += result.get("prompt_tokens", 0)
-                completion_tokens += result.get("completion_tokens", 0)
-                cached_tokens += result.get("cached_tokens", 0)
-
-        return cls(
-            evaluation_name=evaluation.evaluation_name,
-            dataset_name=evaluation.dataset_name,
-            flow_id=evaluation.flow_id,
-            model_id=evaluation.model_id,
-            status=evaluation.status.value,
-            created_at=evaluation.created_at,
-            started_at=evaluation.started_at,
-            completed_at=evaluation.completed_at,
-            instance_count=len(evaluation.instances),
-            status_summary=summary,
-            total_cost=total_cost,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            cached_tokens=cached_tokens,
-            resolved_count=resolved_count,
-            failed_count=failed_count,
-        )
-
 
 def get_instance_status(instance: EvaluationInstance) -> str:
     """Get the status of an instance, including resolved/failed states."""
@@ -185,6 +120,7 @@ class EvaluationInstanceDTO(BaseModel):
     completed_at: Optional[datetime] = None
     evaluated_at: Optional[datetime] = None
     error_at: Optional[datetime] = None
+    iterations: Optional[int] = None
     resolved_by: Optional[int] = None
     reward: Optional[int] = None
     usage: Optional[Usage] = None
@@ -238,6 +174,19 @@ class RunnerResponseDTO(BaseModel):
     jobs: list[JobInfo]
 
 
+class RunnerStatsDTO(BaseModel):
+    """Lightweight stats about the runner for the status bar"""
+
+    runner_type: str = Field(..., description="Type of runner (kubernetes, asyncio, etc.)")
+    status: str = Field(..., description="Current runner status")
+    active_workers: int = Field(0, description="Number of available workers/nodes")
+    total_workers: int = Field(0, description="Total number of workers/nodes")
+    pending_jobs: int = Field(0, description="Number of pending jobs")
+    initializing_jobs: int = Field(0, description="Number of initializing jobs")
+    running_jobs: int = Field(0, description="Number of running jobs")
+    total_jobs: int = Field(0, description="Total number of jobs")
+
+
 class JobStatusSummaryResponseDTO(BaseModel):
     """Response DTO for job status summary."""
 
@@ -255,6 +204,6 @@ class CancelJobsResponseDTO(BaseModel):
     """Response DTO for canceling jobs."""
 
     project_id: str
-    canceled_queued_jobs: int
-    canceled_running_jobs: int
+    canceled_queued_jobs: int | None = None
+    canceled_running_jobs: int | None = None
     message: str

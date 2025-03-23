@@ -11,6 +11,7 @@ from moatless.discriminator.base import BaseDiscriminator
 from moatless.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.node import Reward
+from moatless.runner.runner import JobStatus
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
@@ -295,6 +296,7 @@ class TrajectoryResponseDTO(BaseModel):
     project_id: str
     status: FlowStatus
     system_status: FlowStatusInfo
+    job_status: JobStatus
     agent_id: Optional[str] = None
     model_id: Optional[str] = None
     events: list[TrajectoryEventDTO] = Field(default_factory=list)

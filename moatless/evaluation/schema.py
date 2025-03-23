@@ -239,3 +239,104 @@ class EvaluationDatasetSplit(BaseModel):
     name: str = Field(description="Name of the evaluation split (e.g., 'train', 'test', 'validation')")
     description: str = Field(description="Description of what this split represents")
     instance_ids: list[str] = Field(description="List of instance IDs that belong to this split")
+
+
+class EvaluationStatusSummary(BaseModel):
+    """Summary of instance statuses in an evaluation"""
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
+
+    pending: int = Field(default=0, description="Number of pending instances")
+    running: int = Field(default=0, description="Number of running instances")
+    evaluating: int = Field(default=0, description="Number of instances being evaluated")
+    completed: int = Field(default=0, description="Number of completed instances")
+    error: int = Field(default=0, description="Number of instances with errors")
+    resolved: int = Field(default=0, description="Number of resolved instances")
+    failed: int = Field(default=0, description="Number of failed instances")
+
+
+class EvaluationSummary(BaseModel):
+    """Lightweight summary of an evaluation for listing purposes"""
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
+
+    evaluation_name: str = Field(..., description="Name of the evaluation")
+    dataset_name: str = Field(..., description="Name of the dataset")
+    flow_id: str = Field(..., description="ID of the flow configuration used")
+    model_id: str = Field(..., description="ID of the model used")
+    status: str = Field(..., description="Status of the evaluation")
+    created_at: datetime = Field(..., description="When the evaluation was created")
+    started_at: Optional[datetime] = Field(default=None, description="When the evaluation started")
+    completed_at: Optional[datetime] = Field(default=None, description="When the evaluation finished")
+    instance_count: int = Field(..., description="Total number of instances")
+    status_summary: EvaluationStatusSummary = Field(
+        default_factory=EvaluationStatusSummary, description="Summary of instance statuses"
+    )
+    total_cost: float = Field(default=0, description="Total cost of the evaluation")
+    prompt_tokens: int = Field(default=0, description="Total prompt tokens used")
+    completion_tokens: int = Field(default=0, description="Total completion tokens used")
+    cached_tokens: int = Field(default=0, description="Total cached tokens used")
+    resolved_count: int = Field(default=0, description="Number of resolved instances")
+    failed_count: int = Field(default=0, description="Number of failed instances")
+
+    @classmethod
+    def from_evaluation(cls, evaluation: Evaluation) -> "EvaluationSummary":
+        """Create a summary from a full evaluation object"""
+        # Initialize counters for token usage
+        total_cost = 0
+        prompt_tokens = 0
+        completion_tokens = 0
+        cached_tokens = 0
+        resolved_count = 0
+        failed_count = 0
+
+        # Create status summary
+        summary = EvaluationStatusSummary()
+
+        for instance in evaluation.instances:
+            # Update status summary counters based on instance status
+            if instance.status == InstanceStatus.PENDING:
+                summary.pending += 1
+            elif instance.status == InstanceStatus.RUNNING:
+                summary.running += 1
+            elif instance.status == InstanceStatus.EVALUATING:
+                summary.evaluating += 1
+            elif instance.status == InstanceStatus.COMPLETED:
+                summary.completed += 1
+            elif instance.status == InstanceStatus.ERROR:
+                summary.error += 1
+
+            # Count resolved/failed instances
+            if instance.resolved is True:
+                summary.resolved += 1
+                resolved_count += 1
+            elif instance.resolved is False:
+                summary.failed += 1
+                failed_count += 1
+
+            # Add up token usage if usage exists
+            if instance.usage:
+                usage = instance.usage
+                total_cost += usage.completion_cost or 0
+                prompt_tokens += usage.prompt_tokens or 0
+                completion_tokens += usage.completion_tokens or 0
+                cached_tokens += usage.cache_read_tokens or 0
+
+        return cls(
+            evaluation_name=evaluation.evaluation_name,
+            dataset_name=evaluation.dataset_name,
+            flow_id=evaluation.flow_id,
+            model_id=evaluation.model_id,
+            status=evaluation.status.value,
+            created_at=evaluation.created_at,
+            started_at=evaluation.started_at,
+            completed_at=evaluation.completed_at,
+            instance_count=len(evaluation.instances),
+            status_summary=summary,
+            total_cost=total_cost,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
+            resolved_count=resolved_count,
+            failed_count=failed_count,
+        )

@@ -33,7 +33,7 @@ from moatless.api.loop.api import router as loop_router
 from moatless.api.models.api import router as model_router
 from moatless.api.settings.api import router as settings_router
 from moatless.api.swebench.api import router as swebench_router
-from moatless.api.swebench.schema import RunnerResponseDTO
+from moatless.api.swebench.schema import RunnerResponseDTO, RunnerStatsDTO
 from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.flow.trajectory_utils import (
@@ -41,11 +41,11 @@ from moatless.flow.trajectory_utils import (
 )
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
-from moatless.runner.runner import BaseRunner, JobsStatusSummary
+from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
-from moatless.api.dependencies import get_runner
+from moatless.settings import get_runner
 
 import moatless.settings as settings
 
@@ -54,6 +54,7 @@ filter_external_warnings()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
 
 security = HTTPBasic()
 
@@ -164,14 +165,14 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
         await settings.ensure_managers_initialized()
 
-        event_bus = settings.event_bus
+        event_bus = await settings.get_event_bus()
         if event_bus:
             await event_bus.subscribe(handle_event)
 
     @api.on_event("shutdown")
     async def shutdown_event():
         logger.info("Unsubscribing from system events")
-        event_bus = settings.event_bus
+        event_bus = await settings.get_event_bus()
         if event_bus:
             await event_bus.unsubscribe(handle_event)
 
@@ -235,6 +236,52 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     ) -> RunnerResponseDTO:
         """Get the runner"""
         return RunnerResponseDTO(info=await runner.get_runner_info(), jobs=await runner.get_jobs())
+
+    @router.get("/runner/stats", response_model=RunnerStatsDTO)
+    async def get_runner_stats(
+        runner: BaseRunner = Depends(get_runner),
+    ) -> RunnerStatsDTO:
+        """Get lightweight runner stats for the status bar"""
+        runner_info = await runner.get_runner_info()
+        jobs = await runner.get_jobs()
+
+        # Count jobs by status
+        pending_jobs = sum(1 for job in jobs if job.status == JobStatus.PENDING)
+        initializing_jobs = sum(1 for job in jobs if job.status == JobStatus.INITIALIZING)
+        running_jobs = sum(1 for job in jobs if job.status == JobStatus.RUNNING)
+
+        # Get active workers from runner info
+        active_workers = runner_info.data.get("ready_nodes", 0)
+        total_workers = runner_info.data.get("nodes", 0)
+
+        return RunnerStatsDTO(
+            runner_type=runner_info.runner_type,
+            status=runner_info.status,
+            active_workers=active_workers,
+            total_workers=total_workers,
+            pending_jobs=pending_jobs,
+            initializing_jobs=initializing_jobs,
+            running_jobs=running_jobs,
+            total_jobs=len(jobs),
+        )
+
+    @router.get("/health")
+    async def health_check():
+        """Health check endpoint for readiness probes.
+
+        Checks that event bus and storage dependencies are available.
+        """
+        try:
+            event_bus = await settings.get_event_bus()
+            storage = await settings.get_storage()
+
+            if event_bus is None or storage is None:
+                return {"status": "failed", "event_bus": event_bus is not None, "storage": storage is not None}
+
+            return {"status": "ok", "event_bus": True, "storage": True}
+        except Exception as e:
+            logger.exception(f"Health check failed: {e}")
+            return {"status": "failed", "error": str(e)}
 
     @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
     async def get_job_status_summary(project_id: str, runner: BaseRunner = Depends(get_runner)) -> JobsStatusSummary:
