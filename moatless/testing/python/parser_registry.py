@@ -59,8 +59,9 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
         List[TestResult]: List of parsed test results
     """
     parser = get_parser_for_repo(repo)
-    logger.info(f"Parsing log for {repo} with {parser}")
+    logger.info(f"Parsing log for {repo} with {parser.__class__.__name__}")
     test_results = parser.parse_test_output(log, file_path)
+    logger.info(f"Parsed {len(test_results)} test results")
 
     if not test_results:
         return [

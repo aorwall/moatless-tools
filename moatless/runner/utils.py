@@ -13,16 +13,17 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner")
 
 
-def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):
+async def emit_event(evaluation_name: str, instance_id: str, scope: str, event_type: str, data: Any = None):
     """Emit evaluation event."""
     event = BaseEvent(
         project_id=evaluation_name, trajectory_id=instance_id, scope=scope, event_type=event_type, data=data
     )
 
-    from moatless.settings import event_bus
+    from moatless.settings import get_event_bus
 
     try:
-        run_async(event_bus.publish(event))
+        event_bus = await get_event_bus()
+        await event_bus.publish(event)
     except Exception as e:
         logger.error(f"Failed to publish event {event_type}: {e}")
 

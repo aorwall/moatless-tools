@@ -20,8 +20,6 @@ class CodeModificationMixin:
     This includes path normalization, file validation, test running, and observation handling.
     """
 
-    auto_run_tests: bool = Field(True, description="Whether to automatically run tests after modifying code")
-
     def normalize_path(self, file_path: str) -> str:
         """Normalize file path by removing /repo and leading /"""
         if file_path.startswith("/repo"):

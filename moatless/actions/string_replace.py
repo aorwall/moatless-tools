@@ -11,7 +11,6 @@ from moatless.actions.schema import (
     ActionArguments,
     Observation,
 )
-from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 

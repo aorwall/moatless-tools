@@ -41,7 +41,7 @@ from moatless.flow.trajectory_utils import (
 )
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
-from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus
+from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus, JobDetails
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
@@ -54,8 +54,8 @@ filter_external_warnings()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logging.getLogger("azure.core.pipeline.policies.http_logging_policy").setLevel(logging.WARNING)
-
+logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 security = HTTPBasic()
 
 
@@ -311,6 +311,29 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
                 status_code=400,
                 detail="Failed to retry job, it may not exist or not be in a failed state",
             )
+
+    @router.get("/runner/jobs/{project_id}/{trajectory_id}/details")
+    async def get_job_details(
+        project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)
+    ) -> JobDetails:
+        """Get detailed information about a job.
+
+        This endpoint returns detailed information about a job, including:
+        - Basic job information (ID, status, timestamps)
+        - Runner-specific details organized into sections
+        - Error information if the job failed
+        """
+        job_details = await runner.get_job_details(project_id, trajectory_id)
+        if not job_details:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Job details not found for project {project_id}, trajectory {trajectory_id}",
+            )
+
+        # Remove raw_data from the response to reduce payload size
+        job_details.raw_data = None
+
+        return job_details
 
     # Include model, agent, and loop configuration routers
     router.include_router(settings_router, prefix="/settings", tags=["settings"])

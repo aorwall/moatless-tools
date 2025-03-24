@@ -85,6 +85,30 @@ class ActionAgent(MoatlessComponent):
         if not self._workspace:
             raise RuntimeError("Workspace not set")
 
+        if not node.action_steps:
+            await self._generate_actions(node)
+
+            duplicate_node = node.find_duplicate()
+            if duplicate_node:
+                node.is_duplicate = True
+                logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping")
+                return
+
+        else:
+            logger.info(f"Node{node.node_id}: Action steps already generated. Skipping action generation.")
+
+        if not node.action_steps:
+            logger.warning(f"Node{node.node_id}: No action steps generated. Skipping execution.")
+            return
+
+        action_names = [action_step.action.name for action_step in node.action_steps]
+        logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
+        for i, action_step in enumerate(node.action_steps):
+            current_action_step.set(i)  # Used in logging to identify the action step
+            await self._execute(node, action_step)
+            current_action_step.set(None)
+
+    async def _generate_actions(self, node: Node):
         node.possible_actions = [action.name for action in self.actions]
 
         # TODO: This is a hack to get the file context to work with the existing repository, remove when we got rid of the legacy file_context..
@@ -161,22 +185,6 @@ class ActionAgent(MoatlessComponent):
             )
 
             raise e
-
-        if node.action is None:
-            return
-
-        duplicate_node = node.find_duplicate()
-        if duplicate_node:
-            node.is_duplicate = True
-            logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping execution.")
-            return
-
-        action_names = [action_step.action.name for action_step in node.action_steps]
-        logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
-        for i, action_step in enumerate(node.action_steps):
-            current_action_step.set(i)  # Used in logging to identify the action step
-            await self._execute(node, action_step)
-            current_action_step.set(None)
 
     @tracer.start_as_current_span("ActionAgent._execute_action_step")
     async def _execute_action_step(self, node: Node, action_step: ActionStep) -> Observation:

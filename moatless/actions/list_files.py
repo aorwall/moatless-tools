@@ -58,7 +58,13 @@ class ListFiles(Action):
             raise RuntimeError("Repository not available for listing files.")
 
         try:
-            result = file_context._repo.list_directory(args.directory)
+            try:
+                result = file_context._repo.list_directory(args.directory)
+            except ValueError as e:
+                return Observation.create(
+                    message=f"Error listing directory: {str(e)}",
+                    properties={"fail_reason": "error_listing_directory"},
+                )
 
             message = f"Contents of directory '{args.directory or '(root)'}'\n\n"
 
@@ -74,7 +80,7 @@ class ListFiles(Action):
                     message += f"📄 {file}\n"
 
             if not result["directories"] and not result["files"]:
-                message += "Directory is empty or does not exist."
+                message += "Directory is empty."
 
             return Observation.create(
                 message=message,

@@ -47,7 +47,7 @@ async def test_start_job(asyncio_runner):
     assert job_id in asyncio_runner.job_metadata
     
     # Verify initial job status
-    assert asyncio_runner.job_metadata[job_id]["status"] == JobStatus.QUEUED
+    assert asyncio_runner.job_metadata[job_id]["status"] == JobStatus.PENDING
     
     # Wait for the job to complete
     await asyncio.sleep(0.1)
@@ -212,7 +212,7 @@ async def test_get_job_status(asyncio_runner):
     
     # Check status
     status = await asyncio_runner.get_job_status("test-project", "test-trajectory")
-    assert status in (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.COMPLETED)
+    assert status in (JobStatus.PENDING, JobStatus.RUNNING, JobStatus.COMPLETED)
     
     # Wait for job to complete
     await asyncio.sleep(0.1)

@@ -123,6 +123,10 @@ async def test_react_history_file_updates(test_tree, workspace):
     messages = await generator.generate_messages(node3, workspace)
     messages_list = list(messages)
 
+    print("\n=== Messages in test_react_history_file_updates ===")
+    for i, msg in enumerate(messages_list):
+        print(f"{i}. {str(msg)[:200]}")
+    
     # Verify correct message sequence
     assert "Initial task" in str(messages_list[0])  # Initial task
     

@@ -42,7 +42,7 @@ class TestFile(BaseModel):
     test_results: list[TestResult] = Field(default_factory=list, description="List of test results.")
 
     @staticmethod
-    def get_test_summary(test_files: list["TestFile"], file_paths: Optional[list[str]] = None) -> str:
+    def get_test_summary(test_files: list["TestFile"]) -> str:
         """
         Returns a summary of test results, optionally filtered by specified test files.
         If file_paths is provided, only shows results for those files.
@@ -58,24 +58,11 @@ class TestFile(BaseModel):
         if not test_files:
             return "No test results available."
 
-        # Filter test files if specified
-        included_test_files = []
-        if file_paths:
-            # Only include test files for the specified file paths
-            for test_file in test_files:
-                if test_file.file_path in file_paths:
-                    included_test_files.append(test_file)
-        else:
-            included_test_files = test_files
-
-        if not included_test_files:
-            return "No test results available."
-
         # Collect results and generate per-file summaries
         all_results = []
         per_file_summary = []
 
-        for test_file in included_test_files:
+        for test_file in test_files:
             file_results = test_file.test_results
             all_results.extend(file_results)
 
@@ -106,10 +93,7 @@ class TestFile(BaseModel):
 
     @staticmethod
     def get_test_failure_details(
-        test_files: list["TestFile"],
-        max_tokens: int = 8000,
-        max_chars_per_test: int = 2000,
-        file_paths: Optional[list[str]] = None,
+        test_files: list["TestFile"], max_tokens: int = 8000, max_chars_per_test: int = 2000
     ) -> str:
         """
         Returns detailed output for each failed or errored test result.
@@ -128,19 +112,9 @@ class TestFile(BaseModel):
         if not test_files:
             return ""
 
-        # Filter test files if specified
-        included_test_files = []
-        if file_paths:
-            # Only include test files for the specified file paths
-            for test_file in test_files:
-                if test_file.file_path in file_paths:
-                    included_test_files.append(test_file)
-        else:
-            included_test_files = test_files
-
         sum_tokens = 0
         test_result_strings = []
-        for test_file in included_test_files:
+        for test_file in test_files:
             for result in test_file.test_results:
                 if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.failure_output:
                     attributes = ""

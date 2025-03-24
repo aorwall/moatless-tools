@@ -268,15 +268,11 @@ class FlowManager:
             trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
             settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
-            flow._storage = self._storage
 
             # nodes = convert_nodes(flow.root)
             flow_status_info = flow.get_status()
 
-            if not flow.is_finished():
-                job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
-            else:
-                job_status = JobStatus.COMPLETED
+            job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
 
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
@@ -378,39 +374,26 @@ class FlowManager:
 
         return flow
 
-    async def execute_node(self, project_id: str, trajectory_id: str, request: ExecuteNodeRequest):
+    async def execute_node(self, project_id: str, trajectory_id: str, node_id: int):
         """Execute a specific node in a trajectory."""
 
         agentic_flow = await AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
 
-        swebench_instance = get_swebench_instance(trajectory_id)
-        if swebench_instance:
-            # TODO: This is for testing purposes, should be derived from settings and executed by a worker
-            repository = await create_repository_async(swebench_instance)
-            code_index = await create_index_async(instance=swebench_instance, repository=repository)
-            workspace = Workspace(repository=repository, code_index=code_index)
-        else:
-            workspace = Workspace(environment=LocalBashEnvironment())
-
-        await agentic_flow.agent.initialize(workspace)
-
-        node = agentic_flow.root.get_node_by_id(request.node_id)
+        node = agentic_flow.root.get_node_by_id(node_id)
         if not node:
             raise ValueError("Node not found")
+        if node.is_executed():
+            node = node.clone()
+            node.reset(rebuild_action_steps=False)
+            logger.info(f"Cloned node {node.node_id} from parent {node.parent.node_id}")
+            await agentic_flow.persist()
 
-        # Clone file context from parent node to reset file context
-        if node.parent and node.parent.file_context:
-            node.file_context = node.parent.file_context.clone()
-            logger.info(
-                f"Cloned file context from parent node {node.parent.node_id} to node {node.node_id}, setting repo to {repository}"
-            )
-            node.file_context.repository = repository
-        else:
-            logger.warning("No parent node found, cannot clone file context")
-            node.file_context = None
-
-        # Execute the action step
-        return await agentic_flow.agent._execute_action_step(node, node.action_steps[-1])
+        await self._runner.start_job(
+            project_id=project_id,
+            trajectory_id=trajectory_id,
+            job_func=run_flow,
+            node_id=node_id,
+        )
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
@@ -467,6 +450,7 @@ class FlowManager:
         # First, try to get logs from the runner if it's a job log file or no specific file is requested
         if not file_name or file_name == "job.log":
             runner_logs = await self._runner.get_job_logs(project_id, trajectory_id)
+            logger.info(f"Runner logs: {runner_logs}")
             if runner_logs:
                 # Get the list of local log files
                 logs_dir = get_trajectory_dir(project_id, trajectory_id) / "logs"

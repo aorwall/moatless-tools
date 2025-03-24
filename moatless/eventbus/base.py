@@ -43,6 +43,17 @@ class BaseEventBus(abc.ABC):
 
         return cls._instance
 
+    @classmethod
+    async def close_instance(cls) -> None:
+        """
+        Close and clean up the singleton instance.
+        This should be called during application shutdown to prevent resource leaks.
+        """
+        if cls._instance is not None:
+            await cls._instance.close()
+            cls._instance = None
+            logger.info("EventBus singleton instance closed and reset")
+
     def __init__(self, storage: Optional[BaseStorage] = None):
         """Initialize the event bus base class."""
         self._storage = storage
@@ -85,6 +96,14 @@ class BaseEventBus(abc.ABC):
 
         Args:
             event: The event to publish
+        """
+        pass
+
+    @abc.abstractmethod
+    async def close(self):
+        """
+        Close any connections and clean up resources.
+        Should be called when shutting down the application to prevent resource leaks.
         """
         pass
 
@@ -148,3 +167,8 @@ class BaseEventBus(abc.ABC):
         Get the key for the events file.
         """
         return f"projects/{project_id}/trajs/{trajectory_id}/events.jsonl"
+
+    async def __aenter__(self):
+        """Support using the event bus as an async context manager."""
+        await self.initialize()
+        return self

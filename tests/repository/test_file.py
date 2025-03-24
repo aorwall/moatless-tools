@@ -1,12 +1,13 @@
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from moatless.repository.file import FileRepository
 
 
-@pytest.fixture
-def temp_repo(tmp_path):
+@pytest_asyncio.fixture
+async def temp_repo(tmp_path):
     repo_dir = tmp_path / "test_repo"
     repo_dir.mkdir()
 
@@ -32,8 +33,9 @@ def temp_repo(tmp_path):
     return FileRepository(repo_path=str(repo_dir))
 
 
-def test_matching_files_basic(temp_repo):
-    assert set(temp_repo.matching_files("*.py")) == {
+@pytest.mark.asyncio
+async def test_matching_files_basic(temp_repo):
+    assert set(await temp_repo.matching_files("*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
@@ -44,42 +46,46 @@ def test_matching_files_basic(temp_repo):
     }
 
 
-def test_matching_files_subdirectory(temp_repo):
-    assert set(temp_repo.matching_files("tests/*.py")) == {"tests/test_utils.py"}
-    assert set(temp_repo.matching_files("tests/**/*.py")) == {
+@pytest.mark.asyncio
+async def test_matching_files_subdirectory(temp_repo):
+    assert set(await temp_repo.matching_files("tests/*.py")) == {"tests/test_utils.py"}
+    assert set(await temp_repo.matching_files("tests/**/*.py")) == {
         "tests/test_utils.py",
         "tests/unit/test_core.py",
         "tests/unit/test_helpers.py",
         "tests/integration/test_api.py",
     }
-    assert set(temp_repo.matching_files("tests/unit/*.py")) == {
+    assert set(await temp_repo.matching_files("tests/unit/*.py")) == {
         "tests/unit/test_core.py",
         "tests/unit/test_helpers.py",
     }
 
 
-def test_matching_files_complex_patterns(temp_repo):
-    assert set(temp_repo.matching_files("**/*test*.py")) == {
+@pytest.mark.asyncio
+async def test_matching_files_complex_patterns(temp_repo):
+    assert set(await temp_repo.matching_files("**/*test*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
         "tests/unit/test_helpers.py",
         "tests/integration/test_api.py",
     }
-    assert set(temp_repo.matching_files("src/**/*.py")) == {
+    assert set(await temp_repo.matching_files("src/**/*.py")) == {
         "src/main.py",
         "src/utils/helpers.py",
     }
 
 
-def test_matching_files_non_py(temp_repo):
-    assert set(temp_repo.matching_files("**/*.md")) == {"docs/README.md"}
-    assert set(temp_repo.matching_files(".*")) == {".gitignore"}
+@pytest.mark.asyncio
+async def test_matching_files_non_py(temp_repo):
+    assert set(await temp_repo.matching_files("**/*.md")) == {"docs/README.md"}
+    assert set(await temp_repo.matching_files(".*")) == {".gitignore"}
 
 
-def test_matching_files_case_sensitivity(temp_repo):
-    assert set(temp_repo.matching_files("**/*TEST*.py")) == set()
-    assert set(temp_repo.matching_files("**/*[Tt]est*.py")) == {
+@pytest.mark.asyncio
+async def test_matching_files_case_sensitivity(temp_repo):
+    assert set(await temp_repo.matching_files("**/*TEST*.py")) == set()
+    assert set(await temp_repo.matching_files("**/*[Tt]est*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
@@ -88,21 +94,24 @@ def test_matching_files_case_sensitivity(temp_repo):
     }
 
 
-def test_matching_files_empty_result(temp_repo):
-    assert temp_repo.matching_files("nonexistent*.py") == []
+@pytest.mark.asyncio
+async def test_matching_files_empty_result(temp_repo):
+    assert await temp_repo.matching_files("nonexistent*.py") == []
 
 
-def test_matching_files_specific_subdirectory(temp_repo):
-    assert set(temp_repo.matching_files("unit/*.py")) == {
+@pytest.mark.asyncio
+async def test_matching_files_specific_subdirectory(temp_repo):
+    assert set(await temp_repo.matching_files("unit/*.py")) == {
         "tests/unit/test_core.py",
         "tests/unit/test_helpers.py",
     }
-    assert set(temp_repo.matching_files("src/utils/*.py")) == {"src/utils/helpers.py"}
+    assert set(await temp_repo.matching_files("src/utils/*.py")) == {"src/utils/helpers.py"}
 
 
-def test_matching_files(temp_repo):
+@pytest.mark.asyncio
+async def test_matching_files(temp_repo):
     # Test various patterns
-    assert set(temp_repo.matching_files("*test*.py")) == {
+    assert set(await temp_repo.matching_files("*test*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
@@ -110,7 +119,7 @@ def test_matching_files(temp_repo):
         "tests/integration/test_api.py",
     }
 
-    assert set(temp_repo.matching_files("*test_*.py")) == {
+    assert set(await temp_repo.matching_files("*test_*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
@@ -118,14 +127,14 @@ def test_matching_files(temp_repo):
         "tests/integration/test_api.py",
     }
 
-    assert set(temp_repo.matching_files("tests/**/*.py")) == {
+    assert set(await temp_repo.matching_files("tests/**/*.py")) == {
         "tests/test_utils.py",
         "tests/unit/test_core.py",
         "tests/unit/test_helpers.py",
         "tests/integration/test_api.py",
     }
 
-    assert set(temp_repo.matching_files("*.py")) == {
+    assert set(await temp_repo.matching_files("*.py")) == {
         "test_main.py",
         "tests/test_utils.py",
         "tests/unit/test_core.py",
@@ -135,19 +144,21 @@ def test_matching_files(temp_repo):
         "src/utils/helpers.py",
     }
 
-    assert set(temp_repo.matching_files("src/*.py")) == {"src/main.py"}
+    assert set(await temp_repo.matching_files("src/*.py")) == {"src/main.py"}
 
-    assert temp_repo.matching_files("nonexistent*.py") == []
+    assert await temp_repo.matching_files("nonexistent*.py") == []
 
 
-def test_matching_files_exact_filename(temp_repo):
-    assert set(temp_repo.matching_files("*/helpers.py")) == {"src/utils/helpers.py"}
-    assert set(temp_repo.matching_files("**/helpers.py")) == {"src/utils/helpers.py"}
+@pytest.mark.asyncio
+async def test_matching_files_exact_filename(temp_repo):
+    assert set(await temp_repo.matching_files("*/helpers.py")) == {"src/utils/helpers.py"}
+    assert set(await temp_repo.matching_files("**/helpers.py")) == {"src/utils/helpers.py"}
     # Should not match test_helpers.py
-    assert "tests/unit/test_helpers.py" not in temp_repo.matching_files("*/helpers.py")
+    assert "tests/unit/test_helpers.py" not in await temp_repo.matching_files("*/helpers.py")
 
 
-def test_find_exact_matches(temp_repo):
+@pytest.mark.asyncio
+async def test_find_exact_matches(temp_repo):
     # Create a test file with special regex characters
     test_file = Path(temp_repo.repo_path) / "tests" / "test_functions.py"
     test_file.parent.mkdir(exist_ok=True)
@@ -175,16 +186,16 @@ def another_function():
     ]
 
     for search_text in special_chars:
-        matches = temp_repo.find_exact_matches(search_text, "tests/test_functions.py")
+        matches = await temp_repo.find_exact_matches(search_text, "tests/test_functions.py")
         assert len(matches) == 1
         assert matches[0][0] == "tests/test_functions.py"
 
     # Test original function search still works
-    matches = temp_repo.find_exact_matches("def test_partitions():", "tests/test_functions.py")
+    matches = await temp_repo.find_exact_matches("def test_partitions():", "tests/test_functions.py")
     assert len(matches) == 1
     assert matches[0] == ("tests/test_functions.py", 5)
 
     # Test searching in a directory
-    matches = temp_repo.find_exact_matches("def test_partitions():", "tests/")
+    matches = await temp_repo.find_exact_matches("def test_partitions():", "tests/")
     assert len(matches) == 1
     assert matches[0] == ("tests/test_functions.py", 5)

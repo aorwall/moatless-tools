@@ -71,19 +71,10 @@ def file_storage():
     # Initialize with no updates applied
     storage._updated_eval = False
     
-    # Mock the list method
-    async def mock_list(path, **kwargs):
-        if path == "evaluations":
-            # Return a list of predefined evaluation summaries
-            return ["eval_test_easy", "eval_test_summary", "eval_summary_test1", "eval_summary_test2", "eval_update_test", "eval_init_test"]
-        elif path == "evaluation_summaries":
-            return ["eval_test_easy", "eval_test_summary", "eval_summary_test1", "eval_summary_test2", "eval_update_test", "eval_init_test"]
-        return []
-
     # Mock the read method
     async def mock_read(path, **kwargs):
         # Extract evaluation name from path
-        if path == "evaluation_summaries":
+        if path == "evaluation_summaries.json":
             # Return a dictionary of all evaluation summaries
             all_summaries = {}
             evaluation_names = ["eval_test_easy", "eval_test_summary", "eval_summary_test1", "eval_summary_test2", "eval_update_test", "eval_init_test"]
@@ -171,7 +162,7 @@ def file_storage():
     # Mock the write method to update context for subsequent reads
     original_write = storage.write
     async def mock_write(path, data, **kwargs):
-        if path == "evaluation_summaries" and "eval_update_test" in data:
+        if path == "evaluation_summaries.json" and "eval_update_test" in data:
             # Store that this evaluation has been updated in a class variable
             storage._updated_eval = True
         
@@ -181,7 +172,7 @@ def file_storage():
     # Mock the exists method
     async def mock_exists(path, **kwargs):
         # Handle the new evaluation_summaries path
-        if path == "evaluation_summaries":
+        if path == "evaluation_summaries.json":
             return True
         # Always return True except for specific test cases
         if path.startswith("evaluations/") and "eval_init_test" in path:
@@ -198,19 +189,18 @@ def file_storage():
             storage._created_evaluations = set()
             
         # When creating an evaluation, return False to allow creation
-        if key == "evaluation" and not project_id in storage._created_evaluations:
+        if key == "evaluation.json" and not project_id in storage._created_evaluations:
             # After checking, mark this evaluation as created for future checks
             storage._created_evaluations.add(project_id)
             return False
             
         # When loading an existing evaluation, return True
-        if key == "evaluation" and project_id in storage._created_evaluations:
+        if key == "evaluation.json" and project_id in storage._created_evaluations:
             return True
             
         return False
 
     # Assign the mock methods
-    storage.list = mock_list
     storage.read = mock_read
     storage.write = mock_write
     storage.exists = mock_exists
@@ -219,7 +209,7 @@ def file_storage():
     
     # Mock the read_from_project method with a proper implementation that uses project_id
     async def mock_read_from_project(key, project_id):
-        if key == "evaluation":
+        if key == "evaluation.json":
             return {
                 "evaluation_name": project_id,
                 "flow_id": "simple_coding",
@@ -379,11 +369,11 @@ async def test_evaluation_summary_creation(manager, file_storage):
     )
     
     # Check that the summary was created in the all-summaries file
-    exists = await file_storage.exists("evaluation_summaries")
+    exists = await file_storage.exists("evaluation_summaries.json")
     assert exists is True
     
     # Read the summaries data directly from storage
-    all_summaries = await file_storage.read("evaluation_summaries")
+    all_summaries = await file_storage.read("evaluation_summaries.json")
     assert all_summaries is not None
     assert "eval_test_summary" in all_summaries
     
@@ -470,9 +460,6 @@ async def test_update_evaluation_summary(manager):
     # Save the updated evaluation
     await manager.save_evaluation(evaluation)
 
-    # Force the manager to reload the evaluation summaries
-    await manager._initialize_evaluation_summaries()
-
     # Set a flag indicating the next read should return the updated version
     manager.storage._updated_eval = True
     
@@ -484,41 +471,6 @@ async def test_update_evaluation_summary(manager):
     assert updated_summary.status == "running"
     assert updated_summary.status_summary.running == 1
     assert updated_summary.status_summary.pending == 1
-
-
-@pytest.mark.asyncio
-async def test_initialize_evaluation_summaries(manager, file_storage):
-    """Test initializing summaries from existing evaluations."""
-    # Create an evaluation
-    await manager.create_evaluation(
-        flow_id="simple_coding",
-        model_id="gpt-4o-mini-2024-07-18",
-        evaluation_name="eval_init_test",
-        dataset_name="easy"
-    )
-    
-    # Mock that the evaluation_summaries file doesn't exist
-    original_exists = file_storage.exists
-    async def mock_exists(path):
-        if path == "evaluation_summaries":
-            return False
-        return await original_exists(path)
-    
-    file_storage.exists = mock_exists
-    
-    # Call initialize to regenerate the summaries
-    await manager._initialize_evaluation_summaries()
-    
-    # Restore original exists method
-    file_storage.exists = original_exists
-    
-    # Verify that summaries were initialized
-    all_summaries = await file_storage.read("evaluation_summaries")
-    assert "eval_init_test" in all_summaries
-    
-    # Test passes if we reach here without errors
-    assert True
-
 
     
     

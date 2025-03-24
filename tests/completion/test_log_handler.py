@@ -45,28 +45,28 @@ def setup_context():
 
 
 @pytest.mark.asyncio
-async def test_get_log_key_basic(log_handler):
-    key = await log_handler._get_log_key()
+async def test_get_log_path_basic(log_handler):
+    key = await log_handler._get_log_path()
     assert "completions" in key
     assert key.endswith("completion")
 
 
 @pytest.mark.asyncio
-async def test_get_log_key_with_node(log_handler):
+async def test_get_log_path_with_node(log_handler):
     token = current_node_id.set("test_node")
     try:
-        key = await log_handler._get_log_key()
+        key = await log_handler._get_log_path()
         assert "node_test_node" in key
     finally:
         current_node_id.reset(token)
 
 
 @pytest.mark.asyncio
-async def test_get_log_key_with_node_and_action(log_handler):
+async def test_get_log_path_with_node_and_action(log_handler):
     node_token = current_node_id.set("test_node")
     action_token = current_action_step.set(1)
     try:
-        key = await log_handler._get_log_key()
+        key = await log_handler._get_log_path()
         assert "node_test_node" in key
         assert "action_1" in key
     finally:
@@ -80,8 +80,8 @@ async def test_write_to_file_async(log_handler):
     await log_handler._write_to_file_async(test_data)
     
     # Verify data was written
-    trajectory_key = log_handler._storage.get_trajectory_path()
-    files = await log_handler._storage.list_paths(f"{trajectory_key}/completions")
+    trajectory_path = log_handler._storage.get_trajectory_path()
+    files = await log_handler._storage.list_paths(f"{trajectory_path}/completions")
     assert len(files) == 1
     
     # Read back the data
@@ -109,8 +109,8 @@ async def test_log_success_event(log_handler):
     )
     
     # Verify log was written
-    trajectory_key = log_handler._storage.get_trajectory_path()
-    files = await log_handler._storage.list_paths(f"{trajectory_key}/completions")
+    trajectory_path = log_handler._storage.get_trajectory_path()
+    files = await log_handler._storage.list_paths(f"{trajectory_path}/completions")
     assert len(files) == 1
     
     # Read back the log

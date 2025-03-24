@@ -30,21 +30,6 @@ class JsonArtifactHandler(ArtifactHandler[T]):
     _storage: BaseStorage = PrivateAttr()
     _artifacts: dict[str, T] = PrivateAttr(default={})
 
-    def __init__(self, storage: BaseStorage, **kwargs):
-        """
-        Initialize the JsonArtifactHandler.
-
-        Args:
-            storage: Optional storage backend to use. If not provided, a default storage will be created
-                    based on the in_memory flag.
-            **kwargs: Additional keyword arguments to pass to the parent class.
-        """
-
-        super().__init__(**kwargs)
-        if not storage:
-            raise ValueError("Storage is required")
-        self._storage = storage
-
     @classmethod
     @abstractmethod
     def get_artifact_class(cls) -> type[T]:

@@ -207,28 +207,6 @@ class CodeIndex:
         return await cls.from_persist_dir_async(persist_dir, file_repo)
 
     @classmethod
-    def from_index_name(cls, index_name: str, file_repo: Repository, index_store_dir: Optional[str] = None):
-        """Synchronous version of from_index_name"""
-        if not index_store_dir:
-            index_store_dir = os.getenv("INDEX_STORE_DIR")
-
-        persist_dir = os.path.join(index_store_dir, index_name)
-        if os.path.exists(persist_dir):
-            logger.info(f"Loading existing index {index_name} from {persist_dir}.")
-            return cls.from_persist_dir(persist_dir, file_repo)
-        else:
-            logger.info(f"No existing index found at {persist_dir}.")
-
-        if os.getenv("INDEX_STORE_URL"):
-            index_store_url = os.getenv("INDEX_STORE_URL")
-        else:
-            index_store_url = "https://stmoatless.blob.core.windows.net/indexstore/20250118-voyage-code-3/"
-
-        store_url = os.path.join(index_store_url, f"{index_name}.zip")
-        logger.info(f"Downloading existing index {index_name} from {store_url}.")
-        return cls.from_url(store_url, file_repo)
-
-    @classmethod
     async def from_index_name_async(
         cls,
         index_name: str,
@@ -594,106 +572,6 @@ class CodeIndex:
             message=message,
             hits=search_hits,
         )
-
-    @tracer.start_as_current_span("find_test_files")
-    async def find_test_files(
-        self,
-        file_path: str,
-        span_id: str | None = None,
-        query: str | None = None,
-        max_results: int = 5,
-        max_tokens: int | None = None,
-        max_method_tokens: int = 500,
-        max_spans: int | None = None,
-    ) -> list[FileWithSpans]:
-        if span_id:
-            query = f"{file_path} {span_id}"
-        elif query:
-            query = f"{file_path} {query}"
-        else:
-            query = file_path
-
-        search_results = await self._vector_search(query, category="test")
-
-        sum_tokens = 0
-        files = []
-        matching_file = await self._find_by_test_pattern(file_path)
-        if matching_file:
-            files.append(FileWithSpans(file_path=matching_file, span_ids=[]))
-        elif span_id or query and max_results > 1:
-            # Try to find the most similar test file by file name if no exact match on file name
-            files = await self.find_test_files(file_path, max_results=1, max_spans=max_spans)
-
-        for result in search_results:
-            file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
-
-            if not file_with_spans:
-                file_with_spans = FileWithSpans(file_path=result.file_path, span_ids=[])
-                files.append(file_with_spans)
-
-            file = self._file_repo.get_file(result.file_path)
-            if not file:
-                logger.warning(f"run_tests() File not found {result.file_path}")
-                continue
-
-            # expect to find methods with the name test in the span id if there are any
-            has_test_names = any(span_id for span_id in file.module.span_ids if "test" in span_id.lower())
-
-            for span_id in result.span_ids:
-                span = file.module.find_span_by_id(span_id)
-                if (
-                    span
-                    and span.initiating_block.type in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
-                    and span.tokens <= max_method_tokens
-                    and (not max_tokens or sum_tokens + span.tokens <= max_tokens)
-                    and (not has_test_names or "test" in span_id.lower())
-                    and span_id not in file_with_spans.span_ids
-                    and (not max_spans or len(file_with_spans.span_ids) < max_spans)
-                ):
-                    file_with_spans.span_ids.append(span_id)
-                    sum_tokens += span.tokens
-
-            if max_spans and len([f for f in files if len(f.span_ids) >= max_spans]) >= max_results:
-                break
-
-            if not max_spans and len(files) >= max_results:
-                break
-
-        if max_spans:
-            files = [f for f in files if len(f.span_ids) > 0]
-
-        return files
-
-    async def _find_by_test_pattern(self, file_path: str) -> str | None:
-        """
-        Find the test file related to the provided file path.
-
-        Test files should match the pattern "test_[filename].py" or "[filename]_test.py".
-        If there are multiple matches, the one with the most similar directory path is picked.
-        """
-        filename = os.path.basename(file_path)
-        dirname = os.path.dirname(file_path)
-        test_patterns = [f"test_{filename}", f"{filename}_test.py"]
-
-        matched_files = await self.find_by_pattern(test_patterns)
-        if not matched_files:
-            return None
-
-        if len(matched_files) == 1:
-            return matched_files[0]
-
-        # Find the test file with the most similar directory path
-        best_match = None
-        best_match_score = float("inf")
-        for test_file in matched_files:
-            test_dirname = os.path.dirname(test_file)
-            common_prefix = os.path.commonprefix([dirname, test_dirname])
-            score = len(dirname) - len(common_prefix)
-            if score < best_match_score:
-                best_match = test_file
-                best_match_score = score
-
-        return best_match
 
     @tracer.start_as_current_span("vector_search")
     async def _vector_search(

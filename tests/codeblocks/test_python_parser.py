@@ -1,5 +1,3 @@
-from moatless.benchmark.swebench import setup_swebench_repo
-from moatless.evaluation.utils import get_moatless_instances, get_moatless_instance
 from moatless.codeblocks import CodeBlockType
 from moatless.codeblocks.codeblocks import (
     Relationship,
@@ -790,15 +788,3 @@ class Signal:
         print(codeblock.to_prompt(include_block_types=[CodeBlockType.ERROR]))
 
     _verify_parsing(content, assertion, debug=False)
-
-
-
-
-def test_thing():
-    file_path = "/tmp/repos/swe-bench_django__django-12406/tests/view_tests/tests/test_debug.py"
-    with open(file_path, "r") as file:
-        content = file.read()
-
-    parser = PythonParser()
-    codeblock = parser.parse(content)
-    print(codeblock.to_tree(show_spans=True))

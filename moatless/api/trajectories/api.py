@@ -185,7 +185,7 @@ async def execute_node(
 ):
     """Execute a run."""
     try:
-        result = await flow_manager.execute_node(project_id, trajectory_id, request)
+        result = await flow_manager.execute_node(project_id, trajectory_id, request.node_id)
         return result
     except ValueError as e:
         logger.exception(f"Error executing node: {str(e)}")

@@ -117,11 +117,23 @@ async def test_start_job(kubernetes_runner, mock_k8s_api):
     """Test that a job can be started successfully."""
     # Mock the job creation response
     batch_api = mock_k8s_api["batch_api"]
+    core_api = mock_k8s_api["core_api"]
     created_job = create_mock_job("run-test-project-test-trajectory")
     batch_api.create_namespaced_job.return_value = created_job
     
-    # Mock job_exists to return False
-    with patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=False)):
+    # Create pod list with running container
+    pod_list = MagicMock()
+    pod = MagicMock()
+    pod.status.phase = "Running"
+    container_status = MagicMock()
+    container_status.ready = True
+    pod.status.container_statuses = [container_status]
+    pod_list.items = [pod]
+    core_api.list_namespaced_pod.return_value = pod_list
+    
+    # Mock _get_image_name method to avoid IndexError
+    with patch.object(kubernetes_runner, "_get_image_name", return_value="test-image"), \
+         patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=False)):
         # Start the job
         result = await kubernetes_runner.start_job("test-project", "test-trajectory", "test_module.test_function")
         
@@ -257,6 +269,17 @@ async def test_job_exists(kubernetes_runner, mock_k8s_api):
 async def test_get_job_status(kubernetes_runner, mock_k8s_api):
     """Test getting the status of a job."""
     batch_api = mock_k8s_api["batch_api"]
+    core_api = mock_k8s_api["core_api"]
+    
+    # Create running pod
+    pod_list = MagicMock()
+    pod = MagicMock()
+    pod.status.phase = "Running"
+    container_status = MagicMock()
+    container_status.ready = True
+    pod.status.container_statuses = [container_status]
+    pod_list.items = [pod]
+    core_api.list_namespaced_pod.return_value = pod_list
     
     # Running job
     running_job = create_mock_job("run-test-project-test-trajectory", active=1, succeeded=0, failed=0)
@@ -314,17 +337,26 @@ async def test_retry_job(kubernetes_runner, mock_k8s_api):
     
     batch_api.read_namespaced_job.return_value = failed_job
     
+    # Add annotations to the job metadata
+    failed_job.metadata.annotations = {
+        "moatless.ai/project-id": "test-project",
+        "moatless.ai/trajectory-id": "test-trajectory",
+        "moatless.ai/function": "test_module.test_function"
+    }
+    
     # Set up create job response
     new_job = create_mock_job("run-test-project-test-trajectory", active=1, succeeded=0, failed=0)
     batch_api.create_namespaced_job.return_value = new_job
     
-    # Retry the job
-    result = await kubernetes_runner.retry_job("test-project", "test-trajectory")
-    
-    # Verify the job was deleted and recreated
-    assert result is True
-    batch_api.delete_namespaced_job.assert_called_once()
-    batch_api.create_namespaced_job.assert_called_once()
+    # Mock _get_image_name method to avoid IndexError
+    with patch.object(kubernetes_runner, "_get_image_name", return_value="test-image"):
+        # Retry the job
+        result = await kubernetes_runner.retry_job("test-project", "test-trajectory")
+        
+        # Verify the job was deleted and recreated
+        assert result is True
+        batch_api.delete_namespaced_job.assert_called_once()
+        batch_api.create_namespaced_job.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -343,6 +375,17 @@ async def test_get_runner_info(kubernetes_runner, mock_k8s_api):
 async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
     """Test getting job status summary."""
     batch_api = mock_k8s_api["batch_api"]
+    core_api = mock_k8s_api["core_api"]
+    
+    # Create running pod (for job status detection)
+    pod_list = MagicMock()
+    pod = MagicMock()
+    pod.status.phase = "Running"
+    container_status = MagicMock()
+    container_status.ready = True
+    pod.status.container_statuses = [container_status]
+    pod_list.items = [pod]
+    core_api.list_namespaced_pod.return_value = pod_list
     
     # Create jobs in various states
     job_list = MagicMock()
@@ -351,6 +394,14 @@ async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
         create_mock_job("run-test-project-completed", active=0, succeeded=1, failed=0),
         create_mock_job("run-test-project-failed", active=0, succeeded=0, failed=1),
     ]
+    
+    # Add annotations to each job
+    for job in job_list.items:
+        job.metadata.annotations = {
+            "moatless.ai/project-id": "test-project",
+            "moatless.ai/trajectory-id": job.metadata.name.split("-")[-1]
+        }
+    
     batch_api.list_namespaced_job.return_value = job_list
     
     # Get summary

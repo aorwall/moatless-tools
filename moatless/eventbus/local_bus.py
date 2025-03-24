@@ -74,3 +74,17 @@ class LocalEventBus(BaseEventBus):
             await callback(event)
         except Exception as e:
             logger.exception(f"Error in async subscriber {callback.__name__}: {e}")
+
+    async def close(self):
+        """
+        Close any connections and clean up resources.
+        For the local event bus, this just clears subscribers and resets state.
+        """
+        logger.debug("Closing LocalEventBus")
+        self.subscribers.clear()
+        self._initialized = False
+        logger.debug("LocalEventBus closed")
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """Support using the event bus as an async context manager."""
+        await self.close()

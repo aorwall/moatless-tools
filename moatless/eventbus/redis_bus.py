@@ -40,6 +40,7 @@ class RedisEventBus(BaseEventBus):
         self._listener_task: Optional[asyncio.Task] = None
         self._redis_available = False
         self._initialized = False
+        self._closing = False
 
         logger.info(f"Initialized RedisEventBus with Redis URL: {self._redis_url}")
 
@@ -55,7 +56,7 @@ class RedisEventBus(BaseEventBus):
 
     async def initialize(self) -> None:
         """Initialize the event bus, including Redis connections."""
-        if self._initialized:
+        if self._initialized or self._closing:
             return
 
         await self._check_redis_available()
@@ -113,7 +114,7 @@ class RedisEventBus(BaseEventBus):
 
     async def _start_redis_listener(self) -> None:
         """Start the Redis pub/sub listener task."""
-        if self._redis_available and not self._listener_task:
+        if self._redis_available and not self._listener_task and not self._closing:
             self._listener_task = asyncio.create_task(self._handle_redis_messages())
             logger.info("Started Redis pub/sub listener")
 
@@ -210,8 +211,8 @@ class RedisEventBus(BaseEventBus):
         try:
             event_data = event.model_dump(mode="json")
             serialized = json.dumps(event_data)
-            # redis.asyncio.Redis.rpush is already a coroutine function
-            await self._redis.rpush(key, serialized)
+            # Redis rpush is a coroutine and should be awaited
+            result = await self._redis.rpush(key, serialized)
             logger.debug(f"Saved event to Redis: {event.event_type}")
         except Exception as e:
             logger.exception(f"Error saving event to Redis: {e}")
@@ -234,7 +235,7 @@ class RedisEventBus(BaseEventBus):
         key = f"moatless:events:{project_id}:{trajectory_id}"
 
         try:
-            # redis.asyncio.Redis.lrange is already a coroutine function
+            # Redis lrange is a coroutine and should be awaited
             event_strings = await self._redis.lrange(key, 0, -1)
             events = []
 
@@ -269,6 +270,46 @@ class RedisEventBus(BaseEventBus):
 
         # If no events in Redis or Redis is unavailable, fall back to storage
         if not events and self._storage:
-            events = await super().read_events(project_id, trajectory_id)
+            storage_events = await super().read_events(project_id, trajectory_id)
+            # Convert the dict events to BaseEvent objects
+            if storage_events:
+                events = [BaseEvent.model_validate(event_dict) for event_dict in storage_events]
 
         return events
+
+    async def close(self) -> None:
+        """
+        Close Redis connections and clean up resources.
+        This prevents "Unclosed client session" and "Task was destroyed but it is pending" errors.
+        """
+        self._closing = True
+        logger.info("Closing Redis event bus connections")
+
+        # Stop the Redis listener task first
+        await self._stop_redis_listener()
+
+        # Clean up Redis pubsub connection
+        if self._pubsub:
+            try:
+                await self._pubsub.close()
+                logger.debug("Closed Redis pubsub connection")
+            except Exception as e:
+                logger.exception(f"Error closing Redis pubsub connection: {e}")
+
+        # Close the Redis client connection
+        if self._redis:
+            try:
+                await self._redis.close()
+                logger.debug("Closed Redis client connection")
+            except Exception as e:
+                logger.exception(f"Error closing Redis client: {e}")
+
+        # Clear subscribers
+        self.subscribers.clear()
+
+        self._initialized = False
+        logger.info("Redis event bus connections closed")
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        """Support using the event bus as an async context manager."""
+        await self.close()

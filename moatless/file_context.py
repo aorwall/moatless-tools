@@ -1758,7 +1758,7 @@ class FileContext(BaseModel):
         return len(span_ids)
 
     def add_test_file(self, file_path: str, test_results: list[TestResult]) -> TestFile:
-        if file_path in self._test_files.key():
+        if file_path in self._test_files.keys():
             self._test_files[file_path].test_results = test_results
         else:
             self._test_files[file_path] = TestFile(file_path=file_path, test_results=test_results)
@@ -1772,10 +1772,8 @@ class FileContext(BaseModel):
     def get_test_summary(self) -> str:
         return TestFile.get_test_summary(self._test_files.values())
 
-    def get_test_failure_details(
-        self, max_tokens: int = 8000, max_chars_per_test: int = 2000, test_files: Optional[list[str]] = None
-    ) -> str:
-        return TestFile.get_test_failure_details(self._test_files.values(), max_tokens, max_chars_per_test, test_files)
+    def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
+        return TestFile.get_test_failure_details(self._test_files.values(), max_tokens, max_chars_per_test)
 
     def get_test_status(self):
         return TestFile.get_test_status(self._test_files.values())

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 
-async def run_instance_async(project_id: str, trajectory_id: str):
+async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: int | None = None):
     from moatless.settings import get_storage, get_event_bus
 
     storage = await get_storage()
@@ -189,8 +189,9 @@ async def _emit_event(
     )
 
     try:
-        from moatless.settings import event_bus
+        from moatless.settings import get_event_bus
 
+        event_bus = await get_event_bus()
         await event_bus.publish(event)
     except Exception as e:
         logger.error(f"Failed to publish event {event_type}: {e}")
@@ -204,4 +205,4 @@ if __name__ == "__main__":
     if not trajectory_id:
         raise ValueError("TRAJECTORY_ID is not set")
 
-    asyncio.run(run_instance_async(project_id, trajectory_id))
+    asyncio.run(run_swebench_instance(project_id, trajectory_id))

@@ -132,6 +132,7 @@ class AgenticFlow(MoatlessComponent):
         self,
         message: str | None = None,
         workspace: Workspace | None = None,
+        node_id: int | None = None,
     ) -> Node:
         """Run the system with optional root node."""
         if not self.root:
@@ -155,7 +156,7 @@ class AgenticFlow(MoatlessComponent):
                 current_project_id.set(self.project_id)
                 await self._initialize_run_state()
                 await self._emit_event(FlowStartedEvent())
-                node, finish_reason = await self._run(message)
+                node, finish_reason = await self._run(message, node_id)
 
                 # Complete attempt successfully
                 self._status.complete_current_attempt("completed")
@@ -179,7 +180,7 @@ class AgenticFlow(MoatlessComponent):
                 await self._save_status()
 
     @abstractmethod
-    async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
+    async def _run(self, message: str | None = None, node_id: int | None = None) -> tuple[Node, str | None]:
         raise NotImplementedError("Subclass must implement _run method")
 
     def reset_node(self, node_id: int):
@@ -375,7 +376,7 @@ class AgenticFlow(MoatlessComponent):
         storage = await get_storage()
         traj_dict = await storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
         flow_dict = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)
-        return cls.from_dicts(flow_dict, traj_dict, storage)
+        return cls.from_dicts(flow_dict, traj_dict)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""

@@ -116,6 +116,30 @@ class JobsStatusSummary(BaseModel):
     )
 
 
+class JobDetailSection(BaseModel):
+    """A section of job details to display in the UI."""
+
+    name: str
+    display_name: str
+    data: dict[str, Any] = Field(default_factory=dict)
+    items: Optional[list[dict[str, Any]]] = None
+
+
+class JobDetails(BaseModel):
+    """Detailed information about a job."""
+
+    id: str
+    status: JobStatus
+    project_id: Optional[str] = None
+    trajectory_id: Optional[str] = None
+    enqueued_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    sections: list[JobDetailSection] = Field(default_factory=list)
+    error: Optional[str] = None
+    raw_data: Optional[dict[str, Any]] = None
+
+
 class BaseRunner(ABC):
     _instance = None
 
@@ -147,7 +171,9 @@ class BaseRunner(ABC):
         cls._instance = None
 
     @abstractmethod
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str) -> bool:
+    async def start_job(
+        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
+    ) -> bool:
         """Start a job for the given project and trajectory."""
         pass
 
@@ -167,11 +193,6 @@ class BaseRunner(ABC):
         pass
 
     @abstractmethod
-    async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
-        """Retry a job for the given project and trajectory."""
-        pass
-
-    @abstractmethod
     async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         """Get the status of a job for the given project and trajectory."""
         pass
@@ -184,6 +205,19 @@ class BaseRunner(ABC):
     @abstractmethod
     async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
         """Get a summary of job statuses for the given project."""
+        pass
+
+    @abstractmethod
+    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
+        """Get detailed information about a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            JobDetails object containing detailed information about the job if available
+        """
         pass
 
     async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:

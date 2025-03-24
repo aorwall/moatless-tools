@@ -94,7 +94,7 @@ class SearchTree(AgenticFlow):
         )
 
     @tracer.start_as_current_span("SearchTree._run")
-    async def _run(self, message: str | None = None) -> tuple[Node, str]:
+    async def _run(self, message: str | None = None, node_id: int | None = None) -> tuple[Node | None, str | None]:
         """Run the search tree algorithm with the given node."""
         if not self.root:
             raise ValueError("No node provided to run")
@@ -107,9 +107,15 @@ class SearchTree(AgenticFlow):
                 f"Restarting search tree with {len(self.root.get_all_nodes())} nodes",
             )
 
-        node = self.root
+        if node_id:
+            node = self.get_node_by_id(node_id)
+            if not node:
+                raise ValueError(f"Node with ID {node_id} not found")
+        else:
+            node = self.root
+
         finish_reason = None
-        while not (finish_reason := self.is_finished()):
+        while node_id or not (finish_reason := self.is_finished()):
             total_cost = self.total_usage().completion_cost
             self.log(
                 logger.info,
@@ -141,15 +147,19 @@ class SearchTree(AgenticFlow):
                 self.log(logger.info, "Search complete: no more nodes to expand.")
                 break
 
+            if node_id:
+                self.log(logger.info, f"Node{node.node_id} finished. Returning.")
+                break
+
         if not len(self.get_finished_nodes()):
             self.log(
                 logger.warning,
-                f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created.",
+                f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
             )
         else:
             self.log(
                 logger.info,
-                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created.",
+                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
             )
 
         if finish_reason:
@@ -158,8 +168,13 @@ class SearchTree(AgenticFlow):
         return self.get_best_trajectory(), finish_reason
 
     @tracer.start_as_current_span("SearchTree._select")
-    async def _select(self, node: Node) -> Optional[Node]:
+    async def _select(self, node: Node) -> Node | None:
         """Select a node for expansion using the UCT algorithm."""
+
+        if not node.is_executed():
+            self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping selection.")
+            return node
+
         root = node.get_root()
         expandable_nodes = root.get_expandable_descendants()
 
@@ -184,8 +199,8 @@ class SearchTree(AgenticFlow):
     async def _expand(self, node: Node) -> Node | None:
         """Expand the node and return a child node."""
         # Check if any action step was not executed, if so return the node
-        if node.action_steps and node.has_unexecuted_actions():
-            self.log(logger.info, f"Returning Node{node.node_id} with unexecuted actions")
+        if not node.is_executed():
+            self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping expansion.")
             return node
 
         child_node = await self.expander.expand(node)
@@ -325,12 +340,10 @@ class SearchTree(AgenticFlow):
         # Check max cost
         total_cost = self.total_usage().completion_cost
         if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
-            logger.info(f"Search finished: Reached max cost {self.max_cost}")
             return "max_cost"
 
         # Check max iterations
         if len(self.root.get_all_nodes()) >= self.max_iterations:
-            logger.info(f"Search finished: Reached max iterations {self.max_iterations}")
             return "max_iterations"
 
         finished_nodes = self.get_finished_nodes()
@@ -340,7 +353,6 @@ class SearchTree(AgenticFlow):
 
         # Check max finished nodes
         if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
-            logger.info(f"Search finished: Reached max finished nodes {self.max_finished_nodes}")
             return "max_finished_nodes"
 
         # Check reward threshold
@@ -348,13 +360,11 @@ class SearchTree(AgenticFlow):
             node.reward and node.reward.value >= self.reward_threshold for node in finished_nodes
         ):
             if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
-                logger.info(f"Search finished: Found solution meeting reward threshold {self.reward_threshold}")
                 return "reward_threshold"
 
         # Check if there are no more expandable nodes
         expandable_nodes = self.root.get_expandable_descendants()
         if not expandable_nodes:
-            logger.info("Search finished: No more expandable nodes")
             return "no_expandable_nodes"
 
         return None

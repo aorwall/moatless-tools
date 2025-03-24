@@ -384,10 +384,12 @@ class FileRepository(Repository):
         full_path = self.get_full_path(directory_path)
 
         if not os.path.exists(full_path):
-            return {"files": [], "directories": []}
+            logger.warning(f"Directory {full_path} does not exist")
+            raise ValueError(f"Directory {directory_path} does not exist")
 
         if not os.path.isdir(full_path):
-            return {"files": [], "directories": []}
+            logger.warning(f"Directory {full_path} is not a directory")
+            raise ValueError(f"Directory {directory_path} is not a directory")
 
         files = []
         directories = []

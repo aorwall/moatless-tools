@@ -25,9 +25,9 @@ def run_evaluation_instance(project_id: str, trajectory_id: str) -> None:
     try:
         # Dynamically import the run_instance function
         # This avoids circular imports that can occur when importing at module level
-        from moatless.evaluation.run_instance import run_instance_async
+        from moatless.evaluation.run_instance import run_swebench_instance
 
-        asyncio.run(run_instance_async(project_id, trajectory_id))
+        asyncio.run(run_swebench_instance(project_id, trajectory_id))
 
     except ImportError as e:
         logger.error(f"Failed to import run_instance: {e}")

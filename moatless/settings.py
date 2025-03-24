@@ -4,8 +4,10 @@ import logging
 
 from dotenv import load_dotenv
 
+from moatless.eventbus.base import BaseEventBus
 from moatless.eventbus.local_bus import LocalEventBus
 from moatless.runner.asyncio_runner import AsyncioRunner
+from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 
 load_dotenv()
@@ -114,7 +116,7 @@ async def get_flow_manager():
     return flow_manager
 
 
-async def get_event_bus():
+async def get_event_bus() -> BaseEventBus:
     """Get the event bus instance."""
     global _event_bus
 
@@ -125,17 +127,17 @@ async def get_event_bus():
             try:
                 from moatless.eventbus.redis_bus import RedisEventBus
 
-                event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
+                _event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
             except Exception as e:
                 logger.error(f"Failed to initialize event bus and runner: {e}")
                 raise e
         else:
             logger.info("Use Local Event Bus")
-            event_bus = LocalEventBus(storage=storage)
+            _event_bus = LocalEventBus(storage=storage)
 
-    await event_bus.initialize()
+    await _event_bus.initialize()
 
-    return event_bus
+    return _event_bus
 
 
 async def get_runner():
@@ -147,41 +149,38 @@ async def get_runner():
         if runner_type == "kubernetes":
             from moatless.runner.kubernetes_runner import KubernetesRunner
 
-            runner = KubernetesRunner()
+            _runner = KubernetesRunner()
+        elif runner_type == "docker":
+            from moatless.runner.docker_runner import DockerRunner
+
+            _runner = DockerRunner()
         elif runner_type == "rq":
             from moatless.runner.rq import RQRunner
 
-            runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
+            _runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
         else:
             logger.info("Use Local Runner")
-            runner = AsyncioRunner()
+            _runner = AsyncioRunner()
 
-    return runner
+    return _runner
 
 
-async def get_storage():
+async def get_storage() -> BaseStorage:
     """Get the storage instance."""
     global _storage
     if _storage is None:
-        logger.info(f"Using {os.environ.get('MOATLESS_STORAGE')} storage")
-
         if os.environ.get("MOATLESS_STORAGE") == "s3":
             from moatless.storage.s3_storage import S3Storage
 
-            storage = S3Storage()
+            _storage = S3Storage()
         elif os.environ.get("MOATLESS_STORAGE") == "azure":
             from moatless.storage.azure_storage import AzureBlobStorage
 
-            logger.info(
-                f"Using Azure storage with connection string: {os.environ.get('AZURE_STORAGE_CONNECTION_STRING')}"
-            )
-
-            storage = AzureBlobStorage()
-            logger.info(f"Storage: {storage}")
+            _storage = AzureBlobStorage()
         else:
-            storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
+            _storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
 
-    return storage
+    return _storage
 
 
 async def get_evaluation_manager():

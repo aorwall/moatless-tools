@@ -57,7 +57,7 @@ class AsyncioRunner(BaseRunner):
         # Create metadata for the job
         self.job_metadata[job_id] = {
             "id": job_id,
-            "status": JobStatus.QUEUED,
+            "status": JobStatus.PENDING,
             "enqueued_at": datetime.now(),
             "started_at": None,
             "ended_at": None,

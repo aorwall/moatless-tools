@@ -131,11 +131,11 @@ class RunTests(Action):
 
         response_msg = ""
 
-        failure_details = TestFile.get_test_failure_details(test_file_objects, file_paths=args.test_files)
+        failure_details = TestFile.get_test_failure_details(test_file_objects)
         if failure_details:
             response_msg += f"\n{failure_details}"
 
-        summary = f"\n{TestFile.get_test_summary(test_file_objects, file_paths=args.test_files)}"
+        summary = f"\n{TestFile.get_test_summary(test_file_objects)}"
         response_msg += summary
 
         artifact_changes = []

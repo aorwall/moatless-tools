@@ -37,7 +37,7 @@ def local_event_bus(file_storage):
     # First, reset the singleton to ensure we're starting fresh
     BaseEventBus.reset_instance()
     # Create and return the new instance as the singleton
-    bus = BaseEventBus.get_instance(eventbus_impl=LocalEventBus)
+    bus = BaseEventBus.get_instance(eventbus_impl=LocalEventBus, storage=file_storage)
     return bus
 
 
@@ -88,7 +88,7 @@ async def test_publish_and_read_events(local_event_bus, file_storage):
     assert events[0].data["key1"] == "value1"
     
     # Verify the events were saved to storage
-    key = "test-project/test-trajectory/events"
+    key = "projects/test-project/trajs/test-trajectory/events.jsonl"
     assert await file_storage.exists(key)
     
     # Verify the contents via read_lines

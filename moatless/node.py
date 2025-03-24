@@ -34,6 +34,11 @@ class ActionStep(BaseModel):
 
         return data
 
+    def reset(self):
+        """Reset the action step state."""
+        self.observation = None
+        self.completion = None
+
     @classmethod
     def model_validate(cls, obj: Any, **kwargs) -> "ActionStep":
         if isinstance(obj, dict):
@@ -155,7 +160,7 @@ class Node(BaseModel):
 
     def is_fully_expanded(self) -> bool:
         """Check if all possible actions have been tried and executed from this node."""
-        return self.expanded_count() >= (self.max_expansions or 1)
+        return self.expanded_count() >= (self.max_expansions if self.max_expansions is not None else 1)
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
@@ -328,11 +333,16 @@ class Node(BaseModel):
 
         return True
 
-    def reset(self):
+    def reset(self, rebuild_action_steps: bool = True):
         """Reset the node state to be able to execute it again."""
 
-        self.action_steps = []
-        self.assistant_message = None
+        if rebuild_action_steps:
+            self.action_steps = []
+            self.assistant_message = None
+        else:
+            for action_step in self.action_steps:
+                action_step.reset()
+
         self.visits = 0
         self.value = 0.0
         self.terminal = False
@@ -341,6 +351,18 @@ class Node(BaseModel):
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
         self.children = []
+
+    def clone(self) -> "Node":
+        """Clone the node state."""
+        new_node = self.model_copy(deep=True, update={"children": []})
+        if self.parent:
+            self.parent.children.append(new_node)
+        else:
+            raise ValueError("Cannot clone root node")
+
+        node_id = self.get_all_nodes()[-1].node_id
+        new_node.node_id = node_id + 1
+        return new_node
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """

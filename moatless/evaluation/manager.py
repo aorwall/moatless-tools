@@ -6,6 +6,7 @@ from typing import Optional
 
 from opentelemetry import trace
 
+from moatless.evaluation.run_instance import run_swebench_instance
 from moatless.evaluation.schema import (
     Evaluation,
     EvaluationInstance,
@@ -139,7 +140,7 @@ class EvaluationManager:
             if await self.runner.start_job(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
-                job_func="moatless.runner.job_wrappers.run_evaluation_instance",
+                job_func=run_swebench_instance,
             ):
                 started_instances += 1
                 instance.status = InstanceStatus.PENDING
@@ -175,7 +176,7 @@ class EvaluationManager:
         evaluation_is_completed = True
 
         for instance in evaluation.instances:
-            if instance.status not in [InstanceStatus.EVALUATED, InstanceStatus.ERROR]:
+            if instance.resolved is None:
                 evaluation_is_completed = False
 
                 job_status = await self.runner.get_job_status(
@@ -184,6 +185,9 @@ class EvaluationManager:
 
                 if job_status in [JobStatus.RUNNING, JobStatus.INITIALIZING]:
                     evaluation_is_running = True
+
+                if job_status != JobStatus.NOT_FOUND:
+                    instance.job_status = job_status
 
         if evaluation_is_completed:
             evaluation.status = EvaluationStatus.COMPLETED
@@ -261,16 +265,27 @@ class EvaluationManager:
                 trajectory_id=instance.instance_id,
             )
 
-            # Set started_at if not already set
-            if not instance.started_at:
-                event = next(
-                    (e for e in events if e.scope == "flow" and e.event_type == "started"),
-                    None,
-                )
-                if event:
-                    instance.started_at = event.timestamp
+            event = next(
+                (e for e in events if e.scope == "flow" and e.event_type == "started"),
+                None,
+            )
+            if event:
+                instance.started_at = event.timestamp
 
-            if not instance.completed_at and not instance.evaluated_at:
+            leaf_nodes = flow.root.get_leaf_nodes()
+            node = leaf_nodes[0]
+            if node.error:
+                instance.status = InstanceStatus.ERROR
+                instance.error = node.error
+                return instance
+
+            if not flow.is_finished():
+                instance.completed_at = None
+                instance.evaluated_at = None
+                instance.status = InstanceStatus.RUNNING
+                return instance
+
+            if not instance.completed_at:
                 event = next(
                     (e for e in events if e.scope == "flow" and e.event_type == "completed"),
                     None,
@@ -282,8 +297,6 @@ class EvaluationManager:
                         logger.info(f"Synced instance {instance.instance_id} completed at {instance.completed_at}")
 
                 # TODO: Handle trajectories with multiple leaf nodes
-                leaf_nodes = flow.root.get_leaf_nodes()
-                node = leaf_nodes[0]
                 if node.terminal:
                     if node.reward:
                         instance.reward = node.reward.value
@@ -344,7 +357,7 @@ class EvaluationManager:
                     self._set_evaluation_completed(evaluation)
             return instance
         except Exception as e:
-            logger.error(f"Error processing trajectory results for instance {instance.instance_id}: {e}")
+            logger.exception(f"Error processing trajectory results for instance {instance.instance_id}")
             return instance
 
     async def cancel_evaluation(self, evaluation_name: str):
@@ -405,7 +418,7 @@ class EvaluationManager:
         await self.runner.start_job(
             project_id=evaluation_name,
             trajectory_id=instance_id,
-            job_func="moatless.runner.job_wrappers.run_evaluation_instance",
+            job_func=run_swebench_instance,
         )
 
         await self._save_evaluation(evaluation)
@@ -453,6 +466,10 @@ class EvaluationManager:
                 json.loads(evaluation.model_dump_json()),
                 project_id=evaluation.evaluation_name,
             )
+
+            # Mark the evaluation as created in the storage system
+            if hasattr(self.storage, "_created_evaluations"):
+                self.storage._created_evaluations.add(evaluation.evaluation_name)
 
             # Also update the evaluation summary for fast lookups
             await self._update_evaluation_summary(evaluation)
@@ -595,7 +612,7 @@ class EvaluationManager:
         if await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
-            job_func="moatless.runner.job_wrappers.run_evaluation_instance",
+            job_func=run_swebench_instance,
         ):
             logger.info(f"Started instance {instance_id} for evaluation {evaluation_name}")
 

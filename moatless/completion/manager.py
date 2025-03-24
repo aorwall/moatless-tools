@@ -59,8 +59,6 @@ class ModelConfigManager:
     def __init__(self, storage: BaseStorage):
         """Initialize the model config manager."""
         self._base_configs = self._load_base_configs()
-        if not storage:
-            raise ValueError("Storage is required")
         self._storage = storage
         self._user_configs: dict[str, BaseCompletionModel] = {}
 
