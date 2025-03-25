@@ -8,13 +8,13 @@ data to files on disk.
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Union, Optional, List, Dict, Any, cast, TypeVar, Sequence, overload
-from datetime import datetime
 
 import aiofiles
-from opentelemetry import trace
 from moatless.storage.base import BaseStorage
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 

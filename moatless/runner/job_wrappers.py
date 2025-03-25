@@ -4,8 +4,8 @@ Job wrapper functions for RQ.
 This module contains wrapper functions for RQ jobs that avoid circular imports.
 """
 
-import logging
 import asyncio
+import logging
 
 logger = logging.getLogger(__name__)
 

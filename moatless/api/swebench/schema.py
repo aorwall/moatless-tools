@@ -2,13 +2,12 @@ from datetime import datetime
 from token import OP
 from typing import Optional
 
-from pydantic import BaseModel, Field
-
 from moatless.completion.manager import BaseCompletionModel
 from moatless.completion.stats import Usage
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationStatusSummary
 from moatless.flow.schema import FlowConfig
 from moatless.runner.runner import JobInfo, RunnerInfo
+from pydantic import BaseModel, Field
 
 
 class SWEBenchInstanceDTO(BaseModel):

@@ -5,7 +5,6 @@ import logging
 from typing import Dict, Set
 
 from fastapi import WebSocket, WebSocketDisconnect
-
 from moatless.events import BaseEvent
 
 logger = logging.getLogger(__name__)

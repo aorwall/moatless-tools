@@ -1,15 +1,16 @@
 """Main API module for Moatless."""
 
+import asyncio
 import importlib.resources as pkg_resources
 import json
 import logging
 import os
-from pathlib import Path
 import secrets
-from typing import Any, Optional
-import asyncio
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
 
+import moatless.settings as settings
 from dotenv import load_dotenv
 from fastapi import (
     FastAPI,
@@ -21,12 +22,9 @@ from fastapi import (
     Depends,
     Response,
 )
-
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
 from moatless.api.agents.api import router as agent_router
 from moatless.api.artifacts.api import router as artifact_router
 from moatless.api.loop.api import router as loop_router
@@ -36,18 +34,17 @@ from moatless.api.swebench.api import router as swebench_router
 from moatless.api.swebench.schema import RunnerResponseDTO, RunnerStatsDTO
 from moatless.api.trajectories.api import router as trajectory_router
 from moatless.api.trajectory.schema import TrajectoryDTO
+from moatless.api.websocket import handle_event, websocket_endpoint
+from moatless.artifacts.artifact import ArtifactListItem
 from moatless.flow.trajectory_utils import (
     load_trajectory_from_file,
 )
-from moatless.api.websocket import handle_event, websocket_endpoint
-from moatless.artifacts.artifact import ArtifactListItem
 from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus, JobDetails
+from moatless.settings import get_runner
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
-from moatless.settings import get_runner
-
-import moatless.settings as settings
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 # Filter warnings from external dependencies
 filter_external_warnings()

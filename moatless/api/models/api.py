@@ -3,9 +3,9 @@
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends
-
-from moatless.completion.manager import ModelTestResult, ModelConfigManager, BaseCompletionModel
 from moatless.api.dependencies import get_model_manager
+from moatless.completion.manager import ModelTestResult, ModelConfigManager, BaseCompletionModel
+
 from .schema import ModelsResponseDTO
 
 logger = logging.getLogger(__name__)

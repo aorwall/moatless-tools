@@ -7,17 +7,16 @@ import string
 from datetime import datetime
 from typing import List
 
-from opentelemetry import trace
-from testbeds.schema import EvaluationResult, TraceItem, TestbedSummary
-from testbeds.sdk import TestbedSDK
-from testbeds.sdk.exceptions import TestbedError
-
 from moatless.exceptions import RuntimeError
 from moatless.repository import GitRepository
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.testing.schema import TestResult, TestStatus
 from moatless.schema import RankedFileSpan
+from moatless.testing.schema import TestResult, TestStatus
+from opentelemetry import trace
+from testbeds.schema import EvaluationResult, TraceItem, TestbedSummary
+from testbeds.sdk import TestbedSDK
+from testbeds.sdk.exceptions import TestbedError
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

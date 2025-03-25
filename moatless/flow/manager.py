@@ -3,16 +3,13 @@
 import json
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
-import uuid
-
-from regex import F
 
 from moatless.actions.action import CompletionModelMixin
 from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.flow.trajectory_utils import convert_nodes
 from moatless.benchmark.swebench.utils import (
     create_index_async,
     create_repository_async,
@@ -38,15 +35,16 @@ from moatless.flow.schema import (
     StartTrajectoryRequest,
 )
 from moatless.flow.trajectory_tree import create_node_tree
+from moatless.flow.trajectory_utils import convert_nodes
 from moatless.node import Node
 from moatless.repository.git import GitRepository
-from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.runner.kubernetes_runner import KubernetesRunner
+from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.runtime.testbed import TestbedEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
 from moatless.workspace import Workspace
-
+from regex import F
 
 logger = logging.getLogger(__name__)
 

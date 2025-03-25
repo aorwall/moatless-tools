@@ -3,7 +3,6 @@ import logging
 from typing import Any, List
 
 from fastapi import HTTPException
-
 from moatless.actions.think import ThinkArgs
 from moatless.api.trajectory.schema import (
     ActionDTO,

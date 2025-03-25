@@ -3,7 +3,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-
 from moatless.actions.action import Action
 from moatless.agent.agent import ActionAgent
 from moatless.agent.manager import AgentConfigManager

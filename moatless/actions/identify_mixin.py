@@ -1,17 +1,16 @@
 import logging
 from typing import Optional
 
-from pydantic import BaseModel, Field
-
 from moatless.actions.action import CompletionModelMixin
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
-from moatless.completion.stats import CompletionInvocation
 from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
 )
+from moatless.completion.stats import CompletionInvocation
 from moatless.file_context import FileContext
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

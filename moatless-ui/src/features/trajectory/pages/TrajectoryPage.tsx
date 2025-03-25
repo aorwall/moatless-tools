@@ -26,6 +26,34 @@ export function TrajectoryPage() {
     isLoading,
   } = useRealtimeTrajectory(projectId, trajectoryId);
 
+  const handleSuccess = () => {
+    queryClient.invalidateQueries({
+      queryKey: trajectoryKeys.detail(projectId, trajectoryId),
+    });
+  };
+
+  const startTrajectory = useStartTrajectory({
+    onSuccess: handleSuccess
+  });
+
+  const retryTrajectory = useRetryTrajectory({
+    onSuccess: handleSuccess
+  });
+
+  const handleStart = async () => {
+    await startTrajectory.mutateAsync({
+      projectId,
+      trajectoryId,
+    });
+  };
+
+  const handleRetry = async () => {
+    await retryTrajectory.mutateAsync({
+      projectId,
+      trajectoryId,
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="container mx-auto p-6">
@@ -55,34 +83,6 @@ export function TrajectoryPage() {
       </div>
     );
   }
-
-  const handleSuccess = () => {
-    queryClient.invalidateQueries({
-      queryKey: trajectoryKeys.detail(projectId, trajectoryId),
-    });
-  };
-
-  const startTrajectory = useStartTrajectory({
-    onSuccess: handleSuccess
-  });
-
-  const retryTrajectory = useRetryTrajectory({
-    onSuccess: handleSuccess
-  });
-
-  const handleStart = async () => {
-    await startTrajectory.mutateAsync({
-      projectId,
-      trajectoryId,
-    });
-  };
-
-  const handleRetry = async () => {
-    await retryTrajectory.mutateAsync({
-      projectId,
-      trajectoryId,
-    });
-  };
 
   return (
     <div className="h-full w-full">

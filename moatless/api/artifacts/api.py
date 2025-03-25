@@ -2,7 +2,6 @@ import logging
 import uuid
 
 from fastapi import APIRouter, HTTPException
-
 from moatless.artifacts.artifact import ArtifactListItem, ArtifactResponse
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace

@@ -3,17 +3,16 @@
 import asyncio
 import logging
 from typing import Optional
-from typing_extensions import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-
+from moatless.api.dependencies import get_flow_manager, get_model_manager, get_evaluation_manager
 from moatless.completion.manager import ModelConfigManager
 from moatless.evaluation.manager import EvaluationManager
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationSummary
 from moatless.evaluation.utils import get_moatless_dataset_splits, get_moatless_instance, get_moatless_instances
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import TrajectoryResponseDTO
-from moatless.api.dependencies import get_flow_manager, get_model_manager, get_evaluation_manager
+from typing_extensions import Annotated
 
 from .schema import (
     CancelJobsResponseDTO,

@@ -1,8 +1,7 @@
 from typing import Optional
 
-from pydantic import BaseModel
-
 from moatless.flow.schema import FlowConfig
+from pydantic import BaseModel
 
 
 class FlowConfigUpdateDTO(BaseModel):

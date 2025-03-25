@@ -1,10 +1,8 @@
 import logging
-from typing import List, Optional, Dict, Any, Tuple
 import os
-import time
 import re
-
-from pydantic import ConfigDict, Field, PrivateAttr
+import time
+from typing import List, Optional, Dict, Any, Tuple
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -15,10 +13,11 @@ from moatless.actions.schema import (
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
+from moatless.testing.schema import TestFile
 from moatless.testing.schema import TestResult, TestStatus
 from moatless.testing.test_output_parser import TestOutputParser
-from moatless.testing.schema import TestFile
 from moatless.workspace import Workspace
+from pydantic import ConfigDict, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 

@@ -2,9 +2,6 @@ import logging
 from collections.abc import Callable
 from typing import Any, Dict, Optional
 
-from opentelemetry import trace
-from pydantic import ConfigDict, Field, model_validator
-
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.context_data import current_node_id
@@ -24,6 +21,8 @@ from moatless.flow.events import (
 from moatless.node import Node, generate_ascii_tree
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
+from opentelemetry import trace
+from pydantic import ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.search_tree")

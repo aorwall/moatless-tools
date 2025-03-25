@@ -8,12 +8,13 @@ export enum JobStatus {
   COMPLETED = "completed",
   FAILED = "failed",
   CANCELED = "canceled",
+  NOT_FOUND = "not_found"
 }
 
 export enum RunnerStatus {
   RUNNING = "running",
   STOPPED = "stopped",
-  ERROR = "error",
+  ERROR = "error"
 }
 
 // Schema definitions
@@ -54,5 +55,53 @@ export const RunnerResponseSchema = z.object({
 // Type definitions
 export type JobInfo = z.infer<typeof JobInfoSchema>;
 export type RunnerInfo = z.infer<typeof RunnerInfoSchema>;
-export type JobsStatusSummary = z.infer<typeof JobsStatusSummarySchema>;
 export type RunnerResponse = z.infer<typeof RunnerResponseSchema>;
+
+export type RunnerStats = {
+  runner_type: string;
+  status: string;
+  active_workers: number;
+  total_workers: number;
+  pending_jobs: number;
+  initializing_jobs: number;
+  running_jobs: number;
+  total_jobs: number;
+};
+
+export type JobsStatusSummary = {
+  project_id: string;
+  total_jobs: number;
+  pending_jobs: number;
+  initializing_jobs: number;
+  running_jobs: number;
+  completed_jobs: number;
+  failed_jobs: number;
+  canceled_jobs: number;
+  job_ids: {
+    pending: string[];
+    initializing: string[];
+    running: string[];
+    completed: string[];
+    failed: string[];
+    canceled: string[];
+  };
+};
+
+export interface JobDetailSection {
+  name: string;
+  display_name: string;
+  data?: Record<string, any>;
+  items?: Record<string, any>[];
+}
+
+export interface JobDetails {
+  id: string;
+  status: JobStatus;
+  project_id?: string;
+  trajectory_id?: string;
+  enqueued_at?: string;
+  started_at?: string;
+  ended_at?: string;
+  sections: JobDetailSection[];
+  error?: string;
+}

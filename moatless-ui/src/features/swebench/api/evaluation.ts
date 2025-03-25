@@ -26,6 +26,7 @@ export interface EvaluationInstance {
   started_at?: string;
   completed_at?: string;
   evaluated_at?: string;
+  iterations?: number;
   error_at?: string;
   resolved?: boolean;
   resolved_by?: number;
@@ -115,7 +116,7 @@ export const evaluationApi = {
     apiRequest<Evaluation>(`/swebench/evaluations/${evaluationId}`),
 
   listEvaluations: () =>
-    apiRequest<EvaluationListResponse>("/swebench/evaluations"),
+    apiRequest<EvaluationListItem[]>("/swebench/evaluations"),
 
   createEvaluation: (data: EvaluationRequest) =>
     apiRequest<Evaluation>(`/swebench/evaluations`, {

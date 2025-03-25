@@ -252,24 +252,24 @@ export function EvaluationInstancesTable({
         // Prompt tokens
         (advancedFilters.minPromptTokens === null ||
           (instance.usage?.prompt_tokens || 0) >=
-            advancedFilters.minPromptTokens) &&
+          advancedFilters.minPromptTokens) &&
         (advancedFilters.maxPromptTokens === null ||
           (instance.usage?.prompt_tokens || 0) <=
-            advancedFilters.maxPromptTokens) &&
+          advancedFilters.maxPromptTokens) &&
         // Completion tokens
         (advancedFilters.minCompletionTokens === null ||
           (instance.usage?.completion_tokens || 0) >=
-            advancedFilters.minCompletionTokens) &&
+          advancedFilters.minCompletionTokens) &&
         (advancedFilters.maxCompletionTokens === null ||
           (instance.usage?.completion_tokens || 0) <=
-            advancedFilters.maxCompletionTokens) &&
+          advancedFilters.maxCompletionTokens) &&
         // Cache tokens
         (advancedFilters.minCacheTokens === null ||
           (instance.usage?.cache_read_tokens || 0) >=
-            advancedFilters.minCacheTokens) &&
+          advancedFilters.minCacheTokens) &&
         (advancedFilters.maxCacheTokens === null ||
           (instance.usage?.cache_read_tokens || 0) <=
-            advancedFilters.maxCacheTokens) &&
+          advancedFilters.maxCacheTokens) &&
         // Reward
         (advancedFilters.minReward === null ||
           (instance.reward || 0) >= advancedFilters.minReward) &&
@@ -320,9 +320,9 @@ export function EvaluationInstancesTable({
           if (!b.started_at) return sortDirection === "asc" ? -1 : 1;
           return sortDirection === "asc"
             ? new Date(a.started_at).getTime() -
-                new Date(b.started_at).getTime()
+            new Date(b.started_at).getTime()
             : new Date(b.started_at).getTime() -
-                new Date(a.started_at).getTime();
+            new Date(a.started_at).getTime();
         }
 
         case "reward": {
@@ -600,6 +600,7 @@ export function EvaluationInstancesTable({
                 </th>
                 <th className="p-2 text-left font-medium">Run Duration</th>
                 <th className="p-2 text-left font-medium">Eval Duration</th>
+                <th className="p-2 text-left font-medium">Iterations</th>
                 <th className="p-2 text-left font-medium">
                   {renderSortHeader("Reward", "reward")}
                 </th>
@@ -663,9 +664,19 @@ export function EvaluationInstancesTable({
                   <td className="p-2 text-xs text-muted-foreground">
                     {getDuration(instance.completed_at, instance.evaluated_at)}
                   </td>
+                  <td className="p-2 text-xs text-muted-foreground">
+                    {instance.iterations !== null &&
+                      instance.iterations !== undefined ? (
+                      <span className="text-xs font-medium">
+                        {instance.iterations}
+                      </span>
+                    ) : (
+                      "-"
+                    )}
+                  </td>
                   <td className="p-2">
                     {instance.reward !== null &&
-                    instance.reward !== undefined ? (
+                      instance.reward !== undefined ? (
                       <div className="flex items-center space-x-1">
                         <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
                         <span className="text-xs font-medium">
@@ -678,7 +689,7 @@ export function EvaluationInstancesTable({
                   </td>
                   <td className="p-2">
                     {instance.resolved_by !== null &&
-                    instance.resolved_by !== undefined ? (
+                      instance.resolved_by !== undefined ? (
                       <TooltipProvider>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -719,7 +730,7 @@ export function EvaluationInstancesTable({
                         <span className="text-xs font-medium">
                           {formatTokens(
                             (instance.usage.prompt_tokens || 0) +
-                              (instance.usage.completion_tokens || 0),
+                            (instance.usage.completion_tokens || 0),
                           )}
                         </span>
                       </div>

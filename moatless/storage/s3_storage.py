@@ -7,15 +7,14 @@ data to Amazon S3 buckets.
 
 import json
 import logging
-from datetime import datetime
 import os
+from datetime import datetime
 from typing import Union, List
 
 import aioboto3
 from botocore.exceptions import ClientError
-from opentelemetry import trace
-
 from moatless.storage.base import BaseStorage
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

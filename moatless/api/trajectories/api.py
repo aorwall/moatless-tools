@@ -3,8 +3,6 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
-
-from moatless.settings import get_flow_manager, get_storage
 from moatless.flow.manager import FlowManager
 from moatless.flow.schema import (
     ExecuteNodeRequest,
@@ -12,8 +10,8 @@ from moatless.flow.schema import (
     TrajectoryListItem,
     TrajectoryResponseDTO,
 )
+from moatless.settings import get_flow_manager, get_storage
 from moatless.storage.base import BaseStorage
-
 
 logger = logging.getLogger(__name__)
 

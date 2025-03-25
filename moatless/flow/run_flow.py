@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 
 import litellm
-
 from moatless.completion.log_handler import LogHandler
+from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.flow.flow import AgenticFlow
 from moatless.index.code_index import CodeIndex
 from moatless.repository.git import GitRepository
@@ -14,7 +14,6 @@ from moatless.runner.utils import (
     emit_event,
     setup_job_logging,
 )
-from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.runtime.local import SweBenchLocalEnvironment
 from moatless.settings import get_storage
 from moatless.workspace import Workspace

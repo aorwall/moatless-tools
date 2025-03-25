@@ -3,17 +3,17 @@
 import logging
 import os
 import secrets
+
+import moatless.settings as settings
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-
-from moatless.completion.manager import ModelConfigManager
 from moatless.agent.manager import AgentConfigManager
-from moatless.flow.manager import FlowManager
+from moatless.completion.manager import ModelConfigManager
+from moatless.evaluation.manager import EvaluationManager
 from moatless.eventbus.base import BaseEventBus
+from moatless.flow.manager import FlowManager
 from moatless.runner.runner import BaseRunner
 from moatless.storage.base import BaseStorage
-from moatless.evaluation.manager import EvaluationManager
-import moatless.settings as settings
 
 logger = logging.getLogger(__name__)
 

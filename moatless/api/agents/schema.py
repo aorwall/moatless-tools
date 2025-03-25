@@ -1,7 +1,6 @@
-from pydantic import BaseModel, Field
-
 from moatless.actions.schema import ActionSchema
 from moatless.message_history.base import BaseMemory
+from pydantic import BaseModel, Field
 
 
 class ActionConfigDTO(BaseModel):

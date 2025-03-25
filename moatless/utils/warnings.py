@@ -2,8 +2,8 @@
 Utilities for filtering warnings in the moatless project.
 """
 
-import warnings
 import logging
+import warnings
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,10 @@
 from typing import ClassVar, Optional
 
-from pydantic import ConfigDict, Field, model_validator
-
 from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeResponse
+from pydantic import ConfigDict, Field, model_validator
 
 
 class SemanticSearchArgs(SearchBaseArgs):

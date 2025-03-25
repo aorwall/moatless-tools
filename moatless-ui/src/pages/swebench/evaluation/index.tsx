@@ -12,6 +12,8 @@ export function EvaluationsPage() {
   const navigate = useNavigate();
   const { data: evaluations, isLoading, error } = useEvaluationsList();
 
+  console.log(`found ${evaluations?.length} evaluations`);
+
   React.useEffect(() => {
     if (error) {
       toast.error("Failed to fetch evaluations", {
@@ -33,7 +35,7 @@ export function EvaluationsPage() {
       <ScrollArea className="h-[calc(100vh-56px-8rem)]">
         <div className="pr-4">
           <EvaluationTable
-            evaluations={evaluations?.evaluations}
+            evaluations={evaluations}
             isLoading={isLoading}
           />
         </div>

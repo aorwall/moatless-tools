@@ -3,12 +3,11 @@ import os
 from fnmatch import fnmatch
 from typing import ClassVar, Optional
 
-from pydantic import Field, model_validator
-
 from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
+from pydantic import Field, model_validator
 
 logger = logging.getLogger(__name__)
 

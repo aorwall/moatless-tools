@@ -2,8 +2,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, Union, cast
 
-from pydantic import BaseModel, Field
-
 from moatless.actions.find_class import FindClassArgs
 from moatless.actions.find_function import FindFunctionArgs
 from moatless.actions.run_tests import RunTestsArgs
@@ -12,6 +10,7 @@ from moatless.actions.semantic_search import SemanticSearchArgs
 from moatless.actions.think import ThinkArgs
 from moatless.completion.stats import CompletionInvocation
 from moatless.node import Node
+from pydantic import BaseModel, Field
 
 
 # Tree View Schema Classes

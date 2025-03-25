@@ -166,7 +166,7 @@ export function EvaluationToolbar({
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button size="sm" onClick={handleStart} disabled={startDisabled}>
+                <Button size="sm" onClick={handleStart}>
                   {!workersRunning && (
                     <AlertCircle className="h-4 w-4 mr-1" />
                   )}

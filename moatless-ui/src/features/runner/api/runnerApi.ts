@@ -1,5 +1,5 @@
 import { apiRequest } from "@/lib/api/config";
-import { RunnerResponse, JobsStatusSummary } from "../types";
+import { RunnerResponse, JobsStatusSummary, JobDetails } from "../types";
 
 // API endpoints for runner management
 export const runnerApi = {
@@ -22,4 +22,8 @@ export const runnerApi = {
     apiRequest<void>(`/runner/jobs/${projectId}/${trajectoryId}/retry`, {
       method: "POST",
     }),
+
+  // Get detailed job information
+  getJobDetails: (projectId: string, trajectoryId: string) =>
+    apiRequest<JobDetails>(`/runner/jobs/${projectId}/${trajectoryId}/details`),
 };

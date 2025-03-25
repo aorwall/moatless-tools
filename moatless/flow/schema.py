@@ -3,8 +3,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
-
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion.stats import CompletionInvocation, Usage
 from moatless.discriminator.base import BaseDiscriminator
@@ -14,6 +12,7 @@ from moatless.node import Reward
 from moatless.runner.runner import JobStatus
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 

@@ -2,8 +2,6 @@ import json
 import logging
 from typing import Optional
 
-from pydantic import ConfigDict, Field
-
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments
 from moatless.artifacts.diagnostic import (
@@ -16,6 +14,7 @@ from moatless.artifacts.diagnostic import (
 from moatless.environment.base import EnvironmentExecutionError
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
+from pydantic import ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 

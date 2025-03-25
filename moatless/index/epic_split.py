@@ -9,7 +9,6 @@ from llama_index.core.node_parser import NodeParser, TextSplitter, TokenTextSpli
 from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode
 from llama_index.core.utils import get_tokenizer, get_tqdm_iterable
-
 from moatless.codeblocks import CodeParser, create_parser
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, PathTree
 from moatless.index.code_node import CodeNode

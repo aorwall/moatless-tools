@@ -8,20 +8,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from opentelemetry import trace
-from pydantic import ConfigDict, Field, PrivateAttr
-
 from moatless import storage
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.component import MoatlessComponent
-from moatless.eventbus.base import BaseEventBus
-from moatless.storage.base import BaseStorage
 from moatless.context_data import (
     current_project_id,
     current_trajectory_id,
     get_trajectory_dir,
 )
+from moatless.eventbus.base import BaseEventBus
 from moatless.events import (
     BaseEvent,
     FlowCompletedEvent,
@@ -31,8 +27,10 @@ from moatless.events import (
 from moatless.flow.schema import FlowStatus, FlowStatusInfo
 from moatless.node import Node
 from moatless.repository.repository import Repository
+from moatless.storage.base import BaseStorage
 from moatless.workspace import Workspace
-
+from opentelemetry import trace
+from pydantic import ConfigDict, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.flow")

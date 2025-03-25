@@ -3,8 +3,8 @@
 import logging
 
 from fastapi import APIRouter, HTTPException, Depends
-
 from moatless.actions.action import Action
+from moatless.api.dependencies import get_flow_manager
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow.manager import FlowManager
@@ -12,7 +12,6 @@ from moatless.flow.schema import FlowConfig
 from moatless.message_history.base import BaseMemory
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from moatless.api.dependencies import get_flow_manager
 
 logger = logging.getLogger(__name__)
 

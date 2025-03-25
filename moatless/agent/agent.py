@@ -2,16 +2,11 @@ import logging
 import traceback
 from typing import Any, Optional, cast
 
-from opentelemetry import trace
-from pydantic import Field, PrivateAttr
-
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
 )
-from moatless.completion.schema import ResponseSchema
-from moatless.context_data import current_action_step
 from moatless.agent.events import (
     ActionCreatedEvent,
     ActionExecutedEvent,
@@ -20,8 +15,10 @@ from moatless.agent.events import (
     RunAgentEvent,
 )
 from moatless.completion import BaseCompletionModel
+from moatless.completion.schema import ResponseSchema
 from moatless.completion.stats import CompletionInvocation, CompletionAttempt
 from moatless.component import MoatlessComponent
+from moatless.context_data import current_action_step
 from moatless.exceptions import (
     CompletionError,
     CompletionRejectError,
@@ -32,7 +29,8 @@ from moatless.message_history.base import BaseMemory
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import ActionStep, Node
 from moatless.workspace import Workspace
-
+from opentelemetry import trace
+from pydantic import Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.agent")

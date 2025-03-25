@@ -1,9 +1,8 @@
 from litellm import ConfigDict
-from pydantic import Field
-
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
+from pydantic import Field
 
 
 class BashArgs(ActionArguments):

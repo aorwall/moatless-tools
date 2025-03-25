@@ -2,9 +2,6 @@ import logging
 from abc import ABC
 from typing import Any, ClassVar, Optional
 
-from opentelemetry import trace
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
-
 from moatless.actions.schema import (
     ActionArguments,
     ActionProperty,
@@ -19,6 +16,8 @@ from moatless.index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.workspace import Workspace
+from opentelemetry import trace
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

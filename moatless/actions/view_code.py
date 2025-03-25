@@ -1,8 +1,6 @@
 import logging
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.identify_mixin import IdentifyMixin
 from moatless.actions.schema import (
@@ -14,6 +12,7 @@ from moatless.codeblocks import CodeBlockType
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import ContextFile, FileContext
 from moatless.workspace import Workspace
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 

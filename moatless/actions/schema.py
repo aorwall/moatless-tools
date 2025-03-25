@@ -4,11 +4,10 @@ import pkgutil
 from abc import ABC
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, model_validator
-
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import ResponseSchema
 from moatless.completion.stats import CompletionInvocation
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 

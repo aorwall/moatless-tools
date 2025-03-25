@@ -2,8 +2,8 @@ import asyncio
 import logging
 from typing import Callable, Optional
 
-from moatless.events import BaseEvent
 from moatless.eventbus.base import BaseEventBus
+from moatless.events import BaseEvent
 from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)

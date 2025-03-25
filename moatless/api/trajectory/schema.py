@@ -3,11 +3,10 @@
 from enum import Enum
 from typing import Any, Optional, Union
 
-from pydantic import BaseModel, Field
-
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.stats import Usage, CompletionInvocation
 from moatless.flow.schema import NodeDTO
+from pydantic import BaseModel, Field
 
 
 class UsageDTO(BaseModel):

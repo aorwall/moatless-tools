@@ -7,19 +7,18 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-
+from moatless.agent.manager import AgentConfigManager
+from moatless.api.dependencies import get_agent_manager, get_model_manager
 from moatless.api.loop.schema import LoopResponseDTO
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.artifacts.file import FileArtifact, FileArtifactHandler
 from moatless.completion.manager import ModelConfigManager
-from moatless.agent.manager  import AgentConfigManager
 from moatless.environment.local import LocalBashEnvironment
 from moatless.flow.loop import AgenticLoop
 from moatless.repository.git import GitRepository
 from moatless.utils.moatless import get_moatless_trajectory_dir
 from moatless.workspace import Workspace
-from moatless.api.dependencies import get_agent_manager, get_model_manager
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

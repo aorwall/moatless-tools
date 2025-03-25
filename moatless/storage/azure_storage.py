@@ -7,17 +7,16 @@ data to Azure Blob Storage.
 
 import json
 import logging
-from datetime import datetime
 import os
-from typing import Union, List, Optional
+from datetime import datetime
 from io import BytesIO
+from typing import Union, List, Optional
 
+from azure.core.exceptions import ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient, ContainerClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from azure.core.exceptions import ResourceNotFoundError
-from opentelemetry import trace
-
 from moatless.storage.base import BaseStorage
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

@@ -1,3 +1,4 @@
+from moatless.runner.asyncio_runner import AsyncioRunner
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
@@ -5,6 +6,5 @@ from moatless.runner.runner import (
     RunnerInfo,
     RunnerStatus,
 )
-from moatless.runner.asyncio_runner import AsyncioRunner
 
 __all__ = ["BaseRunner", "JobInfo", "JobStatus", "RunnerInfo", "RunnerStatus", "AsyncioRunner"]

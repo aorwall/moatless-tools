@@ -1,11 +1,10 @@
 import logging
 
-from pydantic import ConfigDict
-
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
+from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
 

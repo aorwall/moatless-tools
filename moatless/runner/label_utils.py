@@ -1,8 +1,8 @@
 """Utility functions for creating and managing container labels."""
 
-from typing import Dict, List
 import asyncio
 from typing import Callable
+from typing import Dict, List
 
 
 def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, node_id: int = None):

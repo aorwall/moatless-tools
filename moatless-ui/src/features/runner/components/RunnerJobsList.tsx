@@ -26,6 +26,7 @@ import {
   AlertCircle,
   XCircleIcon,
   InfoIcon,
+  ExternalLink
 } from "lucide-react";
 import { dateTimeFormat } from "@/lib/utils/date";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ import {
   TooltipTrigger,
 } from "@/lib/components/ui/tooltip";
 import { JobDetailsDialog } from "./JobDetailsDialog";
+import { Link } from "react-router-dom";
 
 interface RunnerJobsListProps {
   jobs: JobInfo[];
@@ -140,6 +142,14 @@ export function RunnerJobsList({
     }
   };
 
+  // Get trajectory link if project_id and trajectory_id exist
+  const getTrajectoryLink = (job: JobInfo) => {
+    if (job.project_id && job.trajectory_id) {
+      return `/trajectories/${job.project_id}/${job.trajectory_id}`;
+    }
+    return null;
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -229,19 +239,33 @@ export function RunnerJobsList({
                         <span className="sr-only">View Details</span>
                       </Button>
 
-                      {(job.status === JobStatus.PENDING ||
-                        job.status === JobStatus.INITIALIZING ||
-                        job.status === JobStatus.RUNNING) && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCancel(job)}
-                            disabled={cancelJob.isPending}
-                          >
-                            <XCircle className="h-4 w-4 text-red-500" />
-                            <span className="sr-only">Cancel</span>
-                          </Button>
-                        )}
+                      {/* Trajectory link button */}
+                      {getTrajectoryLink(job) && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Link to={getTrajectoryLink(job)!}>
+                                <Button variant="ghost" size="icon">
+                                  <ExternalLink className="h-4 w-4 text-blue-500" />
+                                  <span className="sr-only">View Trajectory</span>
+                                </Button>
+                              </Link>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              <p>View Trajectory</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleCancel(job)}
+                      >
+                        <XCircle className="h-4 w-4 text-red-500" />
+                        <span className="sr-only">Remove</span>
+                      </Button>
 
                       {job.status === JobStatus.FAILED && (
                         <Button

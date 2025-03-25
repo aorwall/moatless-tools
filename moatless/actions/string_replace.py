@@ -2,8 +2,6 @@ import logging
 import re
 from typing import Any
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
-
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
@@ -13,6 +11,7 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 

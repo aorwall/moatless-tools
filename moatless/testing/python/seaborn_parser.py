@@ -1,9 +1,9 @@
 import re
 from typing import List, Optional
 
+from moatless.testing.python.utils import create_generic_error_result
 from moatless.testing.schema import TestResult, TestStatus
 from moatless.testing.test_output_parser import TestOutputParser
-from moatless.testing.python.utils import create_generic_error_result
 
 
 class SeabornParser(TestOutputParser):

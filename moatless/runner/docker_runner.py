@@ -1,11 +1,12 @@
+import asyncio
 import logging
 import os
-import asyncio
 import subprocess
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional, Dict, List, Tuple
 
+from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
@@ -17,7 +18,6 @@ from moatless.runner.runner import (
     JobDetailSection,
 )
 from moatless.telemetry import extract_trace_context
-from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels
 
 logger = logging.getLogger(__name__)
 
