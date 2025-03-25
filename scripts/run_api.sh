@@ -1,1 +1,4 @@
-uvicorn moatless.api.api:create_api --host 0.0.0.0 --port 8000 --reload --reload-dir moatless --reload-include "*.py"
+#!/bin/bash
+# Default to local environment if not specified
+ENV=${1:-local}
+python -m scripts.run_api --dev --env $ENV
