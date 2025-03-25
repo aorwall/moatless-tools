@@ -72,17 +72,17 @@ async def test_publish_and_read_events(local_event_bus, file_storage):
     await local_event_bus.publish(event2)
     
     # Read the events back as dictionaries
-    event_dicts = await local_event_bus.read_events("test-project", "test-trajectory")
+    events = await local_event_bus.read_events("test-project", "test-trajectory")
     
     # Verify the events
-    assert len(event_dicts) == 2
-    assert event_dicts[0]["event_type"] == "test-event-1"
-    assert event_dicts[0]["data"]["key1"] == "value1"
-    assert event_dicts[1]["event_type"] == "test-event-2"
-    assert event_dicts[1]["data"]["key2"] == "value2"
+    assert len(events) == 2
+    assert events[0].event_type == "test-event-1"
+    assert events[0].data["key1"] == "value1"
+    assert events[1].event_type == "test-event-2"
+    assert events[1].data["key2"] == "value2"
     
     # Convert to BaseEvent objects for more testing
-    events = [BaseEvent.from_dict(d) for d in event_dicts]
+    events = [BaseEvent.from_dict(d) for d in events]
     assert len(events) == 2
     assert events[0].event_type == "test-event-1"
     assert events[0].data["key1"] == "value1"
@@ -92,10 +92,10 @@ async def test_publish_and_read_events(local_event_bus, file_storage):
     assert await file_storage.exists(key)
     
     # Verify the contents via read_lines
-    event_dicts = await file_storage.read_lines(key)
-    assert len(event_dicts) == 2
-    assert event_dicts[0]["event_type"] == "test-event-1"
-    assert event_dicts[1]["event_type"] == "test-event-2"
+    events = await file_storage.read_lines(key)
+    assert len(events) == 2
+    assert events[0].event_type == "test-event-1"
+    assert events[1].event_type == "test-event-2"
 
 
 @pytest.mark.asyncio

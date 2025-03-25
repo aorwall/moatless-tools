@@ -26,11 +26,11 @@ from moatless.workspace import Workspace
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
-load_dotenv()
-
 
 async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: int | None = None):
     from moatless.settings import get_storage, get_event_bus
+
+    load_dotenv()
 
     storage = await get_storage()
     event_bus = await get_event_bus()

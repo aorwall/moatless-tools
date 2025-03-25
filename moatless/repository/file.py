@@ -77,10 +77,24 @@ class CodeFile(BaseModel):
         if self.has_been_modified():
             if self._repo_path is None:
                 raise ValueError("Repository path is not set")
-            with open(os.path.join(self._repo_path, self.file_path)) as f:
-                self._content = f.read()
-                self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
-                self._module = None
+            try:
+                with open(os.path.join(self._repo_path, self.file_path)) as f:
+                    self._content = f.read()
+                    self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
+                    self._module = None
+            except UnicodeDecodeError as e:
+                logger.warning(f"Failed to decode {self.file_path} as UTF-8: {e}")
+                # Try to read file as binary, then decode with errors='replace'
+                try:
+                    with open(os.path.join(self._repo_path, self.file_path), "rb") as f:
+                        binary_content = f.read()
+                        self._content = binary_content.decode("utf-8", errors="replace")
+                        self._last_modified = datetime.fromtimestamp(os.path.getmtime(f.name))
+                        self._module = None
+                        logger.info(f"Successfully read {self.file_path} with replacement characters")
+                except Exception as e2:
+                    logger.error(f"Failed to read {self.file_path} even with error handling: {e2}")
+                    self._content = f"[Error reading file: {str(e)}]"
 
         return self._content
 
@@ -89,7 +103,11 @@ class CodeFile(BaseModel):
         if self._module is None or self.has_been_modified() and self.content.strip():
             parser = get_parser_by_path(self.file_path)
             if parser:
-                self._module = parser.parse(self.content)
+                try:
+                    self._module = parser.parse(self.content)
+                except Exception as e:
+                    logger.warning(f"Failed to parse {self.file_path}: {e}")
+                    return None
             else:
                 return None
 

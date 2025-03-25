@@ -19,7 +19,14 @@ from moatless.runner.runner import (
     JobDetailSection,
 )
 from moatless.telemetry import extract_trace_context
-from moatless.runner.label_utils import sanitize_label, get_project_label, get_trajectory_label, create_metadata
+from moatless.runner.label_utils import (
+    create_annotations,
+    create_job_args,
+    create_labels,
+    sanitize_label,
+    get_project_label,
+    get_trajectory_label,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner.kubernetes")
@@ -121,22 +128,35 @@ class KubernetesRunner(BaseRunner):
         Returns:
             Valid namespace name
         """
-        # Create a valid namespace name that complies with RFC 1123
+        # Sanitize project_id to follow RFC 1123 requirements
         # Must be lowercase alphanumeric chars or '-', max 63 chars, start/end with alphanumeric
-        project_hash = str(hash(project_id) % 10000000)  # Use hash to create a shorter identifier
-        base_name = f"moatless-proj-{self._sanitize_kubernetes_label(project_id)}"
+        sanitized_id = self._sanitize_kubernetes_label(project_id)
 
-        # Ensure it's not too long (K8s has a 63 character limit)
-        if len(base_name) > 57:  # Allow room for hash
-            # Use just the start of the name plus hash to maintain uniqueness
-            namespace_name = f"moatless-proj-{project_hash}"
+        # Create namespace with prefix and sanitized project ID
+        prefix = "moatless-"
+
+        # Calculate how much of the project ID we can include
+        # For longer IDs, we need to include a hash to ensure uniqueness
+        max_length = 63 - len(prefix)
+
+        if len(sanitized_id) <= max_length:
+            # For shorter IDs, use the full sanitized ID
+            namespace_name = f"{prefix}{sanitized_id}"
         else:
-            namespace_name = base_name
+            # For longer IDs, truncate and add a hash for uniqueness
+            project_hash = str(hash(project_id) % 10000000)
 
-        # Ensure namespace name is at most 63 chars
-        namespace_name = namespace_name[:63]
+            # Reserve space for the hash (plus a hyphen)
+            hash_space = len(project_hash) + 1
+            truncated_id = sanitized_id[: max_length - hash_space]
 
-        # Ensure it starts and ends with alphanumeric character
+            # Combine truncated ID with hash
+            namespace_name = f"{prefix}{truncated_id}-{project_hash}"
+
+            # Ensure we're still within the length limit
+            namespace_name = namespace_name[:63]
+
+        # Ensure namespace name starts and ends with alphanumeric character
         if not namespace_name[0].isalnum():
             namespace_name = f"x{namespace_name[1:]}"
         if not namespace_name[-1].isalnum():
@@ -191,12 +211,35 @@ class KubernetesRunner(BaseRunner):
             namespace: Namespace to check
         """
         try:
-            self.core_v1.read_namespaced_resource_quota(name="project-job-limit", namespace=namespace)
-        except ApiException as e:
-            if e.status == 404:
-                # Create resource quota
-                self.logger.info(f"Resource quota not found in namespace {namespace}, creating it")
+            # Check if the general quota exists
+            try:
+                self.core_v1.read_namespaced_resource_quota(name="project-job-limit", namespace=namespace)
+                general_exists = True
+            except ApiException as e:
+                if e.status == 404:
+                    general_exists = False
+                else:
+                    raise
+
+            # Check if the active quota exists
+            try:
+                self.core_v1.read_namespaced_resource_quota(name="project-active-job-limit", namespace=namespace)
+                active_exists = True
+            except ApiException as e:
+                if e.status == 404:
+                    active_exists = False
+                else:
+                    raise
+
+            # If either quota doesn't exist, create both to ensure consistency
+            if not general_exists or not active_exists:
+                self.logger.info(f"Resource quotas not found in namespace {namespace}, creating them")
                 await self._create_resource_quota(namespace)
+
+        except ApiException as e:
+            self.logger.exception(f"Error checking resource quotas in namespace {namespace}: {e}")
+            # Create resource quota as fallback
+            await self._create_resource_quota(namespace)
 
     async def _ensure_config_map(self, namespace: str) -> None:
         """Ensure ConfigMap exists in namespace.
@@ -287,31 +330,40 @@ class KubernetesRunner(BaseRunner):
             namespace: Namespace name
         """
         # Create a resource quota that limits the number of active pods
-        resource_quota = client.V1ResourceQuota(
-            metadata=client.V1ObjectMeta(name="project-job-limit", namespace=namespace),
+
+        active_quota = client.V1ResourceQuota(
+            metadata=client.V1ObjectMeta(
+                name="project-active-job-limit",
+                namespace=namespace,
+            ),
             spec=client.V1ResourceQuotaSpec(
                 hard={
-                    "count/pods": str(self.max_jobs_per_project),
-                }
+                    "pods": str(self.max_jobs_per_project),
+                },
+                scopes=["NotTerminating"],  # Only count pods that are not terminating
             ),
         )
 
         try:
-            self.core_v1.create_namespaced_resource_quota(namespace=namespace, body=resource_quota)
+            self.core_v1.create_namespaced_resource_quota(namespace=namespace, body=active_quota)
+
             self.logger.info(
-                f"Created resource quota in namespace {namespace} with limit of {self.max_jobs_per_project} active pods"
+                f"Created resource quotas in namespace {namespace} with limit of {self.max_jobs_per_project} active pods"
             )
         except ApiException as e:
             self.logger.exception(f"Error creating resource quota in namespace {namespace}: {e}")
 
     @tracer.start_as_current_span("KubernetesRunner.start_job")
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str) -> bool:
+    async def start_job(
+        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
+    ) -> bool:
         """Start a job as a Kubernetes Job.
 
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
             job_func: The function to run or a string with the fully qualified function name
+            node_id: Optional node ID for routing jobs to specific nodes
 
         Returns:
             True if the job was scheduled successfully, False otherwise
@@ -341,34 +393,18 @@ class KubernetesRunner(BaseRunner):
                 return False
 
         try:
-            # Determine fully qualified function name
-            if isinstance(job_func, str):
-                fully_qualified_name = job_func
-            else:
-                # If it's a callable, get the fully qualified name
-                func_module = job_func.__module__
-                func_name = job_func.__name__
-
-                # Check if the module name ends with the function name
-                if func_module.endswith(f".{func_name}"):
-                    # Use the module path directly as the function is the module's name
-                    fully_qualified_name = func_module
-                else:
-                    # Normal case: append the function name to the module path
-                    fully_qualified_name = f"{func_module}.{func_name}"
-
-            self.logger.info(f"Creating Kubernetes job for function: {fully_qualified_name}")
+            self.logger.info(f"Creating Kubernetes job for function: {job_func}")
 
             # Extract OpenTelemetry context for propagation
             otel_context = extract_trace_context()
 
-            # Create job spec
             job = self._create_job_object(
                 job_id=job_id,
                 project_id=project_id,
                 trajectory_id=trajectory_id,
-                func_name=fully_qualified_name,
+                job_func=job_func,
                 otel_context=otel_context,
+                node_id=node_id,
             )
 
             # Create the job in the project namespace
@@ -405,7 +441,7 @@ class KubernetesRunner(BaseRunner):
             if project_id:
                 # For a specific project, look in its namespace
                 if self.use_project_namespaces:
-                    namespace = await self._get_or_create_project_namespace(project_id)
+                    namespace = self._create_namespace_name(project_id)
                 jobs = await self._list_jobs_in_namespace(namespace, project_id)
 
                 # Process jobs from this namespace
@@ -500,7 +536,7 @@ class KubernetesRunner(BaseRunner):
         """
         try:
             summary = JobsStatusSummary(project_id=project_id)
-            namespace = await self._get_or_create_project_namespace(project_id)
+            namespace = self._create_namespace_name(project_id)
 
             # Get all jobs for this project
             jobs = await self._list_jobs_in_namespace(namespace, project_id)
@@ -537,7 +573,7 @@ class KubernetesRunner(BaseRunner):
             JobDetails object containing detailed information about the job
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = await self._get_or_create_project_namespace(project_id)
+        namespace = self._create_namespace_name(project_id)
 
         try:
             # Check if job exists
@@ -884,19 +920,24 @@ class KubernetesRunner(BaseRunner):
             return
 
         try:
-            quota = self.core_v1.read_namespaced_resource_quota(name="project-job-limit", namespace=namespace)
-            if quota.status and quota.status.hard and quota.status.used:
-                # Store quota data as a separate dictionary without trying to add it directly to the pydantic model
-                quota_info = {
-                    "max_active_pods": quota.status.hard.get("count/pods", self.max_jobs_per_project),
-                    "used_active_pods": quota.status.used.get("count/pods", "0"),
-                    "max_jobs": quota.status.hard.get("count/jobs.batch", self.max_jobs_per_project * 2),
-                    "used_jobs": quota.status.used.get("count/jobs.batch", "0"),
-                }
+            active_quota = self.core_v1.read_namespaced_resource_quota(
+                name="project-active-job-limit", namespace=namespace
+            )
 
-                # Only log the quota information instead of trying to add it to the model
-                self.logger.debug(f"Quota info for namespace {namespace}: {quota_info}")
-        except ApiException:
+            quota_info = {}
+
+            if active_quota.status and active_quota.status.hard and active_quota.status.used:
+                quota_info.update(
+                    {
+                        "max_active_pods": active_quota.status.hard.get("pods", str(self.max_jobs_per_project)),
+                        "used_active_pods": active_quota.status.used.get("pods", "0"),
+                    }
+                )
+
+            # Only log the quota information instead of trying to add it to the model
+            self.logger.debug(f"Quota info for namespace {namespace}: {quota_info}")
+        except ApiException as e:
+            self.logger.debug(f"Error getting quota info for namespace {namespace}: {e}")
             pass
 
     async def _process_job_info(self, job, project_id: str = None) -> JobInfo | None:
@@ -968,8 +1009,7 @@ class KubernetesRunner(BaseRunner):
             None
         """
         try:
-            # Get namespace for the project
-            namespace = await self._get_or_create_project_namespace(project_id)
+            namespace = self._create_namespace_name(project_id)
 
             project_label = self._get_project_label(project_id)
 
@@ -1033,13 +1073,51 @@ class KubernetesRunner(BaseRunner):
         # Kubernetes has specific restrictions on resource names
         # The name must be lowercase, start with an alphanumeric character,
         # and only contain lowercase alphanumeric characters, '-', or '.'
-        # Also, we add the 'run-' prefix to distinguish jobs
-        job_id = f"run-{project_id}-{trajectory_id}"
 
-        # Make compliant with Kubernetes naming restrictions
-        job_id = job_id.lower()
-        job_id = "".join(c if c.isalnum() or c == "-" else "-" for c in job_id)
-        job_id = job_id[:63]  # Maximum length for Kubernetes resource names
+        if self.use_project_namespaces:
+            # When using project namespaces, we only need the trajectory_id in the job name
+            # since the project_id is already in the namespace
+
+            # Sanitize and lowercase the trajectory_id
+            sanitized_id = trajectory_id.lower()
+            sanitized_id = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_id)
+
+            # Check if we need to truncate the trajectory_id
+            prefix = "run-"
+            max_length = 63 - len(prefix)
+
+            if len(sanitized_id) <= max_length:
+                # For shorter trajectory IDs, use the full sanitized ID
+                job_id = f"{prefix}{sanitized_id}"
+            else:
+                # For longer trajectory IDs, truncate and add a hash for uniqueness
+                traj_hash = str(hash(trajectory_id) % 10000000)
+
+                # Reserve space for the hash (plus a hyphen)
+                hash_space = len(traj_hash) + 1
+                truncated_id = sanitized_id[: max_length - hash_space]
+
+                # Combine truncated ID with hash
+                job_id = f"{prefix}{truncated_id}-{traj_hash}"
+
+                # Ensure we're still within the length limit
+                job_id = job_id[:63]
+        else:
+            # Use the original format when not using project namespaces
+            job_id = f"run-{project_id}-{trajectory_id}"
+
+            # Make compliant with Kubernetes naming restrictions
+            job_id = job_id.lower()
+            job_id = "".join(c if c.isalnum() or c == "-" else "-" for c in job_id)
+
+        # Ensure it starts and ends with alphanumeric character
+        if not job_id[0].isalnum():
+            job_id = f"x{job_id[1:]}"
+        if not job_id[-1].isalnum():
+            job_id = f"{job_id[:-1]}x"
+
+        # Maximum length for Kubernetes resource names
+        job_id = job_id[:63]
 
         return job_id
 
@@ -1054,7 +1132,7 @@ class KubernetesRunner(BaseRunner):
             True if the job exists, False otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = await self._get_or_create_project_namespace(project_id)
+        namespace = self._create_namespace_name(project_id)
 
         try:
             self.batch_v1.read_namespaced_job(name=job_id, namespace=namespace)
@@ -1088,3 +1166,495 @@ class KubernetesRunner(BaseRunner):
 
         # Job is created but not started yet
         return JobStatus.PENDING
+
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+        """Get the status of a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            The job status
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+        namespace = self._create_namespace_name(project_id)
+
+        try:
+            # Get the Kubernetes Job resource
+            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=namespace)
+            return self._get_job_status_from_k8s_job(job)
+        except ApiException as e:
+            if e.status == 404:
+                return JobStatus.NOT_FOUND
+            self.logger.exception(f"Error getting job status for {job_id}: {e}")
+            return JobStatus.NOT_FOUND
+        except Exception as exc:
+            self.logger.exception(f"Unexpected error getting job status for {job_id}: {exc}")
+            return JobStatus.NOT_FOUND
+
+    async def get_runner_info(self) -> RunnerInfo:
+        """Get information about the runner.
+
+        Returns:
+            RunnerInfo with details about the Kubernetes cluster
+        """
+        try:
+            # Get information about nodes in the cluster
+            nodes = self.core_v1.list_node()
+            ready_nodes = 0
+            total_nodes = 0
+
+            for node in nodes.items:
+                total_nodes += 1
+                # Check if node is ready
+                for condition in node.status.conditions:
+                    if condition.type == "Ready" and condition.status == "True":
+                        ready_nodes += 1
+                        break
+
+            # Get API resources info
+            api_resources = self.batch_v1.get_api_resources()
+
+            # Build runner info
+            info = RunnerInfo(
+                runner_type="kubernetes",
+                status=RunnerStatus.RUNNING,
+                data={
+                    "nodes": total_nodes,
+                    "ready_nodes": ready_nodes,
+                    "api_version": api_resources.group_version,
+                    "provider": self.kubernetes_provider,
+                    "namespace": self.namespace,
+                    "use_project_namespaces": self.use_project_namespaces,
+                    "max_jobs_per_project": self.max_jobs_per_project,
+                },
+            )
+            return info
+        except Exception as exc:
+            self.logger.exception(f"Error getting runner info: {exc}")
+            return RunnerInfo(
+                runner_type="kubernetes",
+                status=RunnerStatus.ERROR,
+                data={"error": str(exc)},
+            )
+
+    async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:
+        """Get logs for a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            String containing the logs if available, None otherwise
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+        namespace = self._create_namespace_name(project_id)
+
+        try:
+            # Get pods associated with the job
+            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+
+            # If no pods found, return None
+            if not pod_list.items:
+                return None
+
+            # Get logs from the first pod
+            pod = pod_list.items[0]
+            logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=namespace)
+            return logs
+        except ApiException as e:
+            self.logger.warning(f"Error getting logs for job {job_id}: {e}")
+            return None
+        except Exception as exc:
+            self.logger.exception(f"Unexpected error getting logs for job {job_id}: {exc}")
+            return None
+
+    def _sanitize_kubernetes_label(self, value: str) -> str:
+        """Sanitize a string to be used as a Kubernetes label value.
+
+        Args:
+            value: The string to sanitize
+
+        Returns:
+            A sanitized string that complies with Kubernetes label value requirements
+        """
+        # Kubernetes label values must only contain alphanumeric chars, '-', '_' or '.'
+        # Must start and end with alphanumeric character
+        # Max length is 63 characters
+
+        # Replace invalid characters with '-'
+        # For namespace names, we need to follow RFC 1123 which doesn't allow '_'
+        sanitized = sanitize_label(value)
+
+        # Replace underscores with hyphens for namespace compatibility
+        sanitized = sanitized.replace("_", "-")
+
+        # Ensure it's not too long
+        if len(sanitized) > 63:
+            sanitized = sanitized[:63]
+
+        # Ensure it starts and ends with alphanumeric
+        if sanitized and not sanitized[0].isalnum():
+            sanitized = f"x{sanitized[1:]}"
+        if sanitized and not sanitized[-1].isalnum():
+            sanitized = f"{sanitized[:-1]}x"
+
+        return sanitized
+
+    def _get_project_label(self, project_id: str) -> str:
+        """Get a sanitized project ID for use in Kubernetes labels.
+
+        Args:
+            project_id: The project ID
+
+        Returns:
+            Sanitized project ID suitable for use as a Kubernetes label value
+        """
+        return get_project_label(project_id)
+
+    def _get_trajectory_label(self, trajectory_id: str) -> str:
+        """Get a sanitized trajectory ID for use in Kubernetes labels.
+
+        Args:
+            trajectory_id: The trajectory ID
+
+        Returns:
+            Sanitized trajectory ID suitable for use as a Kubernetes label value
+        """
+        return get_trajectory_label(trajectory_id)
+
+    async def _get_pod_metadata(self, project_id: str, trajectory_id: str) -> dict | None:
+        """Get metadata from the pod associated with a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            Dictionary with pod metadata or None if not found
+        """
+        if not project_id or not trajectory_id:
+            return None
+
+        job_id = self._job_id(project_id, trajectory_id)
+        namespace = self._create_namespace_name(project_id)
+
+        try:
+            # Get pods associated with the job
+            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+
+            # If no pods found, return None
+            if not pod_list.items:
+                return None
+
+            # Get metadata from the first pod
+            pod = pod_list.items[0]
+
+            metadata = {
+                "name": pod.metadata.name,
+                "phase": pod.status.phase,
+                "start_time": pod.status.start_time.isoformat() if pod.status.start_time else None,
+            }
+
+            # Add container status information if available
+            if pod.status.container_statuses:
+                container_status = pod.status.container_statuses[0]
+
+                # Add state information
+                if container_status.state.running:
+                    metadata["container_state"] = "running"
+                elif container_status.state.terminated:
+                    metadata["container_state"] = "terminated"
+                    metadata["exit_code"] = container_status.state.terminated.exit_code
+                    metadata["reason"] = container_status.state.terminated.reason
+                elif container_status.state.waiting:
+                    metadata["container_state"] = "waiting"
+                    metadata["reason"] = container_status.state.waiting.reason
+
+                # Add readiness and restart count
+                metadata["ready"] = container_status.ready
+                metadata["restart_count"] = container_status.restart_count
+
+            return metadata
+        except Exception as exc:
+            self.logger.warning(f"Error getting pod metadata for job {job_id}: {exc}")
+            return None
+
+    def _get_job_error(self, job) -> str | None:
+        """Extract error information from a failed job.
+
+        Args:
+            job: Kubernetes job object
+
+        Returns:
+            Error message if available, None otherwise
+        """
+        if not job.status.failed:
+            return None
+
+        error_message = "Job failed"
+
+        # Check for error conditions in job status
+        if job.status.conditions:
+            for condition in job.status.conditions:
+                if condition.type == "Failed" and condition.message:
+                    error_message = condition.message
+                    break
+
+        try:
+            # Get more detailed error from the pod
+            job_id = job.metadata.name
+            namespace = job.metadata.namespace
+
+            # Get pods associated with the job
+            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+
+            # If no pods found, return basic error message
+            if not pod_list.items:
+                return error_message
+
+            # Get error information from the pod
+            pod = pod_list.items[0]
+
+            # Add pod phase information
+            if pod.status.phase in ["Failed", "Error"]:
+                error_message = f"{error_message} (Pod {pod.status.phase})"
+
+            # If pod has a status message, add it
+            if pod.status.message:
+                error_message = f"{error_message}: {pod.status.message}"
+
+            # Check container status for more detailed error
+            if pod.status.container_statuses:
+                for container_status in pod.status.container_statuses:
+                    if container_status.state.terminated and container_status.state.terminated.exit_code != 0:
+                        exit_code = container_status.state.terminated.exit_code
+                        reason = container_status.state.terminated.reason or ""
+                        message = container_status.state.terminated.message or ""
+
+                        # Create detailed error message
+                        container_error = f"Container exited with code {exit_code}"
+                        if reason:
+                            container_error += f": {reason}"
+                        if message:
+                            container_error += f" - {message}"
+
+                        # Only replace the error message if we have useful details
+                        if reason or message:
+                            error_message = container_error
+                        break
+
+            return error_message
+        except Exception as exc:
+            self.logger.warning(f"Error getting detailed job error for {job.metadata.name}: {exc}")
+            return error_message
+
+    def _create_env_vars(self, project_id: str, trajectory_id: str, func_name: str, otel_context: dict = None) -> list:
+        """Create environment variables for the pod.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            func_name: Function name to execute
+            otel_context: OpenTelemetry context
+
+        Returns:
+            List of environment variables
+        """
+        # Prepare environment variables
+        env_vars = [
+            client.V1EnvVar(name="PROJECT_ID", value=project_id),
+            client.V1EnvVar(name="TRAJECTORY_ID", value=trajectory_id),
+            client.V1EnvVar(name="JOB_FUNC", value=func_name),
+        ]
+
+        # Add API key environment variables
+        for key, value in os.environ.items():
+            if key.startswith("MOATLESS_"):
+                env_vars.append(client.V1EnvVar(name=key, value=value))
+
+        # Add OpenTelemetry context if available
+        if otel_context:
+            for key, value in otel_context.items():
+                env_vars.append(client.V1EnvVar(name=f"OTEL_{key}", value=str(value)))
+
+        env_vars.extend(
+            [
+                client.V1EnvVar(name="MOATLESS_DIR", value="/data/moatless"),
+                client.V1EnvVar(name="MOATLESS_COMPONENTS_PATH", value="/opt/components"),
+                client.V1EnvVar(name="NLTK_DATA", value="/data/nltk_data"),
+                client.V1EnvVar(name="INDEX_STORE_DIR", value="/data/index_store"),
+                client.V1EnvVar(name="REPO_DIR", value="/testbed"),
+                client.V1EnvVar(name="INSTANCE_PATH", value="/data/instance.json"),
+                client.V1EnvVar(name="REDIS_URL", value=os.environ.get("REDIS_URL")),
+            ]
+        )
+
+        return env_vars
+
+    def _create_volumes_and_mounts(self) -> tuple:
+        """Create volumes and volume mounts for the pod.
+
+        Returns:
+            Tuple of (volumes, volume_mounts)
+        """
+        volumes = [
+            client.V1Volume(name="nltk-data", empty_dir=client.V1EmptyDirVolumeSource()),
+            client.V1Volume(name="moatless-components", empty_dir=client.V1EmptyDirVolumeSource()),
+        ]
+
+        # Create volume mounts
+        volume_mounts = [
+            client.V1VolumeMount(name="moatless-components", mount_path="/opt/components"),
+            client.V1VolumeMount(name="nltk-data", mount_path="/data/nltk_data"),
+        ]
+
+        return volumes, volume_mounts
+
+    def _create_tolerations(self) -> list:
+        """Create tolerations for the pod.
+
+        Returns:
+            List of tolerations
+        """
+
+        tolerations = []
+
+        if self.kubernetes_provider == "azure":
+            tolerations.append(
+                client.V1Toleration(
+                    key="kubernetes.azure.com/scalesetpriority",
+                    operator="Equal",
+                    value="spot",
+                    effect="NoSchedule",
+                )
+            )
+
+        return tolerations
+
+    def _create_job_object(
+        self,
+        job_id: str,
+        project_id: str,
+        trajectory_id: str,
+        job_func: Callable,
+        otel_context: dict = None,
+        node_id: int = None,
+    ) -> client.V1Job:
+        """Create a Kubernetes Job object.
+
+        Args:
+            job_id: Unique ID for the job
+            project_id: Project ID
+            trajectory_id: Trajectory ID
+            job_func: Fully qualified function name to execute
+            otel_context: OpenTelemetry context for distributed tracing
+            node_id: Optional node ID for job placement
+
+        Returns:
+            Kubernetes Job object
+        """
+        func_name = job_func.__name__
+        env_vars = self._create_env_vars(project_id, trajectory_id, func_name, otel_context)
+        volumes, volume_mounts = self._create_volumes_and_mounts()
+        tolerations = self._create_tolerations()
+
+        args = create_job_args(project_id, trajectory_id, job_func, node_id)
+
+        container = client.V1Container(
+            name="worker",
+            image=self._get_image_name(trajectory_id),
+            command=["/usr/bin/python"],
+            args=[
+                "-c",
+                args,
+            ],
+            env=env_vars,
+            env_from=[
+                client.V1EnvFromSource(
+                    config_map_ref=client.V1ConfigMapEnvSource(
+                        name="moatless-tools-env",
+                    )
+                ),
+                client.V1EnvFromSource(
+                    secret_ref=client.V1SecretEnvSource(
+                        name="moatless-tools-secrets",
+                    )
+                ),
+            ],
+            volume_mounts=volume_mounts,
+            resources=client.V1ResourceRequirements(
+                requests={"cpu": "100m", "memory": "128Mi"},
+                limits={"cpu": "1000m", "memory": "1Gi"},
+            ),
+            working_dir="/opt/moatless",
+        )
+
+        # Add OpenTelemetry context if available
+        if otel_context:
+            for key, value in otel_context.items():
+                container.env.append(client.V1EnvVar(name=key, value=value))
+
+        labels = create_labels(project_id, trajectory_id, func_name)
+        annotations = create_annotations(project_id, trajectory_id, func_name)
+
+        pod_template = client.V1PodTemplateSpec(
+            metadata=client.V1ObjectMeta(
+                labels=labels,
+                annotations=annotations,
+            ),
+            spec=client.V1PodSpec(
+                containers=[container],
+                restart_policy="Never",
+                volumes=volumes,
+                service_account_name=self.service_account,
+                node_selector=self._get_node_selector(node_id),
+                tolerations=tolerations,
+            ),
+        )
+
+        job_spec = client.V1JobSpec(
+            template=pod_template,
+            backoff_limit=2,
+            ttl_seconds_after_finished=self.job_ttl_seconds,
+            active_deadline_seconds=self.timeout_seconds,
+        )
+
+        job = client.V1Job(
+            api_version="batch/v1",
+            kind="Job",
+            metadata=client.V1ObjectMeta(
+                name=job_id,
+                labels=labels,
+                annotations=annotations,
+            ),
+            spec=job_spec,
+        )
+
+        return job
+
+    def _get_image_name(self, trajectory_id: str) -> str:
+        instance_id_split = trajectory_id.split("__")
+        repo_name = instance_id_split[0]
+        instance_id = instance_id_split[1]
+        return f"aorwall/sweb.eval.x86_64.{repo_name}_moatless_{instance_id}"
+
+    def _get_node_selector(self, node_id: int = None) -> dict:
+        """Get node selector to use for job placement.
+
+        Args:
+            node_id: Optional node ID for job placement
+
+        Returns:
+            Node selector dictionary
+        """
+        # Start with the base node selector
+        node_selector = dict(self.node_selector) if self.node_selector else {}
+
+        # If node_id is specified, add a selector for it
+        if node_id is not None:
+            node_selector["moatless.ai/node-id"] = str(node_id)
+
+        return node_selector

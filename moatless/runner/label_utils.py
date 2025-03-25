@@ -1,7 +1,31 @@
 """Utility functions for creating and managing container labels."""
 
-from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, List
+import asyncio
+from typing import Callable
+
+
+def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, node_id: int = None):
+    func_module = job_func.__module__
+    func_name = job_func.__name__
+
+    if node_id:
+        args = f"(project_id='{project_id}', trajectory_id='{trajectory_id}', node_id={node_id})"
+    else:
+        args = f"(project_id='{project_id}', trajectory_id='{trajectory_id}')"
+
+    is_async = asyncio.iscoroutinefunction(job_func)
+
+    # Create the appropriate Python command based on whether the function is async
+    if is_async:
+        return (
+            f"import asyncio; "
+            f"from {func_module} import {func_name}; "
+            f"import sys; "
+            f"asyncio.run({func_name}{args})"
+        )
+    else:
+        return f"from {func_module} import {func_name}; " f"import sys; " f"{func_name}{args}"
 
 
 def sanitize_label(value: str) -> str:
@@ -50,42 +74,12 @@ def get_trajectory_label(trajectory_id: str) -> str:
     return sanitize_label(trajectory_id)
 
 
-def create_job_labels(project_id: str, trajectory_id: str, prefix: str = "moatless") -> Dict[str, str]:
-    """Create standard labels for a job.
-
-    Args:
-        project_id: The project ID
-        trajectory_id: The trajectory ID
-        prefix: The prefix for label keys (default: "moatless")
-
-    Returns:
-        Dictionary of labels
-    """
-    project_label = get_project_label(project_id)
-    trajectory_label = get_trajectory_label(trajectory_id)
-
-    return {
-        f"{prefix}.project_id": project_id,
-        f"{prefix}.trajectory_id": trajectory_id,
-        f"{prefix}.managed": "true",
-        f"{prefix}.started_at": datetime.now().isoformat(),
-    }
-
-
-def create_metadata(
-    project_id: str, trajectory_id: str, func_name: str = None
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Create metadata for a job (labels and annotations).
-
-    Args:
-        project_id: The project ID
-        trajectory_id: The trajectory ID
-        func_name: Function name to execute (optional)
-
-    Returns:
-        Tuple of (labels, annotations)
-    """
-    # Prepare labels
+def create_labels(
+    project_id: str,
+    trajectory_id: str,
+    func_name: str = None,
+) -> Dict[str, str]:
+    """Create labels for a job."""
     project_label = get_project_label(project_id)
     trajectory_label = get_trajectory_label(trajectory_id)
 
@@ -95,6 +89,23 @@ def create_metadata(
         "trajectory_id": trajectory_label,
     }
 
+    if func_name:
+        labels["function"] = func_name
+
+    return labels
+
+
+def create_annotations(project_id: str, trajectory_id: str, func_name: str = None) -> Dict[str, str]:
+    """Create annotations for a job (labels and annotations).
+
+    Args:
+        project_id: The project ID
+        trajectory_id: The trajectory ID
+        func_name: Function name to execute (optional)
+
+    Returns:
+        Dictionary of annotations
+    """
     # Store original values in annotations
     annotations = {
         "moatless.ai/project-id": project_id,
@@ -104,7 +115,7 @@ def create_metadata(
     if func_name:
         annotations["moatless.ai/function"] = func_name
 
-    return labels, annotations
+    return annotations
 
 
 def create_docker_label_args(labels: Dict[str, str]) -> List[str]:

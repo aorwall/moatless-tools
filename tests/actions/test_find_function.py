@@ -16,7 +16,7 @@ async def test_find_function_init_method():
     instance_id = "django__django-13658"
     instance = get_moatless_instance(instance_id)
     repository = create_repository(instance)
-    code_index = create_index(instance, repository)
+    code_index = await create_index_async(instance, repository)
     file_context = FileContext(repo=repository)
     # Mock the completion model
     completion_model = AsyncMock(spec=BaseCompletionModel)

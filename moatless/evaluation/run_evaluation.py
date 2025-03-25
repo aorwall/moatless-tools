@@ -20,13 +20,13 @@ from moatless.runtime.local import SweBenchTestbedEnvironment
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")
 
-load_dotenv()
-
 
 async def run_evaluation_async(
     project_id: str, trajectory_id: str | None = None, patch: str | None = None
 ) -> bool | None:
     logger.info(f"current_project_id: {current_project_id}, current_trajectory_id: {current_trajectory_id}")
+
+    load_dotenv()
 
     storage = await get_storage()
 

@@ -10,8 +10,6 @@ from moatless.runner.asyncio_runner import AsyncioRunner
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
 if not os.environ.get("MOATLESS_DIR"):
@@ -120,6 +118,8 @@ async def get_event_bus() -> BaseEventBus:
     """Get the event bus instance."""
     global _event_bus
 
+    load_dotenv()
+
     if _event_bus is None:
         storage = await get_storage()
         if os.environ.get("REDIS_URL"):
@@ -143,7 +143,7 @@ async def get_event_bus() -> BaseEventBus:
 async def get_runner():
     """Get the runner instance."""
     global _runner
-
+    load_dotenv()
     if _runner is None:
         runner_type = os.environ.get("MOATLESS_RUNNER")
         if runner_type == "kubernetes":
@@ -168,6 +168,7 @@ async def get_runner():
 async def get_storage() -> BaseStorage:
     """Get the storage instance."""
     global _storage
+    load_dotenv()
     if _storage is None:
         if os.environ.get("MOATLESS_STORAGE") == "s3":
             from moatless.storage.s3_storage import S3Storage

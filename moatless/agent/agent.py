@@ -85,28 +85,33 @@ class ActionAgent(MoatlessComponent):
         if not self._workspace:
             raise RuntimeError("Workspace not set")
 
-        if not node.action_steps:
-            await self._generate_actions(node)
+        try:
+            if not node.action_steps:
+                await self._generate_actions(node)
 
-            duplicate_node = node.find_duplicate()
-            if duplicate_node:
-                node.is_duplicate = True
-                logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping")
+                duplicate_node = node.find_duplicate()
+                if duplicate_node:
+                    node.is_duplicate = True
+                    logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping")
+                    return
+
+            else:
+                logger.info(f"Node{node.node_id}: Action steps already generated. Skipping action generation.")
+
+            if not node.action_steps:
+                logger.warning(f"Node{node.node_id}: No action steps generated. Skipping execution.")
                 return
 
-        else:
-            logger.info(f"Node{node.node_id}: Action steps already generated. Skipping action generation.")
-
-        if not node.action_steps:
-            logger.warning(f"Node{node.node_id}: No action steps generated. Skipping execution.")
-            return
-
-        action_names = [action_step.action.name for action_step in node.action_steps]
-        logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
-        for i, action_step in enumerate(node.action_steps):
-            current_action_step.set(i)  # Used in logging to identify the action step
-            await self._execute(node, action_step)
-            current_action_step.set(None)
+            action_names = [action_step.action.name for action_step in node.action_steps]
+            logger.info(f"Node{node.node_id}: Execute actions: {action_names}")
+            for i, action_step in enumerate(node.action_steps):
+                current_action_step.set(i)  # Used in logging to identify the action step
+                await self._execute(node, action_step)
+                current_action_step.set(None)
+        except Exception as e:
+            logger.exception(f"Node{node.node_id}: Error in run: {e}")
+            node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
+            raise e
 
     async def _generate_actions(self, node: Node):
         node.possible_actions = [action.name for action in self.actions]

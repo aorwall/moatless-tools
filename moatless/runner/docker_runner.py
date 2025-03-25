@@ -17,7 +17,7 @@ from moatless.runner.runner import (
     JobDetailSection,
 )
 from moatless.telemetry import extract_trace_context
-from moatless.runner.label_utils import create_job_labels, sanitize_label, create_docker_label_args
+from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args
 
 logger = logging.getLogger(__name__)
 
@@ -145,26 +145,9 @@ class DockerRunner(BaseRunner):
                 cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless"])
                 cmd.extend(["-e", "PYTHONPATH=/opt/moatless:$PYTHONPATH"])
 
-            if node_id:
-                args = f"(project_id='{project_id}', trajectory_id='{trajectory_id}', node_id={node_id})"
-            else:
-                args = f"(project_id='{project_id}', trajectory_id='{trajectory_id}')"
-
-            is_async = asyncio.iscoroutinefunction(job_func)
-
-            # Create the appropriate Python command based on whether the function is async
-            if is_async:
-                python_command = (
-                    f"import asyncio; "
-                    f"from {func_module} import {func_name}; "
-                    f"import sys; "
-                    f"asyncio.run({func_name}{args})"
-                )
-            else:
-                python_command = f"from {func_module} import {func_name}; " f"import sys; " f"{func_name}{args}"
-
-            logger.info(f"Running command: {python_command}")
-            cmd.extend([image_name, "/usr/bin/python", "-c", python_command])
+            args = create_job_args(project_id, trajectory_id, job_func, node_id)
+            logger.info(f"Running command: {args}")
+            cmd.extend([image_name, "/usr/bin/python", "-c", args])
 
             # Run the command
             stdout, returncode = await self._run_docker_command(*cmd)

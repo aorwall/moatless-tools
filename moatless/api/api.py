@@ -88,8 +88,6 @@ async def verify_credentials(credentials: HTTPBasicCredentials = Depends(securit
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
 
-    load_dotenv()
-
     api = FastAPI(
         title="Moatless API",
         json_encoders={datetime: lambda dt: dt.isoformat()},

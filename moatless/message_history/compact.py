@@ -73,7 +73,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                     }
                 )
 
-            tokens += count_tokens(action.model_dump_json(exclude=exclude))
+                tokens += count_tokens(action.model_dump_json(exclude=exclude))
 
             messages.append(ChatCompletionAssistantMessage(role="assistant", tool_calls=tool_calls, content=content))
             messages.append(

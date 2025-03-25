@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional, cast
 from uuid import uuid4
 import importlib
 import traceback
+import inspect
 
 from opentelemetry import trace
 
@@ -16,6 +17,8 @@ from moatless.runner.runner import (
     BaseRunner,
     RunnerInfo,
     RunnerStatus,
+    JobDetails,
+    JobDetailSection,
 )
 
 tracer = trace.get_tracer(__name__)
@@ -119,7 +122,24 @@ class AsyncioRunner(BaseRunner):
             # Run the job function
             # Use a direct call instead of asyncio.to_thread to avoid type issues
             if callable(job_func):
-                job_func(project_id=project_id, trajectory_id=trajectory_id)
+                # Check function signature to determine what arguments to pass
+                sig = inspect.signature(job_func)
+                parameters = sig.parameters
+
+                # Determine how to call the function based on its parameters
+                if "project_id" in parameters and "trajectory_id" in parameters:
+                    # Function accepts both project_id and trajectory_id
+                    result = job_func(project_id=project_id, trajectory_id=trajectory_id)
+                elif len(parameters) == 0:
+                    # Function accepts no arguments
+                    result = job_func()
+                else:
+                    # For other cases, try calling without arguments to maintain backward compatibility
+                    result = job_func()
+
+                # Check if the result is a coroutine and await it if necessary
+                if inspect.iscoroutine(result):
+                    await result
             else:
                 raise TypeError(f"job_func must be callable, got {type(job_func)}")
 
@@ -362,3 +382,72 @@ class AsyncioRunner(BaseRunner):
             logs.append(meta["exc_info"])
 
         return "\n".join(logs)
+
+    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
+        """Get detailed information about a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            JobDetails object containing detailed information about the job if available
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+
+        # Check if the job exists
+        if job_id not in self.job_metadata:
+            return None
+
+        # Get job metadata
+        meta = self.job_metadata[job_id]
+        status = cast(JobStatus, meta["status"])
+
+        # Create the job details object
+        details = JobDetails(
+            id=job_id,
+            status=status,
+            project_id=project_id,
+            trajectory_id=trajectory_id,
+            enqueued_at=meta["enqueued_at"],
+            started_at=meta["started_at"],
+            ended_at=meta["ended_at"],
+            raw_data=meta,
+        )
+
+        # Add sections with detailed information
+        basic_info_section = JobDetailSection(
+            name="basic_info",
+            display_name="Basic Information",
+            data={
+                "job_id": job_id,
+                "status": status.value,
+                "project_id": project_id,
+                "trajectory_id": trajectory_id,
+            },
+        )
+        details.sections.append(basic_info_section)
+
+        # Add timing information section
+        timing_section = JobDetailSection(
+            name="timing",
+            display_name="Timing Information",
+            data={
+                "enqueued_at": meta["enqueued_at"].isoformat() if meta["enqueued_at"] else None,
+                "started_at": meta["started_at"].isoformat() if meta["started_at"] else None,
+                "ended_at": meta["ended_at"].isoformat() if meta["ended_at"] else None,
+            },
+        )
+        details.sections.append(timing_section)
+
+        # Add error information if applicable
+        if meta.get("exc_info") and status == JobStatus.FAILED:
+            details.error = meta["exc_info"]
+            error_section = JobDetailSection(
+                name="error",
+                display_name="Error Information",
+                data={"error": meta["exc_info"]},
+            )
+            details.sections.append(error_section)
+
+        return details

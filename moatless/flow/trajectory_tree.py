@@ -4,6 +4,8 @@ from typing import Optional, Union, cast
 
 from pydantic import BaseModel, Field
 
+from moatless.actions.find_class import FindClassArgs
+from moatless.actions.find_function import FindFunctionArgs
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments
 from moatless.actions.semantic_search import SemanticSearchArgs
@@ -130,6 +132,12 @@ def get_action_detail(action: ActionArguments) -> str:
 
     if isinstance(action, RunTestsArgs):
         return f"({action.test_files})"
+
+    if isinstance(action, FindClassArgs):
+        return f"({action.class_name})"
+
+    if isinstance(action, FindFunctionArgs):
+        return f"({action.function_name})"
 
     # return first property that is set
     for key, value in action.model_dump().items():
