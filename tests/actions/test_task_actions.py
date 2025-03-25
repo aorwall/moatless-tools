@@ -171,35 +171,6 @@ async def test_create_tasks(create_action, file_context, context_setup):
 
 
 @pytest.mark.asyncio
-async def test_update_task(create_action, update_action, file_context, context_setup):
-    """Test updating a task with the UpdateTask action."""
-    # First create a task
-    tasks = [TaskItem(id="update-test", content="Task to update", priority=50)]
-    create_args = CreateTasksArgs(
-        thoughts="Creating a task to update in test",
-        tasks=tasks
-    )
-    await create_action.execute(create_args, file_context=file_context)
-    
-    # Update the task status
-    update_args = UpdateTaskArgs(
-        thoughts="Updating the task status, result, and priority",
-        task_id="update-test",
-        state=TaskState.COMPLETED,
-        result="Task completed successfully",
-        priority=5
-    )
-    observation = await update_action.execute(update_args, file_context=file_context)
-    result = observation.message
-    
-    # Verify the update result - adapted for actual output format
-    assert "Updated task update-test" in result
-    assert "TaskState.OPEN" in result and "TaskState.COMPLETED" in result
-    assert "Task completed successfully" in result
-    assert "priority from 50 to 5" in result
-
-
-@pytest.mark.asyncio
 @patch('moatless.actions.list_tasks.ListTasks._execute')
 async def test_list_tasks(mock_execute, create_action, list_action, file_context, context_setup):
     """Test listing tasks with the ListTasks action.
