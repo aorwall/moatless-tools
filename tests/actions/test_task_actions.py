@@ -3,7 +3,7 @@ import tempfile
 from pathlib import Path
 import pytest
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from moatless.actions.create_tasks import CreateTasks, CreateTasksArgs, TaskItem
 from moatless.actions.update_task import UpdateTask, UpdateTaskArgs
@@ -26,17 +26,23 @@ def temp_dir():
 @pytest.fixture
 def file_storage(temp_dir):
     """Fixture to create a storage instance with a test directory."""
-    # Reset the singleton to ensure we're starting fresh
+    # Store the original method and reset singleton
     BaseStorage.reset_instance()
-    # Create and return the new instance with a test directory
-    return BaseStorage.get_instance(storage_impl=FileStorage, base_dir=temp_dir)
+    
+    # Create and return the test storage instance
+    storage = FileStorage(base_dir=temp_dir)
+    return storage
+
 
 
 @pytest.fixture(autouse=True)
-def reset_storage_after_test():
-    """Auto-used fixture to reset the storage singleton after each test."""
-    yield
-    BaseStorage.reset_instance()
+def mock_settings_get_storage(file_storage):
+    """Mock the settings.get_storage function to return our test storage."""
+    async def mock_get_storage():
+        return file_storage
+        
+    with patch('moatless.settings.get_storage', mock_get_storage):
+        yield
 
 
 @pytest.fixture
@@ -69,7 +75,7 @@ def context_setup():
 @pytest.fixture
 def task_handler(file_storage, context_setup):
     """Create a TaskHandler using the test FileStorage."""
-    handler = TaskHandler(file_storage)
+    handler = TaskHandler(storage=file_storage)
     return handler
 
 
@@ -109,6 +115,32 @@ def list_action(workspace):
     action = ListTasks()
     action.workspace = workspace
     return action
+
+
+@pytest.fixture(autouse=True)
+def mock_base_storage_get_instance(file_storage):
+    """Mock BaseStorage.get_instance to return our test storage instance."""
+    original_get_instance = BaseStorage.get_instance
+    
+    @classmethod
+    def mock_get_instance(cls, storage_impl=None, **kwargs):
+        return file_storage
+        
+    BaseStorage.get_instance = mock_get_instance
+    yield
+    BaseStorage.get_instance = original_get_instance
+
+
+@pytest.fixture(autouse=True)
+def mock_settings_get_runner():
+    """Mock the settings.get_runner function to return a mock runner."""
+    mock_runner = AsyncMock()
+    
+    async def mock_get_runner():
+        return mock_runner
+        
+    with patch('moatless.settings.get_runner', mock_get_runner):
+        yield mock_runner
 
 
 @pytest.mark.asyncio
