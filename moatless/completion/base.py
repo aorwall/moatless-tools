@@ -9,14 +9,9 @@ from math import log
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import litellm
-from openai import APIConnectionError
 import tenacity
 from litellm.exceptions import BadRequestError
 from litellm.files.main import RateLimitError
-from opentelemetry import trace
-from pydantic import BaseModel, Field, PrivateAttr
-from tenacity import retry, stop_after_attempt, wait_exponential
-
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionCachedContent,
@@ -26,9 +21,12 @@ from moatless.completion.schema import (
     ResponseSchema,
 )
 from moatless.completion.stats import CompletionAttempt, CompletionInvocation, Usage
-
 from moatless.component import MoatlessComponent
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
+from openai import APIConnectionError
+from opentelemetry import trace
+from pydantic import BaseModel, Field, PrivateAttr
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

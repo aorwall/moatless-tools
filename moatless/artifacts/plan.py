@@ -1,6 +1,5 @@
-from pydantic import BaseModel
-
 from moatless.artifacts.artifact import Artifact
+from pydantic import BaseModel
 
 
 class Task(BaseModel):

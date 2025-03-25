@@ -6,8 +6,6 @@ from importlib import resources
 from typing import Optional
 
 import networkx as nx
-from tree_sitter import Language, Node, Parser
-
 from moatless.codeblocks.codeblocks import (
     BlockSpan,
     CodeBlock,
@@ -21,6 +19,7 @@ from moatless.codeblocks.codeblocks import (
 )
 from moatless.codeblocks.module import Module
 from moatless.codeblocks.parser.comment import get_comment_symbol
+from tree_sitter import Language, Node, Parser
 
 commented_out_keywords = ["rest of the code", "existing code", "other code"]
 child_block_types = ["ERROR", "block"]

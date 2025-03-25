@@ -7,12 +7,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import anyio
-from opentelemetry import trace
-from pydantic import BaseModel, Field, PrivateAttr
-
 from moatless.codeblocks import get_parser_by_path
 from moatless.codeblocks.module import Module
 from moatless.repository.repository import Repository
+from opentelemetry import trace
+from pydantic import BaseModel, Field, PrivateAttr
 
 tracer = trace.get_tracer(__name__)
 logger = logging.getLogger(__name__)

@@ -2,20 +2,19 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
 import subprocess
 import time
 import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import litellm
 from dotenv import load_dotenv
-from opentelemetry import trace
-from moatless.settings import get_storage
-
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.runtime.local import SweBenchLocalEnvironment
+from moatless.settings import get_storage
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")

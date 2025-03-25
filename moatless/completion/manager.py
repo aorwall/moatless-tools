@@ -7,14 +7,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from pydantic import BaseModel, Field
-
 from moatless import settings
 from moatless.completion.base import BaseCompletionModel, LLMResponseFormat
 from moatless.completion.log_handler import LogHandler
 from moatless.completion.schema import FewShotExample, ResponseSchema
 from moatless.exceptions import CompletionRuntimeError
 from moatless.storage.base import BaseStorage
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

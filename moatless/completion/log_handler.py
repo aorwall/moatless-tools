@@ -3,11 +3,9 @@ import logging
 from datetime import datetime
 
 from litellm.integrations.custom_logger import CustomLogger
-from pydantic import BaseModel
-
 from moatless.context_data import current_node_id, current_action_step
 from moatless.storage.base import BaseStorage
-
+from pydantic import BaseModel
 
 logger = logging.getLogger()
 

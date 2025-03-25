@@ -2,8 +2,6 @@ import logging
 from dataclasses import dataclass
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
-
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments
 from moatless.actions.view_code import CodeSpan, ViewCodeArgs
@@ -17,6 +15,7 @@ from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

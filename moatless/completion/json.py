@@ -3,11 +3,10 @@ import logging
 from textwrap import dedent
 from typing import Any, Optional
 
-from pydantic import ValidationError
-
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 

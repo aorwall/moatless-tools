@@ -1,8 +1,6 @@
 import logging
 
 import tree_sitter_python as tspython
-from tree_sitter import Language
-
 from moatless.codeblocks.codeblocks import (
     CodeBlock,
     CodeBlockType,
@@ -15,6 +13,7 @@ from moatless.codeblocks.parser.parser import (
     NodeMatch,
     commented_out_keywords,
 )
+from tree_sitter import Language
 
 child_block_types = ["ERROR", "block"]
 

@@ -2,10 +2,9 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional, Type
 
-from pydantic import BaseModel
-
 from moatless.component import MoatlessComponent
 from moatless.node import Node
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 

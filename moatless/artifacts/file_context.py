@@ -1,10 +1,9 @@
 from dataclasses import Field
 
-from pydantic import PrivateAttr
-
 from moatless.artifacts.artifact import Artifact, ArtifactHandler
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
+from pydantic import PrivateAttr
 
 
 class ContextFileArtifact(Artifact):

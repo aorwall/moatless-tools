@@ -2,17 +2,12 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
-
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import litellm
 from dotenv import load_dotenv
-from opentelemetry import trace
-from moatless.runner.utils import cleanup_job_logging, setup_job_logging
-from moatless.storage.base import BaseStorage
-
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import EvaluationEvent
@@ -20,8 +15,11 @@ from moatless.flow.flow import AgenticFlow
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.git import GitRepository
+from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.local import SweBenchLocalEnvironment
+from moatless.storage.base import BaseStorage
 from moatless.workspace import Workspace
+from opentelemetry import trace
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)

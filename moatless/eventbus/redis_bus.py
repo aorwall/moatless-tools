@@ -5,10 +5,9 @@ import os
 from typing import Any, Callable, List, Optional
 
 import redis.asyncio as redis
-
 from moatless.context_data import current_project_id, current_trajectory_id
-from moatless.events import BaseEvent
 from moatless.eventbus.base import BaseEventBus
+from moatless.events import BaseEvent
 from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)

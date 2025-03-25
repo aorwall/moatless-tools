@@ -5,8 +5,6 @@ import os
 import subprocess
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field
-
 from moatless.completion.base import BaseCompletionModel
 from moatless.completion.schema import ChatCompletionUserMessage
 from moatless.repository.file import FileRepository
@@ -17,6 +15,7 @@ from moatless.utils.repo import (
     maybe_clone,
     maybe_clone_async,
 )
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 

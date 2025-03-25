@@ -3,7 +3,6 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any, Optional, Tuple, Type, TypeVar, cast
 
-
 from moatless.completion.stats import CompletionInvocation
 from moatless.component import MoatlessComponent
 from moatless.node import Node, Reward

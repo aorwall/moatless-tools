@@ -3,13 +3,12 @@ import logging
 from textwrap import dedent
 from typing import Any, Dict, List, Optional, Type
 
-from pydantic import ValidationError
-
 from moatless.actions.schema import ActionArguments
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.json import JsonCompletionModel
 from moatless.completion.schema import ResponseSchema
 from moatless.exceptions import CompletionRuntimeError
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 

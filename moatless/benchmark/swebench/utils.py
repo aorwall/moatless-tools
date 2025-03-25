@@ -4,10 +4,10 @@ import logging
 import os
 import shutil
 import signal
-import aiohttp
-import requests
 from typing import Optional
 
+import aiohttp
+import requests
 from moatless.evaluation.utils import (
     get_missing_files,
     get_missing_spans,

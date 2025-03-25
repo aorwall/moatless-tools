@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from opentelemetry import trace
-
 from moatless.evaluation.run_instance import run_swebench_instance
 from moatless.evaluation.schema import (
     Evaluation,
@@ -21,6 +19,7 @@ from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import FlowManager
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
+from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")

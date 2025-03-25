@@ -1,8 +1,6 @@
 import logging
 from typing import List
 
-from pydantic import BaseModel, Field, PrivateAttr, model_serializer
-
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionTextObject,
@@ -12,6 +10,7 @@ from moatless.message_history.base import BaseMemory
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
+from pydantic import BaseModel, Field, PrivateAttr, model_serializer
 
 logger = logging.getLogger(__name__)
 

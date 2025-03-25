@@ -14,7 +14,6 @@ from typing import (
 from docstring_parser import parse
 from pydantic import BaseModel, Field, ValidationError
 
-
 logger = logging.getLogger(__name__)
 
 # Define a type variable as a replacement for Self in Python 3.10

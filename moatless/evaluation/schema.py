@@ -3,8 +3,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.stats import Usage
 from moatless.discriminator.base import BaseDiscriminator
@@ -14,6 +12,7 @@ from moatless.runner.runner import JobStatus
 from moatless.schema import MessageHistoryType
 from moatless.selector import BaseSelector
 from moatless.value_function.base import BaseValueFunction
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DateTimeEncoder(json.JSONEncoder):

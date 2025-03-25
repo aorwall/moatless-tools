@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager, contextmanager
 from functools import wraps
 from typing import Any, Dict, Literal, Optional, ParamSpec, TypeVar, Union
 
+from moatless.context_data import get_moatless_dir
 from opentelemetry import context, trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.propagate import extract, inject
@@ -17,8 +18,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import Span, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-
-from moatless.context_data import get_moatless_dir
 
 try:
     from azure.monitor.opentelemetry import configure_azure_monitor

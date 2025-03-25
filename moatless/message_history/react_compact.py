@@ -1,8 +1,8 @@
 import logging
 from typing import List
 
-from pydantic import Field
-
+from moatless.actions.schema import ActionArguments
+from moatless.actions.view_code import ViewCodeArgs, CodeSpan
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionAssistantMessage,
@@ -10,10 +10,9 @@ from moatless.completion.schema import (
 )
 from moatless.message_history.compact import CompactMessageHistoryGenerator, NodeMessage
 from moatless.node import Node, ActionStep
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan
-from moatless.actions.schema import ActionArguments
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
+from pydantic import Field
 
 logger = logging.getLogger(__name__)
 

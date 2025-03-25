@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
-from moatless import storage
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.component import MoatlessComponent
@@ -27,7 +26,6 @@ from moatless.events import (
 from moatless.flow.schema import FlowStatus, FlowStatusInfo
 from moatless.node import Node
 from moatless.repository.repository import Repository
-from moatless.storage.base import BaseStorage
 from moatless.workspace import Workspace
 from opentelemetry import trace
 from pydantic import ConfigDict, Field, PrivateAttr

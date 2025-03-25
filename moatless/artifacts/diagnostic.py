@@ -2,11 +2,10 @@ import builtins
 from enum import Enum
 from typing import ClassVar, Optional
 
-from pydantic import BaseModel, Field
-
 from moatless.artifacts.artifact import Artifact
 from moatless.artifacts.json_handler import JsonArtifactHandler
 from moatless.completion.schema import ChatCompletionTextObject, MessageContentListBlock
+from pydantic import BaseModel, Field
 
 
 class Position(BaseModel):

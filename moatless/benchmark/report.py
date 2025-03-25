@@ -5,8 +5,6 @@ import os
 from typing import Optional
 
 import pandas as pd
-from pydantic import BaseModel, Field
-
 from moatless.evaluation.utils import (
     count_identified_files,
     count_identified_spans,
@@ -18,6 +16,7 @@ from moatless.evaluation.utils import (
 from moatless.file_context import FileContext
 from moatless.node import Node
 from moatless.utils.file import is_test
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

@@ -2,8 +2,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field, PrivateAttr
-
 from moatless.artifacts.artifact import (
     Artifact,
     ArtifactHandler,
@@ -14,6 +12,7 @@ from moatless.environment.base import BaseEnvironment
 from moatless.index.code_index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
+from pydantic import BaseModel, Field, PrivateAttr
 
 
 class Workspace(BaseModel):
