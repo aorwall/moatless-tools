@@ -1,13 +1,12 @@
 """Tests for the DockerRunner implementation."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, call
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, List, Dict, Optional
+from unittest.mock import AsyncMock, MagicMock, patch, call
 
+import pytest
 import pytest_asyncio
-
 from moatless.runner.docker_runner import DockerRunner
 from moatless.runner.runner import BaseRunner, JobInfo, JobStatus, RunnerStatus, JobsStatusSummary
 

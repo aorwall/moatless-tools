@@ -1,14 +1,14 @@
 import json
-import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
-from pydantic import Field
-import tenacity
 
+import pytest
+import tenacity
+from litellm.types.utils import ModelResponse, Usage, Message, Function, ChatCompletionMessageToolCall
+from moatless.actions.schema import ActionArguments
+from moatless.completion.base import CompletionRetryError
 from moatless.completion.tool_call import ToolCallCompletionModel
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
-from moatless.actions.schema import ActionArguments
-from litellm.types.utils import ModelResponse, Usage, Message, Function, ChatCompletionMessageToolCall
-from moatless.completion.base import CompletionRetryError
+from pydantic import Field
 
 
 class TestActionArgs(ActionArguments):

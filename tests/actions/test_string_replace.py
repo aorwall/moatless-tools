@@ -1,11 +1,11 @@
+import textwrap
+from pathlib import Path
+from unittest.mock import Mock
+
 import pytest
 import pytest_asyncio
-import textwrap
-from unittest.mock import Mock
-from pathlib import Path
-
-from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.schema import Observation
+from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import InMemRepository
 from moatless.workspace import Workspace

@@ -1,11 +1,10 @@
 import json
 import time
 from unittest.mock import MagicMock, patch
-from pydantic import BaseModel
 
 import pytest
-
 from moatless.completion.stats import CompletionAttempt, CompletionInvocation, MODEL_COSTS, Usage
+from pydantic import BaseModel
 
 
 class TestUsage:

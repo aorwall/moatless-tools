@@ -1,19 +1,18 @@
 import json
-import pytest
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
-
+import pytest
 from moatless.completion.log_handler import LogHandler
-from moatless.storage.file_storage import FileStorage
 from moatless.context_data import (
     current_node_id,
     current_action_step,
     current_project_id,
     current_trajectory_id,
 )
+from moatless.storage.file_storage import FileStorage
+from pydantic import BaseModel
 
 
 class TestModel(BaseModel):

@@ -1,12 +1,12 @@
 import json
-import pytest
 from unittest.mock import patch, AsyncMock
-from pydantic import Field
-from litellm.types.utils import ModelResponse, Usage, Message
 
+import pytest
+from litellm.types.utils import ModelResponse, Usage, Message
+from moatless.completion.base import CompletionRetryError, LLMResponseFormat
 from moatless.completion.json import JsonCompletionModel
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
-from moatless.completion.base import CompletionRetryError, LLMResponseFormat
+from pydantic import Field
 
 
 @pytest.fixture

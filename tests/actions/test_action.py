@@ -2,14 +2,13 @@ from typing import Union, Type
 
 import pytest
 from instructor import OpenAISchema
-from pydantic import Field
-
 from moatless.actions.action import Action, ActionArguments
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish, FinishArgs
 from moatless.actions.semantic_search import SemanticSearch, SemanticSearchArgs
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import ViewCode, ViewCodeArgs
+from pydantic import Field
 
 
 def test_action_schema():

@@ -1,10 +1,9 @@
 import json
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
 from typing import Any, Dict, List, Optional, Union, Tuple, cast
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
-from pydantic import BaseModel, Field
-
+import pytest
+from litellm.files.main import RateLimitError
 from moatless.completion.base import (
     BaseCompletionModel,
     CompletionResponse,
@@ -17,8 +16,8 @@ from moatless.completion.schema import (
 )
 from moatless.completion.stats import CompletionAttempt, CompletionInvocation, Usage
 from moatless.exceptions import CompletionRuntimeError
-from litellm.files.main import RateLimitError
 from openai import APIConnectionError
+from pydantic import BaseModel, Field
 
 
 # Create a minimal ResponseSchema subclass for testing

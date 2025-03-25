@@ -1,26 +1,25 @@
-import pytest
-import tempfile
-import shutil
 import asyncio
 import json
 import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, call
-from functools import partial
 
-from moatless.flow.manager import FlowManager
-from moatless.flow.schema import FlowStatusInfo, TrajectoryResponseDTO
-from moatless.storage.base import BaseStorage
-from moatless.storage.file_storage import FileStorage
+import pytest
+from moatless.agent.agent import ActionAgent
 from moatless.evaluation.manager import EvaluationManager
 from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationStatus, InstanceStatus
-from moatless.runner.runner import JobStatus, BaseRunner
-from moatless.flow.loop import AgenticLoop
-from moatless.flow.flow import AgenticFlow, Node
-from moatless.agent.agent import ActionAgent
 from moatless.eventbus.base import BaseEventBus
-
+from moatless.flow.flow import AgenticFlow, Node
+from moatless.flow.loop import AgenticLoop
+from moatless.flow.manager import FlowManager
+from moatless.flow.schema import FlowStatusInfo, TrajectoryResponseDTO
+from moatless.runner.runner import JobStatus, BaseRunner
+from moatless.storage.base import BaseStorage
+from moatless.storage.file_storage import FileStorage
 
 # Constants for test data
 TEST_INSTANCE_IDS = [

@@ -6,7 +6,6 @@ from unittest.mock import Mock
 
 import pytest
 from git import Repo
-
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.file_context import FileContext, ContextFile

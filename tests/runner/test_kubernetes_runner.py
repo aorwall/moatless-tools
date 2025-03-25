@@ -2,11 +2,11 @@
 """Tests for the KubernetesRunner implementation."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, Callable
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 import pytest_asyncio
 from kubernetes import client
 from kubernetes.client import (
@@ -21,7 +21,6 @@ from kubernetes.client import (
     V1ContainerStatus,
     V1PodCondition,
 )
-
 from moatless.runner.kubernetes_runner import KubernetesRunner
 from moatless.runner.runner import BaseRunner, JobInfo, JobStatus, RunnerStatus
 

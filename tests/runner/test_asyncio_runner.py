@@ -2,13 +2,12 @@
 """Tests for the AsyncioRunner implementation."""
 
 import asyncio
-import pytest
-from unittest.mock import AsyncMock
 from datetime import datetime, timedelta
 from typing import AsyncGenerator
+from unittest.mock import AsyncMock
 
+import pytest
 import pytest_asyncio
-
 from moatless.runner.asyncio_runner import AsyncioRunner
 from moatless.runner.runner import BaseRunner, JobStatus, RunnerStatus
 

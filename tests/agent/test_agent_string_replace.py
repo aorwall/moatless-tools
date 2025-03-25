@@ -1,7 +1,7 @@
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.agent.agent import ActionAgent
 from moatless.completion import BaseCompletionModel, CompletionResponse

@@ -1,8 +1,8 @@
-import pytest
-from pydantic import BaseModel, Field
 from typing import Optional, List
 
+import pytest
 from moatless.completion.schema import ResponseSchema
+from pydantic import BaseModel, Field
 
 
 class TestAction(ResponseSchema):

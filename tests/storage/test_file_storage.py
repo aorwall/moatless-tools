@@ -1,13 +1,12 @@
+import asyncio
 import json
-import pytest
 import os
+import shutil
 import tempfile
 from pathlib import Path
-import shutil
-
-import asyncio
 from unittest.mock import patch, MagicMock
 
+import pytest
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 

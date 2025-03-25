@@ -1,10 +1,10 @@
-import pytest
 import asyncio
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 
+import pytest
 from moatless.actions.run_tests import RunTests, RunTestsArgs
-from moatless.testing.schema import TestFile, TestResult, TestStatus
 from moatless.file_context import FileContext
+from moatless.testing.schema import TestFile, TestResult, TestStatus
 from moatless.workspace import Workspace
 
 

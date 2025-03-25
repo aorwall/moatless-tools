@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from moatless.actions.action import Action
 from moatless.actions.finish import FinishArgs
 from moatless.actions.schema import Observation, ActionArguments

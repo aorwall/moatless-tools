@@ -1,3 +1,4 @@
+import pytest
 from moatless.actions.view_code import (
     ViewCode,
     ViewCodeArgs,
@@ -7,7 +8,6 @@ from moatless.benchmark.swebench import create_repository
 from moatless.evaluation.utils import get_moatless_instance
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
-import pytest
 
 
 @pytest.mark.asyncio

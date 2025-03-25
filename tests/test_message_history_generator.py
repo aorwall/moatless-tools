@@ -1,11 +1,11 @@
 import json
+
 import pytest
 import pytest_asyncio
-
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.finish import FinishArgs
-from moatless.actions.schema import Observation, ActionArguments
 from moatless.actions.run_tests import RunTestsArgs
+from moatless.actions.schema import Observation, ActionArguments
 from moatless.actions.string_replace import StringReplaceArgs
 from moatless.actions.view_code import CodeSpan, ViewCodeArgs
 from moatless.completion.schema import ChatCompletionAssistantMessage, ChatCompletionUserMessage
@@ -16,6 +16,7 @@ from moatless.repository.repository import InMemRepository
 from moatless.testing.schema import TestResult, TestStatus
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
+
 
 # pyright: reportCallIssue=false, reportAttributeAccessIssue=false
 

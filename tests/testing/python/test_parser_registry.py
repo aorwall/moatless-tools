@@ -1,10 +1,10 @@
 import os
-import pytest
-from pathlib import Path
 import warnings
+from pathlib import Path
 
-from moatless.testing.schema import TestStatus, TraceItem, TestResult
+import pytest
 from moatless.testing.python.parser_registry import parse_log
+from moatless.testing.schema import TestStatus, TraceItem, TestResult
 
 
 def _get_test_data_path(filename):

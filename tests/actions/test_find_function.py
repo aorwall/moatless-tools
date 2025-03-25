@@ -1,14 +1,15 @@
+from unittest.mock import AsyncMock, Mock, patch, MagicMock
+
+import pytest
 from moatless.actions.find_function import FindFunction, FindFunctionArgs
 from moatless.benchmark.swebench import create_repository, create_index, create_index_async
-from moatless.evaluation.utils import get_moatless_instance
 from moatless.completion import BaseCompletionModel, LLMResponseFormat
+from moatless.evaluation.utils import get_moatless_instance
 from moatless.file_context import FileContext, ContextFile, ContextSpan
-from moatless.workspace import Workspace
-from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 from moatless.index.code_index import CodeIndex
+from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 from moatless.repository.repository import Repository
-import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from moatless.workspace import Workspace
 
 
 @pytest.mark.asyncio

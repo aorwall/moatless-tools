@@ -1,7 +1,6 @@
 from unittest.mock import Mock
 
 import pytest
-
 from moatless.actions.insert_line import InsertLine, InsertLinesArgs
 from moatless.file_context import FileContext
 from moatless.repository.repository import InMemRepository

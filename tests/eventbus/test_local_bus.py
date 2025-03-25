@@ -2,10 +2,10 @@ import asyncio
 import json
 import os
 import tempfile
-import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from moatless.eventbus.base import BaseEventBus
 from moatless.eventbus.local_bus import LocalEventBus
 from moatless.events import BaseEvent

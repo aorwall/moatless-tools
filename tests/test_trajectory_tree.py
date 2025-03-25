@@ -1,22 +1,21 @@
+import io
 import logging
-import pytest
+import sys
 from datetime import datetime, timedelta
 from typing import Optional
-import io
-import sys
 
-from moatless.actions.think import ThinkArgs
+import pytest
+from moatless.actions.finish import FinishArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.semantic_search import SemanticSearchArgs
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.actions.finish import FinishArgs
+from moatless.actions.think import ThinkArgs
 from moatless.completion.stats import CompletionInvocation, Usage, CompletionAttempt
 from moatless.flow.trajectory_tree import (
-    process_tree, process_flat, NodeTreeItem, ItemType, 
+    process_tree, process_flat, NodeTreeItem, ItemType,
     has_branch_nodes, create_node_tree, generate_ascii_tree, print_ascii_tree
 )
 from moatless.node import Node, ActionStep, Thoughts
-
 
 logger = logging.getLogger(__name__)
 
