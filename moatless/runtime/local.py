@@ -19,10 +19,7 @@ from moatless.testing.schema import TestResult
 from swebench.harness.constants import SWEbenchInstance, NON_TEST_EXTS, APPLY_PATCH_FAIL, APPLY_PATCH_PASS
 from swebench.harness.grading import get_eval_report
 from swebench.harness.test_spec.test_spec import TestSpec, make_test_spec, MAP_REPO_VERSION_TO_SPECS
-from testbeds.schema import (
-    EvaluationResult,
-    ResolvedStatus,
-)
+
 
 logger = logging.getLogger(__name__)
 
