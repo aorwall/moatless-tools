@@ -30,7 +30,7 @@ from moatless.testing.schema import TestResult
 logger = logging.getLogger(__name__)
 
 
-class SweBenchTestbedEnvironment(RuntimeEnvironment):
+class SweBenchLocalEnvironment(RuntimeEnvironment):
     """Environment implementation for running swebench tests and evaluations."""
 
     def __init__(

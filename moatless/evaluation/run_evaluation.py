@@ -15,7 +15,7 @@ from opentelemetry import trace
 from moatless.settings import get_storage
 
 from moatless.context_data import current_project_id, current_trajectory_id
-from moatless.runtime.local import SweBenchTestbedEnvironment
+from moatless.runtime.local import SweBenchLocalEnvironment
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.runner")
@@ -44,7 +44,7 @@ async def run_evaluation_async(
     repo_path = os.getenv("REPO_DIR", "/testbed")
     logger.info(f"Using repo path: {repo_path}")
 
-    runtime = SweBenchTestbedEnvironment(
+    runtime = SweBenchLocalEnvironment(
         repo_path=Path(repo_path),
         swebench_instance=swebench_instance,
         storage=storage,

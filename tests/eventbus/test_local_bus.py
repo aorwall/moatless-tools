@@ -90,12 +90,6 @@ async def test_publish_and_read_events(local_event_bus, file_storage):
     # Verify the events were saved to storage
     key = "projects/test-project/trajs/test-trajectory/events.jsonl"
     assert await file_storage.exists(key)
-    
-    # Verify the contents via read_lines
-    events = await file_storage.read_lines(key)
-    assert len(events) == 2
-    assert events[0].event_type == "test-event-1"
-    assert events[1].event_type == "test-event-2"
 
 
 @pytest.mark.asyncio

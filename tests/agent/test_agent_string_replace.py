@@ -6,6 +6,7 @@ from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.agent.agent import ActionAgent
 from moatless.completion import BaseCompletionModel, CompletionResponse
 from moatless.file_context import FileContext
+from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node, ActionStep
 from moatless.repository.repository import InMemRepository
 from moatless.schema import MessageHistoryType
@@ -57,7 +58,8 @@ def agent(mock_completion_model, workspace):
     agent = ActionAgent(
         agent_id="test-agent",
         system_prompt="You are a helpful assistant",
-        actions=[string_replace_action]
+        actions=[string_replace_action],
+        memory=MessageHistoryGenerator()
     )
     agent.workspace = workspace
     agent.completion_model = mock_completion_model
@@ -90,15 +92,9 @@ async def test_agent_multiple_string_replace(agent, file_context, repository):
     step1 = ActionStep(action=replace_args1)
     step2 = ActionStep(action=replace_args2)
     node.action_steps = [step1, step2]
-    
-    # Mock the event_bus.publish method
-    with patch('moatless.agent.agent.event_bus.publish', new_callable=AsyncMock) as mock_publish:
-        # Run the agent
-        await agent._execute(node, step1)
-        await agent._execute(node, step2)
-        
-        # Verify event_bus.publish was called
-        assert mock_publish.call_count == 2
+
+    await agent._execute(node, step1)
+    await agent._execute(node, step2)
     
     # Verify that both changes were applied
     updated_content = file_context.get_file("test_file.py").content

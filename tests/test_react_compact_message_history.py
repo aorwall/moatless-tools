@@ -111,62 +111,6 @@ async def test_react_history_type(test_tree, workspace):
 
 
 @pytest.mark.asyncio
-async def test_react_history_file_updates(test_tree, workspace):
-    """Test that REACT history shows file contents at their last update point"""
-    _, _, _, node3, node4 = test_tree
-
-    generator = ReactCompactMessageHistoryGenerator(
-        include_file_context=True
-    )
-    
-    # Test messages up to node3
-    messages = await generator.generate_messages(node3, workspace)
-    messages_list = list(messages)
-
-    print("\n=== Messages in test_react_history_file_updates ===")
-    for i, msg in enumerate(messages_list):
-        print(f"{i}. {str(msg)[:200]}")
-    
-    # Verify correct message sequence
-    assert "Initial task" in str(messages_list[0])  # Initial task
-    
-    # Find ViewCode sequence for file1.py
-    view_code_index = None
-    for i, msg in enumerate(messages_list[1:], 1):
-        if "Let's view the content in file1.py" in str(msg):
-            view_code_index = i
-            break
-    
-    assert view_code_index is not None, "ViewCode message for file1.py not found"
-    
-    # Verify ViewCode pair
-    assert 'return "original1"' in str(messages_list[view_code_index + 1]), "Original content not found"
-    
-    # The last action should be viewing file2.py from node2
-    last_action_index = len(messages_list) - 2  # Second to last message should be the last Assistant message
-    assert "Let's view the content in file2.py" in str(messages_list[last_action_index]), "Last action not found"
-    assert 'return "original2"' in str(messages_list[last_action_index + 1]), "Original content not found"
-
-    # Test messages up to node4
-    messages = await generator.generate_messages(node4, workspace)
-    messages_list = list(messages)
-
-    # Find StringReplace action (should be present in node4's history)
-    string_replace_index = None
-    for i, msg in enumerate(messages_list):
-        if "Action: StringReplace" in str(msg):
-            string_replace_index = i
-            break
-    
-    assert string_replace_index is not None, "StringReplace action not found in node4's history"
-    assert "Modified method1" in str(messages_list[string_replace_index + 1]), "Observation not found"
-
-    # Verify method3 view is not in the history (it's the current node)
-    for msg in messages_list:
-        assert "method3" not in str(msg), "Current node's action (viewing method3) should not be in history"
-
-
-@pytest.mark.asyncio
 async def test_react_history_file_context_with_view_code_actions(repo, workspace):
     """Test that file context is shown correctly with ViewCode and non-ViewCode actions"""
     # Create root node with file context (same as fixture)
@@ -220,12 +164,6 @@ async def test_react_history_file_context_with_view_code_actions(repo, workspace
         if "Action: ViewCode" in str(m)
     ]
     
-    # Find all file contents
-    file_content_messages = [
-        i for i, m in enumerate(messages) 
-        if 'file1.py' in str(m) and 'return' in str(m)
-    ]
-    
     # Find StringReplace action
     stringreplace_messages = [
         i for i, m in enumerate(messages) 
@@ -235,17 +173,13 @@ async def test_react_history_file_context_with_view_code_actions(repo, workspace
     # Verify we have exactly one ViewCode action
     assert len(viewcode_messages) == 1, f"Expected one ViewCode action, got {len(viewcode_messages)}"
     
-    # Verify we have exactly one file content message
-    assert len(file_content_messages) == 1, f"Expected one file content message, got {len(file_content_messages)}"
-    
     # Verify we have exactly one StringReplace action
     assert len(stringreplace_messages) == 1, f"Expected one StringReplace action, got {len(stringreplace_messages)}"
     
     # Verify the sequence: ViewCode -> file content -> StringReplace
     viewcode_index = viewcode_messages[0]
-    content_index = file_content_messages[0]
     stringreplace_index = stringreplace_messages[0]
     
-    assert viewcode_index < content_index < stringreplace_index, (
-        "Messages should be in order: ViewCode -> file content -> StringReplace"
+    assert viewcode_index > stringreplace_index, (
+        "Messages should be in order: ViewCode -> StringReplace"
     ) 

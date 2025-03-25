@@ -17,7 +17,7 @@ from moatless.runner.runner import (
     JobDetailSection,
 )
 from moatless.telemetry import extract_trace_context
-from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args
+from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +128,7 @@ class DockerRunner(BaseRunner):
             cmd = ["docker", "run", "--name", container_name, "-d"]
 
             # Add Docker labels for easier container identification and querying
-            job_labels = create_job_labels(project_id, trajectory_id)
+            job_labels = create_labels(project_id, trajectory_id)
             cmd.extend(create_docker_label_args(job_labels))
 
             # Add environment variables

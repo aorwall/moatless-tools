@@ -29,7 +29,7 @@ class RunnerInfo(BaseModel):
 
 
 class JobInfo(BaseModel):
-    """Information about a job in RQ."""
+    """Information about a job."""
 
     id: str
     status: JobStatus
@@ -39,58 +39,6 @@ class JobInfo(BaseModel):
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
     metadata: Optional[dict[str, Any]] = None
-
-
-class EvaluationJobStatus(BaseModel):
-    """Status of all jobs for an evaluation."""
-
-    evaluation_name: str
-    status: str
-    instances: dict[str, dict[str, Any]]
-    error: Optional[str] = None
-    traceback: Optional[str] = None
-
-
-class JobsCollection(BaseModel):
-    """Collection of job IDs for an evaluation."""
-
-    run_jobs: list[str] = Field(default_factory=list)
-    eval_jobs: list[str] = Field(default_factory=list)
-    active_jobs: list[str] = Field(default_factory=list)
-    queued_jobs: list[str] = Field(default_factory=list)
-    finished_jobs: list[str] = Field(default_factory=list)
-    failed_jobs: list[str] = Field(default_factory=list)
-    error: Optional[str] = None
-    traceback: Optional[str] = None
-
-
-class CancellationResult(BaseModel):
-    """Result of cancelling jobs for an evaluation."""
-
-    evaluation_name: str
-    cancelled_jobs: list[str] = Field(default_factory=list)
-    errors: list[dict[str, str]] = Field(default_factory=list)
-    error: Optional[str] = None
-    traceback: Optional[str] = None
-
-
-class RetryResult(BaseModel):
-    """Result of retrying a job for an instance."""
-
-    instance_id: str
-    requeued_jobs: list[str] = Field(default_factory=list)
-    error: Optional[str] = None
-    traceback: Optional[str] = None
-
-
-class RestartResult(BaseModel):
-    """Result of restarting failed jobs for an evaluation."""
-
-    evaluation_name: str
-    status: str
-    message: str
-    error: Optional[str] = None
-    traceback: Optional[str] = None
 
 
 class JobsStatusSummary(BaseModel):
@@ -172,7 +120,7 @@ class BaseRunner(ABC):
 
     @abstractmethod
     async def start_job(
-        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
+        self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
     ) -> bool:
         """Start a job for the given project and trajectory."""
         pass

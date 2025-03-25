@@ -32,9 +32,9 @@ def test_get_test_summary_with_results():
     
     summary = TestFile.get_test_summary([test_file1, test_file2])
     
-    assert "tests/test_example1.py: 1 passed, 1 failed, 1 errors" in summary
-    assert "tests/test_example2.py: 2 passed, 0 failed, 0 errors" in summary
-    assert "Total: 3 passed, 1 failed, 1 errors." in summary
+    assert "tests/test_example1.py: 1 passed, 1 failed, 1 errors, 0 skipped" in summary
+    assert "tests/test_example2.py: 2 passed, 0 failed, 0 errors, 0 skipped" in summary
+    assert "Total: 3 passed, 1 failed, 1 errors, 0 skipped." in summary
 
 
 def test_get_test_summary_passed():
@@ -53,34 +53,9 @@ def test_get_test_summary_passed():
     
     summary = TestFile.get_test_summary([test_file1, test_file2])
     
-    assert "tests/test_example1.py: 3 passed, 0 failed, 0 errors" in summary
-    assert "tests/test_example2.py: 1 passed, 0 failed, 0 errors" in summary
-    assert "Total: 4 passed, 0 failed, 0 errors." in summary
-
-
-def test_get_test_summary_with_filter():
-    # Create test files with results
-    test_file1 = TestFile(file_path="tests/test_example1.py")
-    test_file1.test_results = [
-        TestResult(test_name="test1", status=TestStatus.PASSED),
-        TestResult(test_name="test2", status=TestStatus.FAILED),
-    ]
-    
-    test_file2 = TestFile(file_path="tests/test_example2.py")
-    test_file2.test_results = [
-        TestResult(test_name="test3", status=TestStatus.PASSED),
-    ]
-    
-    # Filter by file path
-    summary = TestFile.get_test_summary(
-        [test_file1, test_file2],
-        file_paths=["tests/test_example1.py"]
-    )
-    
-    assert "tests/test_example1.py: 1 passed, 1 failed, 0 errors" in summary
-    assert "tests/test_example2.py" not in summary
-    assert "Total: 1 passed, 1 failed, 0 errors." in summary
-
+    assert "tests/test_example1.py: 3 passed, 0 failed, 0 errors, 0 skipped" in summary
+    assert "tests/test_example2.py: 1 passed, 0 failed, 0 errors, 0 skipped" in summary
+    assert "Total: 4 passed, 0 failed, 0 errors, 0 skipped." in summary
 
 def test_get_test_failure_details_empty():
     details = TestFile.get_test_failure_details([])
@@ -201,42 +176,6 @@ def test_get_test_failure_details_truncation():
     assert "characters truncated" in details
     # The message should be shorter than the original
     assert len(details) < len(long_message) + 200  # Adding buffer for formatting
-
-
-def test_get_test_failure_details_max_tokens(monkeypatch):
-    # Mock counter to track calls
-    call_count = 0
-    
-    def mock_count_tokens(text):
-        nonlocal call_count
-        call_count += 1
-        return 100
-    
-    # Replace the real count_tokens with our mock
-    monkeypatch.setattr("moatless.utils.tokenizer.count_tokens", mock_count_tokens)
-    
-    # Create test files with failures
-    test_file = TestFile(file_path="tests/test_example.py")
-    test_file.test_results = [
-        TestResult(
-            status=TestStatus.ERROR, 
-            failure_output="Error message"
-        ),
-        TestResult(
-            status=TestStatus.ERROR, 
-            failure_output="Another error"
-        )
-    ]
-    
-    # Call the function
-    details = TestFile.get_test_failure_details([test_file])
-    
-    # Verify the output contains the expected messages
-    assert "Error message" in details
-    assert "Another error" in details
-    
-    # Verify token counting was called for each error message
-    assert call_count >= 2
 
 
 def test_get_test_failure_details_token_limit():

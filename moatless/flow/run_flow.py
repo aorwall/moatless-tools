@@ -15,7 +15,7 @@ from moatless.runner.utils import (
     setup_job_logging,
 )
 from moatless.context_data import current_project_id, current_trajectory_id
-from moatless.runtime.local import SweBenchTestbedEnvironment
+from moatless.runtime.local import SweBenchLocalEnvironment
 from moatless.settings import get_storage
 from moatless.workspace import Workspace
 
@@ -55,7 +55,7 @@ async def setup_workspace() -> Workspace:
 
         logger.info(f"Loaded SWE-Bench instance: {swebench_instance.get('instance_id')}")
         repo_path = "/testbed"
-        runtime = SweBenchTestbedEnvironment(
+        runtime = SweBenchLocalEnvironment(
             repo_path=Path(repo_path),
             swebench_instance=swebench_instance,
             storage=storage,

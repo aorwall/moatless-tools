@@ -20,7 +20,7 @@ from moatless.flow.flow import AgenticFlow
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.git import GitRepository
-from moatless.runtime.local import SweBenchTestbedEnvironment
+from moatless.runtime.local import SweBenchLocalEnvironment
 from moatless.workspace import Workspace
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
@@ -70,7 +70,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
         repository = GitRepository(repo_path=repo_path)
 
-        runtime = SweBenchTestbedEnvironment(
+        runtime = SweBenchLocalEnvironment(
             repo_path=Path(repo_path),
             swebench_instance=swebench_instance,
             storage=storage,
@@ -128,7 +128,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
 
 async def evaluate_instance(
-    evaluation_name: str, instance_id: str, root_node: Node, runtime: SweBenchTestbedEnvironment, storage: BaseStorage
+    evaluation_name: str, instance_id: str, root_node: Node, runtime: SweBenchLocalEnvironment, storage: BaseStorage
 ) -> None:
     """Evaluate an instance's results."""
 

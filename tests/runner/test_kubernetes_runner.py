@@ -204,10 +204,14 @@ class TestKubernetesRunner(KubernetesRunner):
         # Include node_id in annotations if provided
         if node_id is not None:
             job.metadata.annotations["moatless.ai/node-id"] = str(node_id)
+            
+        # Set the namespace property when using project namespaces
+        if self.use_project_namespaces:
+            job.metadata.namespace = self._create_namespace_name(project_id)
         
         return job
     
-    def _get_image_name(self) -> str:
+    def _get_image_name(self, trajectory_id: str = None) -> str:
         """Test implementation for getting image name."""
         return self.image or "test-image"
     

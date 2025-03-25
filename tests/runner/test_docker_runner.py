@@ -75,10 +75,17 @@ async def test_start_job_already_exists(docker_runner):
     """Test that starting a job that already exists returns False."""
     with patch("asyncio.create_subprocess_exec") as mock_subprocess:
         # Mock process for container existence check (returns zero to indicate container exists)
-        mock_process = AsyncMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = (b"container-id\n", b"")
-        mock_subprocess.return_value = mock_process
+        mock_existence_process = AsyncMock()
+        mock_existence_process.returncode = 0
+        mock_existence_process.communicate.return_value = (b"container-id\n", b"")
+        
+        # Mock process for container status check
+        mock_status_process = AsyncMock()
+        mock_status_process.returncode = 0
+        mock_status_process.communicate.return_value = (b"running\n", b"")
+        
+        # Configure subprocess to return different mocks for different calls
+        mock_subprocess.side_effect = [mock_existence_process, mock_status_process]
         
         # Start the job
         result = await docker_runner.start_job("test-project", "test-repo__instance", lambda: None)
@@ -336,10 +343,10 @@ async def test_get_job_status_summary(docker_runner):
         assert summary.completed_jobs == 1
         assert summary.failed_jobs == 1
         
-        # Check job IDs
-        assert "moatless-test-project-job1" in summary.job_ids["running"]
-        assert "moatless-test-project-job2" in summary.job_ids["completed"]
-        assert "moatless-test-project-job3" in summary.job_ids["failed"]
+        # Check job IDs using JobStatus enum values as string
+        assert "moatless-test-project-job1" in summary.job_ids[JobStatus.RUNNING.name.lower()]
+        assert "moatless-test-project-job2" in summary.job_ids[JobStatus.COMPLETED.name.lower()]
+        assert "moatless-test-project-job3" in summary.job_ids[JobStatus.FAILED.name.lower()]
 
 
 @pytest.mark.asyncio

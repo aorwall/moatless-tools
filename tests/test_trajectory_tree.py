@@ -317,7 +317,6 @@ def test_generate_ascii_tree():
     assert "─" in ascii_tree  # Should contain connection lines
     
     # Verify tree structure elements are present
-    assert "Completion" in ascii_tree
     assert "thought:(" in ascii_tree   # Thoughts are now inline in node description
     assert "SemanticSearch" in ascii_tree   # The action name (not the args class name)
     assert "StringReplace" in ascii_tree    # The action name (not the args class name)

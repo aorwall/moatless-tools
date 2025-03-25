@@ -182,8 +182,15 @@ class KubernetesRunner(BaseRunner):
             )
         )
 
-        self.core_v1.create_namespace(body=namespace)
-        self.logger.info(f"Created namespace {namespace_name} for project {project_id}")
+        try:
+            self.core_v1.create_namespace(body=namespace)
+            self.logger.info(f"Created namespace {namespace_name} for project {project_id}")
+        except ApiException as e:
+            if e.status == 409:  # Conflict - namespace already exists
+                self.logger.info(f"Namespace {namespace_name} already exists for project {project_id}")
+            else:
+                self.logger.exception(f"Error creating namespace {namespace_name}: {e}")
+                return
 
         # Create resource quota for the namespace
         await self._create_resource_quota(namespace_name)
@@ -299,7 +306,10 @@ class KubernetesRunner(BaseRunner):
             self.core_v1.create_namespaced_config_map(namespace, new_config_map)
             self.logger.info(f"Copied ConfigMap moatless-tools-env to namespace {namespace}")
         except ApiException as e:
-            self.logger.exception(f"Error copying ConfigMap to namespace {namespace}: {e}")
+            if e.status == 409:  # Conflict - resource already exists
+                self.logger.info(f"ConfigMap moatless-tools-env already exists in namespace {namespace}")
+            else:
+                self.logger.exception(f"Error copying ConfigMap to namespace {namespace}: {e}")
 
     async def _copy_secret_to_namespace(self, namespace: str) -> None:
         """Copy Secret to a namespace.
@@ -321,7 +331,10 @@ class KubernetesRunner(BaseRunner):
             self.core_v1.create_namespaced_secret(namespace, new_secret)
             self.logger.info(f"Copied Secret moatless-tools-secrets to namespace {namespace}")
         except ApiException as e:
-            self.logger.exception(f"Error copying Secret to namespace {namespace}: {e}")
+            if e.status == 409:  # Conflict - resource already exists
+                self.logger.info(f"Secret moatless-tools-secrets already exists in namespace {namespace}")
+            else:
+                self.logger.exception(f"Error copying Secret to namespace {namespace}: {e}")
 
     async def _create_resource_quota(self, namespace: str) -> None:
         """Create a resource quota for a namespace.
@@ -351,7 +364,10 @@ class KubernetesRunner(BaseRunner):
                 f"Created resource quotas in namespace {namespace} with limit of {self.max_jobs_per_project} active pods"
             )
         except ApiException as e:
-            self.logger.exception(f"Error creating resource quota in namespace {namespace}: {e}")
+            if e.status == 409:  # Conflict - resource already exists
+                self.logger.info(f"Resource quota already exists in namespace {namespace}")
+            else:
+                self.logger.exception(f"Error creating resource quota in namespace {namespace}: {e}")
 
     @tracer.start_as_current_span("KubernetesRunner.start_job")
     async def start_job(
