@@ -1,11 +1,12 @@
-from typing import ClassVar, List, Optional
+from typing import ClassVar, List
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.actions.action import Action
-from moatless.actions.schema import ActionArguments, Observation
-from moatless.artifacts.task import TaskArtifact, TaskHandler, TaskState
+from moatless.actions.schema import ActionArguments
+from moatless.artifacts.task import TaskArtifact, TaskState
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from pydantic import BaseModel, ConfigDict, Field
 
 
 class TaskItem(BaseModel):

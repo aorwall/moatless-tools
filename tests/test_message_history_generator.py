@@ -173,6 +173,85 @@ async def test_messages_history(test_tree, workspace):
 
 
 @pytest.mark.asyncio
+async def test_token_limited_messages(test_tree, workspace):
+    """Test message history with token limit configuration"""
+    root, node1, node2, node3, node4, node5 = test_tree
+    
+    # Add more content to nodes to increase token count
+    root.user_message = "Initial task with a lot more detailed content to increase token count. " * 5
+    node1.assistant_message = "Processing your request with additional detailed explanation. " * 5
+    node3.assistant_message = "Making changes to the code with extensive details about what's happening. " * 5
+    
+    # Get all messages without limit for comparison
+    full_generator = MessageHistoryGenerator(include_file_context=True)
+    full_messages = await full_generator.generate_messages(node5, workspace)
+    full_messages = list(full_messages)
+    
+    # Count tokens in the full message history
+    total_tokens = 0
+    for message in full_messages:
+        message_str = str(message)
+        total_tokens += count_tokens(message_str)
+    
+    # Set a very small token limit that should include only the most recent nodes
+    # This ensures we'll see truncation even with small test data
+    tiny_limit = min(100, int(total_tokens * 0.2))  # Very small limit
+    limited_generator = MessageHistoryGenerator(
+        include_file_context=True,
+        max_tokens=tiny_limit
+    )
+    limited_messages = await limited_generator.generate_messages(node5, workspace)
+    limited_messages = list(limited_messages)
+    
+    # The limited messages should be fewer than the full messages
+    assert len(limited_messages) < len(full_messages)
+    
+    # Count tokens in the limited messages
+    limited_tokens = 0
+    for message in limited_messages:
+        message_str = str(message)
+        limited_tokens += count_tokens(message_str)
+    
+    # Token count should be below or very close to the limit
+    # Allow slight margin for individual message that can't be split
+    assert limited_tokens <= tiny_limit * 1.5
+    
+    # Verify the most recent content is included
+    # The finish action from node5 should be present
+    finish_found = any("Task completed successfully" in str(m) for m in limited_messages)
+    assert finish_found, "Most recent action (finish) not found in limited messages"
+    
+    # Check for content from early nodes - should not be present with tiny limit
+    if len(limited_messages) < len(full_messages) // 2:
+        initial_found = any("Initial task with a lot more" in str(m) for m in limited_messages)
+        assert not initial_found, "Oldest messages should not be included with small token limit"
+    
+    # Test with a medium limit that should include more nodes
+    medium_limit = int(total_tokens * 0.6)
+    medium_generator = MessageHistoryGenerator(
+        include_file_context=True,
+        max_tokens=medium_limit
+    )
+    medium_messages = await medium_generator.generate_messages(node5, workspace)
+    medium_messages = list(medium_messages)
+    
+    # Count tokens in the medium message set
+    medium_tokens = 0
+    for message in medium_messages:
+        message_str = str(message)
+        medium_tokens += count_tokens(message_str)
+    
+    # Token count should be below the limit
+    assert medium_tokens <= medium_limit * 1.2
+    
+    # Debug output
+    print("\nToken counts:")
+    print(f"Full messages: {len(full_messages)} messages, {total_tokens} tokens")
+    print(f"Medium messages: {len(medium_messages)} messages, {medium_tokens} tokens (limit: {medium_limit})")
+    print(f"Limited messages: {len(limited_messages)} messages, {limited_tokens} tokens (limit: {tiny_limit})")
+
+
+@pytest.mark.asyncio
 async def test_terminal_node_history(test_tree, workspace):
     """Test history generation for terminal nodes"""
     _, _, _, _, _, node5 = test_tree
@@ -233,3 +312,26 @@ def test_message_history_dump_and_load():
     loaded_from_dict = MessageHistoryGenerator.model_validate(dict_data)
     assert loaded_from_dict.include_file_context is True
     assert loaded_from_dict.include_git_patch is False
+
+
+@pytest.mark.asyncio
+async def test_max_tokens_serialization():
+    """Test max_tokens is properly serialized and loaded"""
+    # Create generator with max_tokens
+    generator = MessageHistoryGenerator(
+        include_file_context=True,
+        max_tokens=1000
+    )
+    
+    # Verify max_tokens is included in serialization
+    data = generator.model_dump()
+    assert data["max_tokens"] == 1000
+    
+    # Test JSON serialization
+    json_str = generator.model_dump_json()
+    loaded_dict = json.loads(json_str)
+    assert loaded_dict["max_tokens"] == 1000
+    
+    # Test model reconstruction
+    loaded = MessageHistoryGenerator.model_validate_json(json_str)
+    assert loaded.max_tokens == 1000

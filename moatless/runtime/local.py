@@ -1,25 +1,19 @@
 import asyncio
-import json
 import logging
 import os
-import random
-import string
-import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Tuple
+
+from swebench.harness.constants import SWEbenchInstance, NON_TEST_EXTS
+from swebench.harness.grading import get_eval_report
+from swebench.harness.test_spec.test_spec import make_test_spec, MAP_REPO_VERSION_TO_SPECS
 
 from moatless.exceptions import RuntimeError
-from moatless.repository.git import GitRepository
-from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.testing.python.parser_registry import parse_log
 from moatless.testing.schema import TestResult
-from swebench.harness.constants import SWEbenchInstance, NON_TEST_EXTS, APPLY_PATCH_FAIL, APPLY_PATCH_PASS
-from swebench.harness.grading import get_eval_report
-from swebench.harness.test_spec.test_spec import TestSpec, make_test_spec, MAP_REPO_VERSION_TO_SPECS
-
 
 logger = logging.getLogger(__name__)
 

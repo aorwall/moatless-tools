@@ -2,6 +2,8 @@ import logging
 from abc import ABC
 from typing import ClassVar, Optional
 
+from pydantic import BaseModel, Field, field_validator
+
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
 from moatless.completion.base import CompletionRetryError
@@ -14,7 +16,6 @@ from moatless.file_context import FileContext
 from moatless.index.code_index import CodeIndex
 from moatless.index.types import SearchCodeResponse
 from moatless.workspace import Workspace
-from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 

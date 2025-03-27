@@ -1,23 +1,18 @@
 """OpenTelemetry tracing for Moatless."""
 
 import asyncio
-import contextvars
 import logging
 import os
-from collections.abc import AsyncIterator, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
-from functools import wraps
-from typing import Any, Dict, Literal, Optional, ParamSpec, TypeVar, Union
+from typing import Any, Optional, ParamSpec, TypeVar
 
-from moatless.context_data import get_moatless_dir
 from opentelemetry import context, trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.trace import Span, Status, StatusCode
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+from moatless.context_data import get_moatless_dir
 
 try:
     from azure.monitor.opentelemetry import configure_azure_monitor
@@ -138,7 +133,7 @@ def extract_context_data() -> dict[str, Any]:
     Returns:
         Dict containing context variable values
     """
-    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, moatless_dir
+    from moatless.context_data import current_node_id, current_project_id, current_trajectory_id
 
     context_data = {
         "moatless_dir": get_moatless_dir(),

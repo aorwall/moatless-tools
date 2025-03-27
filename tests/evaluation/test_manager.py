@@ -16,7 +16,7 @@ from moatless.eventbus.base import BaseEventBus
 from moatless.flow.flow import AgenticFlow, Node
 from moatless.flow.loop import AgenticLoop
 from moatless.flow.manager import FlowManager
-from moatless.flow.schema import FlowStatusInfo, TrajectoryResponseDTO
+from moatless.flow.schema import TrajectoryResponseDTO
 from moatless.runner.runner import JobStatus, BaseRunner
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
@@ -291,14 +291,7 @@ def flow_manager(mock_runner, file_storage, mock_event_bus, mock_agent_manager, 
             project_id=project_id,
             status="created",
             job_status=JobStatus.PENDING,
-            system_status=FlowStatusInfo(
-                status="created",
-                is_finished=False,
-                has_error=False,
-                error=None,
-                last_agent_message=None,
-                last_user_message=None,
-            ),
+            
             agent_id="test_agent",
             model_id="gpt-4o-mini-2024-07-18",
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},

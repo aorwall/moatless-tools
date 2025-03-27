@@ -9,6 +9,8 @@ from typing import Any, Optional
 
 import pymupdf as fitz
 from PIL import Image, ImageEnhance
+from pydantic import Field, PrivateAttr
+
 from moatless.artifacts.artifact import Artifact, ArtifactResponse
 from moatless.artifacts.json_handler import JsonArtifactHandler
 from moatless.completion.schema import (
@@ -16,7 +18,6 @@ from moatless.completion.schema import (
     ChatCompletionTextObject,
     MessageContentListBlock,
 )
-from pydantic import Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 

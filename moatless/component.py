@@ -6,8 +6,7 @@ import os
 import pkgutil
 import sys
 from abc import ABC
-from collections.abc import Mapping
-from typing import Any, ClassVar, Dict, Generic, Type, TypeVar, cast
+from typing import Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -44,6 +43,17 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
     """
 
     @classmethod
+    def from_dict(cls, data: dict):
+        discriminator_key = f"{cls.get_component_type()}_class"
+        if discriminator_key not in data:
+            logger.error(
+                f"Failed to create Discrimnator key {discriminator_key} is missing on {cls.get_component_type()}. Data: {data}"
+            )
+            raise ValueError(f"Expected discriminator key {discriminator_key} to be set.")
+
+        return cls.model_validate(data)
+
+    @classmethod
     def model_validate(cls, obj: Any):
         if not isinstance(obj, dict):
             return obj
@@ -57,7 +67,8 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
 
         classpath = obj.pop(discriminator_key, None)
         if not classpath:
-            raise ValueError(f"No {cls.get_component_type()} class path found on {obj}")
+            logger.error(f"Discrimnator key {discriminator_key} is missing on {cls.get_component_type()}. Data: {obj}")
+            raise ValueError(f"Expected discrimnator key {discriminator_key} to be set.")
 
         try:
             component_class = cls.get_component_by_classpath(classpath)

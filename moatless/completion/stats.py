@@ -52,12 +52,8 @@ MODEL_COSTS = {
 class Usage(BaseModel):
     """Class to track usage statistics for LLM completions."""
 
-    completion_cost: float = Field(
-        default=0, description="Total cost of the completion in USD"
-    )
-    completion_tokens: int = Field(
-        default=0, description="Number of tokens in the completion/response"
-    )
+    completion_cost: float = Field(default=0, description="Total cost of the completion in USD")
+    completion_tokens: int = Field(default=0, description="Number of tokens in the completion/response")
     prompt_tokens: int = Field(
         default=0,
         description="Total number of tokens in the prompt, including both cached and non-cached tokens",
@@ -98,9 +94,7 @@ class Usage(BaseModel):
         rates = MODEL_COSTS[model]
         non_cached_tokens = prompt_tokens - cache_read_tokens
         input_cost = non_cached_tokens * rates["input"] / 1_000_000
-        cache_cost = (
-            cache_read_tokens * rates["cache"] / 1_000_000 if cache_read_tokens else 0
-        )
+        cache_cost = cache_read_tokens * rates["cache"] / 1_000_000 if cache_read_tokens else 0
         output_cost = completion_tokens * rates["output"] / 1_000_000
         return input_cost + output_cost + cache_cost
 
@@ -112,13 +106,9 @@ class Usage(BaseModel):
         # All tokens are already included in prompt_tokens
         return self.prompt_tokens
 
-    def update_from_response(
-        self, completion_response: dict | BaseModel, model: str
-    ) -> "Usage":
+    def update_from_response(self, completion_response: dict | BaseModel, model: str) -> "Usage":
         """Update this usage data with token counts and other data from a response."""
-        if isinstance(completion_response, BaseModel) and hasattr(
-            completion_response, "usage"
-        ):
+        if isinstance(completion_response, BaseModel) and hasattr(completion_response, "usage"):
             usage_obj = getattr(completion_response, "usage")
             if isinstance(usage_obj, BaseModel):
                 usage = usage_obj.model_dump()
@@ -129,9 +119,7 @@ class Usage(BaseModel):
         elif isinstance(completion_response, dict) and "usage" in completion_response:
             usage = completion_response["usage"]
         else:
-            logger.warning(
-                f"No usage info available in completion response: {completion_response}"
-            )
+            logger.warning(f"No usage info available in completion response: {completion_response}")
             return self
 
         logger.debug(f"Usage: {json.dumps(usage, indent=2)}")
@@ -141,17 +129,13 @@ class Usage(BaseModel):
         if usage.get("cache_creation_input_tokens"):
             self.prompt_tokens += usage["cache_creation_input_tokens"]
 
-        self.completion_tokens = usage.get("completion_tokens") or usage.get(
-            "output_tokens", 0
-        )
+        self.completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens", 0)
 
         if usage.get("prompt_cache_hit_tokens"):
             self.cache_read_tokens = usage["prompt_cache_hit_tokens"]
         elif usage.get("cache_read_input_tokens"):
             self.cache_read_tokens = usage["cache_read_input_tokens"]
-        elif usage.get("prompt_tokens_details") and usage["prompt_tokens_details"].get(
-            "cached_tokens"
-        ):
+        elif usage.get("prompt_tokens_details") and usage["prompt_tokens_details"].get("cached_tokens"):
             self.cache_read_tokens = usage["prompt_tokens_details"]["cached_tokens"]
         else:
             self.cache_read_tokens = 0
@@ -161,9 +145,7 @@ class Usage(BaseModel):
         try:
             from litellm.cost_calculator import completion_cost
 
-            self.completion_cost = completion_cost(
-                completion_response=completion_response, model=model
-            )
+            self.completion_cost = completion_cost(completion_response=completion_response, model=model)
         except Exception:
             # If cost calculation fails, fall back to calculating it manually
             try:
@@ -176,9 +158,7 @@ class Usage(BaseModel):
                 )
                 self.completion_cost = prompt_cost + completion_cost
             except Exception as e:
-                logger.debug(
-                    f"Failed to calculate cost for completion response: {completion_response}. Error: {e}"
-                )
+                logger.debug(f"Failed to calculate cost for completion response: {completion_response}. Error: {e}")
                 # Use our own cost calculation if litellm fails
                 self.completion_cost = self.calculate_cost(
                     model,
@@ -190,9 +170,7 @@ class Usage(BaseModel):
         return self
 
     @classmethod
-    def from_completion_response(
-        cls, completion_response: dict | BaseModel, model: str
-    ) -> "Usage":
+    def from_completion_response(cls, completion_response: dict | BaseModel, model: str) -> "Usage":
         """Create a new usage instance from a completion response."""
         instance = cls()
         return instance.update_from_response(completion_response, model)
@@ -207,33 +185,21 @@ class Usage(BaseModel):
 
 
 class CompletionAttempt(BaseModel):
-    start_time: float = Field(
-        default=0, description="The start time of the completion in milliseconds"
-    )
-    end_time: float = Field(
-        default=0, description="The end time of the completion in milliseconds"
-    )
-    usage: Usage = Field(
-        default_factory=Usage, description="Usage statistics for this invocation"
-    )
-    success: bool = Field(
-        default=True, description="Whether the completion attempt was successful"
-    )
+    start_time: float = Field(default=0, description="The start time of the completion in milliseconds")
+    end_time: float = Field(default=0, description="The end time of the completion in milliseconds")
+    usage: Usage = Field(default_factory=Usage, description="Usage statistics for this invocation")
+    success: bool = Field(default=True, description="Whether the completion attempt was successful")
     failure_reason: Optional[str] = Field(
         default=None, description="Reason for failure if the attempt was unsuccessful"
     )
-    attempt_number: int = Field(
-        default=1, description="The attempt number for this completion"
-    )
+    attempt_number: int = Field(default=1, description="The attempt number for this completion")
 
     @staticmethod
     def _current_time_ms() -> float:
         """Get current time in milliseconds."""
         return time.time() * 1000
 
-    def update_from_response(
-        self, completion_response: dict | BaseModel, model: str
-    ) -> "CompletionAttempt":
+    def update_from_response(self, completion_response: dict | BaseModel, model: str) -> "CompletionAttempt":
         """Update this invocation with token counts and other data from a response."""
         self.usage.update_from_response(completion_response, model)
         return self
@@ -279,17 +245,13 @@ class CompletionAttempt(BaseModel):
         )
 
     @classmethod
-    def from_completion_response(
-        cls, completion_response: dict | BaseModel, model: str
-    ) -> "CompletionAttempt":
+    def from_completion_response(cls, completion_response: dict | BaseModel, model: str) -> "CompletionAttempt":
         """Create a new invocation instance from a completion response."""
         usage = Usage.from_completion_response(completion_response, model)
         return cls(usage=usage)
 
     @classmethod
-    def create_failed_invocation(
-        cls, failure_reason: str, attempt_number: int = 1
-    ) -> "CompletionAttempt":
+    def create_failed_invocation(cls, failure_reason: str, attempt_number: int = 1) -> "CompletionAttempt":
         """Create a CompletionAttempt instance for a failed attempt."""
         current_time_ms = cls._current_time_ms()
         return cls(
@@ -309,11 +271,7 @@ class CompletionAttempt(BaseModel):
 
     def __str__(self) -> str:
         status = "SUCCESS" if self.success else f"FAILED: {self.failure_reason}"
-        duration_ms = (
-            (self.end_time - self.start_time)
-            if self.end_time and self.start_time
-            else 0
-        )
+        duration_ms = (self.end_time - self.start_time) if self.end_time and self.start_time else 0
         duration_sec = duration_ms / 1000
         return f"Completion[{status}] " f"(duration: {duration_sec:.2f}s, {self.usage})"
 
@@ -336,12 +294,8 @@ class CompletionInvocation(BaseModel):
         default_factory=list,
         description="The usage information for each completion attempt",
     )
-    start_time: float = Field(
-        default=0, description="The start time of the entire invocation in milliseconds"
-    )
-    end_time: float = Field(
-        default=0, description="The end time of the entire invocation in milliseconds"
-    )
+    start_time: float = Field(default=0, description="The start time of the entire invocation in milliseconds")
+    end_time: float = Field(default=0, description="The end time of the entire invocation in milliseconds")
     current_attempt: Optional[CompletionAttempt] = Field(default=None, exclude=True)
     model_config = ConfigDict(extra="ignore")
 
@@ -385,9 +339,7 @@ class CompletionInvocation(BaseModel):
             raise ValueError("Completion response is None")
 
         if not completion_metrics:
-            completion_metrics = CompletionAttempt.from_completion_response(
-                completion_response, model
-            )
+            completion_metrics = CompletionAttempt.from_completion_response(completion_response, model)
 
         return cls(model=model, attempts=[completion_metrics])
 
@@ -428,11 +380,7 @@ class CompletionInvocation(BaseModel):
 
     def __str__(self) -> str:
         num_attempts = len(self.attempts)
-        success = (
-            any(attempt.success for attempt in self.attempts)
-            if self.attempts
-            else False
-        )
+        success = any(attempt.success for attempt in self.attempts) if self.attempts else False
         status = "SUCCESS" if success else "FAILED"
         return (
             f"CompletionInvocation[{status}] "
@@ -447,9 +395,6 @@ class CompletionInvocation(BaseModel):
     @classmethod
     def model_validate(cls, data: Any, **kwargs):
         if isinstance(data, dict):
-            data["attempts"] = [
-                CompletionAttempt.model_validate(attempt, **kwargs)
-                for attempt in data["attempts"]
-            ]
+            data["attempts"] = [CompletionAttempt.model_validate(attempt, **kwargs) for attempt in data["attempts"]]
             return super().model_validate(data, **kwargs)
         return data

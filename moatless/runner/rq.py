@@ -1,7 +1,12 @@
 import logging
-import logging
 import os
 from collections.abc import Callable
+
+from opentelemetry import trace
+from redis import Redis
+from rq import Queue, Worker
+from rq.command import send_stop_job_command
+from rq.job import Job
 
 from moatless.runner.runner import (
     BaseRunner,
@@ -12,11 +17,6 @@ from moatless.runner.runner import (
     RunnerStatus,
 )
 from moatless.telemetry import extract_trace_context
-from opentelemetry import trace
-from redis import Redis
-from rq import Queue, Worker
-from rq.command import send_stop_job_command
-from rq.job import Job
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner.rq")

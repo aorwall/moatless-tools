@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 from moatless.flow.schema import CompletionDTO, CompletionInputMessage, CompletionOutput, ToolCall
 

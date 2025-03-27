@@ -1,11 +1,12 @@
 import logging
 
+from pydantic import ConfigDict
+
 from moatless.context_data import current_node_id
 from moatless.exceptions import RejectError, RuntimeError
 from moatless.flow import AgenticFlow
 from moatless.flow.events import NodeExpandedEvent
 from moatless.node import Node, generate_ascii_tree
-from pydantic import ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AgenticLoop(AgenticFlow):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    async def _run(self, message: str | None = None) -> tuple[Node, str | None]:
+    async def _run(self, message: str | None = None, node_id: int | None = None) -> tuple[Node, str | None]:
         """Run the agentic loop until completion or max iterations."""
 
         current_node = self.root.get_all_nodes()[-1]
@@ -44,7 +45,6 @@ class AgenticLoop(AgenticFlow):
 
                 current_node_id.set(current_node.node_id)
                 await self.agent.run(current_node)
-                await self.persist()
                 self.log(logger.info, generate_ascii_tree(self.root, current_node))
             except RejectError as e:
                 self.log(logger.error, f"Rejection error: {e}")
@@ -52,7 +52,7 @@ class AgenticLoop(AgenticFlow):
                 self.log(logger.exception, f"Unexpected error: {e}")
                 raise e
             finally:
-                await self.persist()
+                pass
 
         logger.info(
             f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost"

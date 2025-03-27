@@ -2,9 +2,10 @@ import asyncio
 import json
 import logging
 import os
-from typing import Any, Callable, List, Optional
+from typing import Callable, List, Optional
 
 import redis.asyncio as redis
+
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent

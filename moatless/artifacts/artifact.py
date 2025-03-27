@@ -3,12 +3,13 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any, ClassVar, Literal, Optional, TypeVar
 
+from pydantic import BaseModel, Field, PrivateAttr
+
 from moatless.artifacts.content import ContentStructure
 from moatless.completion.schema import MessageContentListBlock
 from moatless.component import MoatlessComponent
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
-from pydantic import BaseModel, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 

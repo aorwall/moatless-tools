@@ -1,9 +1,10 @@
 from typing import ClassVar
 
+from pydantic import ConfigDict, Field
+
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.file_context import FileContext
-from pydantic import ConfigDict, Field
 
 
 class RejectArgs(ActionArguments):
@@ -22,6 +23,8 @@ class RejectArgs(ActionArguments):
 
 class Reject(Action):
     args_schema: ClassVar[type[ActionArguments]] = RejectArgs
+
+    is_terminal: bool = Field(default=True, description="Whether the action will finish the flow")
 
     async def execute(self, args: RejectArgs, file_context: FileContext | None = None):
         return Observation.create(message="Rejected", terminal=True)

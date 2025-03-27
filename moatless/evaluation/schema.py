@@ -26,63 +26,6 @@ class DateTimeEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-class TreeSearchSettings(BaseModel):
-    max_expansions: int = Field(
-        3,
-        description="The maximum number of expansions of one state.",
-    )
-
-    max_iterations: int = Field(
-        100,
-        description="The maximum number of iterations to run the tree search.",
-    )
-
-    max_cost: float = Field(
-        4,
-        description="The maximum cost spent on tokens before finishing.",
-    )
-
-    min_finished_nodes: Optional[int] = Field(
-        2,
-        description="The minimum number of finished nodes to consider before finishing",
-    )
-
-    max_finished_nodes: Optional[int] = Field(
-        3,
-        description="The maximum number of finished nodes to consider before finishing",
-    )
-
-    reward_threshold: Optional[int] = Field(
-        None,
-        description="The min reward threshold to consider before finishing.",
-    )
-
-    max_depth: int = Field(
-        20,
-        description="The maximum depth for one trajectory in simulations.",
-    )
-
-    model_id: str = Field(..., description="The ID of the model to use for the evaluation.")
-    agent_id: str = Field(..., description="The ID of the agent to use for the evaluation.")
-
-    selector: Optional[BaseSelector] = Field(default=None, description="Custom selector for tree search")
-
-    value_function: Optional[BaseValueFunction] = Field(
-        None,
-        description="The value function to use for the tree search.",
-    )
-
-    discriminator: Optional[BaseDiscriminator] = Field(
-        None,
-        description="The discriminator to use for the tree search.",
-    )
-
-    feedback_generator: Optional[BaseFeedbackGenerator] = Field(
-        None,
-        description="The feedback generator to use for the tree search.",
-    )
-
-
 class InstanceStatus(str, Enum):
     CREATED = "created"
     PENDING = "pending"

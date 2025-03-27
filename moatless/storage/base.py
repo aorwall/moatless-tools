@@ -1,12 +1,10 @@
 import abc
 import json
 import logging
-import os
 from datetime import datetime
-from pathlib import Path
-from typing import TypeVar, Optional, cast, Union, Type, Any, List
+from typing import TypeVar, Optional, Union, Type, List
 
-from moatless.context_data import get_project_dir, get_trajectory_dir, current_project_id, current_trajectory_id
+from moatless.context_data import current_project_id, current_trajectory_id
 
 logger = logging.getLogger(__name__)
 

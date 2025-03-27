@@ -86,15 +86,13 @@ class EvaluationManager:
         for instance in evaluation.instances:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
             problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
-            flow = self._flow_manager.create_flow(
+            await self._flow_manager.create_flow(
                 id=evaluation.flow_id,
-                message=problem_statement,
-                project_id=evaluation.evaluation_name,
-                trajectory_id=instance.instance_id,
                 model_id=evaluation.model_id,
-                metadata={"instance_id": instance.instance_id},
+                message=problem_statement,
+                trajectory_id=instance.instance_id,
+                project_id=evaluation.evaluation_name,
             )
-            await flow.persist()
 
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
@@ -596,11 +594,11 @@ class EvaluationManager:
             instance.error = None
             instance.error_at = None
 
-        flow = await AgenticFlow.from_trajectory_id(instance.instance_id, evaluation.evaluation_name)
+        flow = await self._flow_manager.get_flow(evaluation.evaluation_name, instance.instance_id)
         if flow.root.get_last_node() and flow.root.get_last_node().error:
             logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
             flow.root.get_last_node().reset()
-            await flow.persist()
+            await self._flow_manager.save_trajectory(evaluation.evaluation_name, instance.instance_id, flow)
 
         # Skip if already evaluated
         if instance.status == InstanceStatus.EVALUATED:

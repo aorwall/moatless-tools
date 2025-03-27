@@ -2,46 +2,29 @@
 
 import json
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from moatless.actions.action import CompletionModelMixin
-from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.benchmark.swebench.utils import (
-    create_index_async,
-    create_repository_async,
-)
-from moatless.context_data import get_projects_dir, get_trajectory_dir
-from moatless.environment.local import LocalBashEnvironment
-from moatless.evaluation.utils import get_swebench_instance
+from moatless.context_data import get_trajectory_dir
 from moatless.eventbus import BaseEventBus
 from moatless.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
     CompletionDTO,
-    CompletionOutput,
-    ExecuteNodeRequest,
     FlowConfig,
-    FlowStatus,
-    FlowStatusInfo,
-    ToolCall,
     TrajectoryEventDTO,
-    TrajectoryListItem,
     TrajectoryResponseDTO,
     StartTrajectoryRequest,
 )
 from moatless.flow.trajectory_tree import create_node_tree
-from moatless.flow.trajectory_utils import convert_nodes
 from moatless.node import Node
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
-from moatless.workspace import Workspace
-from regex import F
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +48,7 @@ class FlowManager:
     async def initialize(self):
         await self._load_configs()
 
-    def create_flow(
+    async def create_flow(
         self,
         id: str,
         model_id: str,
@@ -105,7 +88,7 @@ class FlowManager:
             trajectory_id = str(uuid.uuid4())
 
         if config.flow_type == "loop":
-            return AgenticLoop.create(
+            flow = AgenticLoop.create(
                 message=message,
                 trajectory_id=trajectory_id,
                 project_id=project_id,
@@ -132,7 +115,7 @@ class FlowManager:
             if hasattr(config.selector, "model_id") and not config.selector.model_id:
                 config.selector.model_id = model_id
 
-            tree = SearchTree.create(
+            flow = SearchTree.create(
                 message=message,
                 trajectory_id=trajectory_id,
                 project_id=project_id,
@@ -153,7 +136,9 @@ class FlowManager:
                 **kwargs,
             )
 
-        return tree
+        await self.save_trajectory(project_id, trajectory_id, flow)
+
+        return flow
 
     def _get_config_path(self) -> Path:
         """Get the path to the config file."""
@@ -255,6 +240,14 @@ class FlowManager:
         del self._configs[id]
         await self._save_configs()
 
+    async def get_flow(self, project_id: str, trajectory_id: str) -> AgenticFlow:
+        """Get a flow from a trajectory."""
+        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
+
+        trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
+        settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+        return AgenticFlow.from_dicts(settings_data, trajectory_data)
+
     async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
         await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
@@ -264,20 +257,15 @@ class FlowManager:
             settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
 
-            # nodes = convert_nodes(flow.root)
-            flow_status_info = flow.get_status()
-
             job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
 
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
                 project_id=flow.project_id,
-                status=flow_status_info.status,
+                status=flow.status,
                 job_status=job_status,
-                system_status=flow_status_info,
                 agent_id=flow.agent.agent_id,
                 model_id=flow.agent.model_id,
-                # nodes=nodes,
                 usage=flow.total_usage(),
             )
         except Exception as e:
@@ -301,7 +289,8 @@ class FlowManager:
         if flow.root.get_last_node() and flow.root.get_last_node().error:
             logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
             flow.root.get_last_node().reset()
-            await flow.persist()
+            trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+            await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
 
@@ -327,7 +316,8 @@ class FlowManager:
         if flow.root and flow.root.children:
             logger.info(f"Removing {len(flow.root.children)} children from root node")
             flow.root.children = []
-            await flow.persist()
+            trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+            await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
             logger.info("Trajectory reset successfully")
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
@@ -361,7 +351,8 @@ class FlowManager:
         if request.metadata:
             flow.metadata.update(request.metadata)
 
-        await flow.persist()
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+        await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
         logger.info("Trajectory updated with new parameters")
 
         await self._runner.start_job(project_id=project_id, trajectory_id=trajectory_id, job_func=run_flow)
@@ -381,7 +372,9 @@ class FlowManager:
             node = node.clone()
             node.reset(rebuild_action_steps=False)
             logger.info(f"Cloned node {node.node_id} from parent {node.parent.node_id}")
-            await agentic_flow.persist()
+
+            trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+            await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
 
         await self._runner.start_job(
             project_id=project_id,
@@ -416,18 +409,6 @@ class FlowManager:
                 logger.error(f"Error reading events file: {e}")
 
         return events
-
-    def load_trajectory_from_file(self, file_path: Path) -> TrajectoryDTO:
-        """Load trajectory data from a JSON file."""
-        with open(file_path, encoding="utf-8") as f:
-            data = json.load(f)
-
-        # Convert nodes to DTO format
-        root_node = data.get("root", {})
-        if root_node:
-            data["root"] = convert_nodes(root_node)
-
-        return TrajectoryDTO(**data)
 
     async def get_trajectory_logs(self, project_id: str, trajectory_id: str, file_name: Optional[str] = None) -> Dict:
         """Get logs for a trajectory.
@@ -562,3 +543,9 @@ class FlowManager:
         trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
 
         return Node.from_dict(trajectory_data)
+
+    async def save_trajectory(self, project_id: str, trajectory_id: str, flow: AgenticFlow):
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+
+        await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
+        await self._storage.write(f"{trajectory_path}/settings.json", flow.get_flow_settings())

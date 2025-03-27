@@ -1,34 +1,28 @@
 import json
 import logging
-import traceback
 import uuid
 from abc import abstractmethod
-from collections.abc import Callable
-from datetime import datetime, timezone
+from collections.abc import Callable, Awaitable
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional
+
+from opentelemetry import trace
+from pydantic import ConfigDict, Field, PrivateAttr
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.component import MoatlessComponent
-from moatless.context_data import (
-    current_project_id,
-    current_trajectory_id,
-    get_trajectory_dir,
-)
-from moatless.eventbus.base import BaseEventBus
+from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.events import (
     BaseEvent,
     FlowCompletedEvent,
     FlowErrorEvent,
     FlowStartedEvent,
 )
-from moatless.flow.schema import FlowStatus, FlowStatusInfo
+from moatless.flow.schema import FlowStatus
 from moatless.node import Node
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
-from opentelemetry import trace
-from pydantic import ConfigDict, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.flow")
@@ -46,7 +40,7 @@ class AgenticFlow(MoatlessComponent):
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
 
     _root: Optional[Node] = PrivateAttr(default=None)
-    _status: FlowStatusInfo = PrivateAttr(default_factory=FlowStatusInfo)
+    _on_event: Optional[Callable[[BaseEvent], Awaitable[None]]] = PrivateAttr(default=None)
 
     @classmethod
     def get_component_type(cls) -> str:
@@ -80,6 +74,7 @@ class AgenticFlow(MoatlessComponent):
         max_expansions: Optional[int] = None,
         max_cost: Optional[float] = None,
         shadow_mode: bool = True,
+        on_event: Optional[Callable[[BaseEvent], Awaitable[None]]] = None,
         **kwargs,
     ) -> "AgenticFlow":
         if not trajectory_id:
@@ -113,6 +108,7 @@ class AgenticFlow(MoatlessComponent):
         )
 
         instance._root = root
+        instance._on_event = on_event
 
         return instance
 
@@ -137,6 +133,8 @@ class AgenticFlow(MoatlessComponent):
         if workspace:
             await self.agent.initialize(workspace)
 
+        self.agent._on_event = self._on_event
+
         # TODO: Workaround to set repo on existing nodes
         for node in self.root.get_all_nodes():
             if node.file_context and not node.file_context._repo:
@@ -146,34 +144,18 @@ class AgenticFlow(MoatlessComponent):
         if not self.agent.workspace:
             raise ValueError("Agent workspace is not set")
 
-        with tracer.start_as_current_span(f"flow_{self.trajectory_id}") as span:
-            try:
-                current_trajectory_id.set(self.trajectory_id)
-                current_project_id.set(self.project_id)
-                await self._initialize_run_state()
-                await self._emit_event(FlowStartedEvent())
-                node, finish_reason = await self._run(message, node_id)
+        try:
+            current_trajectory_id.set(self.trajectory_id)
+            current_project_id.set(self.project_id)
+            await self._emit_event(FlowStartedEvent())
+            node, finish_reason = await self._run(message, node_id)
 
-                # Complete attempt successfully
-                self._status.complete_current_attempt("completed")
-                self._status.status = FlowStatus.COMPLETED
-                self._status.finished_at = datetime.now(timezone.utc)
-                await self._emit_event(FlowCompletedEvent())
-                return node
-            except Exception as e:
-                # Complete attempt with error
-                logger.exception(f"Error running flow {self.trajectory_id}")
-                error_trace = traceback.format_exc()
-                self._status.complete_current_attempt("error", str(e), error_trace)
-                self._status.status = FlowStatus.ERROR
-                self._status.error = str(e)
-                self._status.error_trace = error_trace
-                self._status.finished_at = datetime.now(timezone.utc)
-                await self._emit_event(FlowErrorEvent(data={"error": str(e)}))
-                raise
-            finally:
-                await self.persist()
-                await self._save_status()
+            await self._emit_event(FlowCompletedEvent())
+            return node
+        except Exception as e:
+            logger.exception(f"Error running flow {self.trajectory_id}")
+            await self._emit_event(FlowErrorEvent(data={"error": str(e)}))
+            raise
 
     @abstractmethod
     async def _run(self, message: str | None = None, node_id: int | None = None) -> tuple[Node, str | None]:
@@ -201,71 +183,19 @@ class AgenticFlow(MoatlessComponent):
             node.parent.children = [child for child in node.parent.children if child.node_id != node.node_id]
 
     async def _emit_event(self, event: BaseEvent):
+        """Emit an event via the event callback if one is configured.
+
+        Args:
+            event: The event to emit
+        """
         event.project_id = self.project_id
         event.trajectory_id = self.trajectory_id
 
-        await self.persist()
-
-        from moatless.settings import get_event_bus
-
-        event_bus = await get_event_bus()
-        await event_bus.publish(event)
-
-    async def _initialize_run_state(self):
-        """Initialize or restore system run state and logging"""
-
-        from moatless.settings import get_storage
-
-        storage = await get_storage()
-
-        # Initialize or restore status
-        if await storage.exists_in_trajectory("status.json", self.project_id, self.trajectory_id):
-            try:
-                status_data = await storage.read_from_trajectory("status.json", self.project_id, self.trajectory_id)
-                existing_status = FlowStatusInfo.model_validate(status_data)
-
-                # Resume previous run
-                self._status = existing_status
-                self._status.status = FlowStatus.RUNNING
-                self._status.restart_count += 1
-                self._status.error = None
-                self._status.error_trace = None
-                self._status.last_restart = datetime.now(timezone.utc)
-
-                # Mark any incomplete attempts as error
-                current_attempt = self._status.get_current_attempt()
-                if current_attempt and current_attempt.status == "running":
-                    current_attempt.status = "error"
-                    current_attempt.error = "System interrupted"
-                    current_attempt.finished_at = datetime.now(timezone.utc)
-                    self._status.current_attempt = None
-
-            except Exception as e:
-                logger.error(f"Error loading existing status: {e}")
-
-        if not self._status:
-            self._status = FlowStatusInfo()
-
-        self._status.started_at = datetime.now(timezone.utc)
-        self._status.status = FlowStatus.RUNNING
-        self._status.metadata = self.metadata
-
-        # Start new attempt
-        attempt = self._status.start_new_attempt()
-
-        # TODO: Log restart/resume event
-        # if self._status.restart_count > 0:
-        #    event_bus.publish(self.trajectory_id, BaseEvent(event_type="flow_restarted"))
-
-        await self._save_status()
-
-    async def _save_status(self):
-        """Save current status to status.json"""
-        self._status.metadata = self.metadata
-        from moatless.settings import get_storage
-
-        storage = await get_storage()
-        await storage.write_to_trajectory("status.json", self._status.model_dump(), self.project_id, self.trajectory_id)
+        if self._on_event:
+            await self._on_event(event)
+        else:
+            # Just log the event if no callback is configured
+            logger.debug(f"Event emitted (no callback): {event.event_type} for {self.project_id}/{self.trajectory_id}")
 
     def get_node_by_id(self, node_id: int) -> Node | None:
         """Get a node by its ID."""
@@ -278,23 +208,20 @@ class AgenticFlow(MoatlessComponent):
         """Calculate total token usage across all nodes."""
         return self.root.total_usage()
 
+    @property
+    def status(self) -> FlowStatus:
+        if self.root.get_all_nodes()[-1].error:
+            return FlowStatus.ERROR
+        if self.is_finished():
+            return FlowStatus.COMPLETED
+        elif not self.root.children:
+            return FlowStatus.CREATED
+
+        return FlowStatus.RUNNING
+
     @abstractmethod
     def is_finished(self) -> str | None:
         raise NotImplementedError("Subclass must implement is_finished method")
-
-    async def persist(self):
-        trajectory_data = {
-            "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
-        }
-
-        from moatless.settings import get_storage
-
-        storage = await get_storage()
-        await storage.write_to_trajectory("trajectory.json", trajectory_data, self.project_id, self.trajectory_id)
-
-        # TODO: Only save on creation
-        flow_settings = self.model_dump(exclude_none=True)
-        await storage.write_to_trajectory("settings.json", flow_settings, self.project_id, self.trajectory_id)
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""
@@ -312,13 +239,13 @@ class AgenticFlow(MoatlessComponent):
         cls,
         obj: Any,
         repository: Repository | None = None,
-    ) -> "AgenticFlow":
+    ):
         """Validate and reconstruct a system from a dictionary."""
         if isinstance(obj, dict):
             obj = obj.copy()
 
             if "agent" in obj and isinstance(obj["agent"], dict):
-                obj["agent"] = ActionAgent.model_validate(obj["agent"])
+                obj["agent"] = ActionAgent.from_dict(obj["agent"])
 
             if "root" in obj:
                 obj["root"] = Node.reconstruct(obj["root"], repo=repository)
@@ -331,7 +258,7 @@ class AgenticFlow(MoatlessComponent):
     @classmethod
     def from_dicts(cls, settings: dict[str, Any], trajectory: dict[str, Any]) -> "AgenticFlow":
         """Load a system instance from a dictionary."""
-        flow = cls.model_validate(settings)
+        flow = cls.from_dict(settings)
         flow._root = Node.from_dict(trajectory)
         return flow
 
@@ -346,19 +273,11 @@ class AgenticFlow(MoatlessComponent):
         if not trajectory_path.exists():
             raise FileNotFoundError(f"Trajectory file not found in {trajectory_dir}")
 
-        status_path = trajectory_dir / "status.json"
-        if status_path.exists():
-            with open(status_path) as f:
-                status = FlowStatusInfo.model_validate_json(f.read())
-        else:
-            status = FlowStatusInfo(status=FlowStatus.CREATED)
-
         with open(settings_path) as f:
             settings = json.load(f)
 
-        flow = cls.model_validate(settings)
+        flow = cls.from_dict(settings)
         flow._root = Node.from_file(trajectory_path)
-        flow._status = status
         return flow
 
     @classmethod
@@ -374,12 +293,18 @@ class AgenticFlow(MoatlessComponent):
         flow_dict = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)
         return cls.from_dicts(flow_dict, traj_dict)
 
+    def get_trajectory_data(self) -> dict:
+        """Get trajectory data for persistence."""
+        return {
+            "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
+        }
+
+    def get_flow_settings(self) -> dict:
+        """Get flow settings for persistence."""
+        return self.model_dump(exclude_none=True)
+
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""
         data = super().model_dump(exclude={"agent", "root"})
         data["agent"] = self.agent.model_dump(**kwargs)
         return data
-
-    def get_status(self) -> FlowStatusInfo:
-        """Get the current status of the system."""
-        return self._status

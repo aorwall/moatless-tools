@@ -2,6 +2,9 @@ import logging
 from collections.abc import Callable
 from typing import Any, Dict, Optional
 
+from opentelemetry import trace
+from pydantic import ConfigDict, Field, model_validator
+
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
 from moatless.context_data import current_node_id
@@ -21,8 +24,6 @@ from moatless.flow.events import (
 from moatless.node import Node, generate_ascii_tree
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from opentelemetry import trace
-from pydantic import ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.search_tree")
@@ -183,16 +184,20 @@ class SearchTree(AgenticFlow):
 
         previous_node_id = node.node_id
 
-        node = await self.selector.select(expandable_nodes)
+        selected_node = await self.selector.select(expandable_nodes)
+
+        if selected_node is None:
+            self.log(logger.warning, "Selector returned None. Using current node.")
+            return node
 
         await self._emit_event(
             NodeSelectedEvent(
-                node_id=node.node_id,
+                node_id=selected_node.node_id,
                 previous_node_id=previous_node_id,
             )
         )
 
-        return node
+        return selected_node
 
     @tracer.start_as_current_span("SearchTree._expand")
     async def _expand(self, node: Node) -> Node | None:
@@ -206,8 +211,6 @@ class SearchTree(AgenticFlow):
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
             return None
-
-        await self.persist()
 
         await self._emit_event(
             NodeExpandedEvent(
@@ -302,13 +305,14 @@ class SearchTree(AgenticFlow):
             return
 
         reward = node.reward.value
-        while node is not None:
-            node.visits += 1
-            if not node.value:
-                node.value = reward
+        current = node
+        while current is not None:
+            current.visits += 1
+            if not current.value:
+                current.value = reward
             else:
-                node.value += reward
-            node = node.parent
+                current.value += reward
+            current = current.parent
 
     def get_best_trajectory(self) -> Node | None:
         """
@@ -424,19 +428,19 @@ class SearchTree(AgenticFlow):
             obj = obj.copy()
 
             if "selector" in obj and isinstance(obj["selector"], dict):
-                obj["selector"] = BaseSelector.model_validate(obj["selector"])
+                obj["selector"] = BaseSelector.from_dict(obj["selector"])
 
             if "agent" in obj and isinstance(obj["agent"], dict):
-                obj["agent"] = ActionAgent.model_validate(obj["agent"])
+                obj["agent"] = ActionAgent.from_dict(obj["agent"])
 
             if "value_function" in obj and isinstance(obj["value_function"], dict):
-                obj["value_function"] = BaseValueFunction.model_validate(obj["value_function"])
+                obj["value_function"] = BaseValueFunction.from_dict(obj["value_function"])
 
             if "feedback_generator" in obj and isinstance(obj["feedback_generator"], dict):
-                obj["feedback_generator"] = BaseFeedbackGenerator.model_validate(obj["feedback_generator"])
+                obj["feedback_generator"] = BaseFeedbackGenerator.from_dict(obj["feedback_generator"])
 
             if "discriminator" in obj and isinstance(obj["discriminator"], dict):
-                obj["discriminator"] = BaseDiscriminator.model_validate(obj["discriminator"])
+                obj["discriminator"] = BaseDiscriminator.from_dict(obj["discriminator"])
 
             return super().model_validate(obj)
         return obj

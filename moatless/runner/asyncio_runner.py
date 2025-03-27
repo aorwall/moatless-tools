@@ -6,7 +6,8 @@ import traceback
 from asyncio import Task
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, cast
-from uuid import uuid4
+
+from opentelemetry import trace
 
 from moatless.runner.runner import (
     JobInfo,
@@ -18,7 +19,6 @@ from moatless.runner.runner import (
     JobDetails,
     JobDetailSection,
 )
-from opentelemetry import trace
 
 tracer = trace.get_tracer(__name__)
 

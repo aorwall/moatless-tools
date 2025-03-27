@@ -1,5 +1,4 @@
 import fnmatch
-import fnmatch
 import json
 import logging
 import os

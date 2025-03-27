@@ -1,10 +1,9 @@
 import asyncio
 import logging
 import os
-import subprocess
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Optional, Dict, Tuple
 
 from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels
 from moatless.runner.runner import (

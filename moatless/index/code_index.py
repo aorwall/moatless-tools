@@ -13,6 +13,9 @@ from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
 from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
 from llama_index.core.vector_stores.types import BasePydanticVectorStore
+from opentelemetry import trace
+from rapidfuzz import fuzz
+
 from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
 from moatless.codeblocks.module import Module
 from moatless.index.code_block_index import CodeBlockIndex
@@ -26,11 +29,8 @@ from moatless.index.types import (
 )
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
-from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
-from opentelemetry import trace
-from rapidfuzz import fuzz
 
 logger = logging.getLogger(__name__)
 

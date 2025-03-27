@@ -2,6 +2,8 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional
 
+from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
+
 from moatless.actions import CreateFile
 from moatless.actions.action import Action, CompletionModelMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
@@ -9,7 +11,6 @@ from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.actions.string_replace import StringReplace, StringReplaceArgs
 from moatless.actions.view_code import CodeSpan, ViewCode, ViewCodeArgs
-from moatless.completion import BaseCompletionModel
 from moatless.completion.schema import (
     ChatCompletionToolParam,
     ChatCompletionToolParamFunctionChunk,
@@ -18,7 +19,6 @@ from moatless.file_context import FileContext
 from moatless.repository.file import do_diff
 from moatless.repository.repository import Repository
 from moatless.workspace import Workspace
-from pydantic import ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 

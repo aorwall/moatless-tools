@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 
-from moatless.artifacts.artifact import Artifact
 from pydantic import BaseModel
+
+from moatless.artifacts.artifact import Artifact
 
 
 class ArtifactConnector(BaseModel, ABC):

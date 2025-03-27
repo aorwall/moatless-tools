@@ -4,13 +4,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from pydantic import BaseModel, Field
+
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.stats import CompletionInvocation, Usage
 from moatless.file_context import FileContext
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

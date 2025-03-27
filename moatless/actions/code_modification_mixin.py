@@ -2,11 +2,10 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from opentelemetry import trace
+
 from moatless.actions.schema import Observation
 from moatless.file_context import FileContext
-from moatless.utils.file import is_test
-from opentelemetry import trace
-from pydantic import Field
 
 logger = logging.getLogger(__name__)
 

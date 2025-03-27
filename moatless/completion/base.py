@@ -1,17 +1,18 @@
-import json
 import logging
-import os
-import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from enum import Enum
-from math import log
-from typing import Any, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, List, Optional, Union
 
 import litellm
 import tenacity
 from litellm.exceptions import BadRequestError
 from litellm.files.main import RateLimitError
+from openai import APIConnectionError
+from opentelemetry import trace
+from pydantic import BaseModel, Field, PrivateAttr
+from tenacity import retry, stop_after_attempt, wait_exponential
+
 from moatless.completion.schema import (
     AllMessageValues,
     ChatCompletionCachedContent,
@@ -20,13 +21,9 @@ from moatless.completion.schema import (
     ChatCompletionUserMessage,
     ResponseSchema,
 )
-from moatless.completion.stats import CompletionAttempt, CompletionInvocation, Usage
+from moatless.completion.stats import CompletionAttempt, CompletionInvocation
 from moatless.component import MoatlessComponent
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
-from openai import APIConnectionError
-from opentelemetry import trace
-from pydantic import BaseModel, Field, PrivateAttr
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

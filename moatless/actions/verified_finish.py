@@ -1,5 +1,7 @@
 from typing import ClassVar
 
+from pydantic import ConfigDict, Field
+
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
@@ -9,7 +11,6 @@ from moatless.actions.schema import (
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
-from pydantic import ConfigDict, Field
 
 
 class VerifiedFinishArgs(ActionArguments):

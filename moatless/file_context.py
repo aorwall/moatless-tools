@@ -3,12 +3,12 @@ import io
 import json
 import logging
 import os
-import re
-import subprocess
-from dataclasses import dataclass, field, asdict
-from math import log
-from typing import Dict, List, Optional, Set, Tuple, Literal, Any, Union, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import List, Optional, Literal, Any
 from unittest import TestResult
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from unidiff import PatchSet
 
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.codeblocks import CodeBlockType, get_parser_by_path
@@ -29,8 +29,6 @@ from moatless.testing.schema import TestFile
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
 from moatless.workspace import Workspace
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from unidiff import Hunk, PatchSet
 
 logger = logging.getLogger(__name__)
 

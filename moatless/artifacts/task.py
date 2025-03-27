@@ -2,11 +2,11 @@ import builtins
 from enum import Enum
 from typing import ClassVar, Optional
 
-from moatless.artifacts.artifact import Artifact
-from moatless.artifacts.diagnostic import DiagnosticArtifact
-from moatless.artifacts.json_handler import JsonArtifactHandler
-from moatless.completion.schema import ChatCompletionTextObject, MessageContentListBlock
 from pydantic import Field
+
+from moatless.artifacts.artifact import Artifact
+from moatless.artifacts.json_handler import JsonArtifactHandler
+from moatless.completion.schema import MessageContentListBlock
 
 
 class TaskState(str, Enum):

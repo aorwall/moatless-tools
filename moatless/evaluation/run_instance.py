@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import EvaluationEvent
-from moatless.flow.flow import AgenticFlow
+from moatless.flow.run_flow import setup_flow, setup_swebench_runtime, setup_workspace
 from moatless.index.code_index import CodeIndex
 from moatless.node import Node
 from moatless.repository.git import GitRepository
@@ -19,19 +19,17 @@ from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.local import SweBenchLocalEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.workspace import Workspace
-from opentelemetry import trace
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
 logger = logging.getLogger(__name__)
 
 
 async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: int | None = None):
-    from moatless.settings import get_storage, get_event_bus
+    from moatless.settings import get_storage
 
     load_dotenv()
 
     storage = await get_storage()
-    event_bus = await get_event_bus()
     date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = Path(f"/data/logs/logs_{date_str}.log")
     original_handlers = setup_job_logging(log_path=log_path)
@@ -51,29 +49,19 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
         raise ValueError("Settings not found")
 
     try:
-        instance_path = os.environ.get("INSTANCE_PATH")
-        if not instance_path:
-            raise ValueError("INSTANCE_PATH is not set")
-        if not Path(instance_path).exists():
-            raise ValueError(f"Instance file not found at {instance_path}")
-        with open(instance_path) as f:
-            swebench_instance = json.loads(f.read())
+        flow = await setup_flow(project_id, trajectory_id)
 
-        logger.info(f"Loaded instance: {swebench_instance['instance_id']}")
+        if not node_id and flow.is_finished():
+            logger.warning(f"Flow already finished for instance {trajectory_id}")
+            return None
 
-        repo_path = os.environ.get("REPO_DIR")
+        repo_path = os.environ.get("REPO_PATH")
         if not repo_path:
-            raise ValueError("REPO_DIR is not set")
-        logger.info(f"Using repo path: {repo_path}")
+            raise ValueError("REPO_PATH is not set")
 
         repository = GitRepository(repo_path=repo_path)
 
-        runtime = SweBenchLocalEnvironment(
-            repo_path=Path(repo_path),
-            swebench_instance=swebench_instance,
-            storage=storage,
-        )
-
+        runtime = await setup_swebench_runtime()
         index_store_dir = os.environ.get("INDEX_STORE_DIR")
         if not index_store_dir:
             raise ValueError("INDEX_STORE_DIR is not set")
@@ -84,19 +72,12 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
             file_repo=repository,
         )
 
-        workspace = Workspace(
-            repository=repository,
-            code_index=code_index,
-            runtime=runtime,
-            legacy_workspace=True,
-        )
+        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
 
-        trajectory_dict = await storage.read_from_trajectory(
-            path="trajectory.json", trajectory_id=trajectory_id, project_id=project_id
-        )
+        logger.info(f"Flow created for instance {trajectory_id}")
 
-        flow = AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
-        await flow.run(workspace=workspace)
+        await flow.run(workspace=workspace, node_id=node_id)
+
         logger.info(f"Flow completed for instance {trajectory_id}")
 
         await evaluate_instance(

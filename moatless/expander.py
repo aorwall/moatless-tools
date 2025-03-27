@@ -1,9 +1,9 @@
 import logging
 import random
-from typing import List
+
+from pydantic import BaseModel, Field
 
 from moatless.node import Node
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

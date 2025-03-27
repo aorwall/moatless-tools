@@ -2,15 +2,14 @@ import logging
 from abc import abstractmethod
 from typing import TypeVar
 
-from moatless import settings
+from pydantic import PrivateAttr
+
 from moatless.artifacts.artifact import (
     Artifact,
     ArtifactHandler,
     SearchCriteria,
-    ArtifactListItem,
 )
 from moatless.storage import BaseStorage
-from pydantic import PrivateAttr
 
 logger = logging.getLogger(__name__)
 

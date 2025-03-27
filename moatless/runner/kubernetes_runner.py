@@ -1,11 +1,13 @@
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import timezone
 from typing import Any, Optional
 
 from kubernetes import client, config
 from kubernetes.client import ApiException
+from opentelemetry import trace
+
 from moatless.runner.label_utils import (
     create_annotations,
     create_job_args,
@@ -25,7 +27,6 @@ from moatless.runner.runner import (
     JobDetailSection,
 )
 from moatless.telemetry import extract_trace_context
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner.kubernetes")

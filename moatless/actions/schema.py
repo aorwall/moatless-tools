@@ -4,10 +4,11 @@ import pkgutil
 from abc import ABC
 from typing import Any, Optional
 
+from pydantic import BaseModel, Field, model_validator
+
 from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import ResponseSchema
 from moatless.completion.stats import CompletionInvocation
-from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,6 @@ class ActionArguments(ResponseSchema, ABC):
             action_args_class_path = obj.pop("action_args_class", None)
 
             if action_args_class_path:
-                if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
-                    action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
-
-                if action_args_class_path.startswith("moatless.actions.edit"):
-                    action_args_class_path = "moatless.actions.claude_text_editor.EditActionArguments"
-
                 module_name, class_name = action_args_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 action_args_class = getattr(module, class_name)

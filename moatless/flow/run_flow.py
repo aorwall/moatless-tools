@@ -1,11 +1,15 @@
+import asyncio
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 import litellm
+
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
+from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.index.code_index import CodeIndex
 from moatless.repository.git import GitRepository
@@ -14,11 +18,14 @@ from moatless.runner.utils import (
     emit_event,
     setup_job_logging,
 )
-from moatless.runtime.local import SweBenchLocalEnvironment
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.settings import get_storage
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
+
+
+_flow_lock = asyncio.Lock()
 
 
 async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
@@ -29,6 +36,8 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
     current_project_id.set(project_id)
     current_trajectory_id.set(trajectory_id)
 
+    litellm.callbacks = [LogHandler(storage=storage)]
+
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
 
     settings = await storage.read_from_trajectory(
@@ -38,27 +47,41 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
         path="trajectory.json", trajectory_id=trajectory_id, project_id=project_id
     )
 
-    return AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
+    flow = AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
+
+    async def on_event(event: BaseEvent) -> None:
+        await handle_flow_event(flow, event)
+
+    flow._on_event = on_event
+
+    return flow
+
+
+async def setup_swebench_runtime() -> RuntimeEnvironment:
+    storage = await get_storage()
+    from moatless.runtime.local import SweBenchLocalEnvironment
+
+    instance_path = os.environ.get("INSTANCE_PATH")
+    if not instance_path:
+        raise ValueError("INSTANCE_PATH is not set")
+
+    if not os.path.exists(instance_path):
+        raise FileNotFoundError(f"Instance path {instance_path} does not exist")
+
+    with open(instance_path) as f:
+        swebench_instance = json.loads(f.read())
+
+    return SweBenchLocalEnvironment(
+        repo_path=Path("/testbed"),
+        swebench_instance=swebench_instance,
+        storage=storage,
+    )
 
 
 async def setup_workspace() -> Workspace:
-    storage = await get_storage()
-
     instance_path = os.environ.get("INSTANCE_PATH")
     if instance_path:
-        if not os.path.exists(instance_path):
-            raise FileNotFoundError(f"Instance path {instance_path} does not exist")
-
-        with open(instance_path) as f:
-            swebench_instance = json.loads(f.read())
-
-        logger.info(f"Loaded SWE-Bench instance: {swebench_instance.get('instance_id')}")
-        repo_path = "/testbed"
-        runtime = SweBenchLocalEnvironment(
-            repo_path=Path(repo_path),
-            swebench_instance=swebench_instance,
-            storage=storage,
-        )
+        runtime = await setup_swebench_runtime()
     else:
         # TODO: Use Local bash environment
         runtime = None
@@ -83,21 +106,45 @@ async def setup_workspace() -> Workspace:
     return Workspace(repository=repository, code_index=code_index, runtime=runtime)
 
 
+async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
+    """Handle flow events by persisting data and publishing to event bus.
+
+    Args:
+        flow: The flow instance that generated the event
+    """
+    from moatless.settings import get_storage, get_event_bus
+
+    async def process_event_task():
+        async with _flow_lock:
+            storage = await get_storage()
+
+            trajectory_data = flow.get_trajectory_data()
+            await storage.write_to_trajectory("trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id)
+
+            try:
+                event_bus = await get_event_bus()
+                await event_bus.publish(event)
+            except Exception as e:
+                logger.error(f"Error publishing event: {e}")
+
+    asyncio.create_task(process_event_task())
+
+
 async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = None) -> None:
     """Run an instance's agentic flow."""
     print(f"Running instance {trajectory_id} for project {project_id}")
 
-    log_path = Path("/data/logs/job.log")
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = Path(f"/data/logs/logs_{date_str}.log")
     original_handlers = setup_job_logging(log_path=log_path)
     storage = await get_storage()
-    try:
-        litellm.callbacks = [LogHandler(storage=storage)]
 
+    try:
         flow = await setup_flow(project_id, trajectory_id)
 
         if not node_id and flow.is_finished():
             logger.warning(f"Flow already finished for instance {trajectory_id}")
-            return
+            return None
 
         workspace = await setup_workspace()
 

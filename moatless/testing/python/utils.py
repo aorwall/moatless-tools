@@ -1,5 +1,5 @@
 import re
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from moatless.testing.schema import TestResult, TestStatus, TraceItem
 

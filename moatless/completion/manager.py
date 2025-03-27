@@ -83,7 +83,7 @@ class ModelConfigManager:
             model_config.update({k: v for k, v in base_config.items() if k not in model_config})
             model_config["model_id"] = model_id
             try:
-                configs[model_id] = BaseCompletionModel.model_validate(model_config)
+                configs[model_id] = BaseCompletionModel.from_dict(model_config)
             except Exception as e:
                 logger.error(f"Failed to validate model config: {model_config}")
                 raise e
@@ -102,7 +102,7 @@ class ModelConfigManager:
 
         self._user_configs = {}
         for model_config in models_configs:
-            self._user_configs[model_config["model_id"]] = BaseCompletionModel.model_validate(model_config)
+            self._user_configs[model_config["model_id"]] = BaseCompletionModel.from_dict(model_config)
 
     async def _save_user_configs(self) -> None:
         """Save user model configurations to file."""
@@ -220,7 +220,7 @@ class ModelConfigManager:
 
         config_dict = config.model_dump()
         config_dict["model_id"] = model_id
-        return BaseCompletionModel.model_validate(config_dict)
+        return BaseCompletionModel.from_dict(config_dict)
 
     async def test_model_setup(self, model_id: str) -> dict[str, Any]:
         """Test if a model configuration works correctly.

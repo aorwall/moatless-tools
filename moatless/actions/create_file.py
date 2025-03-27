@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 
+from pydantic import ConfigDict, Field
+
 from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
@@ -8,7 +10,6 @@ from moatless.actions.schema import ActionArguments, Observation
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
-from pydantic import ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 

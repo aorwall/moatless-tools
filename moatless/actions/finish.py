@@ -1,5 +1,7 @@
 from typing import ClassVar
 
+from pydantic import ConfigDict, Field
+
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
@@ -8,7 +10,6 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from pydantic import ConfigDict, Field
 
 
 class FinishArgs(ActionArguments):
@@ -18,6 +19,7 @@ class FinishArgs(ActionArguments):
         ...,
         description="Explain why the task is complete.",
     )
+    is_terminal: bool = Field(default=True, description="Whether the action will finish the flow")
 
     model_config = ConfigDict(title="Finish")
 

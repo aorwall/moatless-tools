@@ -10,6 +10,7 @@ from moatless.completion.base import (
     CompletionRetryError,
     LLMResponseFormat,
 )
+from moatless.completion.react import ReActCompletionModel
 from moatless.completion.schema import (
     AllMessageValues,
     ResponseSchema,
@@ -150,11 +151,18 @@ class TestCompletionResponse:
         )
         assert completion_response.structured_output is None
 
-    def test_model_validate_with_legacy_completion(self):
-        """Test model_validate method with a legacy completion field."""
-        # Since we've removed backward compatibility, this test is now skipped
-        pytest.skip("Legacy completion backward compatibility has been removed")
-
+    def test_model_validate(self):
+        model = BaseCompletionModel.model_validate(
+            {
+                "completion_model_class": "moatless.completion.react.ReActCompletionModel",
+                "model_id": "test-model-id",
+                "model": "test-model",
+                "temperature": 0.0,
+                "max_tokens": 100,
+                "timeout": 30.0,
+            }
+        )
+        assert isinstance(model, ReActCompletionModel)
 
 @pytest.fixture
 def model():

@@ -1,8 +1,9 @@
 from enum import Enum
 from typing import Optional, List
 
-from moatless.utils.tokenizer import count_tokens
 from pydantic import BaseModel, Field, model_validator
+
+from moatless.utils.tokenizer import count_tokens
 
 
 class TestStatus(str, Enum):

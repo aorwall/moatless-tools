@@ -1,8 +1,7 @@
 import logging
-import os
-import re
 import time
-from typing import List, Optional, Dict, Any, Tuple
+
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -15,9 +14,7 @@ from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.testing.schema import TestFile
 from moatless.testing.schema import TestResult, TestStatus
-from moatless.testing.test_output_parser import TestOutputParser
 from moatless.workspace import Workspace
-from pydantic import ConfigDict, Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 

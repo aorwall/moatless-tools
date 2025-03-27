@@ -3,9 +3,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
-from moatless import settings
 from moatless.agent.agent import ActionAgent
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
@@ -80,7 +78,7 @@ class AgentConfigManager:
         """Get an agent configuration by ID."""
         logger.debug(f"Getting agent config {agent_id}")
         if agent_id in self._configs:
-            return ActionAgent.model_validate(self._configs[agent_id])
+            return ActionAgent.from_dict(self._configs[agent_id])
         else:
             raise ValueError(f"Agent config {agent_id} not found. Available configs: {self._configs.keys()}")
 
@@ -88,7 +86,7 @@ class AgentConfigManager:
         agents = []
         for config in self._configs.values():
             try:
-                agents.append(ActionAgent.model_validate(config))
+                agents.append(ActionAgent.from_dict(config))
             except Exception as e:
                 logger.exception(f"Failed to load agent config {config['agent_id']}: {e}")
 

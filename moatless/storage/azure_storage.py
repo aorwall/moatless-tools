@@ -9,14 +9,13 @@ import json
 import logging
 import os
 from datetime import datetime
-from io import BytesIO
-from typing import Union, List, Optional
+from typing import Union, List
 
 from azure.core.exceptions import ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient, ContainerClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from moatless.storage.base import BaseStorage
 from opentelemetry import trace
+
+from moatless.storage.base import BaseStorage
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)

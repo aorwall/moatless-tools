@@ -1,8 +1,7 @@
-import re
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from moatless.testing.schema import TestResult, TestStatus
+from moatless.testing.schema import TestResult
 
 
 class TestOutputParser(ABC):

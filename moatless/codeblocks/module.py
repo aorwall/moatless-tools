@@ -1,10 +1,11 @@
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Optional
+
+from networkx import DiGraph
 
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.codeblocks import BlockSpan, SpanType
-from networkx import DiGraph
 
 logger = logging.getLogger(__name__)
 

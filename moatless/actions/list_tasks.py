@@ -1,13 +1,14 @@
 import logging
-from typing import ClassVar, List, Optional
+from typing import ClassVar, Optional
+
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
-from moatless.actions.schema import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments
 from moatless.artifacts.artifact import SearchCriteria
-from moatless.artifacts.task import TaskArtifact, TaskHandler, TaskState
+from moatless.artifacts.task import TaskState
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from pydantic import ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 

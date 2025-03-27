@@ -1,12 +1,12 @@
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from opentelemetry import trace
+
 from moatless.context_data import current_node_id, current_project_id, current_trajectory_id, get_moatless_dir
 from moatless.events import BaseEvent
-from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.runner")

@@ -1,7 +1,9 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Literal, Optional
+
+from pydantic import BaseModel, Field, model_validator
 
 from moatless.artifacts.artifact import ArtifactHandler
 from moatless.completion.stats import CompletionInvocation, Usage
@@ -12,7 +14,6 @@ from moatless.node import Reward
 from moatless.runner.runner import JobStatus
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
-from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -164,56 +165,6 @@ class FlowStatus(str, Enum):
     ERROR = "error"
 
 
-class RunAttempt(BaseModel):
-    """Information about a single run attempt"""
-
-    attempt_id: int
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: Optional[datetime] = None
-    status: str = "running"  # running, error, completed
-    error: Optional[str] = None
-    error_trace: Optional[str] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class FlowStatusInfo(BaseModel):
-    """System status information"""
-
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    status: FlowStatus = FlowStatus.CREATED
-    error: Optional[str] = None
-    error_trace: Optional[str] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    restart_count: int = Field(default=0)
-    last_restart: Optional[datetime] = None
-    run_history: list[RunAttempt] = Field(default_factory=list)
-    current_attempt: Optional[int] = None
-
-    def start_new_attempt(self) -> RunAttempt:
-        """Start a new run attempt"""
-        attempt = RunAttempt(attempt_id=len(self.run_history), metadata=self.metadata)
-        self.run_history.append(attempt)
-        self.current_attempt = attempt.attempt_id
-        return attempt
-
-    def get_current_attempt(self) -> Optional[RunAttempt]:
-        """Get the current run attempt"""
-        if self.current_attempt is not None:
-            return self.run_history[self.current_attempt]
-        return None
-
-    def complete_current_attempt(
-        self, status: str = "completed", error: Optional[str] = None, error_trace: Optional[str] = None
-    ):
-        """Complete the current attempt"""
-        if attempt := self.get_current_attempt():
-            attempt.finished_at = datetime.now(timezone.utc)
-            attempt.status = status
-            attempt.error = error
-            attempt.error_trace = error_trace
-
-
 class TrajectoryEventDTO(BaseModel):
     """Data transfer object for trajectory events."""
 
@@ -294,7 +245,6 @@ class TrajectoryResponseDTO(BaseModel):
     trajectory_id: str
     project_id: str
     status: FlowStatus
-    system_status: FlowStatusInfo
     job_status: JobStatus
     agent_id: Optional[str] = None
     model_id: Optional[str] = None

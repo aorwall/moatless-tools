@@ -1,11 +1,12 @@
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Optional
+
+from typing_extensions import deprecated
 
 from moatless.codeblocks.parser.comment import get_comment_symbol
 from moatless.utils.colors import Colors
-from typing_extensions import deprecated
 
 BlockPath = list[str]
 

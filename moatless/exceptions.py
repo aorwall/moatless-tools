@@ -1,10 +1,8 @@
-from typing import Any, List, Optional
-
 # Import CompletionInvocation for type hint
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from moatless.completion.stats import CompletionInvocation, Usage
+    pass
 
 
 class MoatlessError(Exception):

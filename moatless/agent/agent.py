@@ -1,6 +1,10 @@
 import logging
 import traceback
-from typing import Any, Optional, cast
+from collections.abc import Callable
+from typing import Any, Awaitable, Optional, cast
+
+from opentelemetry import trace
+from pydantic import Field, PrivateAttr
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -16,9 +20,9 @@ from moatless.agent.events import (
 )
 from moatless.completion import BaseCompletionModel
 from moatless.completion.schema import ResponseSchema
-from moatless.completion.stats import CompletionInvocation, CompletionAttempt
 from moatless.component import MoatlessComponent
 from moatless.context_data import current_action_step
+from moatless.events import BaseEvent
 from moatless.exceptions import (
     CompletionError,
     CompletionRejectError,
@@ -29,15 +33,13 @@ from moatless.message_history.base import BaseMemory
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import ActionStep, Node
 from moatless.workspace import Workspace
-from opentelemetry import trace
-from pydantic import Field, PrivateAttr
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.agent")
 
 
 class ActionAgent(MoatlessComponent):
-    agent_id: str = Field(..., description="Agent ID")
+    agent_id: Optional[str] = Field(None, description="Agent ID")
     model_id: Optional[str] = Field(None, description="Model ID")
     description: Optional[str] = Field(None, description="Description of the agent")
 
@@ -48,12 +50,13 @@ class ActionAgent(MoatlessComponent):
     system_prompt: str = Field(..., description="System prompt to be used for generating completions")
     actions: list[Action] = Field(default_factory=list)
     memory: BaseMemory = Field(
-        ...,
+        default_factory=MessageHistoryGenerator,
         description="Message history generator to be used for generating completions",
     )
 
     _action_map: dict[type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
     _workspace: Workspace | None = PrivateAttr(default=None)
+    _on_event: Optional[Callable[[BaseEvent], Awaitable[None]]] = PrivateAttr(default=None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -297,10 +300,8 @@ class ActionAgent(MoatlessComponent):
 
     async def _emit_event(self, event: AgentEvent):
         """Emit a pure agent event"""
-        from moatless.settings import get_event_bus
-
-        event_bus = await get_event_bus()
-        await event_bus.publish(event)
+        if self._on_event:
+            await self._on_event(event)
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         dump = super().model_dump(**kwargs)
