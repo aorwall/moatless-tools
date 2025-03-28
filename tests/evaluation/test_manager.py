@@ -282,7 +282,8 @@ def flow_manager(mock_runner, file_storage, mock_event_bus, mock_agent_manager, 
     # Mock the create_flow method to avoid the need for flow configs
     mock_flow = AsyncMock()
     mock_flow.persist = AsyncMock()
-    manager.create_flow = MagicMock(return_value=mock_flow)
+    manager.create_flow = AsyncMock()
+    manager.create_flow.return_value = mock_flow
     
     # Mock get_trajectory to return a mock response
     async def mock_get_trajectory(project_id, trajectory_id):

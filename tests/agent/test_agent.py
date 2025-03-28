@@ -53,6 +53,44 @@ def mock_completion_model():
 
 
 @pytest.fixture
+def mock_litellm_response():
+    """Mock LiteLLM response with ReAct format content"""
+    def _create_mock(content="", usage=None):
+        from litellm.types.utils import Message, Usage, ModelResponse
+
+        # Create message
+        message = Message(
+            content=content,
+            role="assistant"
+        )
+
+        # Create usage
+        if usage:
+            usage_obj = Usage(
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                total_tokens=usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+            )
+        else:
+            usage_obj = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+
+        # Create ModelResponse
+        return ModelResponse(
+            id="test_id",
+            created=1234567890,
+            model="test",
+            choices=[{
+                "message": message,
+                "finish_reason": "stop",
+                "index": 0
+            }],
+            usage=usage_obj
+        )
+
+    return _create_mock
+
+
+@pytest.fixture
 def agent(mock_completion_model, workspace):
     string_replace_action = StringReplace(auto_correct_indentation=True)
     agent = ActionAgent(
@@ -106,3 +144,71 @@ async def test_agent_multiple_string_replace(agent, file_context, repository):
     assert "def hello_world():" in updated_content
     assert "print(message)" in updated_content
     assert "print(other_message)" in updated_content
+
+
+@pytest.mark.asyncio
+async def test_agent_run_with_react_model(repository, workspace, mock_litellm_response):
+    """Test agent run method with ReActCompletionModel and ReactMessageHistoryGenerator"""
+    from moatless.completion.react import ReActCompletionModel
+    from moatless.message_history.react import ReactMessageHistoryGenerator
+    from moatless.actions.string_replace import StringReplace
+
+    # Create the agent with ReAct model and memory
+    string_replace_action = StringReplace(auto_correct_indentation=True)
+    model = ReActCompletionModel(
+        model_id="test",
+        model="test",
+        disable_thoughts=False,
+        response_format={"type": "text"},  # Required for JsonCompletionModel
+    )
+    agent = ActionAgent(
+        agent_id="test-agent",
+        system_prompt="You are a helpful assistant",
+        actions=[string_replace_action],
+        memory=ReactMessageHistoryGenerator(),
+        completion_model=model
+    )
+    await agent.initialize(workspace)  # Initialize agent with workspace
+
+    # Create a root node and a child node for testing
+    root_node = Node.create_root("Initial message", shadow_mode=True)
+    node = Node(node_id=1, user_message="Please update the greeting message")
+    node.set_parent(root_node)  # This will make it a non-root node
+    node.file_context = FileContext(repo=repository)
+    node.file_context.add_file("test_file.py", show_all_spans=True)
+
+    # Mock the completion response with thoughts
+    mock_response = """Thoughts: I will update the greeting message to be more welcoming
+
+Action: StringReplace
+<path>test_file.py</path>
+<old_str>    message = "Hello World"</old_str>
+<new_str>    message = "Welcome to our World!"</new_str>"""
+
+    with patch("litellm.acompletion", new_callable=AsyncMock) as mock_completion:
+        mock_completion.return_value = mock_litellm_response(
+            mock_response,
+            usage={"prompt_tokens": 25, "completion_tokens": 15, "total_tokens": 40}
+        )
+
+        # Run the agent
+        await agent.run(node)
+
+        # Verify the node has thoughts set
+        assert node.thoughts is not None
+        assert node.thoughts.text == "I will update the greeting message to be more welcoming"
+
+        # Verify action was executed
+        assert len(node.action_steps) == 1
+        assert isinstance(node.action_steps[0].action, StringReplaceArgs)
+        assert node.action_steps[0].action.path == "test_file.py"
+        assert node.action_steps[0].action.old_str == '    message = "Hello World"'
+        assert node.action_steps[0].action.new_str == '    message = "Welcome to our World!"'
+
+        # Verify file was updated
+        updated_content = node.file_context.get_file("test_file.py").content
+        assert 'message = "Welcome to our World!"' in updated_content
+        
+        # Verify original structure is preserved
+        assert "def hello_world():" in updated_content
+        assert "print(message)" in updated_content
