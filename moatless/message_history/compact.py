@@ -195,7 +195,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         message_tokens = action_tokens + observation_tokens
 
                         # Only add if within token limit
-                        if total_tokens + message_tokens <= self.max_tokens:
+                        if self.max_tokens is None or total_tokens + message_tokens <= self.max_tokens:
                             total_tokens += message_tokens
                             actions.append(action_step.action)
                             observations.append(observation_str)
@@ -261,7 +261,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                                 thoughts="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
                             )
                             diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
-                            if total_tokens + diff_tokens <= self.max_tokens:
+                            if self.max_tokens is None or total_tokens + diff_tokens <= self.max_tokens:
                                 total_tokens += diff_tokens
                                 current_messages.append(
                                     NodeMessage(
@@ -298,7 +298,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
                             # Calculate and check token limits
                             test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
-                            if total_tokens + test_tokens <= self.max_tokens:
+                            if self.max_tokens is None or total_tokens + test_tokens <= self.max_tokens:
                                 total_tokens += test_tokens
                                 current_messages.append(
                                     NodeMessage(actions=[run_tests_args], observations=[test_output])
