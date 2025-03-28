@@ -183,7 +183,9 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         thought_item = ThoughtTreeItem(
             id=f"{node_item.id}-thought",
             label="Thought",
-            detail=f'("{node.thoughts.text[:20]}...")' if len(node.thoughts.text) > 20 else f'("{node.thoughts.text}")',
+            detail=f'("{node.thoughts.text[:100]}...")'
+            if len(node.thoughts.text) > 100
+            else f'("{node.thoughts.text}")',
             node_id=node_item.node_id,
         )
         node_item.children.append(thought_item)

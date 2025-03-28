@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 _flow_lock = asyncio.Lock()
+_pending_event_tasks = set()
 
 
 async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
@@ -115,19 +116,26 @@ async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
     from moatless.settings import get_storage, get_event_bus
 
     async def process_event_task():
-        async with _flow_lock:
-            storage = await get_storage()
+        try:
+            async with _flow_lock:
+                storage = await get_storage()
 
-            trajectory_data = flow.get_trajectory_data()
-            await storage.write_to_trajectory("trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id)
+                trajectory_data = flow.get_trajectory_data()
+                await storage.write_to_trajectory(
+                    "trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id
+                )
+                logger.info(f"Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
 
-            try:
-                event_bus = await get_event_bus()
-                await event_bus.publish(event)
-            except Exception as e:
-                logger.error(f"Error publishing event: {e}")
+                try:
+                    event_bus = await get_event_bus()
+                    await event_bus.publish(event)
+                except Exception as e:
+                    logger.error(f"Error publishing event: {e}")
+        finally:
+            _pending_event_tasks.discard(task)
 
-    asyncio.create_task(process_event_task())
+    task = asyncio.create_task(process_event_task())
+    _pending_event_tasks.add(task)
 
 
 async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = None) -> None:
@@ -153,6 +161,11 @@ async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = No
         await flow.run(workspace=workspace, node_id=node_id)
 
         logger.info(f"Flow completed for instance {trajectory_id}")
+
+        # Wait for all pending event tasks to complete
+        if _pending_event_tasks:
+            logger.info("Waiting for pending event tasks to complete...")
+            await asyncio.gather(*_pending_event_tasks)
 
     except Exception as e:
         logger.exception(f"Error running instance {trajectory_id}")

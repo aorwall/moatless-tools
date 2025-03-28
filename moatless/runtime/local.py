@@ -40,7 +40,14 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             self.swebench_instance["version"], {}
         )
 
-        self._install_task = asyncio.create_task(self._run_async_installation(specs.get("install")))
+        self._install_command = specs.get("install")
+
+        if self.swebench_instance["repo"] == "sphinx-doc/sphinx":
+            self._install_after_patch = True
+        else:
+            self._install_after_patch = False
+
+        self._install_task = asyncio.create_task(self._run_async_installation(self._install_command))
 
     async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
         """Run tests with an optional patch and specific test files."""
@@ -57,6 +64,9 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         if patch:
             if not await self._apply_patch(patch):
                 raise RuntimeError("Failed to apply patch")
+
+        if self._install_after_patch and self._install_command:
+            await self._execute_command(self._install_command)
 
         test_results = []
         if test_files:  # Check if test_files is not None
@@ -176,6 +186,10 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         """Run installation asynchronously with the improved script approach."""
         if not install_command:
             logger.info("No install command specified in the test spec")
+            return True
+
+        if self._install_after_patch:
+            logger.info("Skipping installation because it's done after patch")
             return True
 
         if os.getenv("SKIP_INSTALL", "false").lower() == "true":
