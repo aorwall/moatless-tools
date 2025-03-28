@@ -31,7 +31,7 @@ from moatless.exceptions import (
 )
 from moatless.message_history.base import BaseMemory
 from moatless.message_history.message_history import MessageHistoryGenerator
-from moatless.node import ActionStep, Node
+from moatless.node import ActionStep, Node, Thoughts
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,9 @@ class ActionAgent(MoatlessComponent):
             completion_response = await self.completion_model.create_completion(messages=messages)
             if completion_response.completion_invocation:
                 node.completions["build_action"] = completion_response.completion_invocation
+
+            if completion_response.thought:
+                node.thoughts = Thoughts(text=completion_response.thought)
 
             node.assistant_message = completion_response.text_response
             if not completion_response.structured_outputs:

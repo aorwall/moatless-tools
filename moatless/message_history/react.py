@@ -34,6 +34,10 @@ class ReactMessageHistoryGenerator(MessageHistoryGenerator):
                 continue
 
             assistant_content = ""
+
+            if previous_node.thoughts:
+                assistant_content += f"Thought: {previous_node.thoughts.text}\n"
+
             user_content = "Observations:\n "
 
             for action_step in previous_node.action_steps:
