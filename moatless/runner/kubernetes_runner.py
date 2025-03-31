@@ -1202,12 +1202,12 @@ class KubernetesRunner(BaseRunner):
             return self._get_job_status_from_k8s_job(job)
         except ApiException as e:
             if e.status == 404:
-                return JobStatus.NOT_FOUND
+                return JobStatus.NOT_STARTED
             self.logger.exception(f"Error getting job status for {job_id}: {e}")
-            return JobStatus.NOT_FOUND
+            return JobStatus.NOT_STARTED
         except Exception as exc:
             self.logger.exception(f"Unexpected error getting job status for {job_id}: {exc}")
-            return JobStatus.NOT_FOUND
+            return JobStatus.NOT_STARTED
 
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.

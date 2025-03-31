@@ -208,7 +208,7 @@ class BaseStorage(abc.ABC):
             The normalized path
         """
         # Remove leading/trailing slashes and whitespace
-        return path.strip().strip("/")
+        return path.strip()
 
     def _get_project_id(self, project_id: Optional[str] = None) -> str:
         """

@@ -58,63 +58,6 @@ class MessageHistoryGenerator(BaseMemory):
         self, previous_nodes: List[Node], workspace: Workspace
     ) -> list[AllMessageValues]:
         """
-        Generate messages respecting the token limit by including only the most recent nodes.
-
-        This method processes nodes from most recent to oldest, adding them until the token
-        limit would be exceeded. This ensures the most relevant recent context is preserved.
-        The first user message and the most recent node's messages are always included.
-
-        Args:
-            previous_nodes: List of nodes in the trajectory (oldest to newest)
-            workspace: The workspace containing artifacts
-
-        Returns:
-            A list of messages that fit within the token limit
-        """
-        if not self.max_tokens:
-            return await self._generate_unlimited_messages(previous_nodes, workspace)
-
-        # Generate all messages to identify the ones we need
-        all_messages = await self._generate_unlimited_messages(previous_nodes, workspace)
-
-        # If we have 5 or fewer messages already, return them all
-        if len(all_messages) <= 5:
-            return all_messages
-
-        # Get the first user message
-        first_user_message = next(
-            (msg for msg in all_messages if isinstance(msg, dict) and msg.get("role") == "user"), None
-        )
-
-        # Get the last 4 messages
-        last_four_messages = all_messages[-4:]
-
-        # Combine first message and last 4 messages
-        result_messages = []
-        if first_user_message:
-            result_messages.append(first_user_message)
-        result_messages.extend(last_four_messages)
-
-        # Calculate total tokens
-        actual_tokens = 0
-        for message in result_messages:
-            message_str = str(message)
-            actual_tokens += count_tokens(message_str)
-
-        # Check if we're within the token limit
-        if actual_tokens <= self.max_tokens:
-            logger.info(
-                f"Generated {len(result_messages)} messages with {actual_tokens} tokens (limited by max_tokens={self.max_tokens})"
-            )
-            return result_messages
-
-        # If we exceed the token limit, revert to the previous algorithm
-        return await self._generate_adaptive_token_limited_messages(previous_nodes, workspace)
-
-    async def _generate_adaptive_token_limited_messages(
-        self, previous_nodes: List[Node], workspace: Workspace
-    ) -> list[AllMessageValues]:
-        """
         Adaptively generate messages based on token limits.
 
         Fallback implementation when the specific first+last4 approach doesn't fit in token limit.

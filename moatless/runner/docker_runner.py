@@ -586,7 +586,7 @@ class DockerRunner(BaseRunner):
         """
         logger.info(f"Getting status for container: {container_name}")
         if not await self._container_exists(container_name):
-            return JobStatus.NOT_FOUND
+            return JobStatus.NOT_STARTED
 
         try:
             container_status_output, return_code = await self._run_docker_command(
@@ -594,7 +594,7 @@ class DockerRunner(BaseRunner):
             )
 
             if return_code != 0:
-                return JobStatus.NOT_FOUND
+                return JobStatus.NOT_STARTED
 
             container_status = container_status_output.strip()
 
@@ -617,7 +617,7 @@ class DockerRunner(BaseRunner):
 
         except Exception as exc:
             self.logger.exception(f"Error getting status for container {container_name}: {exc}")
-            return JobStatus.NOT_FOUND
+            return JobStatus.NOT_STARTED
 
     async def _stop_container(self, container_name: str) -> bool:
         """Stop and remove a container.

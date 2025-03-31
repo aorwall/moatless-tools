@@ -658,7 +658,7 @@ async def test_get_job_status(kubernetes_runner, mock_k8s_api):
     batch_api.read_namespaced_job.side_effect = error_response
     
     status = await kubernetes_runner.get_job_status("test-project", "nonexistent")
-    assert status == JobStatus.NOT_FOUND
+    assert status == JobStatus.NOT_STARTED
 
 
 @pytest.mark.asyncio

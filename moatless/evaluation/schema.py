@@ -3,15 +3,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from moatless.benchmark.report import BenchmarkResult
 from moatless.completion.stats import Usage
-from moatless.discriminator.base import BaseDiscriminator
 from moatless.events import BaseEvent
-from moatless.feedback import BaseFeedbackGenerator
 from moatless.runner.runner import JobStatus
 from moatless.schema import MessageHistoryType
-from moatless.selector import BaseSelector
-from moatless.value_function.base import BaseValueFunction
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -85,7 +80,7 @@ class EvaluationInstance(BaseModel):
         self,
         submission: Optional[str] = None,
         resolved: Optional[bool] = None,
-        benchmark_result: Optional[BenchmarkResult] = None,
+        benchmark_result: Optional[dict[str, Any]] = None,
     ):
         """Mark the instance as completed"""
         self.status = InstanceStatus.COMPLETED
@@ -109,8 +104,8 @@ class EvaluationInstance(BaseModel):
 
     def model_dump(self, *args, **kwargs) -> dict:
         data = super().model_dump(*args, **kwargs)
-        if self.benchmark_result and isinstance(self.benchmark_result, BenchmarkResult):
-            data["benchmark_result"] = self.benchmark_result.model_dump(**kwargs)
+        if self.benchmark_result:
+            data["benchmark_result"] = self.benchmark_result
         return data
 
 

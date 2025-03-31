@@ -11,6 +11,7 @@ class TestStatus(str, Enum):
     PASSED = "PASSED"
     SKIPPED = "SKIPPED"
     ERROR = "ERROR"
+    UNKNOWN = "UNKNOWN"
 
     def __str__(self):
         return self.value
@@ -85,10 +86,11 @@ class TestFile(BaseModel):
         passed_count = len(all_results) - failure_count - error_count - skipped_count
 
         # Combine per-file summary with overall summary
-        summary = "\n".join(per_file_summary)
-        summary += (
-            f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors, {skipped_count} skipped."
-        )
+        if failure_count + error_count + skipped_count + passed_count > 0:
+            summary = "\n".join(per_file_summary)
+            summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors, {skipped_count} skipped."
+        else:
+            summary = ""
 
         return summary
 
@@ -117,7 +119,7 @@ class TestFile(BaseModel):
         test_result_strings = []
         for test_file in test_files:
             for result in test_file.test_results:
-                if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.failure_output:
+                if result.status in [TestStatus.FAILED, TestStatus.ERROR, TestStatus.UNKNOWN] and result.failure_output:
                     attributes = ""
                     if result.file_path:
                         attributes += f"{result.file_path}"
@@ -131,7 +133,7 @@ class TestFile(BaseModel):
                     else:
                         truncated_message = result.failure_output
 
-                    test_result_str = f"* {result.status.value} {attributes}>\n```\n{truncated_message}\n```\n"
+                    test_result_str = f"* {attributes}\n```\n{truncated_message}\n```\n"
                     test_result_tokens = count_tokens(test_result_str)
                     if sum_tokens + test_result_tokens > max_tokens:
                         break

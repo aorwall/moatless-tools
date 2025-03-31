@@ -69,7 +69,7 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
             TestResult(
                 file_path=file_path,
                 failure_output=log,
-                status=TestStatus.ERROR,
+                status=TestStatus.UNKNOWN,
                 error_details=log,
             )
         ]

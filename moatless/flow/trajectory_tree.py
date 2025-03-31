@@ -1,4 +1,5 @@
 from enum import Enum
+import logging
 from typing import Optional, Union, cast
 
 from pydantic import BaseModel, Field
@@ -10,7 +11,9 @@ from moatless.actions.schema import ActionArguments
 from moatless.actions.semantic_search import SemanticSearchArgs
 from moatless.actions.think import ThinkArgs
 from moatless.completion.stats import CompletionInvocation
-from moatless.node import Node
+from moatless.node import ActionStep, Node
+
+logger = logging.getLogger(__name__)
 
 
 # Tree View Schema Classes
@@ -23,6 +26,7 @@ class ItemType(str, Enum):
     NODE = "node"
     ERROR = "error"
     REWARD = "reward"
+    EVALUATION = "evaluation"
 
 
 class BaseTreeItem(BaseModel):
@@ -71,6 +75,13 @@ class ActionTreeItem(BaseTreeItem):
     children: list[Union["CompletionTreeItem", "ThoughtTreeItem", "ActionTreeItem"]] = Field(default_factory=list)
 
 
+class EvaluationTreeItem(BaseTreeItem):
+    """Represents an evaluation item in the tree."""
+
+    type: str = ItemType.EVALUATION
+    resolved: bool
+
+
 class NodeTreeItem(BaseTreeItem):
     """Represents a node item in the tree."""
 
@@ -85,6 +96,7 @@ class NodeTreeItem(BaseTreeItem):
             "ActionTreeItem",
             "ErrorTreeItem",
             "RewardTreeItem",
+            "EvaluationTreeItem",
         ]
     ] = Field(default_factory=list)
 
@@ -112,12 +124,12 @@ def get_completion_detail(completion: CompletionInvocation | None) -> str:
     return f"({model})"
 
 
-def get_execution_time(step) -> str:
+def get_execution_time(step: ActionStep) -> str:
     """Get execution time as string."""
     # Extract time from step if available
-    execution_time = getattr(step, "execution_time", None)
-    if execution_time:
-        return f"{execution_time:.2f}s"
+    if step.start_time and step.end_time:
+        execution_time = step.end_time - step.start_time
+        return f"{execution_time.total_seconds():.2f}s"
     return ""
 
 
@@ -193,7 +205,16 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
     # Add actions
     for i, step in enumerate(node.action_steps):
         if isinstance(step.action, ThinkArgs):
-            # Already added thought from node.thoughts
+            logger.info(f"Thought: {step.action.thought}")
+            thought_item = ThoughtTreeItem(
+                id=f"{node_item.id}-thought",
+                label="Thought",
+                detail=f'("{step.action.thought[:100]}...")'
+                if len(step.action.thought) > 100
+                else f'("{step.action.thought}")',
+                node_id=node_item.node_id,
+            )
+            node_item.children.append(thought_item)
             continue
 
         action_id = f"{node_item.id}-action-{i}"
@@ -201,7 +222,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
             id=action_id,
             label=step.action.name,
             detail=get_action_detail(step.action),
-            # time=get_execution_time(step),
+            time=get_execution_time(step),
             action_name=step.action.name,
             action_index=i,
             node_id=node_item.node_id,
@@ -209,22 +230,21 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         )
 
         # Add action completion if available
-        if step.observation and step.observation.execution_completion:
-            completion_time = f"{step.observation.execution_completion.duration_sec:.2f}s"
+        if step.completion and step.completion.usage:
+            completion_time = f"{step.completion.duration_sec:.2f}s"
+            usage = step.completion.usage
+            logger.info(f"Usage: {usage}")
 
-            if step.observation.execution_completion.usage:
-                tokens = (
-                    step.observation.execution_completion.usage.completion_tokens
-                    + step.observation.execution_completion.usage.prompt_tokens
-                )
+            if usage:
+                tokens = usage.completion_tokens + usage.prompt_tokens
             else:
                 tokens = None
 
             action_completion = CompletionTreeItem(
                 id=f"{action_id}-completion",
                 label="Completion",
-                detail=get_completion_detail(step.observation.execution_completion),
-                # time=completion_time,
+                detail=get_completion_detail(step.completion),
+                time=completion_time,
                 tokens=tokens,
                 node_id=node_item.node_id,
                 action_step_id=i,
@@ -249,6 +269,24 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
                 label="Error",
                 detail=node.error[:100],
                 node_id=node_item.node_id,
+            )
+        )
+
+    if node.evaluation_result:
+        if node.evaluation_result.start_time and node.evaluation_result.end_time:
+            time_diff = node.evaluation_result.end_time - node.evaluation_result.start_time
+            time = f"{time_diff.total_seconds():.2f}s"
+        else:
+            time = None
+
+        node_item.children.append(
+            EvaluationTreeItem(
+                id=f"{node_item.id}-evaluation",
+                node_id=node_item.node_id,
+                label="Evaluation",
+                detail="Resolved" if node.evaluation_result.resolved else "Failed",
+                time=time,
+                resolved=node.evaluation_result.resolved,
             )
         )
 

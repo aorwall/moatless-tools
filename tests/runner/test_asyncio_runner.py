@@ -237,7 +237,7 @@ async def test_get_job_status(asyncio_runner):
     
     # Check status of nonexistent job
     status = await asyncio_runner.get_job_status("nonexistent", "nonexistent")
-    assert status == JobStatus.NOT_FOUND
+    assert status == JobStatus.NOT_STARTED
 
 
 @pytest.mark.asyncio

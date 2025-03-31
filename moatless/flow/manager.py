@@ -19,6 +19,7 @@ from moatless.flow.schema import (
     TrajectoryEventDTO,
     TrajectoryResponseDTO,
     StartTrajectoryRequest,
+    FlowStatus,
 )
 from moatless.flow.trajectory_tree import create_node_tree
 from moatless.node import Node
@@ -248,6 +249,20 @@ class FlowManager:
         settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
         return AgenticFlow.from_dicts(settings_data, trajectory_data)
 
+    def get_trajectory_status(self, flow: AgenticFlow, job_status: JobStatus) -> FlowStatus:
+        if job_status == JobStatus.RUNNING:
+            return FlowStatus.RUNNING
+        elif job_status == JobStatus.PENDING:
+            return FlowStatus.PENDING
+        elif flow.root.get_all_nodes()[-1].error:
+            return FlowStatus.ERROR
+        elif flow.is_finished():
+            return FlowStatus.COMPLETED
+        elif not flow.root.children:
+            return FlowStatus.CREATED
+        else:
+            return FlowStatus.PAUSED
+
     async def get_trajectory(self, project_id: str, trajectory_id: str) -> "TrajectoryResponseDTO":
         """Get the status, trajectory data, and events for a specific trajectory."""
         await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
@@ -259,11 +274,22 @@ class FlowManager:
 
             job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
 
+            evaluated_nodes = [
+                node
+                for node in flow.root.get_leaf_nodes()
+                if node.evaluation_result and node.evaluation_result.resolved is not None
+            ]
+            if evaluated_nodes:
+                resolved = all(node.evaluation_result.resolved for node in evaluated_nodes)
+            else:
+                resolved = None
+
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
                 project_id=flow.project_id,
-                status=flow.status,
+                status=self.get_trajectory_status(flow, job_status),
                 job_status=job_status,
+                resolved=resolved,
                 agent_id=flow.agent.agent_id,
                 model_id=flow.agent.model_id,
                 usage=flow.total_usage(),
@@ -383,6 +409,11 @@ class FlowManager:
             node_id=node_id,
         )
 
+    async def get_trajectory_settings(self, project_id: str, trajectory_id: str) -> dict:
+        """Get the settings for a trajectory."""
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+        return await self._storage.read(f"{trajectory_path}/settings.json")
+
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
         return get_trajectory_dir(project_id, trajectory_id) / "trajectory.json"
@@ -426,7 +457,6 @@ class FlowManager:
         # First, try to get logs from the runner if it's a job log file or no specific file is requested
         if not file_name or file_name == "job.log":
             runner_logs = await self._runner.get_job_logs(project_id, trajectory_id)
-            logger.info(f"Runner logs: {runner_logs}")
             if runner_logs:
                 # Get the list of local log files
                 logs_dir = get_trajectory_dir(project_id, trajectory_id) / "logs"

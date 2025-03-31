@@ -263,7 +263,7 @@ async def test_get_job_status(docker_runner):
             JobStatus.COMPLETED,
             JobStatus.FAILED,
             JobStatus.CANCELED,
-            JobStatus.NOT_FOUND
+            JobStatus.NOT_STARTED
         ]:
             mock_get_status.return_value = status
             result = await docker_runner.get_job_status("test-project", "test-repo__instance")

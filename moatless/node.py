@@ -20,6 +20,8 @@ class ActionStep(BaseModel):
     action: ActionArguments
     observation: Optional[Observation] = None
     completion: Optional[CompletionInvocation] = None
+    start_time: datetime = Field(default_factory=datetime.now, description="The start time of the action step")
+    end_time: datetime = Field(default_factory=datetime.now, description="The end time of the action step")
 
     def is_executed(self) -> bool:
         """Check if this action step has been executed by verifying if it has observations."""
@@ -30,6 +32,9 @@ class ActionStep(BaseModel):
 
         data["action"] = self.action.model_dump(**kwargs)
         data["action"]["action_args_class"] = f"{self.action.__class__.__module__}.{self.action.__class__.__name__}"
+
+        if self.completion:
+            data["completion"] = self.completion.model_dump(**kwargs)
 
         return data
 
@@ -43,6 +48,10 @@ class ActionStep(BaseModel):
         if isinstance(obj, dict):
             obj = obj.copy()
             obj["action"] = ActionArguments.model_validate(obj["action"])
+
+            if "completion" in obj:
+                obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
+
         return super().model_validate(obj, **kwargs)
 
 
@@ -67,6 +76,16 @@ class Reward(BaseModel):
         ge=-100,
         le=100,
     )
+
+
+class EvaluationResult(BaseModel):
+    """Evaluation result for a node."""
+
+    resolved: bool = Field(..., description="Whether the node was resolved")
+    start_time: datetime = Field(..., description="The start time of the evaluation")
+    end_time: datetime = Field(..., description="The end time of the evaluation")
+    evaluation: str = Field(default="SWE-Bench", description="The evaluation")
+    details: Optional[dict[str, Any]] = Field(None, description="Details about the evaluation")
 
 
 class Thoughts(BaseModel):
@@ -110,6 +129,7 @@ class Node(BaseModel):
     agent_id: Optional[str] = Field(None, description="The agent ID associated with the node")
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
     timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
+    evaluation_result: Optional[EvaluationResult] = Field(None, description="The evaluation result of the node")
 
     @property
     def action(self) -> Optional[ActionArguments]:

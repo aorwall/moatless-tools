@@ -31,8 +31,8 @@ tracer = trace.get_tracer("moatless.flow")
 class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    project_id: str = Field(..., description="The project ID")
-    trajectory_id: str = Field(..., description="The trajectory ID.")
+    project_id: Optional[str] = Field(None, description="The project ID")
+    trajectory_id: Optional[str] = Field(None, description="The trajectory ID.")
 
     agent: ActionAgent = Field(..., description="Agent for generating actions.")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
@@ -219,9 +219,20 @@ class AgenticFlow(MoatlessComponent):
 
         return FlowStatus.RUNNING
 
-    @abstractmethod
     def is_finished(self) -> str | None:
-        raise NotImplementedError("Subclass must implement is_finished method")
+        """Check if the loop should finish."""
+        total_cost = self.total_usage().completion_cost
+        if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
+            return "max_cost"
+
+        nodes = self.root.get_all_nodes()
+        if len(nodes) >= self.max_iterations:
+            return "max_iterations"
+
+        if nodes[-1].is_terminal():
+            return "terminal"
+
+        return None
 
     def _generate_unique_id(self) -> int:
         """Generate a unique ID for a new node."""

@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import traceback
 from collections.abc import Callable
@@ -212,6 +213,7 @@ class ActionAgent(MoatlessComponent):
     @tracer.start_as_current_span("ActionAgent._execute")
     async def _execute(self, node: Node, action_step: ActionStep):
         try:
+            action_step.start_time = datetime.now()
             previous_context = node.file_context.clone() if node.file_context else None
             action_step.observation = await self._execute_action_step(node, action_step)
 
@@ -232,6 +234,8 @@ class ActionAgent(MoatlessComponent):
                 node.terminal = action_step.observation.terminal
                 if action_step.observation.execution_completion:
                     action_step.completion = action_step.observation.execution_completion
+
+            action_step.end_time = datetime.now()
 
             logger.info(
                 f"Node{node.node_id}: Executed action: {action_step.action.name}. "

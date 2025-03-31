@@ -395,6 +395,7 @@ class CompletionInvocation(BaseModel):
     @classmethod
     def model_validate(cls, data: Any, **kwargs):
         if isinstance(data, dict):
-            data["attempts"] = [CompletionAttempt.model_validate(attempt, **kwargs) for attempt in data["attempts"]]
+            if "attempts" in data:
+                data["attempts"] = [CompletionAttempt.model_validate(attempt, **kwargs) for attempt in data["attempts"]]
             return super().model_validate(data, **kwargs)
         return data

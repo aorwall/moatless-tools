@@ -13,7 +13,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"  # Job finished successfully
     FAILED = "failed"  # Job execution failed
     CANCELED = "canceled"  # Job was manually canceled
-    NOT_FOUND = "not_found"  # Job not found in the system
+    NOT_STARTED = "not_started"  # Job not found or not started yet
 
 
 class RunnerStatus(str, Enum):

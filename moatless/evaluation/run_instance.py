@@ -11,9 +11,16 @@ from dotenv import load_dotenv
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import EvaluationEvent
-from moatless.flow.run_flow import setup_flow, setup_swebench_runtime, setup_workspace
+from moatless.flow.flow import AgenticFlow
+from moatless.flow.run_flow import (
+    handle_flow_event,
+    persist_trajectory_data,
+    setup_flow,
+    setup_swebench_runtime,
+    setup_workspace,
+)
 from moatless.index.code_index import CodeIndex
-from moatless.node import Node
+from moatless.node import EvaluationResult, Node
 from moatless.repository.git import GitRepository
 from moatless.runner.utils import cleanup_job_logging, setup_job_logging
 from moatless.runtime.local import SweBenchLocalEnvironment
@@ -83,7 +90,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
         await evaluate_instance(
             evaluation_name=project_id,
             instance_id=trajectory_id,
-            root_node=flow.root,
+            flow=flow,
             runtime=runtime,
             storage=storage,
         )
@@ -107,12 +114,12 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
 
 async def evaluate_instance(
-    evaluation_name: str, instance_id: str, root_node: Node, runtime: SweBenchLocalEnvironment, storage: BaseStorage
+    evaluation_name: str, instance_id: str, flow: AgenticFlow, runtime: SweBenchLocalEnvironment, storage: BaseStorage
 ) -> None:
     """Evaluate an instance's results."""
 
     evaluation_key = f"projects/{evaluation_name}/trajs/{instance_id}/evaluation"
-    leaf_nodes = root_node.get_leaf_nodes()
+    leaf_nodes = flow.root.get_leaf_nodes()
 
     unevaluated_nodes = [
         node for node in leaf_nodes if not await storage.exists(f"{evaluation_key}/node_{node.node_id}/report.json")
@@ -129,21 +136,34 @@ async def evaluate_instance(
     for i, leaf_node in enumerate(unevaluated_nodes):
         logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(unevaluated_nodes)})")
         if not leaf_node.file_context:
-            logger.warning(f"No file context for node {leaf_node.node_id}; skipping.")
-            continue
+            raise ValueError(f"No file context for node {leaf_node.node_id}")
 
         patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
-        if not patch or not patch.strip():
-            logger.info(f"No patch for node {leaf_node.node_id}; skipping.")
-            continue
         try:
             evaluation_node_key = f"{evaluation_key}/node_{leaf_node.node_id}"
+            start_time = datetime.now()
             report = await runtime.swebench_evaluate(evaluation_node_key, patch)
+            end_time = datetime.now()
+
+            if instance_id not in report:
+                logger.warning(f"Instance {instance_id} not found in report for node {leaf_node.node_id}: {report}")
+                continue
+
             logger.info(
                 f"Evaluation complete for node {leaf_node.node_id}. Resolved: {report[instance_id]['resolved']}"
             )
+
             if report[instance_id]["resolved"]:
                 any_resolved = True
+
+            leaf_node.evaluation_result = EvaluationResult(
+                resolved=report[instance_id].get("resolved", False),
+                details=report[instance_id],
+                start_time=start_time,
+                end_time=end_time,
+            )
+
+            await persist_trajectory_data(flow)
 
         except Exception:
             logger.exception(f"Error evaluating node {leaf_node.node_id} for instance {instance_id}")

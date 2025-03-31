@@ -66,7 +66,9 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
                 raise RuntimeError("Failed to apply patch")
 
         if self._install_after_patch and self._install_command:
-            await self._execute_command(self._install_command)
+            logger.info(f"Installing after patch with command: {self._install_command}")
+            stdout, return_code = await self._execute_command(self._install_command)
+            logger.info(f"Installation output: {stdout} {return_code}")
 
         test_results = []
         if test_files:  # Check if test_files is not None

@@ -39,7 +39,7 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
 
     litellm.callbacks = [LogHandler(storage=storage)]
 
-    logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
+    logger.info(f"current_project_id: {current_project_id.get()}, current {current_trajectory_id.get()}")
 
     settings = await storage.read_from_trajectory(
         path="settings.json", trajectory_id=trajectory_id, project_id=project_id
@@ -107,30 +107,38 @@ async def setup_workspace() -> Workspace:
     return Workspace(repository=repository, code_index=code_index, runtime=runtime)
 
 
+async def persist_trajectory_data(flow: AgenticFlow) -> None:
+    storage = await get_storage()
+
+    trajectory_data = flow.get_trajectory_data()
+    await storage.write_to_trajectory("trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id)
+    logger.info(f"Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
+
+
 async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
     """Handle flow events by persisting data and publishing to event bus.
 
     Args:
         flow: The flow instance that generated the event
     """
-    from moatless.settings import get_storage, get_event_bus
+    from moatless.settings import get_event_bus
+
+    try:
+        event_bus = await get_event_bus()
+        await event_bus.publish(event)
+    except Exception as e:
+        logger.error(f"Error publishing event: {e}")
 
     async def process_event_task():
         try:
             async with _flow_lock:
-                storage = await get_storage()
+                if (event.scope == "node" and event.event_type == "expanded") or event.scope == "flow":
+                    await persist_trajectory_data(flow)
 
-                trajectory_data = flow.get_trajectory_data()
-                await storage.write_to_trajectory(
-                    "trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id
+                logger.info(
+                    f"Event {event.scope}:{event.event_type}. Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json. "
                 )
-                logger.info(f"Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
 
-                try:
-                    event_bus = await get_event_bus()
-                    await event_bus.publish(event)
-                except Exception as e:
-                    logger.error(f"Error publishing event: {e}")
         finally:
             _pending_event_tasks.discard(task)
 
@@ -162,10 +170,15 @@ async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = No
 
         logger.info(f"Flow completed for instance {trajectory_id}")
 
-        # Wait for all pending event tasks to complete
         if _pending_event_tasks:
-            logger.info("Waiting for pending event tasks to complete...")
-            await asyncio.gather(*_pending_event_tasks)
+            logger.info("Cancelling pending event tasks...")
+            for task in _pending_event_tasks:
+                task.cancel()
+
+            _pending_event_tasks.clear()
+
+        if flow.is_finished():
+            await persist_trajectory_data(flow)
 
     except Exception as e:
         logger.exception(f"Error running instance {trajectory_id}")
