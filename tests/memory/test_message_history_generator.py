@@ -251,7 +251,7 @@ async def test_token_limited_messages(test_tree, workspace):
     limited_messages = await limited_generator.generate_messages(node5, workspace)
     
     print(json.dumps(limited_messages, indent=2))
-    assert len(limited_messages) == 5, f"Expected 5 messages, first message and the last 4"
+    assert len(limited_messages) == 5, f"Expected 5 messages, first message and the last 4, got {len(limited_messages)}"
     
     # Verify order in limited messages
     for i in range(len(limited_messages) - 1):

@@ -58,92 +58,67 @@ class MessageHistoryGenerator(BaseMemory):
         self, previous_nodes: List[Node], workspace: Workspace
     ) -> list[AllMessageValues]:
         """
-        Adaptively generate messages based on token limits.
-
-        Fallback implementation when the specific first+last4 approach doesn't fit in token limit.
+        Generate messages based on token limits.
+        
+        This implementation will try to include the first message (user query) 
+        and as many of the recent messages as possible, prioritizing the most recent.
+        The selection is dynamic based on the token limit.
         """
-        # First, process the initial node to get the user message
-        first_node = previous_nodes[0]
-        first_messages, first_tokens = await self._process_single_node(first_node, workspace, 0)
-        first_user_message = next(
-            (msg for msg in first_messages if isinstance(msg, dict) and msg["role"] == "user"), None
-        )
-        first_user_tokens = count_tokens(str(first_user_message)) if first_user_message else 0
-
-        # Process the most recent node
-        last_node = previous_nodes[-1]
-        last_messages, last_tokens = await self._process_single_node(last_node, workspace, len(previous_nodes))
-
-        # Find the assistant message and its tool responses in the last node
-        last_assistant_idx = next(
-            (i for i, msg in enumerate(last_messages) if msg.get("role") == "assistant"),
-            -1,
-        )
-
-        # Start with just the first user message
-        temp_messages = []
-        if first_user_message:
-            temp_messages.append(first_user_message)
-
-        # Add messages from the last node, ensuring we include the assistant message and its tool responses
-        total_tokens = first_user_tokens
-        if last_assistant_idx >= 0:
-            # Add the assistant message
-            assistant_msg = last_messages[last_assistant_idx]
-            assistant_tokens = count_tokens(str(assistant_msg))
-
-            # Add any tool responses that follow
-            tool_responses = [msg for msg in last_messages[last_assistant_idx + 1 :] if msg.get("role") == "tool"]
-
-            # Calculate total tokens needed for assistant message and tool responses
-            total_needed = assistant_tokens + sum(count_tokens(str(msg)) for msg in tool_responses)
-
-            # If we can fit both assistant message and all tool responses, add them
-            if total_tokens + total_needed <= self.max_tokens:
-                temp_messages.append(assistant_msg)
-                temp_messages.extend(tool_responses)
-                total_tokens += total_needed
+        # First, generate all messages
+        all_messages = []
+        tool_idx = 0
+        
+        for node in previous_nodes:
+            node_messages, _ = await self._process_single_node(node, workspace, tool_idx)
+            
+            # Update tool_idx for the next node
+            for msg in node_messages:
+                if isinstance(msg, dict) and msg.get("role") == "assistant" and "tool_calls" in msg:
+                    tool_idx += len(msg["tool_calls"])
+                    
+            all_messages.extend(node_messages)
+        
+        # If we don't have a token limit or all messages fit, return them all
+        total_tokens = sum(count_tokens(str(msg)) for msg in all_messages)
+        if not self.max_tokens or total_tokens <= self.max_tokens:
+            logger.info(f"Generated {len(all_messages)} messages with {total_tokens} tokens")
+            return all_messages
+            
+        # We need to select messages based on the token limit
+        # Always try to include the first message
+        first_message = all_messages[0] if all_messages else None
+        first_message_tokens = count_tokens(str(first_message)) if first_message else 0
+        
+        # If we can't fit even the first message, we need to truncate it somehow
+        if first_message_tokens > self.max_tokens:
+            logger.warning(f"First message exceeds token limit ({first_message_tokens} > {self.max_tokens})")
+            # Return just the first message and we'll need to handle truncation elsewhere
+            return [first_message]
+        
+        # Start with the first message
+        selected_messages = [first_message] if first_message else []
+        remaining_tokens = self.max_tokens - first_message_tokens
+        
+        # Try to include recent messages, starting from the most recent
+        for msg in reversed(all_messages[1:]):
+            msg_tokens = count_tokens(str(msg))
+            if msg_tokens <= remaining_tokens:
+                # We can include this message
+                selected_messages.insert(1, msg)  # Insert after first message
+                remaining_tokens -= msg_tokens
             else:
-                # Try to fit as many of the tool responses as possible, starting from the end
-                # Always include the assistant message if possible
-                remaining_tokens = self.max_tokens - total_tokens - assistant_tokens
-                included_tool_responses = []
-
-                # Work backward from the end to include the most recent tool responses first
-                for tool_msg in reversed(tool_responses):
-                    tool_tokens = count_tokens(str(tool_msg))
-                    if remaining_tokens >= tool_tokens:
-                        included_tool_responses.insert(0, tool_msg)  # Insert at beginning to maintain order
-                        remaining_tokens -= tool_tokens
-                    else:
-                        break
-
-                # Only add the assistant message if we can include at least one tool response
-                # or if it fits on its own
-                if included_tool_responses or (total_tokens + assistant_tokens <= self.max_tokens):
-                    temp_messages.append(assistant_msg)
-                    total_tokens += assistant_tokens
-
-                    # Add the tool responses we could fit
-                    temp_messages.extend(included_tool_responses)
-                    total_tokens += self.max_tokens - remaining_tokens - total_tokens + assistant_tokens
-
-        # Calculate total tokens
-        actual_tokens = 0
-        for message in temp_messages:
-            message_str = str(message)
-            actual_tokens += count_tokens(message_str)
-
+                # This message doesn't fit
+                continue
+        
+        # Sort messages to maintain conversation order
+        selected_messages.sort(key=lambda msg: all_messages.index(msg))
+        
+        actual_tokens = sum(count_tokens(str(msg)) for msg in selected_messages)
         logger.info(
-            f"Generated {len(temp_messages)} messages with {actual_tokens} tokens (limited by max_tokens={self.max_tokens})"
+            f"Generated {len(selected_messages)} messages with {actual_tokens} tokens (limited by max_tokens={self.max_tokens})"
         )
-
-        # Verify message order
-        for i in range(len(temp_messages) - 1):
-            if temp_messages[i].get("role") == "user":
-                assert temp_messages[i + 1].get("role") == "assistant", "Assistant message must follow user message"
-
-        return temp_messages
+        
+        return selected_messages
 
     async def _process_single_node(
         self, node: Node, workspace: Workspace, tool_idx_start: int
