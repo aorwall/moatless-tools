@@ -7,8 +7,6 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Optional
 
-import pymupdf as fitz
-from PIL import Image, ImageEnhance
 from pydantic import Field, PrivateAttr
 
 from moatless.artifacts.artifact import Artifact, ArtifactResponse
@@ -58,6 +56,8 @@ class FileArtifact(Artifact):
         elif self.mime_type.startswith("image/"):
             # For images, optimize before sending
             try:
+                from PIL import Image
+                
                 image = Image.open(io.BytesIO(content))
                 # Convert RGBA to RGB if needed
                 if image.mode in ("RGBA", "LA"):
@@ -235,6 +235,8 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
 
     def preprocess_image(self, file_content: bytes) -> bytes:
         """Enhance image for document processing with focus on text clarity"""
+        from PIL import Image, ImageEnhance
+
         image = Image.open(io.BytesIO(file_content))
         image = image.convert("L")
 
@@ -256,6 +258,8 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
         pdf_content = f"Contents of file {file_name}:\n\n"
 
         try:
+            import pymupdf as fitz
+        
             with fitz.open(stream=file_content, filetype="pdf") as doc:
                 # Add metadata if available
                 metadata = doc.metadata

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 from moatless.artifacts.content import ContentStructure
 from moatless.completion.schema import MessageContentListBlock
 from moatless.component import MoatlessComponent
+from moatless.settings import get_storage
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 
@@ -216,15 +217,13 @@ class ArtifactHandler(MoatlessComponent[T]):
         return cls.type
 
     @classmethod
-    def initiate_handlers(cls, storage: BaseStorage | None = None) -> list["ArtifactHandler"]:
+    def initiate_handlers(cls) -> list["ArtifactHandler"]:
         registered_classes = cls.get_available_components()
-        if not storage:
-            storage = FileStorage()
-
+        
         logger.info(f"Registered classes: {list(registered_classes.keys())}")
         handlers = []
         for handler in registered_classes.values():
-            handler = handler(storage=storage)
+            handler = handler()
             handlers.append(handler)
 
         logger.info(f"Initialized handlers: {list(map(lambda h: h.type, handlers))}")

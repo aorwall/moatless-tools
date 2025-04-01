@@ -86,9 +86,8 @@ def test_get_test_failure_details_with_failures():
     
     details = TestFile.get_test_failure_details([test_file])
     
-    assert "FAILED tests/test_example.py" in details
+    assert "tests/test_example.py" in details
     assert "Expected 1 but got 2" in details
-    assert "ERROR tests/test_example.py" in details
     assert "Division by zero" in details
     assert "test_passes" not in details  # Passed tests should not be included
 

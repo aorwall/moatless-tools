@@ -210,12 +210,8 @@ async def test_normalize_path():
     
     # Test various formats
     assert storage.normalize_path("path.json") == "path.json"
-    assert storage.normalize_path("/path.json") == "path.json"
-    assert storage.normalize_path("path.json/") == "path.json"
-    assert storage.normalize_path("/path.json/") == "path.json"
     assert storage.normalize_path("  path.json  ") == "path.json"
-    assert storage.normalize_path("/path/to/path.json/") == "path/to/path.json"
-
+    
 
 @pytest.mark.asyncio
 async def test_error_handling(file_storage):

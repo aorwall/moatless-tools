@@ -157,7 +157,8 @@ class TestIntegration:
     @patch('moatless.flow.run_flow.setup_job_logging')
     @patch('moatless.flow.run_flow.setup_flow')
     @patch('moatless.flow.run_flow.setup_workspace')
-    async def test_run_flow_integration(self, mock_setup_workspace, mock_setup_flow,
+    @patch('moatless.flow.run_flow.get_storage')  # Add patch for get_storage in run_flow module
+    async def test_run_flow_integration(self, mock_get_storage_run_flow, mock_setup_workspace, mock_setup_flow,
                                        mock_setup_logging, mock_get_event_bus, mock_get_storage,
                                        mock_agent, root_node):
         """Test the run_flow module's integration with the event callback"""
@@ -170,6 +171,8 @@ class TestIntegration:
         # Create mock storage and event bus
         mock_storage = AsyncMock()
         mock_get_storage.return_value = mock_storage
+        mock_get_storage_run_flow.return_value = mock_storage  # Set the same mock for run_flow.get_storage
+        
         # Setup necessary methods
         mock_storage.get_trajectory_path.return_value = "test-path"
         mock_storage.write_raw = AsyncMock()
@@ -227,8 +230,14 @@ class TestIntegration:
                     start_event = FlowStartedEvent()
                     await flow._emit_event(start_event)
                     
+                    # Wait for any pending tasks to complete
+                    await asyncio.sleep(0.1)
+                    
                     # Run the flow - this should call _emit_event with various events
                     await run_flow("test-project", "test-trajectory")
+                    
+                    # Wait for any pending tasks to complete
+                    await asyncio.sleep(0.1)
                     
                     # Verify that at least some events were captured by our callback
                     assert len(captured_events) >= 1

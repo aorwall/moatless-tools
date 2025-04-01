@@ -234,13 +234,6 @@ def file_storage():
     return storage
 
 
-@pytest.fixture(autouse=True)
-def reset_storage_after_test():
-    """Auto-used fixture to reset the storage singleton after each test."""
-    yield
-    BaseStorage.reset_instance()
-
-
 @pytest.fixture
 def mock_swebench_instance():
     """Mock for get_swebench_instance function"""

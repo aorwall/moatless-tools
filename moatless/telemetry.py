@@ -6,7 +6,6 @@ import os
 from typing import Any, Optional, ParamSpec, TypeVar
 
 from opentelemetry import context, trace
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -84,6 +83,8 @@ def setup_telemetry() -> None:
 
         # Configure exporter
         if otlp_endpoint:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
             otlp_exporter = OTLPSpanExporter(endpoint=otlp_endpoint)
             provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
 

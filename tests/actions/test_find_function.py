@@ -1,3 +1,4 @@
+import os
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
 
 import pytest
@@ -13,6 +14,10 @@ from moatless.workspace import Workspace
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("VOYAGE_API_KEY") is None,
+    reason="VOYAGE_API_KEY environment variable not set"
+)
 async def test_find_function_init_method():
     instance_id = "django__django-13658"
     instance = get_moatless_instance(instance_id)
@@ -44,6 +49,10 @@ async def test_find_function_init_method():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("VOYAGE_API_KEY") is None,
+    reason="VOYAGE_API_KEY environment variable not set"
+)
 async def test_find_function():
     instance_id = "django__django-14855"
     instance = get_moatless_instance(instance_id)

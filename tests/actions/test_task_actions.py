@@ -26,12 +26,9 @@ def temp_dir():
 @pytest.fixture
 def file_storage(temp_dir):
     """Fixture to create a storage instance with a test directory."""
-    # Store the original method and reset singleton
-    BaseStorage.reset_instance()
     
     # Create and return the test storage instance
-    storage = FileStorage(base_dir=temp_dir)
-    return storage
+    return FileStorage(base_dir=temp_dir)
 
 
 
@@ -116,19 +113,6 @@ def list_action(workspace):
     action.workspace = workspace
     return action
 
-
-@pytest.fixture(autouse=True)
-def mock_base_storage_get_instance(file_storage):
-    """Mock BaseStorage.get_instance to return our test storage instance."""
-    original_get_instance = BaseStorage.get_instance
-    
-    @classmethod
-    def mock_get_instance(cls, storage_impl=None, **kwargs):
-        return file_storage
-        
-    BaseStorage.get_instance = mock_get_instance
-    yield
-    BaseStorage.get_instance = original_get_instance
 
 
 @pytest.fixture(autouse=True)

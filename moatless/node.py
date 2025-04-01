@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 from moatless.actions.schema import ActionArguments, Observation
 from moatless.artifacts.artifact import ArtifactChange
@@ -22,6 +22,18 @@ class ActionStep(BaseModel):
     completion: Optional[CompletionInvocation] = None
     start_time: datetime = Field(default_factory=datetime.now, description="The start time of the action step")
     end_time: datetime = Field(default_factory=datetime.now, description="The end time of the action step")
+    
+    model_config = ConfigDict(
+        ser_json_timedelta="iso8601",
+        json_encoders={datetime: lambda dt: dt.isoformat()}
+    )
+    
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def parse_datetime(cls, value):
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        return value
 
     def is_executed(self) -> bool:
         """Check if this action step has been executed by verifying if it has observations."""
@@ -86,6 +98,18 @@ class EvaluationResult(BaseModel):
     end_time: datetime = Field(..., description="The end time of the evaluation")
     evaluation: str = Field(default="SWE-Bench", description="The evaluation")
     details: Optional[dict[str, Any]] = Field(None, description="Details about the evaluation")
+    
+    model_config = ConfigDict(
+        ser_json_timedelta="iso8601",
+        json_encoders={datetime: lambda dt: dt.isoformat()}
+    )
+    
+    @field_validator("start_time", "end_time", mode="before")
+    @classmethod
+    def parse_datetime(cls, value):
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        return value
 
 
 class Thoughts(BaseModel):
@@ -130,6 +154,18 @@ class Node(BaseModel):
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
     timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
     evaluation_result: Optional[EvaluationResult] = Field(None, description="The evaluation result of the node")
+
+    model_config = ConfigDict(
+        ser_json_timedelta="iso8601",
+        json_encoders={datetime: lambda dt: dt.isoformat()}
+    )
+    
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def parse_datetime(cls, value):
+        if isinstance(value, str):
+            return datetime.fromisoformat(value)
+        return value
 
     @property
     def action(self) -> Optional[ActionArguments]:
@@ -420,8 +456,6 @@ class Node(BaseModel):
         if not kwargs.get("exclude") or "children" not in kwargs.get("exclude", set()):
             node_dict["children"] = [child.model_dump(**kwargs) for child in self.children]
 
-        node_dict["timestamp"] = self.timestamp.isoformat()
-
         return node_dict
 
     @classmethod
@@ -472,11 +506,19 @@ class Node(BaseModel):
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)
 
-        if node_data.get("timestamp"):
-            node_data["timestamp"] = datetime.fromisoformat(node_data["timestamp"])
+        # The validator will handle conversion of timestamp from string to datetime
+        # so we don't need to explicitly convert it here
 
         if node_data.get("feedback_data"):
             node_data["feedback_data"] = FeedbackData.model_validate(node_data["feedback_data"])
+
+        if node_data.get("evaluation_result"):
+            eval_result = node_data["evaluation_result"]
+            # Handle datetime fields in evaluation_result
+            if "start_time" in eval_result and isinstance(eval_result["start_time"], str):
+                eval_result["start_time"] = datetime.fromisoformat(eval_result["start_time"])
+            if "end_time" in eval_result and isinstance(eval_result["end_time"], str):
+                eval_result["end_time"] = datetime.fromisoformat(eval_result["end_time"])
 
         if "children" in node_data:
             children = node_data.get("children", [])

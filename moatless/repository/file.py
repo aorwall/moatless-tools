@@ -323,22 +323,9 @@ class FileRepository(Repository):
                 # If it's a specific file, use it as the search path
                 search_path = file_pattern
 
-            # Always escape special regex characters to handle them literally
-            escaped_search_text = (
-                search_text.replace("[", "\\[")
-                .replace("]", "\\]")
-                .replace(".", "\\.")
-                .replace("+", "\\+")
-                .replace("*", "\\*")
-                .replace("?", "\\?")
-                .replace("|", "\\|")
-                .replace("{", "\\{")
-                .replace("}", "\\}")
-                .replace("$", "\\$")
-                .replace("^", "\\^")
-            )
-
-            cmd = ["grep", "-n", "-r"] + include_arg + [escaped_search_text, search_path]
+            # Use -F flag for fixed-string matching instead of regex
+            # This works on both BSD grep (macOS) and GNU grep (Linux)
+            cmd = ["grep", "-n", "-r", "-F"] + include_arg + [search_text, search_path]
             logger.info(f"Executing grep command: {' '.join(cmd)}")
             logger.info(f"Search directory: {self.repo_path}")
 
@@ -378,6 +365,8 @@ class FileRepository(Repository):
                         file_path = parts[0]
                         if file_path.startswith("./"):  # type: ignore
                             file_path = file_path[2:]
+                        # Normalize path to avoid double slashes
+                        file_path = file_path.replace("//", "/")
                         line_num = int(parts[1])
                         content = parts[2]
 

@@ -30,34 +30,6 @@ class BaseStorage(abc.ABC):
 
     _instance = None
 
-    @classmethod
-    def get_instance(cls, storage_impl: Optional[Type["BaseStorage"]] = None, **kwargs) -> "BaseStorage":
-        """
-        Get or create the singleton instance of Storage.
-
-        Args:
-            storage_impl: Optional storage implementation class to use, defaults to FileStorage
-            **kwargs: Arguments to pass to the storage implementation constructor
-
-        Returns:
-            The singleton Storage instance
-        """
-        if cls._instance is None:
-            # Import here to avoid circular imports
-            from moatless.storage.file_storage import FileStorage
-
-            # Use FileStorage as default implementation
-            impl_class = storage_impl or FileStorage
-            logger.info(f"Using {impl_class.__name__} as storage implementation")
-            cls._instance = impl_class(**kwargs)
-
-        return cls._instance
-
-    @classmethod
-    def reset_instance(cls) -> None:
-        """Reset the singleton instance. Mainly useful for testing."""
-        cls._instance = None
-
     async def read(self, path: str) -> dict | list[dict] | str:
         """
         Read JSON data from a file.

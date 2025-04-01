@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import pytest
 from moatless.actions.action import Action
@@ -7,6 +8,13 @@ from moatless.actions.schema import Observation, ActionArguments
 from moatless.file_context import FileContext
 from moatless.node import ActionStep, Node
 from moatless.repository.repository import InMemRepository
+
+
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 class TestAction(Action):
@@ -56,7 +64,7 @@ def test_node_model_dump():
 
     # Get the model dump
     dumped_data = root.model_dump()
-    print(json.dumps(dumped_data, indent=2))
+    print(json.dumps(dumped_data, indent=2, cls=DateTimeEncoder))
 
     # Verify the structure and content of the dumped data
     assert dumped_data["node_id"] == 0

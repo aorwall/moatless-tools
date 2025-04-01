@@ -25,10 +25,7 @@ def temp_dir():
 @pytest.fixture
 def file_storage(temp_dir):
     """Fixture to create a FileStorage instance and set it as the singleton."""
-    # First, reset the singleton to ensure we're starting fresh
-    BaseStorage.reset_instance()
-    # Create and return the new instance as the singleton
-    return BaseStorage.get_instance(storage_impl=FileStorage, base_dir=temp_dir)
+    return FileStorage(base_dir=temp_dir)
 
 
 @pytest.fixture
@@ -40,13 +37,6 @@ def local_event_bus(file_storage):
     bus = BaseEventBus.get_instance(eventbus_impl=LocalEventBus, storage=file_storage)
     return bus
 
-
-@pytest.fixture(autouse=True)
-def reset_after_test():
-    """Reset the singletons after each test."""
-    yield
-    BaseStorage.reset_instance()
-    BaseEventBus.reset_instance()
 
 
 @pytest.mark.asyncio
