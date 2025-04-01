@@ -175,7 +175,7 @@ async def test_messages_history(test_tree, workspace):
 
 @pytest.mark.asyncio
 async def test_token_limited_messages(test_tree, workspace):
-    """Test message history with token limit configuration"""
+    """Test message history with token limit configuration for different message pairs"""
     root, node1, node2, node3, node4, node5 = test_tree
     
     # Add more content to nodes to increase token count
@@ -236,36 +236,53 @@ async def test_token_limited_messages(test_tree, workspace):
     
     print(json.dumps(full_messages, indent=2))
     
-    # Count tokens for the first and the last 4 messages
-    token_limit = 0
-    for message in full_messages[:1] + full_messages[-4:]:
-        message_str = str(message)
-        token_limit += count_tokens(message_str)
+    # Test for multiple message pairs (1+2, 1+4, 1+6)
+    message_pair_counts = [3, 5, 7]
+    
+    for pair_count in message_pair_counts:
+        print(f"\nTesting with {pair_count} messages...")
+        
+        # Count tokens for the first message and the last (pair_count-1) messages
+        token_limit = 0
+        selected_messages = full_messages[:1] + full_messages[-(pair_count-1):]
+        for message in selected_messages:
+            message_str = str(message)
+            token_limit += count_tokens(message_str)
 
-    print(f"Limited tokens: {token_limit}")
-    
-    limited_generator = MessageHistoryGenerator(
-        include_file_context=True,
-        max_tokens=token_limit
-    )
-    limited_messages = await limited_generator.generate_messages(node5, workspace)
-    
-    print(json.dumps(limited_messages, indent=2))
-    assert len(limited_messages) == 5, f"Expected 5 messages, first message and the last 4, got {len(limited_messages)}"
-    
-    # Verify order in limited messages
-    for i in range(len(limited_messages) - 1):
-        msg = cast(Dict[str, Any], limited_messages[i])
-        next_msg = cast(Dict[str, Any], limited_messages[i + 1])
+        print(f"Limited tokens for {pair_count} messages: {token_limit}")
         
-        # If current message is user, next should be assistant
-        if msg["role"] == "user":
-            assert next_msg["role"] == "assistant", f"Expected assistant after user at index {i}"
+        limited_generator = MessageHistoryGenerator(
+            include_file_context=True,
+            max_tokens=token_limit
+        )
+        limited_messages = await limited_generator.generate_messages(node5, workspace)
+        limited_messages = list(limited_messages)
         
-        # If current message is assistant with tool calls, next should be tool response
-        elif msg["role"] == "assistant" and "tool_calls" in msg:
-            assert next_msg["role"] == "tool", f"Expected tool response after assistant with tool calls at index {i}"
-            assert next_msg["tool_call_id"] == msg["tool_calls"][0]["id"], "Tool response ID should match tool call ID"
+        print(json.dumps(limited_messages, indent=2))
+        assert len(limited_messages) == pair_count, f"Expected {pair_count} messages, first message and the last {pair_count-1}, got {len(limited_messages)}"
+        
+        # Verify the first message is included
+        assert limited_messages[0]["role"] == "user"
+        assert str(limited_messages[0]) == str(full_messages[0]), "First message should match the original first message"
+        
+        # Verify the last (pair_count-1) messages are included and in the correct order
+        for i in range(1, pair_count):
+            full_msg_idx = len(full_messages) - (pair_count - i)
+            assert str(limited_messages[i]) == str(full_messages[full_msg_idx]), f"Message at position {i} should match full message at position {full_msg_idx}"
+        
+        # Verify message order
+        for i in range(len(limited_messages) - 1):
+            msg = cast(Dict[str, Any], limited_messages[i])
+            next_msg = cast(Dict[str, Any], limited_messages[i + 1])
+            
+            # If current message is user, next should be assistant
+            if msg["role"] == "user":
+                assert next_msg["role"] == "assistant", f"Expected assistant after user at index {i}"
+            
+            # If current message is assistant with tool calls, next should be tool response
+            elif msg["role"] == "assistant" and "tool_calls" in msg:
+                assert next_msg["role"] == "tool", f"Expected tool response after assistant with tool calls at index {i}"
+                assert next_msg["tool_call_id"] == msg["tool_calls"][0]["id"], "Tool response ID should match tool call ID"
 
 @pytest.mark.asyncio
 async def test_terminal_node_history(test_tree, workspace):
