@@ -26,14 +26,57 @@ echo "Using INDEX_STORE_DIR: $INDEX_STORE_DIR"
 
 # Check if the index store directory exists
 if [ ! -d "$INDEX_STORE_DIR" ]; then
-    echo "Error: Index store directory $INDEX_STORE_DIR does not exist"
-    exit 1
+    echo "Creating index store directory $INDEX_STORE_DIR"
+    mkdir -p "$INDEX_STORE_DIR"
 fi
+
+# Set the index store URL, use environment variable if set
+if [ -z "$INDEX_STORE_URL" ]; then
+    INDEX_STORE_URL="https://stmoatless.blob.core.windows.net/indexstore/20250118-voyage-code-3/"
+    echo "INDEX_STORE_URL not set, using default: $INDEX_STORE_URL"
+else
+    echo "Using INDEX_STORE_URL: $INDEX_STORE_URL"
+fi
+
+# Function to download and extract index if it doesn't exist
+download_index() {
+    local instance_id=$1
+    local index_dir="${INDEX_STORE_DIR}/${instance_id}"
+    
+    if [ ! -d "$index_dir" ] || [ -z "$(ls -A $index_dir 2>/dev/null)" ]; then
+        echo "Index for $instance_id not found in $INDEX_STORE_DIR, downloading..."
+        local temp_dir=$(mktemp -d)
+        local zip_file="${temp_dir}/${instance_id}.zip"
+        local download_url="${INDEX_STORE_URL}${instance_id}.zip"
+        
+        echo "Downloading from: $download_url"
+        if ! curl -L -o "$zip_file" "$download_url"; then
+            echo "Error: Failed to download index for $instance_id"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        
+        echo "Extracting index to $index_dir"
+        mkdir -p "$index_dir"
+        if ! unzip -q "$zip_file" -d "$index_dir"; then
+            echo "Error: Failed to extract index for $instance_id"
+            rm -rf "$temp_dir"
+            return 1
+        fi
+        
+        rm -rf "$temp_dir"
+        echo "Successfully downloaded and extracted index for $instance_id"
+    else
+        echo "Index for $instance_id already exists in $INDEX_STORE_DIR"
+    fi
+    
+    return 0
+}
 
 # Check if instances directory exists, if not, run create_dataset_index.py
 if [ ! -d "instances" ]; then
     echo "instances directory not found, running create_dataset_index.py"
-    python scripts/create_dataset_index.py
+    python3 scripts/create_dataset_index.py
     if [ $? -ne 0 ]; then
         echo "Error: Failed to create dataset index"
         exit 1
@@ -48,7 +91,7 @@ fi
 
 # Build and push the base image first
 echo "Building base image: aorwall/moatless.swebench.base.x86_64"
-docker build -t aorwall/moatless.swebench.base.x86_64 -f docker/Dockerfile.base .
+docker build --platform linux/amd64 -t aorwall/moatless.swebench.base.x86_64 -f docker/Dockerfile.base .
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to build base image"
@@ -91,6 +134,13 @@ mkdir -p .moatless_index_store
 for INSTANCE_ID in $INSTANCE_IDS; do
     echo "Processing instance: $INSTANCE_ID"
     
+    # Download the index if it doesn't exist
+    download_index "$INSTANCE_ID"
+    if [ $? -ne 0 ]; then
+        echo "Warning: Failed to ensure index for $INSTANCE_ID, skipping..."
+        continue
+    fi
+    
     # Replace __ with _1776_ in instance_id for the base image name
     DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_1776_/g')
     # Create the target image name in the required format - using first part before __
@@ -105,7 +155,7 @@ ENV PIP_CACHE_DIR=/root/.cache/pip
 ENV PIP_NO_CACHE_DIR=false
 ENV PYTHONUNBUFFERED=1
 
-# Copy Python libraries and moatless directory from base image
+# Copy Python3 libraries and moatless directory from base image
 COPY --from=aorwall/moatless.swebench.base.x86_64 /usr/local/lib/python3.10/ /usr/local/lib/python3.10/
 
 # Git configuration
@@ -128,20 +178,21 @@ EOL
 
     # Copy index store files from environment variable directory
     echo "Copying index store files for $INSTANCE_ID from $INDEX_STORE_DIR"
-    cp -r "${INDEX_STORE_DIR}/${INSTANCE_ID}" .moatless_index_store/ 2>/dev/null
+    mkdir -p ".moatless_index_store/${INSTANCE_ID}"
+    cp -r "${INDEX_STORE_DIR}/${INSTANCE_ID}"/* .moatless_index_store/${INSTANCE_ID}/ 2>/dev/null
     
-    if [ ! -d ".moatless_index_store/${INSTANCE_ID}" ]; then
-        echo "Warning: No index store files found for $INSTANCE_ID, skipping..."
+    if [ ! -d ".moatless_index_store/${INSTANCE_ID}" ] || [ -z "$(ls -A .moatless_index_store/${INSTANCE_ID} 2>/dev/null)" ]; then
+        echo "Warning: No index store files found for $INSTANCE_ID after copying, skipping..."
         continue
     fi
 
     # Build the Docker image
     echo "Building Docker image: ${DOCKER_TARGET_IMAGE}"
-    docker build -t ${DOCKER_TARGET_IMAGE} -f Dockerfile.temp .
+    docker build --platform linux/amd64 -t ${DOCKER_TARGET_IMAGE} -f Dockerfile.temp .
     
     if [ $? -ne 0 ]; then
         echo "Error: Failed to build image for $INSTANCE_ID"
-        continue
+        exit 1
     fi
 
     # Push the Docker image
@@ -150,6 +201,7 @@ EOL
     
     if [ $? -ne 0 ]; then
         echo "Error: Failed to push image for $INSTANCE_ID"
+        exit 1
     else
         echo "Successfully built and pushed image for $INSTANCE_ID"
     fi

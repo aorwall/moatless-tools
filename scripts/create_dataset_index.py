@@ -70,6 +70,11 @@ def create_dataset_index(
 
     # Create the index
     index = []
+    
+    # Create instances directory if it doesn't exist
+    instances_dir = "instances"
+    os.makedirs(instances_dir, exist_ok=True)
+    
     for instance_id, info in instance_map.items():
         instance = info["instance"]
         index_entry = {
@@ -85,12 +90,18 @@ def create_dataset_index(
             "resolved_by": instance.get("resolved_by", []),
         }
         index.append(index_entry)
+        
+        # Save individual instance as JSON file
+        instance_path = os.path.join(instances_dir, f"{instance_id}.json")
+        with open(instance_path, "w") as f:
+            json.dump(instance, f, indent=2)
 
     # Write the index to file
     with open(output_path, "w") as f:
         json.dump({"instances": index}, f, indent=2)
 
     print(f"Index created with {len(index)} instances and saved to {output_path}")
+    print(f"Individual instance files saved to {instances_dir}/ directory")
     print(f"Sources: {len(swegym_data)} from SWE-Gym, {len(lite_data)} from Lite, {len(verified_data)} from Verified")
 
 

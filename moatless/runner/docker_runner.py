@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import platform
+import subprocess
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional, Dict, Tuple
@@ -53,10 +55,14 @@ class DockerRunner(BaseRunner):
         # Get moatless data directory - prefer host path if running in container
         self.moatless_dir = os.environ.get("MOATLESS_HOST_DIR") or os.environ.get("MOATLESS_DIR")
         
+        # Determine if running on ARM64 architecture
+        self.is_arm64 = platform.machine().lower() in ["arm64", "aarch64"]
+        
         logger.info(f"Docker runner initialized with:")
         logger.info(f"  - Source dir: {self.moatless_source_dir}")
         logger.info(f"  - Components path: {self.components_path}")
         logger.info(f"  - Moatless dir: {self.moatless_dir}")
+        logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
 
     async def start_job(
         self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
@@ -137,6 +143,10 @@ class DockerRunner(BaseRunner):
 
             # Create command to run Docker container
             cmd = ["docker", "run", "--name", container_name, "-d"]
+            
+            # Add platform flag if running on ARM64 architecture
+            if self.is_arm64:
+                cmd.extend(["--platform=linux/amd64"])
 
             # Add Docker labels for easier container identification and querying
             job_labels = create_labels(project_id, trajectory_id)

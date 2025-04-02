@@ -174,7 +174,23 @@ class BaseCompletionModel(MoatlessComponent, ABC):
             raise ValueError("System prompt cannot be changed after initialization")
 
         self._response_schema = schemas
+        
         self._completion_params = self._get_completion_params(self._response_schema)
+            
+        if self.model_base_url:
+            self._completion_params["api_base"] = self.model_base_url
+
+        if self.model_api_key:
+            self._completion_params["api_key"] = self.model_api_key
+
+        if self.headers:
+            self._completion_params["headers"] = self.headers
+        
+        if self.params:
+            self._completion_params.update(self.params)
+            
+        logger.info(f"Completion params: {self._completion_params} from {self}")
+
         self._post_validation_fn = post_validation_fn
 
         if self.few_shot_examples:
@@ -436,10 +452,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         Raises:
             CompletionRuntimeError: For provider errors
         """
-        params = self._completion_params.copy() if self._completion_params else {}
-        if self.params:
-            params.update(self.params)
-
+        
         if self.merge_same_role_messages:
             messages = self._merge_same_role_messages(messages)
 
@@ -463,14 +476,8 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     if "claude-3-" in self.model:
                         self._inject_prompt_caching(messages)
 
-                    if self.model_base_url:
-                        params["api_base"] = self.model_base_url
-
-                    if self.model_api_key:
-                        params["api_key"] = self.model_api_key
-
-                    if self.headers:
-                        params["headers"] = self.headers
+                    
+                    logger.info(f"Executing completion with params: {self._completion_params}")
 
                     response = await litellm.acompletion(
                         model=self.model,
@@ -479,7 +486,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                         messages=messages,
                         metadata=self.metadata or {},
                         timeout=self.timeout,
-                        **params,
+                        **self._completion_params,
                     )
 
                     if invocation.current_attempt:
