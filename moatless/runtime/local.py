@@ -27,6 +27,12 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         swebench_instance: SWEbenchInstance,
         storage: BaseStorage,
     ):
+        if not repo_path.exists():
+            raise RuntimeError(f"Repository path does not exist: {repo_path}")
+        
+        if not swebench_instance:
+            raise RuntimeError("SWEbench instance is required")
+
         logger.info(f"Creating LocalEnvironment instance. ID: {swebench_instance['instance_id']}")
         self.repo_path = repo_path
         self.swebench_instance = swebench_instance

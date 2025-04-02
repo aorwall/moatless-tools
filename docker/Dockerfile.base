@@ -1,11 +1,26 @@
 FROM aorwall/sweb.base.py.x86_64:latest
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Ensure the installed binary is on the `PATH`
+ENV PATH="/root/.local/bin/:$PATH"
+
+RUN uv python install 3.12 --managed-python
+
 WORKDIR /opt/moatless
 
-COPY pyproject.toml ./
+# Copy project files
+COPY pyproject.toml uv.lock ./
 COPY README.md ./
+
+# Install dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project
+
 COPY moatless ./moatless
 
-RUN /usr/bin/python3.10 -m pip install .
-
-WORKDIR /testbed
+# Sync the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen

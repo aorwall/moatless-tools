@@ -1582,10 +1582,10 @@ class KubernetesRunner(BaseRunner):
         container = client.V1Container(
             name="worker",
             image=self._get_image_name(trajectory_id),
-            command=["/usr/bin/python"],
+            command=["sh"],
             args=[
                 "-c",
-                args,
+                f"uv run - <<EOF\n{args}\nEOF",
             ],
             env=env_vars,
             env_from=[

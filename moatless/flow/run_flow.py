@@ -72,11 +72,15 @@ async def setup_swebench_runtime() -> RuntimeEnvironment:
     with open(instance_path) as f:
         swebench_instance = json.loads(f.read())
 
-    return SweBenchLocalEnvironment(
-        repo_path=Path("/testbed"),
-        swebench_instance=swebench_instance,
-        storage=storage,
-    )
+    try: 
+        return SweBenchLocalEnvironment(
+            repo_path=Path("/testbed"),
+            swebench_instance=swebench_instance,
+            storage=storage,
+        )
+    except Exception as e:
+        logger.error(f"Error setting up SWEbench runtime with instance {swebench_instance}")
+        raise e
 
 
 async def setup_workspace() -> Workspace:

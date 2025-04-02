@@ -16,16 +16,20 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
 
     is_async = asyncio.iscoroutinefunction(job_func)
 
-    # Create the appropriate Python command based on whether the function is async
+    # Create the appropriate Python code for uv run
     if is_async:
         return (
-            f"import asyncio; "
-            f"from {func_module} import {func_name}; "
-            f"import sys; "
+            f"import asyncio\n"
+            f"from {func_module} import {func_name}\n"
+            f"import sys\n"
             f"asyncio.run({func_name}{args})"
         )
     else:
-        return f"from {func_module} import {func_name}; " f"import sys; " f"{func_name}{args}"
+        return (
+            f"from {func_module} import {func_name}\n"
+            f"import sys\n"
+            f"{func_name}{args}"
+        )
 
 
 def sanitize_label(value: str) -> str:

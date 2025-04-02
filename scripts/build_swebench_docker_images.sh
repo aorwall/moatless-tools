@@ -150,13 +150,11 @@ for INSTANCE_ID in $INSTANCE_IDS; do
     cat > Dockerfile.temp << EOL
 FROM swebench/sweb.eval.x86_64.$DOCKER_BASE_IMAGE
 
-# Set pip cache directory and configuration
-ENV PIP_CACHE_DIR=/root/.cache/pip
-ENV PIP_NO_CACHE_DIR=false
-ENV PYTHONUNBUFFERED=1
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Copy Python3 libraries and moatless directory from base image
-COPY --from=aorwall/moatless.swebench.base.x86_64 /usr/local/lib/python3.10/ /usr/local/lib/python3.10/
+# Copy libraries and moatless directory from base image
+COPY --from=aorwall/moatless.swebench.base.x86_64 /root/.local/share/uv /root/.local/share/uv
+COPY --from=aorwall/moatless.swebench.base.x86_64 /opt/moatless /opt/moatless
 
 # Git configuration
 RUN git config --global --add safe.directory /testbed
@@ -172,7 +170,6 @@ ENV REPO_PATH=/testbed
 ENV INDEX_STORE_DIR=/data/index_store/${INSTANCE_ID}
 ENV INSTANCE_PATH=/data/instance.json
 
-RUN mkdir -p /opt/moatless
 WORKDIR /opt/moatless
 EOL
 

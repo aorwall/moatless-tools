@@ -8,7 +8,6 @@ from typing import cast
 from datasets import Dataset, load_dataset
 
 from swebench.harness.constants import SWEbenchInstance
-from testbeds.swebench.utils import load_swebench_dataset
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

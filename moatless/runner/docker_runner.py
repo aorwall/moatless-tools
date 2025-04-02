@@ -170,7 +170,7 @@ class DockerRunner(BaseRunner):
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
             logger.info(f"Running command: {args}")
-            cmd.extend([image_name, "/usr/bin/python", "-c", args])
+            cmd.extend([image_name, "sh", "-c", f"uv run - <<EOF\n{args}\nEOF"])
 
             # Run the command
             stdout, returncode = await self._run_docker_command(*cmd)
