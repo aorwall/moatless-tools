@@ -492,7 +492,7 @@ class EvaluationManager:
         # Check if the evaluation_summaries file exists
         exists = await self.storage.exists("evaluation_summaries.json")
         if not exists:
-            raise ValueError("Evaluation summaries file not found")
+            return summaries
 
         # Load all summaries from the single file
         all_summaries = await self._load_all_summaries()

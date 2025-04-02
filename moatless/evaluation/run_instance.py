@@ -83,7 +83,9 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
         logger.info(f"Flow created for instance {trajectory_id}")
 
-        await flow.run(workspace=workspace, node_id=node_id)
+        node = await flow.run(workspace=workspace, node_id=node_id)
+        if node.error:
+            raise ValueError(f"Node {node.node_id} failed with error: {node.error}")
 
         logger.info(f"Flow completed for instance {trajectory_id}")
 
