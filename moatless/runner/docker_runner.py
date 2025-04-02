@@ -43,8 +43,20 @@ class DockerRunner(BaseRunner):
         self.timeout_seconds = timeout_seconds
         self.logger = logging.getLogger(__name__)
         self.running_containers: Dict[str, Dict[str, Any]] = {}
-        self.moatless_source_dir = moatless_source_dir or os.environ.get("MOATLESS_RUNNER_MOUNT_SOURCE_DIR")
-        logger.info(f"Mounting moatless source dir: {self.moatless_source_dir}")
+            
+        # Get source directory - prefer explicitly passed parameter over environment variable
+        self.moatless_source_dir = moatless_source_dir or os.environ.get("MOATLESS_HOST_RUNNER_SOURCE_DIR") or os.environ.get("MOATLESS_RUNNER_MOUNT_SOURCE_DIR")
+        
+        # Get components directory - prefer host path if running in container
+        self.components_path = os.environ.get("MOATLESS_HOST_COMPONENTS_PATH") or os.environ.get("MOATLESS_COMPONENTS_PATH")
+        
+        # Get moatless data directory - prefer host path if running in container
+        self.moatless_dir = os.environ.get("MOATLESS_HOST_DIR") or os.environ.get("MOATLESS_DIR")
+        
+        logger.info(f"Docker runner initialized with:")
+        logger.info(f"  - Source dir: {self.moatless_source_dir}")
+        logger.info(f"  - Components path: {self.components_path}")
+        logger.info(f"  - Moatless dir: {self.moatless_dir}")
 
     async def start_job(
         self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
@@ -133,13 +145,15 @@ class DockerRunner(BaseRunner):
             # Add environment variables
             for env_var in env_vars:
                 cmd.extend(["-e", env_var])
+                
+            cmd.extend(["-v", f"{self.moatless_dir}:/data/moatless"])
 
-            if os.environ.get("MOATLESS_DIR"):
-                cmd.extend(["-v", f"{os.environ['MOATLESS_DIR']}:/data/moatless"])
+            # Add volume mounts for components
+            if self.components_path:
+                cmd.extend(["-v", f"{self.components_path}:/opt/components"])
+                cmd.extend(["-e", "MOATLESS_COMPONENTS_PATH=/opt/components"])
 
-            if os.environ.get("MOATLESS_COMPONENTS_PATH"):
-                cmd.extend(["-v", f"{os.environ['MOATLESS_COMPONENTS_PATH']}:/opt/components"])
-
+            # Add volume mounts for source code
             if self.moatless_source_dir:
                 cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless"])
                 cmd.extend(["-e", "PYTHONPATH=/opt/moatless:$PYTHONPATH"])

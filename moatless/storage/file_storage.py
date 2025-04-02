@@ -192,7 +192,7 @@ class FileStorage(BaseStorage):
         file_path = self._get_path(path)
         exists = file_path.exists()
         if not exists:
-            logger.info(f"File {file_path} does not exist")
+            logger.debug(f"File {file_path} does not exist")
         return exists
 
     @tracer.start_as_current_span("FileStorage.list_paths")
