@@ -111,7 +111,7 @@ class ActionAgent(MoatlessComponent):
                 await self._execute(node, action_step)
                 current_action_step.set(None)
         except Exception as e:
-            logger.exception(f"Node{node.node_id}: Error in run: {e}")
+            logger.exception(f"Node{node.node_id}: Failed to run.")
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             raise e
 

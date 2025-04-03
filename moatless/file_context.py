@@ -1768,6 +1768,9 @@ class FileContext(BaseModel):
 
     def get_test_summary(self) -> str:
         return TestFile.get_test_summary(self._test_files.values())
+    
+    def get_test_counts(self) -> tuple[int, int, int]:
+        return TestFile.get_test_counts(self._test_files.values())
 
     def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
         return TestFile.get_test_failure_details(self._test_files.values(), max_tokens, max_chars_per_test)

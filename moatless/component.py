@@ -197,44 +197,63 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
                     logger.debug(f"Failed to load from module {modname}: {e}")
 
             # Log all found classes
-            logger.debug(f"Found {len(registered_classes)} classes in {package}: {list(registered_classes.keys())}")
+            logger.info(
+                f"Found {len(registered_classes)} classes in [{package}] for [{cls.get_component_type()}]: {list(registered_classes.keys())}"
+            )
 
             # Then check for custom components if MOATLESS_COMPONENTS_PATH is set
             custom_path = os.getenv("MOATLESS_COMPONENTS_PATH")
-            if custom_path and os.path.isdir(custom_path):
-                logger.debug(f"Custom components path found: {custom_path}")
-                sys.path.insert(0, os.path.dirname(custom_path))
-                try:
-                    package_name = os.path.basename(custom_path)
-                    for finder, modname, ispkg in pkgutil.walk_packages([custom_path], prefix=f"{package_name}."):
-                        try:
-                            module = importlib.import_module(modname)
-                            for name, obj in module.__dict__.items():
-                                if (
-                                    isinstance(obj, type)
-                                    and issubclass(obj, base_class)
-                                    and obj != base_class
-                                    and not getattr(obj, "__abstractmethods__", False)
-                                    and ABC not in obj.__bases__
-                                ):  # Skip classes directly inheriting from ABC
-                                    qualified_name = f"{obj.__module__}.{name}"
-                                    if qualified_name in registered_classes:
-                                        logger.debug(f"Duplicate class: {qualified_name} from {modname}")
-                                    else:
-                                        logger.debug(
-                                            f"Loaded custom {base_class.__name__}: {qualified_name} from {modname}"
-                                        )
-                                        registered_classes[qualified_name] = obj
-                        except Exception as e:
-                            logger.exception(f"Failed to load from custom module {modname}: {e}")
-                finally:
-                    sys.path.pop(0)
+            if not custom_path:
+                logger.info(f"MOATLESS_COMPONENTS_PATH must be set to load custom components for [{cls.get_component_type()}].")
+            elif not os.path.isdir(custom_path):
+                logger.warning(f"Custom components path [{custom_path}] does not exist for [{cls.get_component_type()}]")
             else:
-                logger.debug(f"No custom components path found for {cls.get_component_type()}")
+                logger.debug(f"Custom components path found: [{custom_path}]")
+
+                custom_classes = []
+
+                sys.path.insert(0, custom_path)
+                try:
+                    # Look for all Python modules directly in the custom path
+                    for finder, modname, ispkg in pkgutil.iter_modules([custom_path]):
+                        # Only process directories (packages) in the custom path
+                        if ispkg:
+                            pkg_path = os.path.join(custom_path, modname)
+                            # Now walk all modules in this package
+                            for subfinder, submodname, subispkg in pkgutil.walk_packages([pkg_path], prefix=f"{modname}."):
+                                try:
+                                    logger.debug(f"Attempting to import {submodname}")
+                                    module = importlib.import_module(submodname)
+                                    for name, obj in module.__dict__.items():
+                                        if (
+                                            isinstance(obj, type)
+                                            and issubclass(obj, base_class)
+                                            and obj != base_class
+                                            and not getattr(obj, "__abstractmethods__", False)
+                                            and ABC not in obj.__bases__
+                                        ):  # Skip classes directly inheriting from ABC
+                                            qualified_name = f"{obj.__module__}.{name}"
+                                            if qualified_name in registered_classes:
+                                                logger.debug(f"Duplicate class: {qualified_name} from {submodname}")
+                                            else:
+                                                logger.debug(
+                                                    f"Loaded custom {base_class.__name__}: {qualified_name} from {submodname}"
+                                                )
+                                                registered_classes[qualified_name] = obj
+                                                custom_classes.append(qualified_name)
+                                except Exception as e:
+                                    logger.exception(f"Failed to load from custom module {submodname}: {e}")
+                except Exception as e:
+                    logger.exception(f"Failed to load custom components for [{cls.get_component_type()}] from [{custom_path}]")
+                finally:
+                    # Remove the path we added
+                    sys.path.pop(0)
+
+                logger.info(
+                    f"Found [{len(custom_classes)}] custom [{cls.get_component_type()}] classes in [{custom_path}]: {custom_classes}"
+                )
+
         except Exception as e:
             logger.exception(f"Failed to scan package {package}: {e}")
-
-        if not registered_classes:
-            logger.warning(f"No {cls.get_component_type()} classes found")
 
         return registered_classes

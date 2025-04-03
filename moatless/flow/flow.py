@@ -1,5 +1,6 @@
 import json
 import logging
+import traceback
 import uuid
 from abc import abstractmethod
 from collections.abc import Callable, Awaitable
@@ -154,6 +155,9 @@ class AgenticFlow(MoatlessComponent):
             return node
         except Exception as e:
             logger.exception(f"Error running flow {self.trajectory_id}")
+
+            last_node = self.root.get_last_node()
+            last_node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
             await self._emit_event(FlowErrorEvent(data={"error": str(e)}))
             raise
 

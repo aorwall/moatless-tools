@@ -188,9 +188,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         
         if self.params:
             self._completion_params.update(self.params)
-            
-        logger.info(f"Completion params: {self._completion_params} from {self}")
-
+        
         self._post_validation_fn = post_validation_fn
 
         if self.few_shot_examples:
@@ -475,9 +473,6 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                 try:
                     if "claude-3-" in self.model:
                         self._inject_prompt_caching(messages)
-
-                    
-                    logger.info(f"Executing completion with params: {self._completion_params}")
 
                     response = await litellm.acompletion(
                         model=self.model,
