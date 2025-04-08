@@ -1,12 +1,13 @@
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from moatless.actions.action import Action
 from moatless.actions.finish import FinishArgs
 from moatless.actions.schema import Observation, ActionArguments
+from moatless.completion.stats import CompletionInvocation, CompletionAttempt, Usage
 from moatless.file_context import FileContext
-from moatless.node import ActionStep, Node
+from moatless.node import ActionStep, Node, Selection
 from moatless.repository.repository import InMemRepository
 
 
@@ -62,6 +63,29 @@ def test_node_model_dump():
     )
     child1.action_steps = [ActionStep(action=finish_args)]
 
+    # Add a Selection object to test selection dumping and reading
+    completion = CompletionInvocation(
+        model="test-model",
+        attempts=[
+            CompletionAttempt(
+                start_time=datetime.now().timestamp() * 1000,
+                end_time=(datetime.now() + timedelta(seconds=1)).timestamp() * 1000,
+                usage=Usage(
+                    completion_tokens=100,
+                    prompt_tokens=200,
+                    completion_cost=0.001 * 100
+                )
+            )
+        ]
+    )
+    selection = Selection(
+        node_id=2,
+        completion=completion,
+        reason="Test selection reason",
+        trace={"test_key": "test_value", "score": 0.95}
+    )
+    child1.selection = selection
+
     # Get the model dump
     dumped_data = root.model_dump()
     print(json.dumps(dumped_data, indent=2, cls=DateTimeEncoder))
@@ -83,6 +107,14 @@ def test_node_model_dump():
     assert child1_data["action_steps"][0]["action"]["finish_reason"] == "All tests pass and code is optimized."
     assert len(child1_data["children"]) == 1
     assert "parent" not in child1_data  # Ensure parent is not included
+
+    # Verify selection data
+    assert "selection" in child1_data
+    assert child1_data["selection"]["node_id"] == 2
+    assert child1_data["selection"]["reason"] == "Test selection reason"
+    assert child1_data["selection"]["trace"] == {"test_key": "test_value", "score": 0.95}
+    assert "completion" in child1_data["selection"]
+    assert child1_data["selection"]["completion"]["model"] == "test-model"
 
     child2_data = dumped_data["children"][1]
     assert child2_data["node_id"] == 2
@@ -106,6 +138,15 @@ def test_node_model_dump():
     assert loaded_child1.action.name == "Finish"
     assert loaded_child1.action.thoughts == "Task is complete because all requirements are met."
     assert loaded_child1.action.finish_reason == "All tests pass and code is optimized."
+
+    # Verify loaded selection data
+    assert loaded_child1.selection is not None
+    assert isinstance(loaded_child1.selection, Selection)
+    assert loaded_child1.selection.node_id == 2
+    assert loaded_child1.selection.reason == "Test selection reason"
+    assert loaded_child1.selection.trace == {"test_key": "test_value", "score": 0.95}
+    assert loaded_child1.selection.completion is not None
+    assert loaded_child1.selection.completion.model == "test-model"
 
     # Test with custom exclude
     custom_dump = root.model_dump(exclude={"value", "message"})

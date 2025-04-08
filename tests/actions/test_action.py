@@ -49,3 +49,19 @@ def test_get_action_by_args_class():
     assert Action.get_action_by_args_class(StringReplaceArgs) == StringReplace
     assert Action.get_action_by_args_class(ViewCodeArgs) == ViewCode
     assert Action.get_action_by_args_class(SemanticSearchArgs) == SemanticSearch
+
+def test_get_action_by_name():
+    """Test that get_action_by_name correctly finds actions by their class name."""
+    # Test with some real actions from our imports
+    assert Action.get_action_by_name("Finish") == Finish
+    assert Action.get_action_by_name("StringReplace") == StringReplace
+    assert Action.get_action_by_name("ViewCode") == ViewCode
+    assert Action.get_action_by_name("FindFunction") == FindFunction
+
+    # Test with an invalid action name
+    with pytest.raises(ValueError) as exc_info:
+        Action.get_action_by_name("NonExistentAction")
+    assert "Unknown action: NonExistentAction" in str(exc_info.value)
+    # Verify that the error message contains some real action names
+    assert "Finish" in str(exc_info.value)
+    assert "StringReplace" in str(exc_info.value)
