@@ -14,6 +14,7 @@ from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.testing.python.parser_registry import parse_log
 from moatless.testing.schema import TestResult
+from unidiff import PatchSet
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         self.test_spec = make_test_spec(self.swebench_instance)
         self._install_task = None  # Will hold the installation process task
         self._skip_conda_activate = os.getenv("SKIP_CONDA_ACTIVATE", "false").lower() == "true"
+        logger.info(f"SKIP_CONDA_ACTIVATE: {self._skip_conda_activate}")
 
         specs = MAP_REPO_VERSION_TO_SPECS.get(self.swebench_instance["repo"], {}).get(
             self.swebench_instance["version"], {}
@@ -49,7 +51,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         self._install_command = specs.get("install")
 
         if self.swebench_instance["repo"] == "sphinx-doc/sphinx":
-            self._install_after_patch = True
+            self._install_after_patch = False
         else:
             self._install_after_patch = False
 
@@ -61,10 +63,6 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         await self._wait_for_install()
 
         logger.info(f"Starting test {test_files}")
-
-        # Reset repository to clean state
-        if not await self._reset_repository():
-            raise RuntimeError("Failed to reset repository")
 
         # Apply patch if provided
         if patch:
@@ -107,9 +105,8 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
                         result.file_path = test_file
                 test_results.extend(testbed_results)
 
-        # Reset again after testing
-        if not await self._reset_repository():
-            raise RuntimeError("Failed to reset repository")
+        if patch:
+            await self.reset_modified_files(patch)
 
         return test_results
 
@@ -137,7 +134,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             }
             await self.storage.write(f"{evaluation_key}/report", report)
             return report
-
+        
         await self._wait_for_install()
 
         if not patch.endswith("\n"):
@@ -158,26 +155,19 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             return report
 
         eval_file = Path("/tmp/eval.sh")
-        eval_file.write_text(self.test_spec.eval_script)
-
-        await self.storage.write_raw(f"{evaluation_key}/eval.sh", eval_file.read_text())
-
+        eval_script = self.make_eval_script()
+        eval_file.write_text(eval_script)
+        await self.storage.write_raw(f"{evaluation_key}/eval.sh", eval_script)
+        
         logger.debug(f"Executing command: {eval_file} in {self.repo_path}")
-        process = await asyncio.create_subprocess_shell(
-            f"/bin/bash {eval_file}",
-            cwd=str(self.repo_path),
-            env=os.environ.copy(),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # redirect stderr to stdout
-        )
+        stdout, return_code = await self._execute_command(f"/bin/bash {eval_file}")
+        logger.info(f"Eval output: {stdout} {return_code}")
 
-        stdout, _ = await process.communicate()
-        test_output = stdout.decode()
         test_output_path = "/tmp/test_output.log"
         with open(test_output_path, "w") as f:
-            f.write(test_output)
+            f.write(stdout)
 
-        await self.storage.write_raw(f"{evaluation_key}/test_output.txt", test_output)
+        await self.storage.write_raw(f"{evaluation_key}/test_output.txt", stdout)
 
         report = get_eval_report(
             test_spec=self.test_spec,
@@ -188,6 +178,9 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
 
         await self.storage.write(f"{evaluation_key}/report.json", report)
 
+        if patch:
+            await self.reset_modified_files(patch)
+        
         return report
 
     async def _run_async_installation(self, install_command: str | None = None) -> bool:
@@ -205,7 +198,10 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             return True
 
         logger.info(f"Running async installation with command: {install_command}")
-
+        
+        stdout, return_code = await self._execute_command("which python")
+        logger.info(f"Which python: {stdout} {return_code}")
+        
         stdout, return_code = await self._execute_command(install_command)
         logger.info(f"Installation output: {stdout} {return_code}")
         return return_code == 0
@@ -220,7 +216,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
                 logger.error(f"Installation process failed: {str(e)}")
                 raise RuntimeError("Installation process failed") from e
 
-    async def _execute_command(self, command: str, cwd: Path = None) -> Tuple[str, int]:
+    async def _execute_command(self, command: str, cwd: Path | None = None) -> Tuple[str, int]:
         """Execute a shell command and return combined output and return code."""
 
         # Prepend conda activation to the command using . instead of source
@@ -245,8 +241,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
     async def _apply_patch(self, patch: str) -> bool:
         """Apply a git patch to the repository."""
         logger.debug("Applying patch to local repository")
-        await self._reset_repository()
-
+        
         # Save patch to a temporary file
         patch_file = self.repo_path / "temp_patch.diff"
         try:
@@ -369,3 +364,104 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             .get("test_cmd", "")
         )
         return " ".join([test_cmd, *directives])
+
+    async def reset_modified_files(self, patch: str):
+        modified_files = self.get_modified_files(patch)
+        logger.info(f"Resetting modified files: {modified_files}")
+        
+        # Reset only the modified files to their base state
+        if modified_files:
+            reset_command = f"git checkout {self.swebench_instance['base_commit']} {' '.join(modified_files)}"
+            stdout, return_code = await self._execute_command(reset_command)
+            logger.info(f"Command: {reset_command} Reset output: {stdout} {return_code}")
+            if return_code != 0:
+                logger.error(f"Failed to reset modified files: {stdout}")
+                
+                
+            # Clean untracked files and directories, but only in directories with modified files
+            dir_paths = {str(Path(file).parent) for file in modified_files if file}
+            if dir_paths:
+                clean_paths = ' '.join(dir_paths)
+                clean_command = f"git clean -fd {clean_paths}"
+                stdout, return_code = await self._execute_command(clean_command)
+                logger.info(f"Command: {clean_command} Clean output: {stdout} {return_code}")
+                if return_code != 0:
+                    logger.error(f"Failed to clean repository: {stdout}")
+                    return False
+                
+        return True
+
+    def get_modified_files(self, patch: str) -> list[str]:
+        """
+        Get the list of modified files in a patch
+        """
+        source_files = []
+        for file in PatchSet(patch):
+            if file.source_file != "/dev/null":
+                source_files.append(file.source_file)
+        source_files = [x[2:] for x in source_files if x.startswith("a/")]
+        return source_files
+
+    def make_eval_script(self):
+        eval_script_list = self.make_eval_script_list_py()
+        return (
+            "\n".join(["#!/bin/bash", "set -uxo pipefail"] + eval_script_list)
+            + "\n"
+        )
+        
+    def make_eval_script_list_py(self) -> list:
+        """
+        Applies the test patch and runs the tests.
+        """
+        from swebench.harness.utils import get_modified_files
+        from swebench.harness.test_spec.python import get_test_directives
+        from swebench.harness.constants import (
+            MAP_REPO_VERSION_TO_SPECS,
+            START_TEST_OUTPUT,
+            END_TEST_OUTPUT,
+        )
+        
+        test_patch = self.swebench_instance["test_patch"]
+        base_commit = self.swebench_instance["base_commit"]
+        repo_directory = "/testbed"
+        
+        HEREDOC_DELIMITER = "EOF_114329324912"
+        test_files = get_modified_files(test_patch)
+        # Reset test files to the state they should be in before the patch.
+        reset_tests_command = f"git checkout {base_commit} {' '.join(test_files)}"
+        apply_test_patch_command = (
+            f"git apply -v - <<'{HEREDOC_DELIMITER}'\n{test_patch}\n{HEREDOC_DELIMITER}"
+        )
+        test_command = " ".join(
+            [
+                MAP_REPO_VERSION_TO_SPECS[self.swebench_instance["repo"]][self.swebench_instance["version"]][
+                    "test_cmd"
+                ],
+                *get_test_directives(self.swebench_instance),
+            ]
+        )
+        specs = MAP_REPO_VERSION_TO_SPECS[self.swebench_instance["repo"]][self.swebench_instance["version"]]
+        eval_commands = []
+        if "eval_commands" in specs:
+            eval_commands += specs["eval_commands"]
+        eval_commands += [
+            f"git config --global --add safe.directory {repo_directory}",  # for nonroot user
+            f"cd {repo_directory}",
+            f"which python",
+            f"python --version",
+            # This is just informational, so we have a record
+            "git status",
+            "git show",
+            f"git -c core.fileMode=false diff {base_commit}",
+        ]
+        #if "install" in specs:
+        #    eval_commands.append(specs["install"])
+        eval_commands += [
+            reset_tests_command,
+            apply_test_patch_command,
+            f": '{START_TEST_OUTPUT}'",
+            test_command,
+            f": '{END_TEST_OUTPUT}'",
+            reset_tests_command,  # Revert tests after done, leave the repo in the same state as before
+        ]
+        return eval_commands

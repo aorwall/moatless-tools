@@ -7,7 +7,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from moatless.agent.agent import ActionAgent
 from moatless.completion.stats import Usage
-from moatless.context_data import current_node_id
+from moatless.context_data import current_node_id, current_phase
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.exceptions import RejectError, RuntimeError
 from moatless.expander import Expander
@@ -21,7 +21,7 @@ from moatless.flow.events import (
     NodeRewardFailureEvent,
     NodeSelectedEvent,
 )
-from moatless.node import Node, generate_ascii_tree
+from moatless.node import Node, Selection, generate_ascii_tree
 from moatless.selector.base import BaseSelector
 from moatless.value_function.base import BaseValueFunction
 
@@ -178,22 +178,26 @@ class SearchTree(AgenticFlow):
         root = node.get_root()
         expandable_nodes = root.get_expandable_descendants()
 
-        if not expandable_nodes:
-            self.log(logger.info, "No expandable nodes found.")
+        selection = await self.selector.select(expandable_nodes)
+        
+        if isinstance(selection, Node):
+            logger.warning(f"Selector returned a Node instead of a Selection. Setting Selection to Node{selection.node_id} for backward compatibility.")
+            selection = Selection(node_id=selection.node_id, reason="Legacy Node returned by selector")
+
+        node.selection = selection
+
+        if selection.node_id is None:
+            self.log(logger.warning, "Selector did not return a node to expand.")
             return None
 
-        previous_node_id = node.node_id
-
-        selected_node = await self.selector.select(expandable_nodes)
-
-        if selected_node is None:
-            self.log(logger.warning, "Selector returned None. Using current node.")
-            return node
+        selected_node = self.get_node_by_id(selection.node_id)
+        if not selected_node:
+            raise RuntimeError(f"Node with ID {selection.node_id} not found")
 
         await self._emit_event(
             NodeSelectedEvent(
                 node_id=selected_node.node_id,
-                previous_node_id=previous_node_id,
+                previous_node_id=node.node_id,
             )
         )
 
@@ -218,11 +222,13 @@ class SearchTree(AgenticFlow):
                 child_node_id=child_node.node_id,
             )
         )
-        # Only add feedback if this is the second expansion from this node
+
         if self.feedback_generator:
+            logger.info(f"Generating feedback for node {child_node.node_id}")
             feedback_data = await self.feedback_generator.generate_feedback(child_node)
 
             if feedback_data:
+                # FIXME: Only set one of these
                 child_node.feedback_data = feedback_data
                 child_node.user_message = feedback_data.feedback
 
@@ -250,12 +256,11 @@ class SearchTree(AgenticFlow):
                 node.terminal = True
 
         if self.value_function and not node.is_duplicate and node.observation:
+            current_phase.set("value_function")
             try:
                 logger.info(f"Node{node.node_id}: Evaluating value function")
-                node.reward, completion_response = await self.value_function.get_reward(node=node)
-
-                if completion_response:
-                    node.completions["value_function"] = completion_response
+                node.reward = await self.value_function.get_reward(node=node)
+                current_phase.set(None)
 
                 if node.reward:
                     self.log(

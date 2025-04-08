@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from moatless.completion.schema import (
     AllMessageValues,
@@ -180,15 +180,16 @@ class MessageHistoryGenerator(BaseMemory):
                         ChatCompletionTextObject(
                             type="text",
                             text=f"The {artifact.type} {artifact.id} was {change.change_type}",
+                            cache_control=None
                         )
                     )
                     message_content.append(artifact.to_prompt_message_content())
 
         if node.user_message:
-            message_content.append(ChatCompletionTextObject(type="text", text=node.user_message))
+            message_content.append(ChatCompletionTextObject(type="text", text=node.user_message, cache_control=None))
 
         if message_content:
-            user_message = ChatCompletionUserMessage(role="user", content=message_content)
+            user_message = ChatCompletionUserMessage(role="user", content=message_content, cache_control=None)
             tokens = count_tokens(str(message_content))
             return user_message, tokens
 
@@ -237,7 +238,7 @@ class MessageHistoryGenerator(BaseMemory):
                 message_content = []
 
                 if action_step.observation.message:
-                    message_content.append(ChatCompletionTextObject(type="text", text=action_step.observation.message))
+                    message_content.append(ChatCompletionTextObject(type="text", text=action_step.observation.message, cache_control=None))
                     tokens += count_tokens(action_step.observation.message)
 
                 tool_responses.append(
@@ -249,7 +250,7 @@ class MessageHistoryGenerator(BaseMemory):
                 )
 
         # Build assistant message
-        assistant_message = {"role": "assistant"}
+        assistant_message: dict[str, Any] = {"role": "assistant"}
         assistant_content = []
 
         # Add thoughts if available
@@ -258,12 +259,12 @@ class MessageHistoryGenerator(BaseMemory):
 
         # Add assistant message if available
         if node.assistant_message:
-            assistant_content.append(ChatCompletionTextObject(type="text", text=node.assistant_message))
+            assistant_content.append(ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None))
             tokens += count_tokens(node.assistant_message)
 
         # If we have tool calls but no content, add a default message
         if tool_calls and not assistant_content:
-            default_message = ChatCompletionTextObject(type="text", text="Executing actions...")
+            default_message = ChatCompletionTextObject(type="text", text="Executing actions...", cache_control=None)
             assistant_content.append(default_message)
             tokens += count_tokens("Executing actions...")
 
@@ -299,7 +300,7 @@ class MessageHistoryGenerator(BaseMemory):
             # Update the tool index for tool calls in assistant messages
             for msg in node_messages:
                 if isinstance(msg, dict) and msg.get("role") == "assistant" and "tool_calls" in msg:
-                    tool_idx += len(msg["tool_calls"])
+                    tool_idx += len(msg["tool_calls"] or [])
 
             messages.extend(node_messages)
             tokens += node_tokens

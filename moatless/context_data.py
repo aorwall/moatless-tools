@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 # Used to track the current action step, node id, trajectory id, and project id
+current_phase = contextvars.ContextVar[str | None]("current_phase", default=None)
 current_action_step = contextvars.ContextVar[int | None]("current_action_step", default=None)
 current_node_id = contextvars.ContextVar[int | None]("current_node_id", default=None)
 current_trajectory_id = contextvars.ContextVar[str | None]("current_trajectory_id", default=None)

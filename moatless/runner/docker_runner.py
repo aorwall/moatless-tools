@@ -128,6 +128,7 @@ class DockerRunner(BaseRunner):
                 "NLTK_DATA=/data/nltk_data",
                 "INDEX_STORE_DIR=/data/index_store",
                 "REPO_DIR=/testbed",
+                "SKIP_CONDA_ACTIVATE=true",
                 "INSTANCE_PATH=/data/instance.json",
             ]
 
@@ -165,6 +166,7 @@ class DockerRunner(BaseRunner):
 
             # Add volume mounts for source code
             if self.moatless_source_dir:
+                logger.info(f"Mount {self.moatless_source_dir}:/opt/moatless")
                 cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless"])
                 cmd.extend(["-e", "PYTHONPATH=/opt/moatless:$PYTHONPATH"])
 
@@ -172,6 +174,7 @@ class DockerRunner(BaseRunner):
             logger.info(f"Running command: {args}")
             cmd.extend([image_name, "sh", "-c", f"uv run - <<EOF\n{args}\nEOF"])
 
+            logger.info(f"Running Docker command: {' '.join(cmd)}")
             # Run the command
             stdout, returncode = await self._run_docker_command(*cmd)
 

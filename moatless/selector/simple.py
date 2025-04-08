@@ -1,4 +1,4 @@
-from moatless.node import Node
+from moatless.node import Node, Selection
 from moatless.selector.base import BaseSelector
 
 
@@ -7,8 +7,8 @@ class SimpleSelector(BaseSelector):
     Selects the first expandable node.
     """
 
-    async def select(self, expandable_nodes: list[Node]) -> Node | None:
+    async def select(self, expandable_nodes: list[Node]) -> Selection:
         if not expandable_nodes:
-            return None
+            return Selection(reason="No expandable nodes available")
 
-        return expandable_nodes[0]
+        return Selection(node_id=expandable_nodes[0].node_id, reason="First expandable node")

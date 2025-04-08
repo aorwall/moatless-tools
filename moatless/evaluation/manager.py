@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from moatless.evaluation.run_golden_patch import evaluate_golden_patch
 from moatless.evaluation.run_instance import run_swebench_instance
 from moatless.evaluation.schema import (
     Evaluation,
@@ -240,8 +241,6 @@ class EvaluationManager:
 
     async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance):
         """Process the results of a trajectory and update the instance with the results."""
-        if instance.status == InstanceStatus.EVALUATED and instance.resolved is not None:
-            return instance
 
         # Check if the instance information exists in storage
         if not await self.storage.exists_in_trajectory(
@@ -253,17 +252,12 @@ class EvaluationManager:
             return instance
 
         try:
-            flow = await AgenticFlow.from_trajectory_id(
-                trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
-            )
-            instance.usage = flow.total_usage()
-            instance.iterations = len(flow.root.get_all_nodes())
-
+            
             events = await self.eventbus.read_events(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
             )
-
+            logger.info(f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}")
             # set timestamps
             if not instance.started_at:
                 event = next(
@@ -281,13 +275,27 @@ class EvaluationManager:
                 if event:
                     instance.completed_at = event.timestamp
 
-            if not instance.evaluated_at:
+            if not instance.start_evaluating_at:
                 event = next(
                     (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
                     None,
                 )
                 if event:
+                    instance.start_evaluating_at = event.timestamp
+                    
+            if not instance.evaluated_at:
+                event = next(
+                    (e for e in events if e.scope == "evaluation" and e.event_type == "completed"),
+                    None,
+                )
+                if event:
                     instance.evaluated_at = event.timestamp
+
+            flow = await AgenticFlow.from_trajectory_id(
+                trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
+            )
+            instance.usage = flow.total_usage()
+            instance.iterations = len(flow.root.get_all_nodes())
 
             leaf_nodes = flow.root.get_leaf_nodes()
             node = leaf_nodes[0]

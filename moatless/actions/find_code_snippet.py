@@ -96,6 +96,7 @@ class FindCodeSnippet(SearchBaseAction):
         matches = await self._repository.find_exact_matches(
             search_text=args.code_snippet, file_pattern=args.file_pattern
         )
+        logger.info(f"Found {len(matches)} matches")
 
         if args.file_pattern:
             # Normalize the pattern to handle both **/*.py and *.py cases
@@ -105,6 +106,7 @@ class FindCodeSnippet(SearchBaseAction):
                 for file_path, line_num in matches
                 if fnmatch(os.path.basename(file_path), pattern) or fnmatch(file_path, args.file_pattern)
             ]
+            logger.info(f"Filtered {len(matches)} matches to {len(matches)} matches")
 
         search_result_context = FileContext(repo=self._repository)
         for file_path, start_line in matches[: self.max_hits]:

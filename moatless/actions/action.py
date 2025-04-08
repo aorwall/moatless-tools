@@ -200,10 +200,16 @@ class Action(MoatlessComponent, ABC):
         Dynamically import and return the appropriate Action class for the given action name.
         """
         cls._initialize_components()
-        action_class = cls._get_components().get(action_name)
-        if not action_class:
-            raise ValueError(f"Unknown action: {action_name}, available actions: {cls._get_components().keys()}")
-        return action_class
+        components = cls._get_components()
+        
+        # Find the component where the class name matches action_name
+        for qualified_name, component_class in components.items():
+            if qualified_name.split('.')[-1] == action_name:
+                return component_class
+        
+        # Get just the class names for the error message
+        available_actions = [name.split('.')[-1] for name in components.keys()]
+        raise ValueError(f"Unknown action: {action_name}, available actions: {available_actions}")
 
     @classmethod
     def create_by_name(cls, name: str, **kwargs) -> "Action":

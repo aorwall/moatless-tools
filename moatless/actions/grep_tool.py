@@ -19,6 +19,7 @@ class GrepToolArgs(ActionArguments):
     - Searches file contents using regular expressions
     - Supports full regex syntax (eg. "log.*Error", "function\\s+\\w+", etc.)
     - Filter files by pattern with the include parameter (eg. "*.js", "*.{ts,tsx}")
+    - Supports path-based include patterns (eg. "**/requests/**/*.py")
     - Returns matching file paths sorted by modification time
     - Use this tool when you need to find files containing specific patterns
     - Start with broad search patterns and refine as needed for large codebases
@@ -32,7 +33,7 @@ class GrepToolArgs(ActionArguments):
 
     include: Optional[str] = Field(
         None,
-        description="Optional glob pattern to filter files (e.g. '*.py', '*.{ts,tsx}')",
+        description="Optional glob pattern to filter files (e.g. '*.py', '*.{ts,tsx}', '**/path/to/*.js')",
     )
 
     max_results: int = Field(
@@ -76,14 +77,23 @@ class GrepToolArgs(ActionArguments):
                 ),
             ),
             FewShotExample.create(
-                user_input="Find all TODO comments in Python files",
+                user_input="Find all timeout or decode errors in the requests library",
                 action=GrepToolArgs(
-                    thoughts="I'll search for TODO comments in Python files.",
-                    pattern=r"#\s*TODO",
-                    include="*.py",
-                    max_results=10,
+                    thoughts="I'll search for TimeoutError and DecodeError in the requests library files.",
+                    pattern=r"TimeoutError|DecodeError",
+                    include="**/requests/**/*.py",
+                    max_results=20,
                 ),
             ),
+            FewShotExample.create(
+                user_input="Find API endpoints in the controllers directory",
+                action=GrepToolArgs(
+                    thoughts="I'll search for API route definitions in the controllers directory.",
+                    pattern=r"@\w+\.route\(|app\.get\(|app\.post\(",
+                    include="src/controllers/**/*.js",
+                    max_results=15,
+                ),
+            )
         ]
 
 
@@ -103,7 +113,7 @@ class GrepTool(Action):
             raise RuntimeError("Repository not available for grep search.")
 
         try:
-            # Use the new regex search method from FileRepository
+            # Use the regex search method from FileRepository
             matches = await file_context._repo.find_regex_matches(
                 regex_pattern=args.pattern, include_pattern=args.include, max_results=args.max_results
             )

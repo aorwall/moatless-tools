@@ -98,6 +98,7 @@ def setup_job_logging(log_path: Path) -> list[logging.Handler]:
 
     logging.getLogger("azure").setLevel(logging.WARNING)
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    # litellm._turn_on_debug()
 
     original_handlers = root_logger.handlers[:]
     for handler in original_handlers:

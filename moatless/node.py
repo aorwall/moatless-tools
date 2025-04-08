@@ -47,7 +47,7 @@ class ActionStep(BaseModel):
 
         if self.completion:
             data["completion"] = self.completion.model_dump(**kwargs)
-
+    
         return data
 
     def reset(self):
@@ -67,11 +67,43 @@ class ActionStep(BaseModel):
         return super().model_validate(obj, **kwargs)
 
 
+class Selection(BaseModel):
+    
+    node_id: Optional[int] = Field(default=None)
+    completion: Optional[CompletionInvocation] = Field(default=None)
+    reason: str
+    trace: dict[str, Any] = Field(default_factory=dict)
+    
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        
+        if self.completion:
+            data["completion"] = self.completion.model_dump(**kwargs)
+            
+        if self.trace:
+            data["trace"] = self.trace
+            
+        return data
+    
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "Selection":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            if "completion" in obj:
+                obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
+
+        return super().model_validate(obj, **kwargs)
+    
+    
+
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
 
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
     analysis: Optional[str] = Field(None, description="Analysis of the task and alternative branch attempts")
+    completion: Optional[CompletionInvocation] = Field(None, description="Completion used to generate the feedback")
+    
+    # TODO: Remove this field
     suggested_node_id: Optional[int] = Field(None, description="ID of the node that should be expanded next (optional)")
 
 
@@ -88,6 +120,24 @@ class Reward(BaseModel):
         ge=-100,
         le=100,
     )
+    completion: Optional[CompletionInvocation] = None
+    
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        
+        if self.completion:
+            data["completion"] = self.completion.model_dump(**kwargs)
+            
+        return data
+    
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "Reward":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            if "completion" in obj:
+                obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
+        return super().model_validate(obj, **kwargs)
+
 
 
 class EvaluationResult(BaseModel):
@@ -143,10 +193,11 @@ class Node(BaseModel):
         default_factory=dict, description="The completions used in this node"
     )
     possible_actions: list[str] = Field(default_factory=list, description="List of possible action types for this node")
-    is_duplicate: Optional[bool] = Field(None, description="Flag to indicate if the node is a duplicate")
+    is_duplicate: bool = Field(False, description="Flag to indicate if the node is a duplicate")
     terminal: bool = Field(False, description="Flag to indicate if the node is a terminal node")
     error: Optional[str] = Field(None, description="Error when running node")
     reward: Optional[Reward] = Field(None, description="The reward of the node")
+    selection: Optional[Selection] = Field(None, description="The selection of the next node to expand")
     visits: int = Field(0, description="The number of times the node has been visited")
     value: Optional[float] = Field(None, description="The total value (reward) of the node")
     max_expansions: Optional[int] = Field(None, description="The maximum number of expansions")
@@ -260,12 +311,12 @@ class Node(BaseModel):
         """Check if the node can be expanded further."""
         return not self.is_terminal() and not self.is_fully_expanded() and not self.is_duplicate
 
-    def find_duplicate(self) -> Optional["Node"]:
+    def find_node_with_same_action_steps(self) -> Optional["Node"]:
         if not self.parent:
             return None
 
         for child in self.parent.children:
-            if child.node_id != self.node_id and child.equals(self):
+            if child.node_id != self.node_id and child.has_same_action_steps(self):
                 return child
 
         return None
@@ -293,6 +344,15 @@ class Node(BaseModel):
         for child in self.children:
             expandable_nodes.extend(child.get_expandable_descendants())
         return expandable_nodes
+    
+    def get_visited_descendants(self) -> list["Node"]:
+        """Get all visited descendants of this node, including self if visited."""
+        visited_nodes = []
+        if self.visits > 0:
+            visited_nodes.append(self)
+        for child in self.children:
+            visited_nodes.extend(child.get_visited_descendants())
+        return visited_nodes
 
     def get_expanded_descendants(self) -> list["Node"]:
         """Get all expanded descendants of this node, including self if expanded."""
@@ -372,10 +432,16 @@ class Node(BaseModel):
         for completion in self.completions.values():
             if completion and completion.usage:
                 usage += completion.usage
+                
+        if self.reward and self.reward.completion and self.reward.completion.usage:
+            usage += self.reward.completion.usage
+
+        if self.feedback_data and self.feedback_data.completion and self.feedback_data.completion.usage:
+            usage += self.feedback_data.completion.usage
 
         return usage
 
-    def equals(self, other: "Node"):
+    def has_same_action_steps(self, other: "Node"):
         if self.action_steps and not other.action_steps:
             return False
 
@@ -383,7 +449,7 @@ class Node(BaseModel):
             return False
 
         for self_step, other_step in zip(self.action_steps, other.action_steps, strict=False):
-            if self_step.action.name != other_step.action.name:
+            if self_step.action.model_dump() != other_step.action.model_dump():
                 return False
 
         return True
@@ -444,6 +510,13 @@ class Node(BaseModel):
 
         if self.reward and "reward" not in exclude_set:
             node_dict["reward"] = self.reward.model_dump(**kwargs)
+            
+        if self.selection and "selection" not in exclude_set:
+            try:
+                node_dict["selection"] = self.selection.model_dump(**kwargs)
+            except Exception as e:
+                logger.exception(f"Error dumping selection {self.selection} for node {self.node_id}. Kwargs: {kwargs}")
+                node_dict["selection"] = None
 
         if self.observation and "output" not in exclude_set:
             node_dict["output"] = self.observation.model_dump(**kwargs)
@@ -497,6 +570,9 @@ class Node(BaseModel):
 
         if "terminal" not in node_data:
             node_data["terminal"] = False
+            
+        if "selection" in node_data and node_data["selection"] is not None:
+            node_data["selection"] = Selection.model_validate(node_data["selection"])
 
         if node_data.get("file_context"):
             node_data["file_context"] = FileContext.from_dict(

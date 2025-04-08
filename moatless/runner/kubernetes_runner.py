@@ -69,6 +69,7 @@ class KubernetesRunner(BaseRunner):
         self.logger = logging.getLogger(__name__)
         self.max_jobs_per_project = max_jobs_per_project
         self.use_project_namespaces = os.getenv("USE_PROJECT_NAMESPACES", "true").lower() == "true"
+        logger.info(f"Using project namespaces: {self.use_project_namespaces}")
 
         # Load the Kubernetes configuration
         try:

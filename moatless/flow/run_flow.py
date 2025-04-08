@@ -38,7 +38,7 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
     current_trajectory_id.set(trajectory_id)
 
     litellm.callbacks = [LogHandler(storage=storage)]
-
+    
     logger.info(f"current_project_id: {current_project_id.get()}, current {current_trajectory_id.get()}")
 
     settings = await storage.read_from_trajectory(
@@ -87,6 +87,7 @@ async def setup_workspace() -> Workspace:
     instance_path = os.environ.get("INSTANCE_PATH")
     if instance_path:
         runtime = await setup_swebench_runtime()
+        repo_path = "/testbed"
     else:
         # TODO: Use Local bash environment
         runtime = None
@@ -116,7 +117,7 @@ async def persist_trajectory_data(flow: AgenticFlow) -> None:
 
     trajectory_data = flow.get_trajectory_data()
     await storage.write_to_trajectory("trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id)
-    logger.info(f"Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
+    logger.info(f"Trajectory data with {len(trajectory_data['nodes'])} nodes written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
 
 
 async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
@@ -139,9 +140,11 @@ async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
                 if (event.scope == "node" and event.event_type == "expanded") or event.scope == "flow":
                     await persist_trajectory_data(flow)
 
-                logger.info(
-                    f"Event {event.scope}:{event.event_type}. Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json. "
-                )
+                    logger.info(
+                        f"Event {event.scope}:{event.event_type}. Trajectory data written to {flow.project_id}/{flow.trajectory_id}/trajectory.json. "
+                    )
+                else:
+                    logger.info(f"Event {event.scope}:{event.event_type} ignored")
 
         finally:
             _pending_event_tasks.discard(task)

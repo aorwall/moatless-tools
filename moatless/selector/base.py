@@ -2,18 +2,15 @@ import logging
 from abc import abstractmethod
 
 from moatless.component import MoatlessComponent
-from moatless.node import Node
+from moatless.node import Node, Selection
 
 logger = logging.getLogger(__name__)
 
 
 class BaseSelector(MoatlessComponent):
     @abstractmethod
-    async def select(self, expandable_nodes: list[Node]) -> Node | None:
-        if not expandable_nodes:
-            return None
-
-        return expandable_nodes[0]
+    async def select(self, expandable_nodes: list[Node]) -> Selection:
+        pass
 
     @classmethod
     def get_component_type(cls) -> str:

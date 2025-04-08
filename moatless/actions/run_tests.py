@@ -21,10 +21,18 @@ logger = logging.getLogger(__name__)
 
 class RunTestsArgs(ActionArguments):
     """
-    Run the specified unit tests on the codebase.
+    Run the specified unit tests in the codebase.
+    
+    Note: This action requires explicit paths to test files.
+    - Only full test file paths are supported (e.g., "tests/auth/test_login.py")
+    - Directory paths, file patterns (e.g., "tests/*.py"), and individual test methods are NOT supported
+    - Non-existent test files will be reported as errors
     """
 
-    test_files: list[str] = Field(..., description="The list of test files to run")
+    test_files: list[str] = Field(
+        ..., 
+        description="The list of explicit test file paths to run (must be file paths, not directories or patterns)"
+    )
 
     model_config = ConfigDict(title="RunTests")
 
@@ -56,6 +64,16 @@ class RunTestsArgs(ActionArguments):
 
 
 class RunTests(Action):
+    """
+    Runs specified test files in the codebase.
+    
+    Important requirements:
+    - Only accepts explicit, complete file paths to test files
+    - Does not support directories, file patterns, or individual test methods
+    - Will validate that test files exist before attempting to run them
+    - Will report errors for non-existent files or if directories are specified
+    """
+
     args_schema = RunTestsArgs
 
     max_output_tokens: int = Field(

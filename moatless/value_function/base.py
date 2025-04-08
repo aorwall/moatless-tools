@@ -19,7 +19,7 @@ class BaseValueFunction(MoatlessComponent[VF]):
     }
 
     @abstractmethod
-    async def get_reward(self, node: Node) -> tuple[Reward, Optional[CompletionInvocation]]:
+    async def get_reward(self, node: Node) -> Optional[Reward]:
         raise NotImplementedError("get_reward method must be implemented")
 
     @classmethod

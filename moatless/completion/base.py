@@ -462,7 +462,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
             stop=stop_after_attempt(3),
             reraise=True,
             before_sleep=lambda retry_state: logger.warning(
-                f"Rate limited by provider, retrying in {retry_state.next_action.sleep} seconds"
+                f"Request failed, retrying in {retry_state.next_action.sleep} seconds"
             ),
         )
         async def _do_completion_with_rate_limit_retry():
@@ -508,7 +508,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     if invocation.current_attempt:
                         invocation.current_attempt.failure_reason = f"APIConnectionError: {str(e)}"
 
-                    logger.warning(f"API connection error: {e}")
+                    logger.exception(f"API connection error: {e}")
                     raise  # Let tenacity handle the retry
 
                 except RateLimitError as e:

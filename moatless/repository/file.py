@@ -316,18 +316,62 @@ class FileRepository(Repository):
         include_arg = []
 
         try:
-            # Handle file pattern as --include argument for grep
-            if file_pattern and "*" in file_pattern:
-                include_arg = ["--include", file_pattern]
-            elif file_pattern and file_pattern != ".":
-                # If it's a specific file, use it as the search path
-                search_path = file_pattern
+            # Handle file pattern 
+            if file_pattern:
+                # Directory search - treat differently
+                if file_pattern.endswith('/') or os.path.isdir(os.path.join(self.repo_path, file_pattern)):
+                    search_path = file_pattern
+                    # When searching in a directory, include all common code files by default
+                    include_arg = ["--include", "*.py"]
+                elif "**" in file_pattern:
+                    # ** isn't directly supported by grep, so handle it differently
+                    # First check if it's just a filename pattern or a path pattern
+                    if "/" in file_pattern:
+                        # For paths with **, we need to use find first to get matching files
+                        matches_files = await self.matching_files(file_pattern)
+                        if not matches_files:
+                            return []
+                        
+                        # Process each matching file separately
+                        all_matches = []
+                        for file_path in matches_files:
+                            file_matches = await self.find_exact_matches(search_text, file_path)
+                            all_matches.extend(file_matches)
+                        return all_matches
+                    else:
+                        # For simple filename patterns like "**/*.py", convert to shell glob
+                        include_arg = ["--include", file_pattern.replace("**", "*")]
+                elif "/" in file_pattern and ("*" in file_pattern or "?" in file_pattern):
+                    # For path patterns with wildcards, use matching_files to expand
+                    matches_files = await self.matching_files(file_pattern)
+                    if not matches_files:
+                        return []
+                    
+                    # Process each matching file separately
+                    all_matches = []
+                    for file_path in matches_files:
+                        file_matches = await self.find_exact_matches(search_text, file_path)
+                        all_matches.extend(file_matches)
+                    return all_matches
+                elif "*" in file_pattern:
+                    # Handle normal glob patterns
+                    include_arg = ["--include", file_pattern]
+                elif "/" in file_pattern:
+                    # For patterns with paths but no wildcards, extract directory and filename
+                    dir_path = os.path.dirname(file_pattern)
+                    if dir_path:
+                        search_path = dir_path
+                    filename = os.path.basename(file_pattern)
+                    if filename != "*":
+                        include_arg = ["--include", filename]
+                elif file_pattern != ".":
+                    # If it's a specific file, use it as the search path
+                    search_path = file_pattern
 
             # Use -F flag for fixed-string matching instead of regex
             # This works on both BSD grep (macOS) and GNU grep (Linux)
             cmd = ["grep", "-n", "-r", "-F"] + include_arg + [search_text, search_path]
-            logger.info(f"Executing grep command: {' '.join(cmd)}")
-            logger.info(f"Search directory: {self.repo_path}")
+            logger.info(f"Executing grep command: {' '.join(cmd)} in {self.repo_path}")
 
             process = await asyncio.create_subprocess_exec(
                 *cmd, cwd=self.repo_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -427,89 +471,273 @@ class FileRepository(Repository):
             List[Dict[str, Any]]: A list of dictionaries containing file path, line number,
                                  line content, and modification time
         """
-        matches = []
-        search_path = "."
-        include_arg = []
-
         try:
             # Apply include pattern if provided
-            if include_pattern:
-                include_arg = ["--include", include_pattern]
+            if include_pattern and "**" in include_pattern:
+                # Use matching_files which properly handles '**' patterns
+                matching_files = await self.matching_files(include_pattern)
+                if not matching_files:
+                    logger.info(f"No files matched pattern: {include_pattern}")
+                    return []
+                
+                logger.info(f"Found {len(matching_files)} files matching pattern: {include_pattern}")
+                
+                # Process files in batches rather than one by one for better efficiency
+                # This is much faster than running grep for each file individually
+                batch_size = 20  # Adjust based on typical file counts
+                all_matches = []
+                
+                for i in range(0, len(matching_files), batch_size):
+                    batch = matching_files[i:i+batch_size]
+                    # Search all files in this batch
+                    batch_results = await self._run_grep_batch(regex_pattern, batch, max_results)
+                    all_matches.extend(batch_results)
+                    
+                    # If we have enough results, stop processing batches
+                    if len(all_matches) >= max_results:
+                        logger.info(f"Found enough matches ({len(all_matches)}), stopping batch processing")
+                        break
+                
+                # Sort by modification time and limit results
+                all_matches.sort(key=lambda x: x.get("mod_time", 0), reverse=True)
+                return all_matches[:max_results]
+            elif include_pattern:
+                # For simple include patterns like *.py, let grep handle it directly
+                include_arg = []
+                search_path = "."
+                
+                # Directory search - treat differently
+                if include_pattern.endswith('/') or os.path.isdir(os.path.join(self.repo_path, include_pattern)):
+                    search_path = include_pattern
+                    # When searching in a directory, include all common code files by default
+                    include_arg = ["--include", "*.py"]
+                # If include pattern has a path with /, we need to handle it differently
+                elif "/" in include_pattern and "*" in include_pattern:
+                    # For patterns with wildcards in paths, fallback to matching_files approach
+                    matching_files = await self.matching_files(include_pattern)
+                    if not matching_files:
+                        return []
+                    
+                    return await self._run_grep_batch(regex_pattern, matching_files, max_results)
+                elif "/" in include_pattern:
+                    # For patterns with exact paths but no wildcards
+                    dir_path = os.path.dirname(include_pattern)
+                    if dir_path:
+                        search_path = dir_path
+                    filename = os.path.basename(include_pattern)
+                    include_arg = ["--include", filename]
+                else:
+                    # Simple pattern like "*.py"
+                    include_arg = ["--include", include_pattern]
+                
+                # Run grep with appropriate include pattern
+                return await self._run_grep_command(regex_pattern, search_path, max_results, include_arg)
+            else:
+                # No include pattern, search everything
+                return await self._run_grep_command(regex_pattern, ".", max_results, [])
+        except Exception as e:
+            logger.exception(f"Grep command failed: {e}")
+            return []
 
-            # Build the grep command with proper regex support
-            cmd = ["grep", "-n", "-r", "--color=never"] + include_arg + ["-E", regex_pattern, search_path]
-            logger.info(f"Executing grep command: {' '.join(cmd)}")
-            logger.info(f"Search directory: {self.repo_path}")
+    async def _run_grep_batch(
+        self, regex_pattern: str, file_paths: list[str], max_results: int
+    ) -> list[dict[str, Any]]:
+        """Search a batch of files with a single grep command"""
+        if not file_paths:
+            return []
+            
+        matches = []
+        
+        # Build the grep command - don't use recursive since we're providing specific files
+        cmd = ["grep", "-n", "--color=never", "-E", regex_pattern] + file_paths
+        logger.info(f"Executing batch grep command with {len(file_paths)} files")
+        logger.debug(f"Command: {' '.join(cmd)}")
+        
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            universal_newlines=False,
+        )
+        stdout_bytes, stderr_bytes = await process.communicate()
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
 
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=self.repo_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                universal_newlines=False,
-            )
-            stdout_bytes, stderr_bytes = await process.communicate()
-            stdout = stdout_bytes.decode("utf-8", errors="replace")
-            stderr = stderr_bytes.decode("utf-8", errors="replace")
+        if process.returncode not in (0, 1):  # grep returns 1 if no matches found
+            logger.info(f"Grep returned non-standard exit code: {process.returncode}")
+            if stderr:
+                logger.warning(f"Grep error output: {stderr}")
+            return []
 
-            if process.returncode not in (0, 1):  # grep returns 1 if no matches found
-                logger.info(f"Grep returned non-standard exit code: {process.returncode}")
-                if stderr:
-                    logger.warning(f"Grep error output: {stderr}")
-                return []
+        logger.info(f"Found {len(stdout.splitlines())} potential matches")
 
-            logger.info(f"Found {len(stdout.splitlines())} potential matches")
+        # Process and organize the results
+        file_matches = {}
+        for line in stdout.splitlines():
+            try:
+                # Parse line format for multiple files: "path/to/file:line_num:line_content"
+                parts = line.split(":", 2)
+                if len(parts) < 3:
+                    logger.info(f"Skipping malformed line: {line}")
+                    continue
 
-            # Process and organize the results
-            file_matches = {}
-            for line in stdout.splitlines():
+                file_path = parts[0]
+                if file_path.startswith("./"):
+                    file_path = file_path[2:]
+                    
                 try:
-                    # Parse line format: "path/to/file:line_num:line_content"
-                    parts = line.split(":", 2)  # type: ignore
+                    line_num = int(parts[1])
+                except ValueError:
+                    logger.info(f"Invalid line number in '{line}': {parts[1]}")
+                    continue
+                    
+                content = parts[2]
+
+                # Get file modification time
+                try:
+                    full_file_path = os.path.join(self.repo_path, file_path)
+                    mod_time = os.path.getmtime(full_file_path)
+                except (FileNotFoundError, OSError) as e:
+                    logger.warning(f"Error getting file stats for {file_path}: {e}")
+                    mod_time = 0
+
+                if file_path not in file_matches:
+                    file_matches[file_path] = {"file_path": file_path, "mod_time": mod_time, "matches": []}
+
+                file_matches[file_path]["matches"].append({"line_num": line_num, "content": content})
+
+            except (ValueError, IndexError) as e:
+                logger.info(f"Error parsing line '{line}': {e}")
+                continue
+
+        # Sort files by modification time (newest first) and create results list
+        sorted_matches = sorted(file_matches.values(), key=lambda x: x["mod_time"], reverse=True)
+
+        # Format the final results
+        for file_match in sorted_matches:
+            file_path = file_match["file_path"]
+            for match in file_match["matches"]:
+                matches.append(
+                    {
+                        "file_path": file_path,
+                        "line_num": match["line_num"],
+                        "content": match["content"],
+                        "mod_time": file_match["mod_time"],
+                    }
+                )
+                
+                if len(matches) >= max_results:
+                    logger.info(f"Reached max results ({max_results}), returning early")
+                    return matches
+                
+        return matches
+
+    async def _run_grep_command(
+        self, regex_pattern: str, search_path: str, max_results: int, include_arg: list = []
+    ) -> list[dict[str, Any]]:
+        """Helper method to run grep command and parse results"""
+        if include_arg is None:
+            include_arg = []
+            
+        matches = []
+        
+        # Determine if we're searching a directory or single file
+        is_dir_search = os.path.isdir(os.path.join(self.repo_path, search_path)) or search_path == "."
+        
+        # Build the grep command with proper regex support
+        # Only use recursive flag (-r) when searching directories
+        cmd_flags = ["-n"]
+        if is_dir_search:
+            cmd_flags.append("-r")
+        cmd_flags.extend(["--color=never", "-E"])
+        
+        cmd = ["grep"] + cmd_flags + include_arg + [regex_pattern, search_path]
+        logger.info(f"Executing grep command: {' '.join(cmd)}")
+        logger.info(f"Search directory: {self.repo_path}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=self.repo_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            universal_newlines=False,
+        )
+        stdout_bytes, stderr_bytes = await process.communicate()
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        stderr = stderr_bytes.decode("utf-8", errors="replace")
+
+        if process.returncode not in (0, 1):  # grep returns 1 if no matches found
+            logger.info(f"Grep returned non-standard exit code: {process.returncode}")
+            if stderr:
+                logger.warning(f"Grep error output: {stderr}")
+            return []
+
+        logger.info(f"Found {len(stdout.splitlines())} potential matches")
+
+        # Process and organize the results
+        file_matches = {}
+        for line in stdout.splitlines():
+            try:
+                if is_dir_search:
+                    # Parse line format for directory search: "path/to/file:line_num:line_content"
+                    parts = line.split(":", 2)
                     if len(parts) < 3:
                         logger.info(f"Skipping malformed line: {line}")
                         continue
 
                     file_path = parts[0]
-                    if file_path.startswith("./"):  # type: ignore
+                    if file_path.startswith("./"):
                         file_path = file_path[2:]
                     line_num = int(parts[1])
                     content = parts[2]
+                else:
+                    # Parse line format for single file search: "line_num:line_content"
+                    parts = line.split(":", 1)
+                    if len(parts) < 2:
+                        logger.info(f"Skipping malformed line: {line}")
+                        continue
+                    
+                    file_path = search_path
+                    line_num = int(parts[0])
+                    content = parts[1]
 
-                    # Get file modification time
+                # Get file modification time
+                try:
                     full_file_path = os.path.join(self.repo_path, file_path)
                     mod_time = os.path.getmtime(full_file_path)
+                except (FileNotFoundError, OSError) as e:
+                    logger.warning(f"Error getting file stats for {file_path}: {e}")
+                    mod_time = 0
 
-                    if file_path not in file_matches:
-                        file_matches[file_path] = {"file_path": file_path, "mod_time": mod_time, "matches": []}
+                if file_path not in file_matches:
+                    file_matches[file_path] = {"file_path": file_path, "mod_time": mod_time, "matches": []}
 
-                    file_matches[file_path]["matches"].append({"line_num": line_num, "content": content})
+                file_matches[file_path]["matches"].append({"line_num": line_num, "content": content})
 
-                except (ValueError, IndexError) as e:
-                    logger.info(f"Error parsing line '{line}': {e}")
-                    continue
+            except (ValueError, IndexError) as e:
+                logger.info(f"Error parsing line '{line}': {e}")
+                continue
 
-            # Sort files by modification time (newest first) and create results list
-            sorted_matches = sorted(file_matches.values(), key=lambda x: x["mod_time"], reverse=True)
+        # Sort files by modification time (newest first) and create results list
+        sorted_matches = sorted(file_matches.values(), key=lambda x: x["mod_time"], reverse=True)
 
-            # Format the final results
-            for file_match in sorted_matches[:max_results]:
-                file_path = file_match["file_path"]
-                for match in file_match["matches"]:
-                    matches.append(
-                        {
-                            "file_path": file_path,
-                            "line_num": match["line_num"],
-                            "content": match["content"],
-                            "mod_time": file_match["mod_time"],
-                        }
-                    )
-
-        except Exception as e:
-            logger.info(f"Grep command failed: {e}")
-            return []
-
-        logger.info(f"Returning {len(matches)} matches")
+        # Format the final results
+        for file_match in sorted_matches[:max_results]:
+            file_path = file_match["file_path"]
+            for match in file_match["matches"]:
+                matches.append(
+                    {
+                        "file_path": file_path,
+                        "line_num": match["line_num"],
+                        "content": match["content"],
+                        "mod_time": file_match["mod_time"],
+                    }
+                )
+                
+                if len(matches) >= max_results:
+                    return matches
+                
         return matches
 
 

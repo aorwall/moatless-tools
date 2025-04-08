@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from moatless.completion.json import JsonCompletionModel
 from moatless.actions.action import CompletionModelMixin
 from moatless.context_data import get_trajectory_dir
 from moatless.eventbus import BaseEventBus
@@ -78,9 +79,29 @@ class FlowManager:
         agent = self._agent_manager.get_agent(agent_id=config.agent_id)
         completion_model = self._model_manager.create_completion_model(model_id)
         agent.completion_model = completion_model
+        
+        json_completion_model = JsonCompletionModel(
+                model=completion_model.model,
+                temperature=0.0,
+                max_tokens=completion_model.max_tokens,
+                timeout=completion_model.timeout,
+                few_shot_examples=completion_model.few_shot_examples,
+                headers=completion_model.headers,
+                params=completion_model.params,
+                merge_same_role_messages=completion_model.merge_same_role_messages,
+                thoughts_in_action=completion_model.thoughts_in_action,
+                disable_thoughts=completion_model.disable_thoughts,
+                message_cache=completion_model.message_cache,
+                model_base_url=completion_model.model_base_url,
+                model_api_key=completion_model.model_api_key
+            )
+        
         for action in agent.actions:
             if isinstance(action, CompletionModelMixin):
-                action.completion_model = completion_model
+                action.completion_model = json_completion_model.clone()
+                
+        if hasattr(config.value_function, "completion_model") and not config.value_function.completion_model:
+            config.value_function.completion_model = json_completion_model.clone()
 
         if not project_id:
             project_id = "default"
@@ -507,7 +528,7 @@ class FlowManager:
 
         return {"logs": log_content, "files": file_list, "current_file": current_file_name}
 
-    async def get_completions(self, project_id: str, trajectory_id: str, node_id: str, action_step: int | None = None):
+    async def get_completions(self, project_id: str, trajectory_id: str, node_id: str, item_id: str):
         """Get the completions for a specific node.
 
         Args:
@@ -522,16 +543,11 @@ class FlowManager:
 
         trajectory_key = self._storage.get_trajectory_path(project_id, trajectory_id)
 
-        if action_step is not None:
-            log_keys = await self._storage.list_paths(
-                f"{trajectory_key}/completions/node_{node_id}_action_{action_step}/"
-            )
-        else:
-            log_keys = await self._storage.list_paths(f"{trajectory_key}/completions/node_{node_id}/")
+        log_keys = await self._storage.list_paths(f"{trajectory_key}/completions/node_{node_id}/{item_id}/")
 
         completions = []
 
-        logger.info(f"Found {len(log_keys)} completions for node {node_id} and action {action_step}: {log_keys}")
+        logger.info(f"Found {len(log_keys)} completions for node {node_id} and item {item_id}: {log_keys}")
 
         for log_key in log_keys:
             logger.info(f"Reading completion from {log_key}")
@@ -579,3 +595,46 @@ class FlowManager:
 
         await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
         await self._storage.write(f"{trajectory_path}/settings.json", flow.get_flow_settings())
+
+    async def get_node_evaluation_files(self, project_id: str, trajectory_id: str, node_id: int) -> dict[str, str]:
+        """Get the evaluation files for a specific node.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            node_id: The node ID to get evaluation files for
+
+        Returns:
+            A dictionary mapping file names to file contents
+        """
+        # Verify node exists
+        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
+        root_node = await self.read_trajectory_node(project_id, trajectory_id)
+        node = root_node.get_node_by_id(node_id)
+        if not node:
+            raise ValueError(f"Node {node_id} not found in trajectory {trajectory_id}")
+
+        # Get the path to the evaluation files
+        trajectory_key = self._storage.get_trajectory_path(project_id, trajectory_id)
+        eval_dir = f"{trajectory_key}/evaluation/node_{node_id}/"
+        
+        # Check if evaluation directory exists
+        if not await self._storage.exists(eval_dir):
+            # Return empty if no evaluation files
+            return {}
+            
+        # List evaluation files
+        file_paths = await self._storage.list_paths(eval_dir)
+        
+        # Read each file and build result dictionary
+        result = {}
+        for file_path in file_paths:
+            file_name = file_path.split("/")[-1]
+            try:
+                file_content = await self._storage.read_raw(file_path)
+                result[file_name] = file_content
+            except Exception as e:
+                logger.exception(f"Error reading evaluation file {file_path}: {e}")
+                result[file_name] = f"Error reading file: {str(e)}"
+                
+        return result

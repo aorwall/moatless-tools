@@ -1,9 +1,10 @@
+import asyncio
 import json
 import logging
 from datetime import datetime
 
 from litellm.integrations.custom_logger import CustomLogger
-from moatless.context_data import current_node_id, current_action_step
+from moatless.context_data import current_node_id, current_action_step, current_phase
 from moatless.storage.base import BaseStorage
 from pydantic import BaseModel
 
@@ -21,6 +22,7 @@ class LogHandler(CustomLogger):
         now = datetime.now()
         node_id = current_node_id.get()
         action_step = current_action_step.get()
+        phase = current_phase.get()
 
         trajectory_key = self._storage.get_trajectory_path()
 
@@ -32,7 +34,11 @@ class LogHandler(CustomLogger):
         if node_id:
             log_path += f"node_{node_id}"
             if action_step is not None:
-                log_path += f"_action_{action_step}"
+                log_path += f"/action_{action_step}"
+            elif phase:
+                log_path += f"/{phase}"
+            else:
+                log_path += f"/agent"
 
             if node_id:
                 counter = 1
@@ -95,8 +101,15 @@ class LogHandler(CustomLogger):
             "original_response_obj": original_response,
             "original_response": self._handle_kwargs_item(kwargs.get("async_complete_streaming_response")),
             "original_input": self._handle_kwargs_item(original_input),
-            "litellm_response": self._handle_kwargs_item(response_obj),
+            "litellm_response": self._handle_kwargs_item(response_obj)
         }
+        
+        if "traceback_exception" in kwargs:
+            data["traceback_exception"] = self._handle_kwargs_item(kwargs["traceback_exception"])
+            
+        if "exception" in kwargs:
+            data["exception"] = self._handle_kwargs_item(kwargs["exception"])
+    
         await self._write_to_file_async(data)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
@@ -106,6 +119,24 @@ class LogHandler(CustomLogger):
             logger.warning("Got coroutine in failure response_obj, converting to string")
             response_obj = str(response_obj)
         await self.async_log_success_event(kwargs, response_obj, start_time, end_time)
+        
+    async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time):
+        logger.info(f"Processing stream event for node {current_node_id.get()}")
+        if hasattr(response_obj, "__class__") and response_obj.__class__.__name__ == "coroutine":
+            logger.warning("Got coroutine in stream response_obj, converting to string")
+            response_obj = str(response_obj)
+        await self.async_log_success_event(kwargs, response_obj, start_time, end_time)
+
+    def log_failure_event(self, kwargs, response_obj, start_time, end_time):
+        logger.warning(f"Processing failure event for node {current_node_id.get()}")
+        if hasattr(response_obj, "__class__") and response_obj.__class__.__name__ == "coroutine":
+            logger.warning("Got coroutine in failure response_obj, converting to string")
+            response_obj = str(response_obj)
+        try:
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(self.async_log_success_event(kwargs, response_obj, start_time, end_time))
+        except Exception as e:
+            logger.exception(f"Failed to log stream event for node {current_node_id.get()}")
 
     def parse_response(self, original_response):
         if not original_response:
@@ -122,12 +153,31 @@ class LogHandler(CustomLogger):
         return original_response
 
     def _handle_kwargs_item(self, item):
-        if isinstance(item, BaseModel):
+        if isinstance(item, str):
+            return item
+        elif isinstance(item, BaseModel):
             return item.model_dump()
         elif isinstance(item, dict):
             return {k: self._handle_kwargs_item(v) for k, v in item.items()}
         elif isinstance(item, list):
             return [self._handle_kwargs_item(i) for i in item]
+        elif isinstance(item, (set, tuple)):
+            return [self._handle_kwargs_item(i) for i in item]
         elif hasattr(item, "__class__") and item.__class__.__name__ == "coroutine":
             return str(item)  # Convert coroutine objects to string representation
-        return item
+        elif isinstance(item, Exception):
+            return {
+                "error_type": item.__class__.__name__,
+                "error_message": str(item),
+                "traceback": getattr(item, "__traceback__", None) and str(item.__traceback__)
+            }
+        elif isinstance(item, datetime):
+            return item.isoformat()
+        elif isinstance(item, bytes) or isinstance(item, bytearray):
+            return item.decode('utf-8', errors='replace')
+        # Catch-all for other non-serializable objects
+        try:
+            json.dumps(item)
+            return item
+        except (TypeError, OverflowError):
+            return str(item)

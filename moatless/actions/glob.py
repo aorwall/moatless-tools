@@ -18,7 +18,7 @@ class GlobArgs(ActionArguments):
     )
 
     max_results: int = Field(
-        100,
+        10,
         description="Maximum number of results to return",
     )
 

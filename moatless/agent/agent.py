@@ -91,7 +91,7 @@ class ActionAgent(MoatlessComponent):
             if not node.action_steps:
                 await self._generate_actions(node)
 
-                duplicate_node = node.find_duplicate()
+                duplicate_node = node.find_node_with_same_action_steps()
                 if duplicate_node:
                     node.is_duplicate = True
                     logger.info(f"Node{node.node_id} is a duplicate to Node{duplicate_node.node_id}. Skipping")
@@ -248,7 +248,7 @@ class ActionAgent(MoatlessComponent):
 
         except CompletionError as e:
             if e.completion_invocation:
-                action_step.observation.execution_completion = e.completion_invocation
+                action_step.completion = e.completion_invocation
 
             node.terminal = True
 
