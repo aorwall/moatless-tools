@@ -356,28 +356,12 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                             invocation.current_attempt.failure_reason = str(e)
 
                         tool_call_id = None
-                        if (
-                            hasattr(completion_response.choices[0].message, "thinking")
-                            and completion_response.choices[0].message.thinking
-                        ):
-                            content = []
-                            content.extend(completion_response.choices[0].message.thinking)
-                            if completion_response.choices[0].message.content:
-                                content.append(
-                                    ChatCompletionTextObject(
-                                        type="text", text=completion_response.choices[0].message.content
-                                    )
-                                )
+                        
+                        if completion_response.choices[0].message.tool_calls:
+                            # TODO: Support multiple tool calls
+                            tool_call_id = completion_response.choices[0].message.tool_calls[0].id
 
-                            message_dump = completion_response.choices[0].message.model_dump()
-                            message_dump["content"] = content
-                            messages.append(message_dump)
-                        else:
-                            if completion_response.choices[0].message.tool_calls:
-                                # TODO: Support multiple tool calls
-                                tool_call_id = completion_response.choices[0].message.tool_calls[0].id
-
-                            messages.append(completion_response.choices[0].message.model_dump())
+                        messages.append(completion_response.choices[0].message.model_dump())
 
                         if e.retry_messages:
                             logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")
@@ -386,10 +370,10 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                             logger.warning(f"Post validation failed with retry message: {e}")
                             if tool_call_id:
                                 messages.append(
-                                    ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)
+                                    ChatCompletionToolMessage(role="tool", content=str(e), tool_call_id=tool_call_id)  # type: ignore
                                 )
                             else:
-                                messages.append(ChatCompletionUserMessage(role="user", content=str(e)))
+                                messages.append(ChatCompletionUserMessage(role="user", content=str(e)))  # type: ignore
                         raise e
                 except Exception as e:
                     # Any exception will be handled by the context manager

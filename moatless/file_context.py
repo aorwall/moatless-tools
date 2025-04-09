@@ -1508,6 +1508,9 @@ class FileContext(BaseModel):
             bool: True if any file has a patch, False otherwise
         """
         return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
+    
+    def has_test_patch(self):
+        return any(file.patch for file in self._files.values() if is_test(file.file_path))
 
     def generate_git_patch(self, ignore_tests: bool = False) -> str:
         """

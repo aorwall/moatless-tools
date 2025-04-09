@@ -105,14 +105,14 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
             return []
 
         # Calculate initial token count
-        total_tokens = node.file_context.context_size()
+        total_tokens = node.file_context.context_size() if node.file_context else 0
         total_tokens += count_tokens(node.get_root().message or "")
 
         # Pre-calculate test output tokens if there's a patch
         test_output_tokens = 0
         test_output = None
         run_tests_args = None
-        if node.file_context.has_runtime and node.file_context.has_patch():
+        if node.file_context and node.file_context.has_runtime and node.file_context.has_patch():
             if node.file_context.has_test_patch():
                 thoughts = "Run the updated tests to verify the changes."
             else:
@@ -206,7 +206,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                 current_messages.append(NodeMessage(actions=actions, observations=observations))
 
                 # Handle file context for non-ViewCode actions
-                if self.include_file_context and not isinstance(previous_node.action, ViewCodeArgs):
+                if self.include_file_context and not isinstance(previous_node.action, ViewCodeArgs) and previous_node.file_context:
                     files_to_show = set()
                     has_edits = False
                     context_files = previous_node.file_context.get_context_files()
@@ -227,9 +227,9 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
                         for file_path in files_to_show:
                             context_file = previous_node.file_context.get_context_file(file_path)
-                            if context_file.show_all_spans:
+                            if context_file and context_file.show_all_spans:
                                 code_spans.append(CodeSpan(file_path=file_path))
-                            elif context_file.span_ids:
+                            elif context_file and context_file.span_ids:
                                 code_spans.append(
                                     CodeSpan(
                                         file_path=file_path,
@@ -254,7 +254,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                             current_messages.append(NodeMessage(actions=[args], observations=observations))
 
                     # Show ViewDiff on first edit
-                    if has_edits and self.include_git_patch and not shown_diff:
+                    if has_edits and self.include_git_patch and not shown_diff and node.file_context:
                         patch = node.file_context.generate_git_patch()
                         if patch:
                             view_diff_args = ViewDiffArgs(
@@ -272,7 +272,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                                 shown_diff = True
 
                     # Add test results only if status changed or first occurrence
-                    if node.file_context.has_runtime and node.file_context.has_patch():
+                    if node.file_context and node.file_context.has_runtime and node.file_context.has_patch():
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
                             if node.file_context.has_test_patch():

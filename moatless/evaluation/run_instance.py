@@ -6,24 +6,20 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import litellm
 from dotenv import load_dotenv
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
 from moatless.evaluation.schema import EvaluationEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.run_flow import (
-    handle_flow_event,
     persist_trajectory_data,
     setup_flow,
     setup_swebench_runtime,
-    setup_workspace,
 )
-from moatless.index.code_index import CodeIndex
 from moatless.node import EvaluationResult, Node
 from moatless.repository.git import GitRepository
 from moatless.runner.utils import cleanup_job_logging, setup_job_logging
-from moatless.runtime.local import SweBenchLocalEnvironment
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.workspace import Workspace
 
@@ -32,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: int | None = None):
+    logger.info(f"Running swebench instance {project_id} {trajectory_id} {node_id}")
+    
     from moatless.settings import get_storage
 
     load_dotenv()
@@ -43,7 +41,8 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
     current_project_id.set(project_id)
     current_trajectory_id.set(trajectory_id)
-
+    
+    import litellm
     litellm.callbacks = [LogHandler(storage=storage)]
 
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
@@ -74,6 +73,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
             raise ValueError("INDEX_STORE_DIR is not set")
 
         logger.info(f"Using index store dir: {index_store_dir}")
+        from moatless.index.code_index import CodeIndex
         code_index = CodeIndex.from_persist_dir(
             persist_dir=index_store_dir,
             file_repo=repository,
@@ -116,7 +116,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
 
 async def evaluate_instance(
-    evaluation_name: str, instance_id: str, flow: AgenticFlow, runtime: SweBenchLocalEnvironment, storage: BaseStorage
+    evaluation_name: str, instance_id: str, flow: AgenticFlow, runtime: RuntimeEnvironment, storage: BaseStorage
 ) -> None:
     """Evaluate an instance's results."""
 

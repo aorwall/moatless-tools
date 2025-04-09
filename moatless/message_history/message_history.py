@@ -262,12 +262,6 @@ class MessageHistoryGenerator(BaseMemory):
             assistant_content.append(ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None))
             tokens += count_tokens(node.assistant_message)
 
-        # If we have tool calls but no content, add a default message
-        if tool_calls and not assistant_content:
-            default_message = ChatCompletionTextObject(type="text", text="Executing actions...", cache_control=None)
-            assistant_content.append(default_message)
-            tokens += count_tokens("Executing actions...")
-
         # Add content and tool calls to assistant message
         if assistant_content:
             assistant_message["content"] = assistant_content

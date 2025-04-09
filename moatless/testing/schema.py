@@ -3,7 +3,6 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field, model_validator
 
-from moatless.utils.tokenizer import count_tokens
 
 
 class TestStatus(str, Enum):
@@ -133,6 +132,7 @@ class TestFile(BaseModel):
                     else:
                         truncated_message = result.failure_output
 
+                    from moatless.utils.tokenizer import count_tokens
                     test_result_str = f"* {attributes}\n```\n{truncated_message}\n```\n"
                     test_result_tokens = count_tokens(test_result_str)
                     if sum_tokens + test_result_tokens > max_tokens:

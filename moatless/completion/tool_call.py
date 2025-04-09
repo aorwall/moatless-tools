@@ -71,7 +71,9 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            return [], content, None
+            raise CompletionRetryError(
+                message="No tool calls found in response, respond with a valid tool call.",
+            )
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()
@@ -80,7 +82,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         retry_messages = []
         retry = False
-
+        
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
 
