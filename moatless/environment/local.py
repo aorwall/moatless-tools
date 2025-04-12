@@ -29,7 +29,7 @@ class LocalBashEnvironment(BaseEnvironment):
         self.env = env
         self.shell = shell
 
-    async def execute(self, command: str, fail_on_error: bool = False) -> str:
+    async def execute(self, command: str, fail_on_error: bool = True) -> str:
         """
         Execute a command on the local machine.
 
@@ -84,8 +84,7 @@ class LocalBashEnvironment(BaseEnvironment):
 
             if return_code != 0:
                 logger.warning(f"Command return code {return_code}")
-                # If the command is not found (usually return code 127) or fail_on_error is set, raise an exception
-                if fail_on_error or "command not found" in error or "not recognized as" in error:
+                if fail_on_error:
                     raise EnvironmentExecutionError(
                         f"Command failed with return code {return_code}: {command}", return_code, error
                     )
@@ -114,7 +113,7 @@ class LocalBashEnvironment(BaseEnvironment):
             stdout, stderr = process.communicate()
             return_code = process.returncode
 
-            if return_code != 0:
+            if return_code != 0 and fail_on_error:
                 raise EnvironmentExecutionError(
                     f"Command failed with return code {return_code}: {command}", return_code, stderr
                 )
