@@ -65,7 +65,9 @@ class ActionAgent(MoatlessComponent):
         action_args: list[type[ActionArguments]] = []
         for action in self.actions:
             self._action_map[action.args_schema] = action
-            action_args.append(action.args_schema)
+            
+            if not action.hidden:
+                action_args.append(action.args_schema)
 
         if not action_args:
             raise RuntimeError("No actions found")
@@ -110,6 +112,9 @@ class ActionAgent(MoatlessComponent):
                 current_action_step.set(i)  # Used in logging to identify the action step
                 await self._execute(node, action_step)
                 current_action_step.set(None)
+                if node.terminal:
+                    break
+                
         except Exception as e:
             logger.exception(f"Node{node.node_id}: Failed to run.")
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"
@@ -208,7 +213,10 @@ class ActionAgent(MoatlessComponent):
                 f"Action {type(action_step.action)} not found in action map with actions: {list(self.action_map.keys())}"
             )
 
-        return await action.execute(action_step.action, file_context=node.file_context)
+        observation = await action.execute(action_step.action, file_context=node.file_context)
+        if action.is_terminal:
+            node.terminal = True
+        return observation
 
     @tracer.start_as_current_span("ActionAgent._execute")
     async def _execute(self, node: Node, action_step: ActionStep):
@@ -231,7 +239,8 @@ class ActionAgent(MoatlessComponent):
             if not action_step.observation:
                 logger.warning(f"Node{node.node_id}: Action {action_step.action.name} returned no observation")
             else:
-                node.terminal = action_step.observation.terminal
+                if action_step.observation.terminal:
+                    node.terminal = True
                 if action_step.observation.execution_completion:
                     action_step.completion = action_step.observation.execution_completion
 

@@ -1503,6 +1503,7 @@ class KubernetesRunner(BaseRunner):
                 client.V1EnvVar(name="REPO_DIR", value="/testbed"),
                 client.V1EnvVar(name="INSTANCE_PATH", value="/data/instance.json"),
                 client.V1EnvVar(name="REDIS_URL", value=os.environ.get("REDIS_URL")),
+                client.V1EnvVar(name="LITELLM_LOCAL_MODEL_COST_MAP", value="True"),
             ]
         )
 
@@ -1584,7 +1585,7 @@ class KubernetesRunner(BaseRunner):
             command=["bash"],
             args=[
                 "-c",
-                f"uv run --no-sync -  <<EOF\n{args}\nEOF",
+                f"echo 'MOATLESS: Starting job for {project_id}/{trajectory_id}' && export PYTHONUNBUFFERED=1 && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF",
             ],
             env=env_vars,
             env_from=[

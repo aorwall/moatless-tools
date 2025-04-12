@@ -23,18 +23,50 @@ class BaseEnvironment(abc.ABC):
     """
 
     @abc.abstractmethod
-    async def execute(self, command: str) -> str:
+    async def execute(self, command: str, fail_on_error: bool = False) -> str:
         """
         Execute a command in the environment.
 
         Args:
             command: The command to execute
+            fail_on_error: If True, raise an exception if the command fails
 
         Returns:
             The output of the command as a string
 
         Raises:
-            EnvironmentExecutionError: If the command execution fails
+            EnvironmentExecutionError: If the command execution fails and fail_on_error is True
+        """
+        pass
+
+    @abc.abstractmethod
+    async def read_file(self, path: str) -> str:
+        """
+        Read a file from the environment.
+
+        Args:
+            path: The path to the file
+
+        Returns:
+            The contents of the file as a string
+
+        Raises:
+            FileNotFoundError: If the file does not exist
+            EnvironmentExecutionError: If there's an error reading the file
+        """
+        pass
+        
+    @abc.abstractmethod
+    async def write_file(self, path: str, content: str) -> None:
+        """
+        Write content to a file in the environment.
+
+        Args:
+            path: The path to the file
+            content: The content to write to the file
+
+        Raises:
+            EnvironmentExecutionError: If there's an error writing to the file
         """
         pass
 

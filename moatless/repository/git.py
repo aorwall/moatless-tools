@@ -50,6 +50,10 @@ class GitRepository(FileRepository):
             raise
 
     @classmethod
+    def from_path(cls, repo_path: str):
+        return cls(repo_path=repo_path, git_repo_url=None, commit=None)
+
+    @classmethod
     def from_repo(cls, git_repo_url: str, repo_path: str, commit: Optional[str] = None):
         logger.info(f"Create GitRepository for {git_repo_url} with commit {commit} on path {repo_path} ")
 

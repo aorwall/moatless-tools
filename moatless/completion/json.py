@@ -90,6 +90,7 @@ Make sure to return an instance of the JSON, not the schema itself.""")
         try:
             assistant_message = completion_response.choices[0].message.content
             response = self._response_schema[0].model_validate_json(assistant_message)
+            logger.info(f"JSON response: {response}")
             return [response], None, None
 
         except (ValidationError, json.JSONDecodeError) as e:

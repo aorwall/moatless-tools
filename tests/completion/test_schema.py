@@ -1,9 +1,10 @@
-from typing import Optional
+from typing import Optional, ClassVar, List
 
 import pytest
+import json
 from moatless.actions.create_file import CreateFileArgs
 from moatless.actions.string_replace import StringReplaceArgs
-from moatless.completion.schema import ResponseSchema
+from moatless.completion.schema import ResponseSchema, FewShotExample
 from pydantic import ValidationError, BaseModel, Field, ConfigDict
 
 
@@ -113,7 +114,6 @@ def test_schema_without_refs():
     schema = MainSchema.openai_schema()
 
     # Print schema for debugging
-    import json
     print(json.dumps(schema, indent=2))
 
     # Verify schema structure - using get() to avoid TypedDict access issues
@@ -190,7 +190,6 @@ def test_schema_with_array_refs():
     schema = ArraySchema.openai_schema()
 
     # Print schema for debugging
-    import json
     print(json.dumps(schema, indent=2))
 
     # Verify schema structure - using get() to avoid TypedDict access issues
@@ -262,3 +261,168 @@ def test_response_schema_name_behavior():
         model_config = ConfigDict(arbitrary_types_allowed=True)
 
     assert SchemaWithConfigNoTitle.name == "SchemaWithConfigNoTitle"
+
+def test_resolving_nested_refs_in_schema():
+    """Test that nested objects with $ref are properly resolved in the schema"""
+    
+    # Define a test schema that contains a nested object with $ref
+    class TestFileLocation(BaseModel):
+        file_path: str = Field(description="Path to the file")
+        start_line: Optional[int] = Field(default=None, description="Starting line number")
+        end_line: Optional[int] = Field(default=None, description="Ending line number")
+    
+    class TestNestedItem(BaseModel):
+        id: str = Field(description="ID of the item")
+        title: str = Field(description="Title of the item")
+        related_files: list[TestFileLocation] = Field(
+            default_factory=list,
+            description="List of related files"
+        )
+
+    class TestSchema(ResponseSchema):
+        """Test schema with nested references"""
+        items: list[TestNestedItem] = Field(description="List of items")
+    
+    # Get the OpenAI schema
+    schema = TestSchema.openai_schema()
+    
+    # Print schema for debugging
+    print(json.dumps(schema, indent=2))
+    
+    # Verify the schema properly resolves nested objects
+    function_dict = schema.get("function", {})
+    params = function_dict.get("parameters", {})
+    properties = params.get("properties", {})
+    
+    # Check items array
+    assert "items" in properties, "Items property missing in schema"
+    items_prop = properties["items"]
+    assert items_prop["type"] == "array", "Items should be an array"
+    
+    # Check nested item schema
+    nested_item_schema = items_prop["items"]
+    assert nested_item_schema["type"] == "object", "Nested item should be an object"
+    nested_item_properties = nested_item_schema["properties"]
+    
+    # Check related_files array
+    assert "related_files" in nested_item_properties, "related_files property missing in nested item"
+    related_files_prop = nested_item_properties["related_files"]
+    assert related_files_prop["type"] == "array", "related_files should be an array"
+    
+    # Check FileLocation schema - it should be expanded, not a $ref
+    file_location_schema = related_files_prop["items"]
+    assert "$ref" not in file_location_schema, "FileLocation should not be a $ref but fully expanded"
+    assert file_location_schema["type"] == "object", "FileLocation should be an object"
+    
+    # Verify FileLocation properties are present
+    file_location_properties = file_location_schema["properties"]
+    assert "file_path" in file_location_properties, "file_path property missing in FileLocation"
+    assert "start_line" in file_location_properties, "start_line property missing in FileLocation"
+    assert "end_line" in file_location_properties, "end_line property missing in FileLocation"
+
+def test_nested_refs_in_real_schema():
+    """Test that nested objects with $ref are properly resolved in a real schema"""
+    
+    # Create a simplified version of what's in add_coding_tasks.py
+    class FileRelationType(str):
+        CREATE = "create"
+        UPDATE = "update"
+        REFERENCE = "reference"
+        DEPENDENCY = "dependency"
+    
+    class FileLocation(BaseModel):
+        """Represents a file location with path and line range"""
+        file_path: str = Field(description="Path to the file")
+        start_line: Optional[int] = Field(default=None, description="Starting line number")
+        end_line: Optional[int] = Field(default=None, description="Ending line number")
+        relation_type: str = Field(
+            default="reference",
+            description="How this file relates to the task"
+        )
+
+    class CodingTaskItem(BaseModel):
+        """A single coding task item to be created."""
+        id: str = Field(
+            ...,
+            description="Identifier or short name for the task. This will be used as the task's ID in the system.",
+        )
+        
+        title: str = Field(
+            ...,
+            description="Short title or description of the task.",
+        )
+
+        instructions: str = Field(
+            ...,
+            description="Detailed instructions for completing the task.",
+        )
+
+        related_files: List[FileLocation] = Field(
+            default_factory=list,
+            description="List of files related to this task with their locations and relationship types.",
+        )
+
+        priority: int = Field(
+            default=100,
+            description="Execution priority - lower numbers = higher priority.",
+        )
+
+    class AddCodingTasksArgs(ResponseSchema):
+        """Create new coding tasks with the given descriptions and file locations."""
+
+        tasks: List[CodingTaskItem] = Field(
+            ...,
+            description="List of coding tasks to create.",
+        )
+
+        model_config = ConfigDict(title="AddCodingTasks")
+    
+    # Generate the schema
+    schema = AddCodingTasksArgs.openai_schema()
+    
+    # Print schema for debugging
+    print(json.dumps(schema, indent=2))
+    
+    # Check that the schema has no $ref fields anywhere
+    def check_no_refs(obj):
+        if isinstance(obj, dict):
+            assert "$ref" not in obj, f"Found $ref in: {obj}"
+            for value in obj.values():
+                check_no_refs(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                check_no_refs(item)
+    
+    check_no_refs(schema)
+    
+    # Verify the schema properly expands nested objects
+    function_dict = schema.get("function", {})
+    params = function_dict.get("parameters", {})
+    properties = params.get("properties", {})
+    
+    # Check tasks array
+    assert "tasks" in properties, "Tasks property missing in schema"
+    tasks_prop = properties["tasks"]
+    assert tasks_prop["type"] == "array", "Tasks should be an array"
+    
+    # Check CodingTaskItem schema
+    task_item_schema = tasks_prop["items"]
+    assert task_item_schema["type"] == "object", "Task item should be an object"
+    task_item_properties = task_item_schema["properties"]
+    
+    # Check related_files array
+    assert "related_files" in task_item_properties, "related_files property missing in task item"
+    related_files_prop = task_item_properties["related_files"]
+    assert related_files_prop["type"] == "array", "related_files should be an array"
+    
+    # Check FileLocation schema - it should be expanded, not a $ref
+    file_location_schema = related_files_prop["items"]
+    assert "$ref" not in file_location_schema, "FileLocation should not be a $ref but fully expanded"
+    assert file_location_schema["type"] == "object", "FileLocation should be an object"
+    
+    # Verify FileLocation properties are present
+    file_location_properties = file_location_schema["properties"]
+    assert "file_path" in file_location_properties, "file_path property missing in FileLocation"
+    assert "start_line" in file_location_properties, "start_line property missing in FileLocation"
+    assert "end_line" in file_location_properties, "end_line property missing in FileLocation"
+    assert "relation_type" in file_location_properties, "relation_type property missing in FileLocation"

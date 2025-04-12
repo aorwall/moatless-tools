@@ -2,10 +2,10 @@
 
 import asyncio
 from typing import Callable
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
-def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, node_id: int = None):
+def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, node_id: Optional[int] = None):
     func_module = job_func.__module__
     func_name = job_func.__name__
 
@@ -19,16 +19,24 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
     # Create the appropriate Python code for uv run
     if is_async:
         return (
+            f"import logging\n"
+            f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
+            f"logging.debug('Starting job execution')\n"
             f"import asyncio\n"
             f"from {func_module} import {func_name}\n"
-            f"import sys\n"
-            f"asyncio.run({func_name}{args})"
+            f"logging.debug('Imports completed, starting execution')\n"
+            f"asyncio.run({func_name}{args})\n"
+            f"logging.debug('Job execution completed')"
         )
     else:
         return (
+            f"import logging\n"
+            f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
+            f"logging.debug('Starting job execution')\n"
             f"from {func_module} import {func_name}\n"
-            f"import sys\n"
-            f"{func_name}{args}"
+            f"logging.debug('Imports completed, starting execution')\n"
+            f"{func_name}{args}\n"
+            f"logging.debug('Job execution completed')"
         )
 
 
@@ -51,7 +59,13 @@ def sanitize_label(value: str) -> str:
         clean_id = clean_id[:-1] + "x"
 
     # Ensure it's not too long (63 character limit)
-    return clean_id[:63]
+    clean_id = clean_id[:63]
+    
+    # Final check to ensure the truncated string ends with an alphanumeric character
+    if clean_id and not clean_id[-1].isalnum():
+        clean_id = clean_id[:-1] + "x"
+    
+    return clean_id
 
 
 def get_project_label(project_id: str) -> str:
@@ -81,7 +95,7 @@ def get_trajectory_label(trajectory_id: str) -> str:
 def create_labels(
     project_id: str,
     trajectory_id: str,
-    func_name: str = None,
+    func_name: Optional[str] = None,
 ) -> Dict[str, str]:
     """Create labels for a job."""
     project_label = get_project_label(project_id)
@@ -99,7 +113,7 @@ def create_labels(
     return labels
 
 
-def create_annotations(project_id: str, trajectory_id: str, func_name: str = None) -> Dict[str, str]:
+def create_annotations(project_id: str, trajectory_id: str, func_name: Optional[str] = None) -> Dict[str, str]:
     """Create annotations for a job (labels and annotations).
 
     Args:

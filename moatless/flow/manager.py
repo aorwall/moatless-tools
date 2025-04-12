@@ -7,9 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from moatless.actions.list_files import ListFilesArgs
+from moatless.actions.read_files import ReadFiles, ReadFilesArgs
 from moatless.completion.json import JsonCompletionModel
 from moatless.actions.action import CompletionModelMixin
+from moatless.completion.react import ReActCompletionModel
 from moatless.context_data import get_trajectory_dir
+from moatless.environment.local import LocalBashEnvironment
 from moatless.eventbus import BaseEventBus
 from moatless.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
@@ -23,10 +27,13 @@ from moatless.flow.schema import (
     FlowStatus,
 )
 from moatless.flow.trajectory_tree import create_node_tree
-from moatless.node import Node
+from moatless.index.code_index import CodeIndex
+from moatless.node import ActionStep, Node
+from moatless.repository.git import GitRepository
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
 from moatless.utils.moatless import get_moatless_dir
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +168,68 @@ class FlowManager:
         await self.save_trajectory(project_id, trajectory_id, flow)
 
         return flow
+    
+    async def create_loop(self, trajectory_id: str, project_id: str, agent_id: str, model_id: str, message: str, repository_path: str | None = None, **kwargs) -> AgenticLoop:
+        logger.info(f"Creating loop for project {project_id} with trajectory {trajectory_id}")
+        agent = self._agent_manager.get_agent(agent_id=agent_id)
+        completion_model = self._model_manager.create_completion_model(model_id)
+        agent.completion_model = completion_model
+        
+        if isinstance(completion_model, ReActCompletionModel):
+            extra_completion_model = JsonCompletionModel(
+                model=completion_model.model,
+                temperature=0.0,
+                max_tokens=completion_model.max_tokens,
+                timeout=completion_model.timeout,
+                few_shot_examples=completion_model.few_shot_examples,
+                headers=completion_model.headers,
+                params=completion_model.params,
+                merge_same_role_messages=completion_model.merge_same_role_messages,
+                thoughts_in_action=completion_model.thoughts_in_action,
+                disable_thoughts=completion_model.disable_thoughts,
+                message_cache=completion_model.message_cache,
+                model_base_url=completion_model.model_base_url,
+                model_api_key=completion_model.model_api_key
+            )
+        else:
+            extra_completion_model = completion_model.clone()
+        
+        for action in agent.actions:
+            if isinstance(action, CompletionModelMixin):
+                action.completion_model = extra_completion_model.clone()
+                
+        if repository_path:
+            repository = GitRepository(repo_path=repository_path)
+            environment = LocalBashEnvironment(cwd=repository_path)
+
+            workspace = Workspace(repository=repository, environment=environment)
+            agent.workspace = workspace
+        
+        loop = AgenticLoop.create(
+            message=message,
+            trajectory_id=trajectory_id,
+            project_id=project_id,
+            agent=agent,
+            max_iterations=50,
+            max_cost=1.0,
+            shadow_mode=False,
+            **kwargs,
+        )
+        
+        project_settings = await self.read_project_settings(project_id)
+        if not project_settings:
+            project_settings = {
+                "project_id": project_id,
+                "agent_id": agent_id,
+                "model_id": model_id,
+                "repository_path": repository_path,
+            }
+            
+            await self.save_project(project_id, project_settings)
+            
+        await self.save_trajectory(project_id, trajectory_id, loop)
+
+        return loop
 
     def _get_config_path(self) -> Path:
         """Get the path to the config file."""
@@ -326,9 +395,9 @@ class FlowManager:
 
     async def start_trajectory(self, project_id: str, trajectory_id: str):
         """Start a trajectory."""
-
+        
         flow = await AgenticFlow.from_trajectory_id(trajectory_id, project_id)
-
+        
         job_status = await self._runner.get_job_status(project_id, trajectory_id)
         if job_status == JobStatus.RUNNING:
             raise ValueError("Flow is already running")
@@ -390,13 +459,21 @@ class FlowManager:
             raise ValueError("Cannot resume a trajectory that is already running")
 
         flow = await AgenticFlow.from_trajectory_id(trajectory_id, project_id)
+        
+        last_node = flow.root.get_last_node()
+        if last_node.is_executed():
+            last_node.terminal = False
+            
+            child_node = Node(
+                node_id=last_node.node_id + 1,
+                parent=last_node,
+                file_context=last_node.file_context.clone() if last_node.file_context else None,
+                max_expansions=last_node.max_expansions,
+                agent_id=last_node.agent_id,
+                user_message=request.message,
+        )  # type: ignore
 
-        # Update flow with any new parameters from the request
-        if request.message:
-            flow.message = request.message
-
-        if request.metadata:
-            flow.metadata.update(request.metadata)
+            last_node.add_child(child_node)
 
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
         await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
@@ -415,13 +492,17 @@ class FlowManager:
         node = agentic_flow.root.get_node_by_id(node_id)
         if not node:
             raise ValueError("Node not found")
+
+        logger.info(f"Executing node {node.node_id} with is_executed: {node.is_executed()}")
         if node.is_executed():
-            node = node.clone()
-            node.reset(rebuild_action_steps=False)
-            logger.info(f"Cloned node {node.node_id} from parent {node.parent.node_id}")
+            new_node = node.clone()
+            new_node.reset(rebuild_action_steps=False)
+            logger.info(f"Cloned node {new_node.node_id} from parent {node.node_id}")
 
             trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
             await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
+            
+            node_id = new_node.node_id
 
         await self._runner.start_job(
             project_id=project_id,
@@ -429,6 +510,22 @@ class FlowManager:
             job_func=run_flow,
             node_id=node_id,
         )
+        
+        return node
+    
+    async def reset_node(self, project_id: str, trajectory_id: str, node_id: int):
+        """Reset a specific node in a trajectory."""
+        agentic_flow = await AgenticFlow.from_trajectory_id(trajectory_id=trajectory_id, project_id=project_id)
+        node = agentic_flow.root.get_node_by_id(node_id)
+        if not node:
+            raise ValueError("Node not found")
+        
+        node.reset()
+        
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+        await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
+        
+        return node
 
     async def get_trajectory_settings(self, project_id: str, trajectory_id: str) -> dict:
         """Get the settings for a trajectory."""
@@ -589,6 +686,15 @@ class FlowManager:
         trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
 
         return Node.from_dict(trajectory_data)
+    
+    async def read_project_settings(self, project_id: str) -> dict | None:
+        if not await self._storage.exists(f"projects/{project_id}/settings.json"):
+            return None
+
+        return await self._storage.read(f"projects/{project_id}/settings.json")
+    
+    async def save_project(self, project_id: str, settings: dict):
+        await self._storage.write(f"projects/{project_id}/settings.json", settings)
 
     async def save_trajectory(self, project_id: str, trajectory_id: str, flow: AgenticFlow):
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)

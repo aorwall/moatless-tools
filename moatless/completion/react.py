@@ -24,7 +24,7 @@ class ReActCompletionModel(JsonCompletionModel):
     4. Validating action sequence format
     """
     
-    max_actions: int = Field(default=1, description="The maximum number of actions to include in the response")
+    max_actions: Optional[int] = Field(default=None, description="The maximum number of actions to include in the response")
 
     def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Any]:
         """Get the completion parameters for JSON completion."""
@@ -119,10 +119,9 @@ Important: You can include multiple Action blocks to perform sequential actions.
             validated_actions: list[ResponseSchema] = []
 
             # Limit the number of actions to the max_actions value
-            if self.max_actions > 0:
-                if len(action_blocks) > self.max_actions:
-                    logger.warning(f"The response contains {len(action_blocks)} actions, but the max_actions is set to {self.max_actions}. The response will be truncated.")
-                    action_blocks = action_blocks[:self.max_actions]
+            if self.max_actions and len(action_blocks) > self.max_actions:
+                logger.warning(f"The response contains {len(action_blocks)} actions, but the max_actions is set to {self.max_actions}. The response will be truncated.")
+                action_blocks = action_blocks[:self.max_actions]
 
             for i, action_input in enumerate(action_blocks):
                 action_name, action_input = self._parse_action(action_input)

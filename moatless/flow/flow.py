@@ -77,7 +77,7 @@ class AgenticFlow(MoatlessComponent):
         shadow_mode: bool = True,
         on_event: Optional[Callable[[BaseEvent], Awaitable[None]]] = None,
         **kwargs,
-    ) -> "AgenticFlow":
+    ):
         if not trajectory_id:
             trajectory_id = str(uuid.uuid4())
         import moatless.settings as settings

@@ -217,7 +217,7 @@ class ArtifactHandler(MoatlessComponent[T]):
         return cls.type
 
     @classmethod
-    def initiate_handlers(cls) -> list["ArtifactHandler"]:
+    def initiate_handlers(cls, storage: BaseStorage | None = None) -> list["ArtifactHandler"]:
         registered_classes = cls.get_available_components()
         
         logger.info(f"Registered classes: {list(registered_classes.keys())}")
@@ -225,6 +225,9 @@ class ArtifactHandler(MoatlessComponent[T]):
         for handler in registered_classes.values():
             handler = handler()
             handlers.append(handler)
+            
+            if hasattr(handler, "_storage"):
+                handler._storage = storage
 
         logger.info(f"Initialized handlers: {list(map(lambda h: h.type, handlers))}")
         return handlers

@@ -116,15 +116,18 @@ class TestFile(BaseModel):
 
         sum_tokens = 0
         test_result_strings = []
+        
+        # Process each test file
         for test_file in test_files:
+            # Process each test result in the file
             for result in test_file.test_results:
                 if result.status in [TestStatus.FAILED, TestStatus.ERROR, TestStatus.UNKNOWN] and result.failure_output:
                     attributes = ""
                     if result.file_path:
                         attributes += f"{result.file_path}"
 
+                    # Handle long failure output
                     if len(result.failure_output) > max_chars_per_test:
-                        # Show first and last portions of the message
                         chars_per_section = max_chars_per_test // 2
                         start_section = result.failure_output[:chars_per_section]
                         end_section = result.failure_output[-chars_per_section:]
@@ -132,16 +135,26 @@ class TestFile(BaseModel):
                     else:
                         truncated_message = result.failure_output
 
+                    # Format the test result string
                     from moatless.utils.tokenizer import count_tokens
                     test_result_str = f"* {attributes}\n```\n{truncated_message}\n```\n"
                     test_result_tokens = count_tokens(test_result_str)
-                    if sum_tokens + test_result_tokens > max_tokens:
-                        break
+                    
+                    # Always include at least one result
+                    if not test_result_strings or sum_tokens + test_result_tokens <= max_tokens:
+                        test_result_strings.append(test_result_str)
+                        sum_tokens += test_result_tokens
+                        
+                        # If we've reached the token limit and have at least one result, break
+                        if sum_tokens >= max_tokens and test_result_strings:
+                            break
+            
+            # Break out of the outer loop if we've reached the token limit
+            if sum_tokens >= max_tokens and test_result_strings:
+                break
 
-                    sum_tokens += test_result_tokens
-                    test_result_strings.append(test_result_str)
-
-        return "\n".join(test_result_strings) if test_result_strings else ""
+        # Join all the test result strings
+        return "\n".join(test_result_strings)
 
     @staticmethod
     def get_test_counts(test_files: list["TestFile"]) -> tuple[int, int, int]:

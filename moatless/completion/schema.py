@@ -196,7 +196,13 @@ class ResponseSchema(BaseModel):
                     if isinstance(ref_path, str) and ref_path.startswith("#/$defs/"):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
-                            result[k] = defs[ref_name].copy()
+                            # Create a new dict with resolved reference
+                            resolved = defs[ref_name].copy()
+                            # Copy over any other properties from the original item object
+                            for k2, v2 in v.items():
+                                if k2 != "$ref":
+                                    resolved[k2] = v2
+                            result[k] = resolve_refs(resolved, defs)  # Recursively resolve any nested refs
                             continue
                 elif k == "$ref":
                     ref_path = v

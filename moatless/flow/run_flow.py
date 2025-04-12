@@ -9,6 +9,7 @@ import litellm
 
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
+from moatless.environment.local import LocalBashEnvironment
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.index.code_index import CodeIndex
@@ -39,7 +40,7 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
 
     litellm.callbacks = [LogHandler(storage=storage)]
     
-    logger.info(f"current_project_id: {current_project_id.get()}, current {current_trajectory_id.get()}")
+    logger.info(f"setup_flow current_project_id: {current_project_id.get()}, current {current_trajectory_id.get()}")
 
     settings = await storage.read_from_trajectory(
         path="settings.json", trajectory_id=trajectory_id, project_id=project_id
@@ -83,22 +84,35 @@ async def setup_swebench_runtime() -> RuntimeEnvironment:
         raise e
 
 
-async def setup_workspace() -> Workspace:
+async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
+    storage = await get_storage()
+    shadow_mode = False
     instance_path = os.environ.get("INSTANCE_PATH")
     if instance_path:
         runtime = await setup_swebench_runtime()
         repo_path = "/testbed"
-    else:
+        shadow_mode = True
+    elif await storage.exists(f"projects/{project_id}/settings.json"):
+        project_settings = await storage.read(f"projects/{project_id}/settings.json")
+        repo_path = project_settings["repository_path"]
+        index_store_dir = f"{repo_path}/.moatless/index"
+        runtime = None
+
+    elif os.environ.get("REPO_PATH"):
         # TODO: Use Local bash environment
         runtime = None
         repo_path = os.environ.get("REPO_PATH")
 
     if repo_path:
         repository = GitRepository(repo_path=repo_path)
+        environment = LocalBashEnvironment(cwd=repo_path)
     else:
         repository = None
+        environment = None
 
-    index_store_dir = os.environ.get("INDEX_STORE_DIR")
+    if not index_store_dir and os.environ.get("INDEX_STORE_DIR"):
+        index_store_dir = os.environ.get("INDEX_STORE_DIR")
+
     if index_store_dir:
         logger.info(f"Using index store dir: {index_store_dir}")
         code_index = CodeIndex.from_persist_dir(
@@ -109,8 +123,7 @@ async def setup_workspace() -> Workspace:
         code_index = None
         logger.info("No index store dir provided, skipping code index")
 
-    return Workspace(repository=repository, code_index=code_index, runtime=runtime)
-
+    return Workspace(repository=repository, code_index=code_index, runtime=runtime, environment=environment, shadow_mode=shadow_mode, storage=storage)
 
 async def persist_trajectory_data(flow: AgenticFlow) -> None:
     storage = await get_storage()
@@ -155,10 +168,10 @@ async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:
 
 async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = None) -> None:
     """Run an instance's agentic flow."""
-    print(f"Running instance {trajectory_id} for project {project_id}")
+    print(f"Running instance {trajectory_id} with node_id {node_id} for project {project_id}")
 
     date_str = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_path = Path(f"/data/logs/logs_{date_str}.log")
+    log_path = Path(f"./logs/logs_{date_str}.log")
     original_handlers = setup_job_logging(log_path=log_path)
     storage = await get_storage()
 
@@ -169,7 +182,7 @@ async def run_flow(project_id: str, trajectory_id: str, node_id: int | None = No
             logger.warning(f"Flow already finished for instance {trajectory_id}")
             return None
 
-        workspace = await setup_workspace()
+        workspace = await setup_workspace(project_id, trajectory_id)
 
         logger.info(f"Flow created for instance {trajectory_id}")
 

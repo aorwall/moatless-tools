@@ -180,6 +180,8 @@ async def get_storage() -> BaseStorage:
             if not os.environ.get("MOATLESS_DIR"):
                 raise ValueError("MOATLESS_DIR environment variable is not set")
             _storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
+            
+        logger.info(f"Storage initialized: {_storage}")
     
     return _storage
 

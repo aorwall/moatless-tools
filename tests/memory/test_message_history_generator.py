@@ -376,3 +376,199 @@ async def test_max_tokens_serialization():
     # Test model reconstruction
     loaded = MessageHistoryGenerator.model_validate_json(json_str)
     assert loaded.max_tokens == 1000
+
+
+@pytest.mark.asyncio
+async def test_observation_summary_usage(test_tree, workspace):
+    """Test that observations use summaries when exceeding max_tokens_per_observation, except for the last node."""
+    root, node1, node2, node3, node4, node5 = test_tree
+    
+    # Create a long message that will exceed the default max_tokens_per_observation (16000)
+    long_message = "This is a very long message. " * 1000  # This will exceed the token limit
+    short_message = "This is a short message."
+    summary = "This is a summary of the long message."
+    
+    # Add observations with long messages and summaries to all nodes
+    for node in [node1, node2, node3, node4, node5]:
+        node.action_steps[0].observation.message = long_message
+        node.action_steps[0].observation.summary = summary
+    
+    # Create generator with a lower max_tokens_per_observation for testing
+    generator = MessageHistoryGenerator(
+        include_file_context=True,
+        max_tokens_per_observation=1000  # Set a low limit to trigger summary usage
+    )
+    
+    # Test 1: Generate messages for node3 - node3 should be the most recent and show full message
+    messages = await generator.generate_messages(node3, workspace)
+    messages = list(messages)
+    
+    # Count tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    assert len(tool_responses) == 3, "Expected 3 tool responses for node3 (one for each node in trajectory)"
+    
+    # Verify non-most-recent nodes (node1, node2) use summaries
+    for i in range(len(tool_responses) - 1):
+        content = str(tool_responses[i]["content"])
+        assert summary in content, f"Expected summary in tool response {i}"
+        assert long_message not in content, f"Expected long message to be replaced with summary in tool response {i}"
+    
+    # Verify most recent node (node3) uses full message
+    last_content = str(tool_responses[-1]["content"])
+    assert long_message in last_content, "Expected full message for most recent node"
+    assert summary not in last_content, "Did not expect summary for most recent node"
+    
+    # Test 2: Generate messages for node5 (terminal) - node5 should be the most recent and show full message
+    messages = await generator.generate_messages(node5, workspace)
+    messages = list(messages)
+    
+    # Count tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    assert len(tool_responses) == 5, "Expected 5 tool responses for node5 (one for each node in trajectory)"
+    
+    # Verify non-most-recent nodes use summaries
+    for i in range(len(tool_responses) - 1):
+        content = str(tool_responses[i]["content"])
+        assert summary in content, f"Expected summary in tool response {i}"
+        assert long_message not in content, f"Expected long message to be replaced with summary in tool response {i}"
+    
+    # Verify most recent node (node5) uses full message
+    last_content = str(tool_responses[-1]["content"])
+    assert long_message in last_content, "Expected full message for most recent node"
+    assert summary not in last_content, "Did not expect summary for most recent node"
+    
+    # Test 3: Verify that when message is shorter than max_tokens_per_observation, full message is used
+    # Update node2 to have a short message
+    node2.action_steps[0].observation.message = short_message
+    
+    # Generate messages for node3
+    messages = await generator.generate_messages(node3, workspace)
+    messages = list(messages)
+    
+    # Find the tool response for node2
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    assert len(tool_responses) >= 2, "Expected at least 2 tool responses"
+    
+    # Node2's message should be shown in full since it's short
+    node2_response_content = str(tool_responses[1]["content"])  # Second tool response should be for node2
+    assert short_message in node2_response_content, "Expected short message to be shown in full for node2"
+    assert summary not in node2_response_content, "Did not expect summary for node2 with short message"
+    
+    # Test 4: Verify that multiple action steps in the most recent node all show full messages
+    # Add a second action step to node4 with a long message
+    second_action = TestActionArguments()
+    node4.action_steps.append(
+        ActionStep(
+            action=second_action, 
+            observation=Observation(message=long_message, summary=summary)
+        )
+    )
+    
+    # Generate messages for node4 (now with multiple action steps)
+    messages = await generator.generate_messages(node4, workspace)
+    messages = list(messages)
+    
+    # Get tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    
+    # The last two tool responses should be from node4 and both should show the full message
+    node4_responses = tool_responses[-2:]  # Last two responses
+    assert len(node4_responses) == 2, "Expected 2 tool responses for node4"
+    
+    for i, response in enumerate(node4_responses):
+        content = str(response["content"])
+        assert long_message in content, f"Expected full message in action step {i} of the most recent node"
+        assert summary not in content, f"Did not expect summary in action step {i} of the most recent node"
+    
+    # Test 5: Verify mixed message lengths in the most recent node
+    # Reset node4's action steps
+    node4.action_steps = [node4.action_steps[0]]  # Keep only the first action step
+    
+    # Add two action steps to node4: one short, one long
+    node4.action_steps[0].observation.message = short_message  # First action: short message
+    node4.action_steps[0].observation.summary = summary
+    
+    # Add second action with long message
+    node4.action_steps.append(
+        ActionStep(
+            action=TestActionArguments(), 
+            observation=Observation(message=long_message, summary=summary)
+        )
+    )
+    
+    # Generate messages for node4 with mixed message lengths
+    messages = await generator.generate_messages(node4, workspace)
+    messages = list(messages)
+    
+    # Get tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    
+    # The last two tool responses should be from node4
+    node4_responses = tool_responses[-2:]
+    assert len(node4_responses) == 2, "Expected 2 tool responses for node4"
+    
+    # First response should contain the short message
+    content1 = str(node4_responses[0]["content"])
+    assert short_message in content1, "Expected short message in first action step of most recent node"
+    assert summary not in content1, "Did not expect summary in first action step of most recent node"
+    
+    # Second response should contain the long message (not summary)
+    content2 = str(node4_responses[1]["content"])
+    assert long_message in content2, "Expected long message in second action step of most recent node"
+    assert summary not in content2, "Did not expect summary in second action step of most recent node"
+    
+    # Test 6: Verify that the last executed node (not the last node in trajectory) shows full messages
+    # Setup: Add actions to node4, but not to node5 (simulating that node5 hasn't executed yet)
+    node4.action_steps = [
+        ActionStep(
+            action=TestActionArguments(), 
+            observation=Observation(message=long_message, summary=summary)
+        )
+    ]
+    node5.action_steps = []  # No action steps for the last node
+    
+    # Generate messages for node5 (which doesn't have action steps)
+    messages = await generator.generate_messages(node5, workspace)
+    messages = list(messages)
+    
+    # Get tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    
+    # node4 should be the last executed node, so it should show full messages
+    # Get the last tool response (should be from node4)
+    if tool_responses:
+        last_executed_content = str(tool_responses[-1]["content"])
+        assert long_message in last_executed_content, "Expected full message for last executed node (node4)"
+        assert summary not in last_executed_content, "Did not expect summary for last executed node (node4)"
+    
+    # Test 7: Verify root node behavior
+    # Create a simple trajectory with only root and node1
+    root_only = Node(node_id=100, file_context=FileContext(repo=repo))
+    root_only.message = "Root only task"
+    
+    # Add action steps to root
+    root_action = TestActionArguments()
+    root_only.action_steps = [
+        ActionStep(
+            action=root_action, 
+            observation=Observation(message=long_message, summary=summary)
+        )
+    ]
+    
+    # Node1 without action steps (not executed yet)
+    node1_only = Node(node_id=101)
+    node1_only.file_context = FileContext(repo=repo)
+    root_only.add_child(node1_only)
+    
+    # Generate messages for node1
+    messages = await generator.generate_messages(node1_only, workspace)
+    messages = list(messages)
+    
+    # Get tool responses
+    tool_responses = [msg for msg in messages if isinstance(msg, dict) and msg.get("role") == "tool"]
+    
+    # Root should be the last (and only) executed node, so it should show full messages
+    if tool_responses:
+        root_content = str(tool_responses[0]["content"])
+        assert long_message in root_content, "Expected full message for root node as the only executed node"
+        assert summary not in root_content, "Did not expect summary for root node as the only executed node"

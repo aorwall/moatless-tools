@@ -282,8 +282,8 @@ class Node(BaseModel):
 
     def is_executed(self) -> bool:
         """Determine if the node is executed"""
-        if not self.parent:
-            # Consider root node as executed
+        if not self.parent and not self.action_steps:
+            # Consider root node without action steps as executed
             return True
 
         return bool(self.action_steps and self.action_steps[-1].is_executed())
@@ -481,8 +481,8 @@ class Node(BaseModel):
         else:
             raise ValueError("Cannot clone root node")
 
-        node_id = self.get_all_nodes()[-1].node_id
-        new_node.node_id = node_id + 1
+        node_id = len(self.get_all_nodes())
+        new_node.node_id = node_id
         return new_node
 
     def model_dump(self, **kwargs) -> dict[str, Any]:

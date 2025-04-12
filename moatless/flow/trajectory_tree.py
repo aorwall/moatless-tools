@@ -150,7 +150,7 @@ def get_action_detail(action: ActionArguments) -> str:
         return f'("{action.thought[:20]}...")' if len(action.thought) > 20 else f'("{action.thought}")'
 
     if isinstance(action, SemanticSearchArgs):
-        return f'("{action.query[:40]}...")' if len(action.query) > 40 else f'("{action.query}")'
+        return f'("{action.query[:100]}...")' if len(action.query) > 100 else f'("{action.query}")'
 
     if isinstance(action, RunTestsArgs):
         return f"({action.test_files})"
@@ -164,7 +164,7 @@ def get_action_detail(action: ActionArguments) -> str:
     # return first property that is set
     for key, value in action.model_dump().items():
         if value and key != "thought":
-            return f"({key}={value[:40]}...)" if len(value) > 40 else f"({key}={value})"
+            return f"({key}={value[:100]}...)" if len(value) > 100 else f"({key}={value})"
     return ""
 
 
@@ -267,8 +267,8 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         thought_item = ThoughtTreeItem(
             id=f"{node_item.id}-thought",
             label="Thought",
-            detail=f'("{node.thoughts.text[:100]}...")'
-            if len(node.thoughts.text) > 100
+            detail=f'("{node.thoughts.text[:200]}...")'
+            if len(node.thoughts.text) > 200
             else f'("{node.thoughts.text}")',
             node_id=node_item.node_id,
         )
@@ -281,8 +281,8 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
             thought_item = ThoughtTreeItem(
                 id=f"{node_item.id}-thought",
                 label="Thought",
-                detail=f'("{step.action.thought[:100]}...")'
-                if len(step.action.thought) > 100
+                detail=f'("{step.action.thought[:200]}...")'
+                if len(step.action.thought) > 200
                 else f'("{step.action.thought}")',
                 node_id=node_item.node_id,
             )
@@ -307,7 +307,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
                 completion=step.completion,
                 parent_id=action_id,
                 node_id=node_item.node_id,
-                item_id=f"action-{i}"
+                item_id=f"action_{i}"
             )
             action_item.children.append(action_completion)
 

@@ -17,12 +17,19 @@ class AgenticLoop(AgenticFlow):
     async def _run(self, message: str | None = None, node_id: int | None = None) -> tuple[Node, str | None]:
         """Run the agentic loop until completion or max iterations."""
 
-        current_node = self.root.get_all_nodes()[-1]
+        if node_id:
+            current_node = self.get_node_by_id(node_id)
+            if not current_node:
+                raise ValueError(f"Node with ID {node_id} not found")
+        else:
+            current_node = self.root.get_last_node()
+    
         if message:  # Assume to continue with a new node if a message is provided
             current_node = self._create_next_node(current_node)
             current_node.user_message = message
 
-        while not (finish_reason := self.is_finished()):
+        finish_reason = None
+        while node_id or not (finish_reason := self.is_finished()):
             total_cost = self.total_usage().completion_cost
             iteration = len(self.root.get_all_nodes())
 
@@ -45,7 +52,7 @@ class AgenticLoop(AgenticFlow):
 
                 current_node_id.set(current_node.node_id)
                 await self.agent.run(current_node)
-                self.log(logger.info, generate_ascii_tree(self.root, current_node))
+                self.log(logger.debug, generate_ascii_tree(self.root, current_node))
             except RejectError as e:
                 self.log(logger.error, f"Rejection error: {e}")
             except Exception as e:
@@ -53,6 +60,10 @@ class AgenticLoop(AgenticFlow):
                 raise e
             finally:
                 pass
+            
+            if node_id:
+                self.log(logger.info, f"Node{current_node.node_id} finished. Returning.")
+                break
 
         logger.info(
             f"Loop finished with {len(self.root.get_all_nodes())} iterations and {self.total_usage().completion_cost} cost"

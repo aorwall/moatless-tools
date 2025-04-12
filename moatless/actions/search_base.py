@@ -97,6 +97,14 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         10,
         description="The maximum number of search hits to display.",
     )
+    add_extra_context: bool = Field(
+        False,
+        description="Whether to add extra context, like imports, to the search results.",
+    )
+    use_identifier: bool = Field(
+        True,
+        description="Whether to use an LLM to identify the relevant code sections.",
+    )
 
     async def initialize(self, workspace: Workspace):
         if not workspace.code_index:
@@ -164,6 +172,43 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         if search_result_context.is_empty():
             properties["fail_reason"] = "no_search_hits"
             return Observation.create(message="No search results found", properties=properties)
+        
+        if not self.use_identifier:
+            response_str = ""
+            matches = 0
+            for file in search_result_context.files:
+                response_str += f"\nFile: {file.file_path}\n"
+                for span in file.spans:
+                    line_content = None
+                    
+                    if span.start_line:
+                        start_line = span.start_line
+                        end_line = span.end_line
+                    elif file.module:
+                        block_span = file.module.find_span_by_id(span.span_id)
+                        if block_span:
+                            start_line = block_span.start_line
+                            end_line = block_span.end_line
+                            code_block = block_span.initiating_block
+                            if code_block:
+                                line_content = code_block.content
+                                
+                    if start_line and not line_content:
+                        line_content = file.content.split("\n")[start_line - 1]
+                    
+                    if line_content:
+                        response_str += f"Line: {start_line} - {end_line} : {line_content}\n"
+                        matches += 1
+                    elif start_line:
+                        response_str += f"Line: {start_line} - {end_line}\n"
+                        matches += 1
+                    
+            if matches > 0:
+                response_str = f"\nFound {matches} matches in {len(search_result_context.files)} files.\n{response_str}"
+            else:
+                response_str = f"\nFound no matches in {len(search_result_context.files)} files."
+
+            return Observation.create(message=response_str, properties=properties)
 
         context_size = search_result_context.context_size()
         properties["search_tokens"] = context_size
@@ -250,7 +295,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         for hit in search_result.hits:
             span_count += len(hit.spans)
             for span in hit.spans:
-                search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=True)
+                search_result_context.add_span_to_context(hit.file_path, span.span_id, add_extra=self.add_extra_context)
 
         return search_result_context, alternative_suggestion
 

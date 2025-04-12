@@ -63,6 +63,8 @@ class Action(MoatlessComponent, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     is_terminal: bool = Field(default=False, description="Whether the action will finish the flow")
+    
+    hidden: bool = Field(default=False, description="Whether the action should be hidden from the AI Agent")
 
     _workspace: Workspace | None = PrivateAttr(default=None)
 
@@ -220,36 +222,13 @@ class Action(MoatlessComponent, ABC):
             raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
         return action_class(**kwargs)
 
-    @classmethod
-    def get_action_schema(cls) -> ActionSchema:
-        """Generate an ActionSchema for this action."""
-        schema = cls.model_json_schema()
-        properties = {}
-        for prop_name, prop_data in schema.get("properties", {}).items():
-            properties[prop_name] = ActionProperty(
-                type=prop_data.get("type", "string"),
-                title=prop_data.get("title", prop_name),
-                description=prop_data.get("description", ""),
-                default=prop_data.get("default"),
-            )
-
-        description = schema.get("description", "")
-        if not description:
-            description = cls.args_schema.model_json_schema().get("description", "")
-
-        return ActionSchema(
-            title=cls.__name__,
-            description=description,
-            properties=properties,
-            action_class=cls.get_class_name(),
-        )
 
     @classmethod
-    def get_available_actions(cls) -> list[ActionSchema]:
+    def get_available_actions(cls) -> list[type["Action"]]:
         """Get all available actions with their schema."""
         cls._initialize_components()
 
-        return [action_class.get_action_schema() for action_class in cls._get_components().values()]
+        return [action_class for action_class in cls._get_components().values()]
 
     @classmethod
     def get_class_name(cls) -> str:

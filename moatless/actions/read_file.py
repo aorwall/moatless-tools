@@ -16,11 +16,11 @@ class ReadFileArgs(ActionArguments):
     This action allows you to read the contents of a file, either in its entirety or a specific range of lines.
     It's useful for examining code, configuration files, or any text file in the repository.
     
-    The action will return at most 100 lines of content at a time. If more lines are requested,
+    The action will return at most 200 lines of content at a time. If more lines are requested,
     the content will be truncated and a note will be added indicating the truncation.
     
     Example usage:
-    - Read entire file (first 100 lines): {"file_path": "src/main.py"}
+    - Read entire file (first 200 lines): {"file_path": "src/main.py"}
     - Read specific lines: {"file_path": "src/main.py", "start_line": 10, "end_line": 20}
     - Read from line to end: {"file_path": "src/main.py", "start_line": 50}
     """
@@ -79,7 +79,11 @@ class ReadFile(Action):
     """
     
     args_schema = ReadFileArgs
-    MAX_LINES: ClassVar[int] = 100
+    
+    max_lines: int = Field(
+        100,
+        description="The maximum number of lines to read from the file."
+    )
 
     async def execute(self, args: ReadFileArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
@@ -103,13 +107,13 @@ class ReadFile(Action):
 
         # If no line range specified, return the first MAX_LINES
         if args.start_line is None and args.end_line is None:
-            selected_lines = lines[:self.MAX_LINES]
+            selected_lines = lines[:self.max_lines]
             content = "\n".join(selected_lines)
             
             file_context.add_line_span_to_context(
                 args.file_path, 
                 1,  # 1-based indexing for start_line
-                min(len(lines), self.MAX_LINES)  # Don't exceed file length
+                min(len(lines), self.max_lines)  # Don't exceed file length
             )
                 
             return Observation.create(
@@ -128,7 +132,7 @@ class ReadFile(Action):
         end = args.end_line if args.end_line else len(lines)  # end_line is inclusive
         
         # Calculate the actual end line, ensuring we don't exceed MAX_LINES
-        actual_end = min(end, start + self.MAX_LINES)
+        actual_end = min(end, start + self.max_lines)
         selected_lines = lines[start:actual_end]
 
         # Add to file context if requested
@@ -144,7 +148,7 @@ class ReadFile(Action):
         # If we had to truncate the selection, add a note
         truncation_note = ""
         if actual_end < end:
-            truncation_note = f"\n\n... (truncated at {self.MAX_LINES} lines)"
+            truncation_note = f"\n\n... (truncated at {self.max_lines} lines)"
 
         line_info = f"lines {args.start_line or 1}-{actual_end}" if args.start_line or args.end_line else ""
         

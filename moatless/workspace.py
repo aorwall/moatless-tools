@@ -1,5 +1,6 @@
 from typing import Any
 
+from moatless.storage.base import BaseStorage
 from pydantic import BaseModel, Field, PrivateAttr
 
 from moatless.artifacts.artifact import (
@@ -17,6 +18,7 @@ from moatless.runtime.runtime import RuntimeEnvironment
 class Workspace(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
     artifact_handlers: dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
+    shadow_mode: bool = Field(default=True, description="If true, the workspace will not be persisted")
 
     _repository: Repository | None = PrivateAttr(default=None)
     _code_index: CodeIndex | None = PrivateAttr(default=None)
@@ -26,6 +28,7 @@ class Workspace(BaseModel):
     def __init__(
         self,
         artifact_handlers: list[ArtifactHandler] | None = None,
+        storage: BaseStorage | None = None,
         repository: Repository | None = None,
         code_index: CodeIndex | None = None,
         runtime: RuntimeEnvironment | None = None,
@@ -35,7 +38,7 @@ class Workspace(BaseModel):
         super().__init__(**data)
 
         if not artifact_handlers:
-            artifact_handlers = ArtifactHandler.initiate_handlers()
+            artifact_handlers = ArtifactHandler.initiate_handlers(storage=storage)
             self.artifact_handlers = {handler.type: handler for handler in artifact_handlers}
 
         self._environment = environment

@@ -184,12 +184,14 @@ def test_get_test_failure_details_token_limit():
         TestResult(
             test_name="test1",
             status=TestStatus.FAILED,
-            failure_output="First error message"
+            failure_output="First error message",
+            file_path="tests/test_example.py"
         ),
         TestResult(
             test_name="test2",
             status=TestStatus.ERROR,
-            failure_output="Second error message"
+            failure_output="Second error message",
+            file_path="tests/test_example.py"
         )
     ]
     
@@ -200,7 +202,7 @@ def test_get_test_failure_details_token_limit():
             max_tokens=500  # Less than one message worth of tokens
         )
         
-        # With the current implementation, all messages are included
-        # because the break is inside the inner loop
+        # With token limiting, only the first message should be included
+        # since it would already exceed the token limit
         assert "First error message" in details
-        assert "Second error message" in details 
+        assert "Second error message" not in details 
