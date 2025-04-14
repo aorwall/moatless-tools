@@ -79,7 +79,7 @@ class LocalBashEnvironment(BaseEnvironment):
             if error.strip():
                 logger.warning("Command stderr:")
                 logger.warning(error[200:])
-                
+
                 output += error
 
             if return_code != 0:
@@ -119,7 +119,7 @@ class LocalBashEnvironment(BaseEnvironment):
                 )
 
             return stdout
-    
+
     async def read_file(self, path: str) -> str:
         """
         Read a file from the local filesystem.
@@ -137,23 +137,21 @@ class LocalBashEnvironment(BaseEnvironment):
         try:
             # Build full path if cwd is set
             full_path = os.path.join(self.cwd, path) if self.cwd else path
-            
+
             logger.info(f"Reading file: {full_path}")
-            
+
             # Use aiofiles to read the file asynchronously
-            async with aiofiles.open(full_path, mode='r') as file:
+            async with aiofiles.open(full_path, mode="r") as file:
                 content = await file.read()
-                
+
             return content
         except FileNotFoundError:
             logger.error(f"File not found: {path}")
             raise
         except Exception as e:
             logger.error(f"Error reading file {path}: {str(e)}")
-            raise EnvironmentExecutionError(
-                f"Failed to read file: {path}", -1, str(e)
-            )
-        
+            raise EnvironmentExecutionError(f"Failed to read file: {path}", -1, str(e))
+
     async def write_file(self, path: str, content: str) -> None:
         """
         Write content to a file in the local filesystem.
@@ -168,18 +166,16 @@ class LocalBashEnvironment(BaseEnvironment):
         try:
             # Build full path if cwd is set
             full_path = os.path.join(self.cwd, path) if self.cwd else path
-            
+
             logger.info(f"Writing to file: {full_path}")
-            
+
             # Ensure the directory exists
             os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            
+
             # Use aiofiles to write to the file asynchronously
-            async with aiofiles.open(full_path, mode='w') as file:
+            async with aiofiles.open(full_path, mode="w") as file:
                 await file.write(content)
-                
+
         except Exception as e:
             logger.error(f"Error writing to file {path}: {str(e)}")
-            raise EnvironmentExecutionError(
-                f"Failed to write to file: {path}", -1, str(e)
-            )
+            raise EnvironmentExecutionError(f"Failed to write to file: {path}", -1, str(e))

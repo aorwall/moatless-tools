@@ -1094,45 +1094,45 @@ class KubernetesRunner(BaseRunner):
         # Sanitize and lowercase both IDs
         sanitized_project = project_id.lower()
         sanitized_project = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_project)
-        
+
         sanitized_traj = trajectory_id.lower()
         sanitized_traj = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_traj)
-        
+
         # Create a hash for uniqueness
         traj_hash = str(hash(trajectory_id) % 10000000)  # 7 digits max
-        
+
         # Prefix for job names
         prefix = "run-"
-        
+
         # Reserve space for the hash plus hyphen
         hash_part = f"-{traj_hash}"  # 8 chars (including hyphen)
-        
+
         # Calculate available space
         max_total_length = 63  # Maximum Kubernetes name length
         available_length = max_total_length - len(prefix) - len(hash_part)
-        
+
         # Allocate space for trajectory_id (up to 24 chars)
         max_traj_length = min(24, available_length // 3)  # At most 24 chars for trajectory
-        
+
         # Remaining space goes to project_id
         max_project_length = available_length - max_traj_length - 1  # -1 for hyphen between project and trajectory
-        
+
         # Truncate IDs if needed
         truncated_project = sanitized_project[:max_project_length]
         truncated_traj = sanitized_traj[-max_traj_length:] if len(sanitized_traj) > max_traj_length else sanitized_traj
-        
+
         # Construct job ID
         job_id = f"{prefix}{truncated_project}-{truncated_traj}{hash_part}"
-        
+
         # Ensure it starts and ends with alphanumeric character
         if not job_id[0].isalnum():
             job_id = f"x{job_id[1:]}"
         if not job_id[-1].isalnum():
             job_id = f"{job_id[:-1]}x"
-        
+
         # Maximum length for Kubernetes resource names
         job_id = job_id[:63]
-        
+
         return job_id
 
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
@@ -1615,7 +1615,7 @@ class KubernetesRunner(BaseRunner):
 
         labels = create_labels(project_id, trajectory_id, func_name)
         annotations = create_annotations(project_id, trajectory_id, func_name)
-        
+
         # Add annotations to prevent eviction by Karpenter
         annotations["karpenter.sh/do-not-evict"] = "true"
         annotations["karpenter.sh/do-not-disrupt"] = "true"

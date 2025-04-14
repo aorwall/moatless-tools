@@ -57,7 +57,7 @@ class FileArtifact(Artifact):
             # For images, optimize before sending
             try:
                 from PIL import Image
-                
+
                 image = Image.open(io.BytesIO(content))
                 # Convert RGBA to RGB if needed
                 if image.mode in ("RGBA", "LA"):
@@ -259,7 +259,7 @@ class FileArtifactHandler(JsonArtifactHandler[FileArtifact]):
 
         try:
             import pymupdf as fitz
-        
+
             with fitz.open(stream=file_content, filetype="pdf") as doc:
                 # Add metadata if available
                 metadata = doc.metadata

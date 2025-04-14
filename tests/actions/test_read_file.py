@@ -17,11 +17,11 @@ def temp_repo():
         test_file_path = os.path.join(temp_dir, "test.txt")
         with open(test_file_path, "w") as f:
             f.write("\n".join([f"line{i}" for i in range(1, 150)]))
-        
+
         # Create a directory
         dir_path = os.path.join(temp_dir, "directory")
         os.makedirs(dir_path)
-        
+
         yield temp_dir
 
 
@@ -42,7 +42,7 @@ def read_file_action(file_repository):
     """Create a ReadFile action with the real repository."""
     action = ReadFile()
     # Use patch to set the _repository property
-    with patch.object(ReadFile, '_repository', new_callable=PropertyMock) as mock_repo:
+    with patch.object(ReadFile, "_repository", new_callable=PropertyMock) as mock_repo:
         mock_repo.return_value = file_repository
         yield action
 
@@ -50,7 +50,9 @@ def read_file_action(file_repository):
 @pytest.mark.asyncio
 async def test_read_entire_file(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="test.txt", thoughts="Reading entire file", start_line=None, end_line=None, add_to_context=True)
+    args = ReadFileArgs(
+        file_path="test.txt", thoughts="Reading entire file", start_line=None, end_line=None, add_to_context=True
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -63,7 +65,7 @@ async def test_read_entire_file(read_file_action, file_context, temp_repo):
     assert "line101" not in result.message  # Should be truncated at 100 lines
     assert result.summary is not None
     assert "Read first 100 lines" in result.summary
-    
+
     # Verify file was added to context
     context_file = file_context.get_file("test.txt")
     assert context_file is not None
@@ -72,7 +74,9 @@ async def test_read_entire_file(read_file_action, file_context, temp_repo):
 @pytest.mark.asyncio
 async def test_read_specific_lines(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="test.txt", start_line=10, end_line=20, thoughts="Reading specific lines", add_to_context=True)
+    args = ReadFileArgs(
+        file_path="test.txt", start_line=10, end_line=20, thoughts="Reading specific lines", add_to_context=True
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -85,7 +89,7 @@ async def test_read_specific_lines(read_file_action, file_context, temp_repo):
     assert "line21" not in result.message
     assert result.summary is not None
     assert "Read lines 10-20" in result.summary
-    
+
     # Verify lines were added to context
     context_file = file_context.get_file("test.txt")
     assert context_file is not None
@@ -94,7 +98,9 @@ async def test_read_specific_lines(read_file_action, file_context, temp_repo):
 @pytest.mark.asyncio
 async def test_read_with_truncation(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="test.txt", start_line=1, end_line=150, thoughts="Reading with truncation", add_to_context=True)
+    args = ReadFileArgs(
+        file_path="test.txt", start_line=1, end_line=150, thoughts="Reading with truncation", add_to_context=True
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -107,7 +113,7 @@ async def test_read_with_truncation(read_file_action, file_context, temp_repo):
     assert "truncated at 100 lines" in result.message
     assert result.summary is not None
     assert "Read lines 1-100" in result.summary
-    
+
     # Verify lines were added to context
     context_file = file_context.get_file("test.txt")
     assert context_file is not None
@@ -116,8 +122,13 @@ async def test_read_with_truncation(read_file_action, file_context, temp_repo):
 @pytest.mark.asyncio
 async def test_without_adding_to_context(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="test.txt", thoughts="Reading without adding to context", 
-                       start_line=1, end_line=10, add_to_context=False)
+    args = ReadFileArgs(
+        file_path="test.txt",
+        thoughts="Reading without adding to context",
+        start_line=1,
+        end_line=10,
+        add_to_context=False,
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -126,7 +137,7 @@ async def test_without_adding_to_context(read_file_action, file_context, temp_re
     assert "```test.txt lines 1-10" in result.message
     assert "line1" in result.message
     assert "line10" in result.message
-    
+
     # No need to clear the context, just verify file exists but with no spans
     # FileContext doesn't have clear() method, and we can't easily check if spans were added
 
@@ -134,7 +145,13 @@ async def test_without_adding_to_context(read_file_action, file_context, temp_re
 @pytest.mark.asyncio
 async def test_file_not_found(read_file_action, file_context):
     # Execute
-    args = ReadFileArgs(file_path="nonexistent.txt", thoughts="Reading nonexistent file", start_line=None, end_line=None, add_to_context=True)
+    args = ReadFileArgs(
+        file_path="nonexistent.txt",
+        thoughts="Reading nonexistent file",
+        start_line=None,
+        end_line=None,
+        add_to_context=True,
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -143,7 +160,7 @@ async def test_file_not_found(read_file_action, file_context):
     assert "not found" in result.message
     assert result.properties is not None
     assert result.properties["fail_reason"] == "file_not_found"
-    
+
     # Verify context wasn't modified
     context_file = file_context.get_file("nonexistent.txt")
     assert context_file is None
@@ -152,7 +169,9 @@ async def test_file_not_found(read_file_action, file_context):
 @pytest.mark.asyncio
 async def test_directory_path(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="directory", thoughts="Reading directory", start_line=None, end_line=None, add_to_context=True)
+    args = ReadFileArgs(
+        file_path="directory", thoughts="Reading directory", start_line=None, end_line=None, add_to_context=True
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -167,7 +186,13 @@ async def test_directory_path(read_file_action, file_context, temp_repo):
 @pytest.mark.asyncio
 async def test_invalid_line_number(read_file_action, file_context, temp_repo):
     # Execute
-    args = ReadFileArgs(file_path="test.txt", start_line=500, end_line=None, thoughts="Reading with invalid line number", add_to_context=True)
+    args = ReadFileArgs(
+        file_path="test.txt",
+        start_line=500,
+        end_line=None,
+        thoughts="Reading with invalid line number",
+        add_to_context=True,
+    )
     result = await read_file_action.execute(args, file_context)
 
     # Assert
@@ -181,8 +206,14 @@ async def test_invalid_line_number(read_file_action, file_context, temp_repo):
 @pytest.mark.asyncio
 async def test_missing_file_context(read_file_action):
     # Setup and Execute
-    args = ReadFileArgs(file_path="test.txt", thoughts="Reading without file context", start_line=None, end_line=None, add_to_context=True)
-    
+    args = ReadFileArgs(
+        file_path="test.txt",
+        thoughts="Reading without file context",
+        start_line=None,
+        end_line=None,
+        add_to_context=True,
+    )
+
     # Assert
     with pytest.raises(ValueError, match="File context must be provided"):
-        await read_file_action.execute(args, None) 
+        await read_file_action.execute(args, None)

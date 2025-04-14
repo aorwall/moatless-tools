@@ -82,7 +82,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         retry_messages = []
         retry = False
-        
+
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
 

@@ -77,12 +77,12 @@ async def test_get_log_path_with_node_and_action(log_handler):
 async def test_write_to_file_async(log_handler):
     test_data = {"test": "data"}
     await log_handler._write_to_file_async(test_data)
-    
+
     # Verify data was written
     trajectory_path = log_handler._storage.get_trajectory_path()
     files = await log_handler._storage.list_paths(f"{trajectory_path}/completions")
     assert len(files) == 1
-    
+
     # Read back the data
     data = await log_handler._storage.read(files[0])
     assert data == test_data
@@ -92,26 +92,23 @@ async def test_write_to_file_async(log_handler):
 async def test_log_success_event(log_handler):
     start_time = datetime.now()
     end_time = datetime.now()
-    
+
     test_response = {"choices": [{"message": {"content": "test"}}]}
     test_kwargs = {
         "response": json.dumps(test_response),
         "input": [{"role": "user", "content": "test message"}],
-        "optional_params": {"temperature": 0.7}
+        "optional_params": {"temperature": 0.7},
     }
-    
+
     await log_handler.async_log_success_event(
-        kwargs=test_kwargs,
-        response_obj={"response": "test"},
-        start_time=start_time,
-        end_time=end_time
+        kwargs=test_kwargs, response_obj={"response": "test"}, start_time=start_time, end_time=end_time
     )
-    
+
     # Verify log was written
     trajectory_path = log_handler._storage.get_trajectory_path()
     files = await log_handler._storage.list_paths(f"{trajectory_path}/completions")
     assert len(files) == 1
-    
+
     # Read back the log
     data = await log_handler._storage.read(files[0])
     assert "start_time" in data
@@ -135,11 +132,11 @@ async def test_handle_kwargs_item_with_nested_structures(log_handler):
     test_data = {
         "model": TestModel(name="test", value=42),
         "list": [TestModel(name="item1", value=1), {"key": "value"}],
-        "nested": {"model": TestModel(name="nested", value=100)}
+        "nested": {"model": TestModel(name="nested", value=100)},
     }
-    
+
     result = log_handler._handle_kwargs_item(test_data)
-    
+
     assert isinstance(result, dict)
     assert isinstance(result["model"], dict)
     assert result["model"]["name"] == "test"
@@ -156,18 +153,18 @@ async def test_parse_response(log_handler):
     result = log_handler.parse_response(json_str)
     assert isinstance(result, dict)
     assert result["key"] == "value"
-    
+
     # Test dict
     dict_input = {"key": "value"}
     result = log_handler.parse_response(dict_input)
     assert isinstance(result, dict)
     assert result["key"] == "value"
-    
+
     # Test None
     result = log_handler.parse_response(None)
     assert result is None
-    
+
     # Test invalid JSON string
     result = log_handler.parse_response("invalid json")
     assert isinstance(result, str)
-    assert result == "invalid json" 
+    assert result == "invalid json"

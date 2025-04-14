@@ -81,7 +81,7 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
 
         if result.failure_output:
             result.failure_output = result.failure_output.replace("/testbed/", "")
-            
+
         if not result.file_path:
             result.file_path = file_path
 

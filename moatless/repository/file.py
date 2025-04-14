@@ -316,10 +316,10 @@ class FileRepository(Repository):
         include_arg = []
 
         try:
-            # Handle file pattern 
+            # Handle file pattern
             if file_pattern:
                 # Directory search - treat differently
-                if file_pattern.endswith('/') or os.path.isdir(os.path.join(self.repo_path, file_pattern)):
+                if file_pattern.endswith("/") or os.path.isdir(os.path.join(self.repo_path, file_pattern)):
                     search_path = file_pattern
                     # When searching in a directory, include all common code files by default
                     include_arg = ["--include", "*.py"]
@@ -331,7 +331,7 @@ class FileRepository(Repository):
                         matches_files = await self.matching_files(file_pattern)
                         if not matches_files:
                             return []
-                        
+
                         # Process each matching file separately
                         all_matches = []
                         for file_path in matches_files:
@@ -346,7 +346,7 @@ class FileRepository(Repository):
                     matches_files = await self.matching_files(file_pattern)
                     if not matches_files:
                         return []
-                    
+
                     # Process each matching file separately
                     all_matches = []
                     for file_path in matches_files:
@@ -479,25 +479,25 @@ class FileRepository(Repository):
                 if not matching_files:
                     logger.info(f"No files matched pattern: {include_pattern}")
                     return []
-                
+
                 logger.info(f"Found {len(matching_files)} files matching pattern: {include_pattern}")
-                
+
                 # Process files in batches rather than one by one for better efficiency
                 # This is much faster than running grep for each file individually
                 batch_size = 20  # Adjust based on typical file counts
                 all_matches = []
-                
+
                 for i in range(0, len(matching_files), batch_size):
-                    batch = matching_files[i:i+batch_size]
+                    batch = matching_files[i : i + batch_size]
                     # Search all files in this batch
                     batch_results = await self._run_grep_batch(regex_pattern, batch, max_results)
                     all_matches.extend(batch_results)
-                    
+
                     # If we have enough results, stop processing batches
                     if len(all_matches) >= max_results:
                         logger.info(f"Found enough matches ({len(all_matches)}), stopping batch processing")
                         break
-                
+
                 # Sort by modification time and limit results
                 all_matches.sort(key=lambda x: x.get("mod_time", 0), reverse=True)
                 return all_matches[:max_results]
@@ -505,9 +505,9 @@ class FileRepository(Repository):
                 # For simple include patterns like *.py, let grep handle it directly
                 include_arg = []
                 search_path = "."
-                
+
                 # Directory search - treat differently
-                if include_pattern.endswith('/') or os.path.isdir(os.path.join(self.repo_path, include_pattern)):
+                if include_pattern.endswith("/") or os.path.isdir(os.path.join(self.repo_path, include_pattern)):
                     search_path = include_pattern
                     # When searching in a directory, include all common code files by default
                     include_arg = ["--include", "*.py"]
@@ -517,7 +517,7 @@ class FileRepository(Repository):
                     matching_files = await self.matching_files(include_pattern)
                     if not matching_files:
                         return []
-                    
+
                     return await self._run_grep_batch(regex_pattern, matching_files, max_results)
                 elif "/" in include_pattern:
                     # For patterns with exact paths but no wildcards
@@ -529,7 +529,7 @@ class FileRepository(Repository):
                 else:
                     # Simple pattern like "*.py"
                     include_arg = ["--include", include_pattern]
-                
+
                 # Run grep with appropriate include pattern
                 return await self._run_grep_command(regex_pattern, search_path, max_results, include_arg)
             else:
@@ -545,14 +545,14 @@ class FileRepository(Repository):
         """Search a batch of files with a single grep command"""
         if not file_paths:
             return []
-            
+
         matches = []
-        
+
         # Build the grep command - don't use recursive since we're providing specific files
         cmd = ["grep", "-n", "--color=never", "-E", regex_pattern] + file_paths
         logger.info(f"Executing batch grep command with {len(file_paths)} files")
         logger.debug(f"Command: {' '.join(cmd)}")
-        
+
         process = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=self.repo_path,
@@ -585,13 +585,13 @@ class FileRepository(Repository):
                 file_path = parts[0]
                 if file_path.startswith("./"):
                     file_path = file_path[2:]
-                    
+
                 try:
                     line_num = int(parts[1])
                 except ValueError:
                     logger.info(f"Invalid line number in '{line}': {parts[1]}")
                     continue
-                    
+
                 content = parts[2]
 
                 # Get file modification time
@@ -626,11 +626,11 @@ class FileRepository(Repository):
                         "mod_time": file_match["mod_time"],
                     }
                 )
-                
+
                 if len(matches) >= max_results:
                     logger.info(f"Reached max results ({max_results}), returning early")
                     return matches
-                
+
         return matches
 
     async def _run_grep_command(
@@ -639,19 +639,19 @@ class FileRepository(Repository):
         """Helper method to run grep command and parse results"""
         if include_arg is None:
             include_arg = []
-            
+
         matches = []
-        
+
         # Determine if we're searching a directory or single file
         is_dir_search = os.path.isdir(os.path.join(self.repo_path, search_path)) or search_path == "."
-        
+
         # Build the grep command with proper regex support
         # Only use recursive flag (-r) when searching directories
         cmd_flags = ["-n"]
         if is_dir_search:
             cmd_flags.append("-r")
         cmd_flags.extend(["--color=never", "-E"])
-        
+
         cmd = ["grep"] + cmd_flags + include_arg + [regex_pattern, search_path]
         logger.info(f"Executing grep command: {' '.join(cmd)}")
         logger.info(f"Search directory: {self.repo_path}")
@@ -697,7 +697,7 @@ class FileRepository(Repository):
                     if len(parts) < 2:
                         logger.info(f"Skipping malformed line: {line}")
                         continue
-                    
+
                     file_path = search_path
                     line_num = int(parts[0])
                     content = parts[1]
@@ -734,10 +734,10 @@ class FileRepository(Repository):
                         "mod_time": file_match["mod_time"],
                     }
                 )
-                
+
                 if len(matches) >= max_results:
                     return matches
-                
+
         return matches
 
 

@@ -24,15 +24,21 @@ class TestActionArguments(ActionArguments):
 @pytest.fixture
 def repo():
     repo = InMemRepository()
-    repo.save_file("file1.py", """def method1():
+    repo.save_file(
+        "file1.py",
+        """def method1():
     return "original1"
-""")
-    repo.save_file("file2.py", """def method2():
+""",
+    )
+    repo.save_file(
+        "file2.py",
+        """def method2():
     return "original2"
     
 def method3():
     return "original3"
-""")
+""",
+    )
     return repo
 
 
@@ -45,7 +51,7 @@ async def workspace(repo):
 @pytest.fixture
 def test_tree(repo) -> tuple[Node, Node, Node, Node, Node]:
     """Creates a test tree with various actions and file contexts"""
-    root = Node(node_id=0, file_context=FileContext(repo=repo))  
+    root = Node(node_id=0, file_context=FileContext(repo=repo))
     root.message = "Initial task"
 
     # Node1: View code action
@@ -70,7 +76,7 @@ def test_tree(repo) -> tuple[Node, Node, Node, Node, Node]:
         path="file1.py",
         old_str='return "original1"',
         new_str='return "modified1"',
-        scratch_pad="Modifying method1 return value"
+        scratch_pad="Modifying method1 return value",
     )
     node3.action_steps.append(ActionStep(action=action3, observation=Observation(message="Modified method1")))
     node3.file_context = node2.file_context.clone()
@@ -94,18 +100,16 @@ def test_tree(repo) -> tuple[Node, Node, Node, Node, Node]:
 async def test_react_history_type(test_tree, workspace):
     """Test REACT history type generation"""
     _, _, _, node3, _ = test_tree
-    
-    generator = ReactCompactMessageHistoryGenerator(
-        include_file_context=True
-    )
+
+    generator = ReactCompactMessageHistoryGenerator(include_file_context=True)
     messages = await generator.generate_messages(node3, workspace)
     messages = list(messages)
-    
+
     # Verify ReAct format
     assert any("Thought:" in str(m) for m in messages), "Missing Thought: in messages"
     assert any("Action:" in str(m) for m in messages), "Missing Action: in messages"
     assert any("Observation:" in str(m) for m in messages), "Missing Observation: in messages"
-    
+
     # Verify file changes are included
     assert any("modified1" in str(m) for m in messages), "Modified file content not found in messages"
 
@@ -116,12 +120,11 @@ async def test_react_history_file_context_with_view_code_actions(repo, workspace
     # Create root node with file context (same as fixture)
     root = Node(node_id=0, file_context=FileContext(repo=repo))
     root.message = "Initial task"
-    
+
     # Create a new branch with ViewCode and StringReplace actions
     node1 = Node(node_id=10)
     action1 = ViewCodeArgs(
-        scratch_pad="Let's look at method1",
-        files=[CodeSpan(file_path="file1.py", span_ids=["method1"])]
+        scratch_pad="Let's look at method1", files=[CodeSpan(file_path="file1.py", span_ids=["method1"])]
     )
     node1.action_steps.append(ActionStep(action=action1, observation=Observation(message="Here's method1's content")))
     node1.file_context = FileContext(repo=repo)  # Use the repo fixture directly
@@ -134,7 +137,7 @@ async def test_react_history_file_context_with_view_code_actions(repo, workspace
         path="file1.py",
         old_str='return "original1"',
         new_str='return "modified1"',
-        scratch_pad="Modifying method1 return value"
+        scratch_pad="Modifying method1 return value",
     )
     node2.action_steps.append(ActionStep(action=action2, observation=Observation(message="Modified method1")))
     node2.file_context = node1.file_context.clone()
@@ -147,39 +150,29 @@ async def test_react_history_file_context_with_view_code_actions(repo, workspace
     node3.file_context = node2.file_context.clone()
     node2.add_child(node3)
 
-    generator = ReactCompactMessageHistoryGenerator(
-        include_file_context=True
-    )
-    
+    generator = ReactCompactMessageHistoryGenerator(include_file_context=True)
+
     messages = await generator.generate_messages(node3, workspace)
     messages = list(messages)
-    
+
     print("\n=== Messages ===")
     for i, msg in enumerate(messages):
         print(f"{i}. {str(msg)[:100]}")
-    
+
     # Find all ViewCode actions
-    viewcode_messages = [
-        i for i, m in enumerate(messages) 
-        if "Action: ViewCode" in str(m)
-    ]
-    
+    viewcode_messages = [i for i, m in enumerate(messages) if "Action: ViewCode" in str(m)]
+
     # Find StringReplace action
-    stringreplace_messages = [
-        i for i, m in enumerate(messages) 
-        if "Action: StringReplace" in str(m)
-    ]
-    
+    stringreplace_messages = [i for i, m in enumerate(messages) if "Action: StringReplace" in str(m)]
+
     # Verify we have exactly one ViewCode action
     assert len(viewcode_messages) == 1, f"Expected one ViewCode action, got {len(viewcode_messages)}"
-    
+
     # Verify we have exactly one StringReplace action
     assert len(stringreplace_messages) == 1, f"Expected one StringReplace action, got {len(stringreplace_messages)}"
-    
+
     # Verify the sequence: ViewCode -> file content -> StringReplace
     viewcode_index = viewcode_messages[0]
     stringreplace_index = stringreplace_messages[0]
-    
-    assert viewcode_index > stringreplace_index, (
-        "Messages should be in order: ViewCode -> StringReplace"
-    ) 
+
+    assert viewcode_index > stringreplace_index, "Messages should be in order: ViewCode -> StringReplace"

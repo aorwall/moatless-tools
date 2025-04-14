@@ -78,7 +78,7 @@ class ListFiles(Action):
         if not isinstance(args, ListFilesArgs):
             raise ValueError(f"Expected ListFilesArgs, got {type(args)}")
         list_files_args = args
-        
+
         if file_context is None:
             raise ValueError("File context must be provided to execute the list files action.")
 
@@ -95,9 +95,9 @@ class ListFiles(Action):
 
         try:
             # Generate directory path for commands
-            dir_path = list_files_args.directory.rstrip('/')
+            dir_path = list_files_args.directory.rstrip("/")
             target_dir = f"./{dir_path}" if dir_path else "."
-            
+
             # Build the appropriate find command based on recursion setting
             if list_files_args.recursive:
                 # Get all files and directories recursively using find
@@ -110,13 +110,13 @@ class ListFiles(Action):
                 maxdepth = "2" if dir_path else "1"  # Use 2 for specified directory, 1 for root
                 dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{target_dir}$' | sort"
                 files_command = f"find {target_dir} -xdev -maxdepth 1 -type f | sort"
-            
+
             try:
                 # Execute commands to get directories and files
                 try:
                     dirs_output = await local_env.execute(dirs_command)
                     files_output = await local_env.execute(files_command)
-                    
+
                 except Exception as e:
                     # Check if it's a "no such file or directory" error
                     if "No such file or directory" in str(e):
@@ -125,7 +125,7 @@ class ListFiles(Action):
                             properties={"fail_reason": "directory_not_found"},
                         )
                     raise  # Re-raise if it's a different error
-                
+
                 # Process directory results
                 directories = []
                 # Check for common error patterns in command output
@@ -134,21 +134,21 @@ class ListFiles(Action):
                     if cmd_output and "No such file or directory" in cmd_output:
                         no_such_file_error = True
                         break
-                
+
                 if no_such_file_error:
                     return Observation.create(
                         message=f"Error listing directory: No such directory '{list_files_args.directory}'",
                         properties={"fail_reason": "directory_not_found"},
                     )
-                
-                for line in dirs_output.strip().split('\n'):
+
+                for line in dirs_output.strip().split("\n"):
                     if line.strip():
                         # Convert path to relative format
-                        if line.startswith('./'):
+                        if line.startswith("./"):
                             rel_path = line[2:]
                         else:
                             rel_path = line
-                            
+
                         # For recursive listing, filter out the target directory itself
                         if rel_path and rel_path != dir_path:
                             if not list_files_args.recursive:
@@ -163,17 +163,17 @@ class ListFiles(Action):
                             else:
                                 # For recursive, show full relative paths
                                 directories.append(rel_path)
-                
+
                 # Process file results
                 files = []
-                for line in files_output.strip().split('\n'):
+                for line in files_output.strip().split("\n"):
                     if line.strip():
                         # Convert path to relative format
-                        if line.startswith('./'):
+                        if line.startswith("./"):
                             rel_path = line[2:]
                         else:
                             rel_path = line
-                            
+
                         if rel_path:
                             if not list_files_args.recursive:
                                 # For non-recursive, show only the file name
@@ -187,13 +187,13 @@ class ListFiles(Action):
                             else:
                                 # For recursive, show full relative paths
                                 files.append(rel_path)
-                
+
                 # Create a result object
                 result = {
                     "directories": sorted(directories),
                     "files": sorted(files),
                 }
-                
+
             except Exception as e:
                 logger.error(f"Error using environment commands: {str(e)}")
                 # Fall back to using repository list_directory method if available

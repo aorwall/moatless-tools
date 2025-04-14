@@ -16,14 +16,17 @@ from moatless.workspace import Workspace
 @pytest.fixture
 def repository():
     repo = InMemRepository()
-    repo.save_file("test_file.py", """
+    repo.save_file(
+        "test_file.py",
+        """
 def hello_world():
     message = "Hello World"
     print(message)
     
     other_message = "Goodbye World"
     print(other_message)
-""")
+""",
+    )
     return repo
 
 
@@ -55,21 +58,19 @@ def mock_completion_model():
 @pytest.fixture
 def mock_litellm_response():
     """Mock LiteLLM response with ReAct format content"""
+
     def _create_mock(content="", usage=None):
         from litellm.types.utils import Message, Usage, ModelResponse
 
         # Create message
-        message = Message(
-            content=content,
-            role="assistant"
-        )
+        message = Message(content=content, role="assistant")
 
         # Create usage
         if usage:
             usage_obj = Usage(
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
-                total_tokens=usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+                total_tokens=usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0),
             )
         else:
             usage_obj = Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
@@ -79,12 +80,8 @@ def mock_litellm_response():
             id="test_id",
             created=1234567890,
             model="test",
-            choices=[{
-                "message": message,
-                "finish_reason": "stop",
-                "index": 0
-            }],
-            usage=usage_obj
+            choices=[{"message": message, "finish_reason": "stop", "index": 0}],
+            usage=usage_obj,
         )
 
     return _create_mock
@@ -97,7 +94,7 @@ def agent(mock_completion_model, workspace):
         agent_id="test-agent",
         system_prompt="You are a helpful assistant",
         actions=[string_replace_action],
-        memory=MessageHistoryGenerator()
+        memory=MessageHistoryGenerator(),
     )
     agent.workspace = workspace
     agent.completion_model = mock_completion_model
@@ -109,23 +106,23 @@ async def test_agent_multiple_string_replace(agent, file_context, repository):
     # Create a node with file context
     node = Node.create_root("Please update the file", shadow_mode=True)
     node.file_context = file_context
-    
+
     # Create StringReplaceArgs for the first change
     replace_args1 = StringReplaceArgs(
         path="test_file.py",
         old_str='    message = "Hello World"',
         new_str='    message = "Hello Universe"',
-        thoughts="Updating greeting message"
+        thoughts="Updating greeting message",
     )
-    
+
     # Create StringReplaceArgs for the second change
     replace_args2 = StringReplaceArgs(
         path="test_file.py",
         old_str='    other_message = "Goodbye World"',
         new_str='    other_message = "Farewell Universe"',
-        thoughts="Updating farewell message"
+        thoughts="Updating farewell message",
     )
-    
+
     # Create action steps for the node
     step1 = ActionStep(action=replace_args1)
     step2 = ActionStep(action=replace_args2)
@@ -133,13 +130,13 @@ async def test_agent_multiple_string_replace(agent, file_context, repository):
 
     await agent._execute(node, step1)
     await agent._execute(node, step2)
-    
+
     # Verify that both changes were applied
     updated_content = file_context.get_file("test_file.py").content
     print(updated_content)
     assert 'message = "Hello Universe"' in updated_content
     assert 'other_message = "Farewell Universe"' in updated_content
-    
+
     # Verify that the original structure is preserved
     assert "def hello_world():" in updated_content
     assert "print(message)" in updated_content
@@ -166,7 +163,7 @@ async def test_agent_run_with_react_model(repository, workspace, mock_litellm_re
         system_prompt="You are a helpful assistant",
         actions=[string_replace_action],
         memory=ReactMessageHistoryGenerator(),
-        completion_model=model
+        completion_model=model,
     )
     await agent.initialize(workspace)  # Initialize agent with workspace
 
@@ -187,8 +184,7 @@ Action: StringReplace
 
     with patch("litellm.acompletion", new_callable=AsyncMock) as mock_completion:
         mock_completion.return_value = mock_litellm_response(
-            mock_response,
-            usage={"prompt_tokens": 25, "completion_tokens": 15, "total_tokens": 40}
+            mock_response, usage={"prompt_tokens": 25, "completion_tokens": 15, "total_tokens": 40}
         )
 
         # Run the agent
@@ -208,7 +204,7 @@ Action: StringReplace
         # Verify file was updated
         updated_content = node.file_context.get_file("test_file.py").content
         assert 'message = "Welcome to our World!"' in updated_content
-        
+
         # Verify original structure is preserved
         assert "def hello_world():" in updated_content
         assert "print(message)" in updated_content

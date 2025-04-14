@@ -39,7 +39,7 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
     current_trajectory_id.set(trajectory_id)
 
     litellm.callbacks = [LogHandler(storage=storage)]
-    
+
     logger.info(f"setup_flow current_project_id: {current_project_id.get()}, current {current_trajectory_id.get()}")
 
     settings = await storage.read_from_trajectory(
@@ -73,7 +73,7 @@ async def setup_swebench_runtime() -> RuntimeEnvironment:
     with open(instance_path) as f:
         swebench_instance = json.loads(f.read())
 
-    try: 
+    try:
         return SweBenchLocalEnvironment(
             repo_path=Path("/testbed"),
             swebench_instance=swebench_instance,
@@ -123,14 +123,24 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
         code_index = None
         logger.info("No index store dir provided, skipping code index")
 
-    return Workspace(repository=repository, code_index=code_index, runtime=runtime, environment=environment, shadow_mode=shadow_mode, storage=storage)
+    return Workspace(
+        repository=repository,
+        code_index=code_index,
+        runtime=runtime,
+        environment=environment,
+        shadow_mode=shadow_mode,
+        storage=storage,
+    )
+
 
 async def persist_trajectory_data(flow: AgenticFlow) -> None:
     storage = await get_storage()
 
     trajectory_data = flow.get_trajectory_data()
     await storage.write_to_trajectory("trajectory.json", trajectory_data, flow.project_id, flow.trajectory_id)
-    logger.info(f"Trajectory data with {len(trajectory_data['nodes'])} nodes written to {flow.project_id}/{flow.trajectory_id}/trajectory.json")
+    logger.info(
+        f"Trajectory data with {len(trajectory_data['nodes'])} nodes written to {flow.project_id}/{flow.trajectory_id}/trajectory.json"
+    )
 
 
 async def handle_flow_event(flow: AgenticFlow, event: BaseEvent) -> None:

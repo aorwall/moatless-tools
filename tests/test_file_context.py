@@ -44,7 +44,7 @@ def test_to_prompt_string_outcommented_code_block_with_line_numbers():
     )
     module.append_children([codeblock1, codeblock2, codeblock3, codeblock4])
 
-    print(f"\"{module.to_prompt(show_line_numbers=True)}\"")
+    print(f'"{module.to_prompt(show_line_numbers=True)}"')
 
     assert (
         module.to_prompt(show_line_numbers=True)
@@ -118,9 +118,7 @@ def test_apply_patch_to_content():
 
     expected_content = "Line 1 modified\nLine 2\nLine 3\n"
 
-    assert (
-        result_content == expected_content
-    ), "Content after applying patch does not match expected content."
+    assert result_content == expected_content, "Content after applying patch does not match expected content."
 
 
 def test_contextfile_flow_verification():
@@ -136,47 +134,27 @@ def test_contextfile_flow_verification():
     # Initialize the mock repository with the base content
     repo = InMemRepository({"test_file.txt": base_content})
 
-    context_file1 = ContextFile(
-        content=base_content, file_path="test_file.txt", repo=repo
-    )
+    context_file1 = ContextFile(content=base_content, file_path="test_file.txt", repo=repo)
 
     # First change
     context_file1.apply_changes(new_content1)
     expected_patch1 = context_file1.generate_patch(base_content, new_content1)
-    assert (
-        context_file1.patch == expected_patch1
-    ), "First change patch does not match expected patch."
-    assert (
-        context_file1.content == new_content1
-    ), "Content after first change does not match expected content."
+    assert context_file1.patch == expected_patch1, "First change patch does not match expected patch."
+    assert context_file1.content == new_content1, "Content after first change does not match expected content."
 
     # Second change
-    context_file2 = ContextFile(
-        repo=repo, file_path="test_file.txt", content=new_content1
-    )
+    context_file2 = ContextFile(repo=repo, file_path="test_file.txt", content=new_content1)
     context_file2.apply_changes(new_content2)
     expected_patch2 = context_file2.generate_patch(base_content, new_content2)
-    assert (
-        context_file2.patch == expected_patch2
-    ), "Second change patch does not match expected patch."
-    assert (
-        context_file2.content == new_content2
-    ), "Content after second change does not match expected content."
+    assert context_file2.patch == expected_patch2, "Second change patch does not match expected patch."
+    assert context_file2.content == new_content2, "Content after second change does not match expected content."
 
     # Third change
-    context_file3 = ContextFile(
-        repo=repo,
-        file_path="test_file.txt",
-        content=new_content2
-    )
+    context_file3 = ContextFile(repo=repo, file_path="test_file.txt", content=new_content2)
     context_file3.apply_changes(new_content3)
     expected_patch3 = context_file3.generate_patch(base_content, new_content3)
-    assert (
-        context_file3.patch == expected_patch3
-    ), "Third change patch does not match expected patch."
-    assert (
-        context_file3.content == new_content3
-    ), "Content after third change does not match expected content."
+    assert context_file3.patch == expected_patch3, "Third change patch does not match expected patch."
+    assert context_file3.content == new_content3, "Content after third change does not match expected content."
 
 
 def test_context_file_model_dump():
@@ -207,9 +185,7 @@ def test_context_file_model_dump():
 
 def test_file_context_model_dump():
     # Setup
-    repo = InMemRepository(
-        {"file1.txt": "Content of file 1\n", "file2.txt": "Content of file 2\n"}
-    )
+    repo = InMemRepository({"file1.txt": "Content of file 1\n", "file2.txt": "Content of file 2\n"})
     file_context = FileContext(repo=repo)
 
     # Add files to the context
@@ -232,7 +208,7 @@ def test_file_context_model_dump():
 
     assert file1_dump["patch"] is not None
     assert "Modified content of file 1" in file1_dump["patch"]
-    
+
 
 def test_generate_full_patch():
     # Create a mock repository
@@ -345,31 +321,31 @@ def test_context_file_status_indicators():
     # Setup
     repo = InMemRepository({"test_file.txt": "Original content\n"})
     file_context = FileContext(repo=repo)
-    
+
     # Add file and verify initial state
     context_file = file_context.add_file("test_file.txt")
     assert not context_file.was_edited
     assert not context_file.was_viewed
-    
+
     # Test editing
     context_file.apply_changes("Modified content\n")
     assert context_file.was_edited
-    
+
     # Test viewing
     context_file.add_line_span(1, 1)
     assert context_file.was_edited
     assert context_file.was_viewed
-    
+
     # Test cloning - status indicators should not be copied
     cloned_context = file_context.clone()
     cloned_file = cloned_context.get_file("test_file.txt")
     assert not cloned_file.was_edited
     assert not cloned_file.was_viewed
-    
+
     # Verify original still has its indicators
     assert context_file.was_edited
     assert context_file.was_viewed
-    
+
     # Verify indicators are excluded from serialization
     dump = context_file.model_dump()
     assert "was_edited" not in dump
@@ -382,34 +358,32 @@ def test_multiple_changes_to_same_contextfile():
     """
     # Setup original content
     base_content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n"
-    
+
     # Initialize the mock repository with the base content
     repo = InMemRepository({"test_file.txt": base_content})
-    
+
     # Create a single ContextFile instance
-    context_file = ContextFile(
-        content=base_content, file_path="test_file.txt", repo=repo
-    )
-    
+    context_file = ContextFile(content=base_content, file_path="test_file.txt", repo=repo)
+
     # First change - modify line 1
     modified_content = "Line 1 modified\nLine 2\nLine 3\nLine 4\nLine 5\n"
     context_file.apply_changes(modified_content)
     assert context_file.content == modified_content
-    
+
     # Second change - modify line 3
     modified_content = "Line 1 modified\nLine 2\nLine 3 modified\nLine 4\nLine 5\n"
     context_file.apply_changes(modified_content)
     assert context_file.content == modified_content
-    
+
     # Third change - modify line 5
     modified_content = "Line 1 modified\nLine 2\nLine 3 modified\nLine 4\nLine 5 modified\n"
     context_file.apply_changes(modified_content)
     assert context_file.content == modified_content
-    
+
     # Verify we can still get the original content
     base = context_file.get_base_content()
     assert base == base_content
-    
+
     # Verify the patch contains all changes
     expected_patch = context_file.generate_patch(base_content, modified_content)
     assert context_file.patch == expected_patch

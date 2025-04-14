@@ -19,6 +19,7 @@ def temp_dir():
     temp_dir = tempfile.mkdtemp()
     yield temp_dir
     import shutil
+
     shutil.rmtree(temp_dir)
 
 
@@ -38,45 +39,38 @@ def local_event_bus(file_storage):
     return bus
 
 
-
 @pytest.mark.asyncio
 async def test_publish_and_read_events(local_event_bus, file_storage):
     """Test basic publish and read operations."""
     # Create a test event
     event1 = BaseEvent(
-        project_id="test-project",
-        trajectory_id="test-trajectory",
-        event_type="test-event-1",
-        data={"key1": "value1"}
+        project_id="test-project", trajectory_id="test-trajectory", event_type="test-event-1", data={"key1": "value1"}
     )
-    
+
     event2 = BaseEvent(
-        project_id="test-project",
-        trajectory_id="test-trajectory",
-        event_type="test-event-2",
-        data={"key2": "value2"}
+        project_id="test-project", trajectory_id="test-trajectory", event_type="test-event-2", data={"key2": "value2"}
     )
-    
+
     # Publish the events
     await local_event_bus.publish(event1)
     await local_event_bus.publish(event2)
-    
+
     # Read the events back as dictionaries
     events = await local_event_bus.read_events("test-project", "test-trajectory")
-    
+
     # Verify the events
     assert len(events) == 2
     assert events[0].event_type == "test-event-1"
     assert events[0].data["key1"] == "value1"
     assert events[1].event_type == "test-event-2"
     assert events[1].data["key2"] == "value2"
-    
+
     # Convert to BaseEvent objects for more testing
     events = [BaseEvent.from_dict(d) for d in events]
     assert len(events) == 2
     assert events[0].event_type == "test-event-1"
     assert events[0].data["key1"] == "value1"
-    
+
     # Verify the events were saved to storage
     key = "projects/test-project/trajs/test-trajectory/events.jsonl"
     assert await file_storage.exists(key)
@@ -87,43 +81,36 @@ async def test_event_subscription(local_event_bus):
     """Test event subscription and notification."""
     # Create a mock subscriber
     mock_subscriber = AsyncMock()
-    
+
     # Subscribe to events
     await local_event_bus.subscribe(mock_subscriber)
-    
+
     # Create a test event
     event = BaseEvent(
-        project_id="test-project",
-        trajectory_id="test-trajectory",
-        event_type="test-event",
-        data={"key": "value"}
+        project_id="test-project", trajectory_id="test-trajectory", event_type="test-event", data={"key": "value"}
     )
-    
+
     # Publish the event
     await local_event_bus.publish(event)
-    
+
     # Verify the subscriber was called
     mock_subscriber.assert_called_once()
-    
+
     # Verify the event was passed to the subscriber
     args, _ = mock_subscriber.call_args
     passed_event = args[0]
     assert passed_event.event_type == "test-event"
     assert passed_event.data["key"] == "value"
-    
+
     # Unsubscribe
     await local_event_bus.unsubscribe(mock_subscriber)
-    
+
     # Reset the mock
     mock_subscriber.reset_mock()
-    
+
     # Publish another event
-    event2 = BaseEvent(
-        project_id="test-project",
-        trajectory_id="test-trajectory",
-        event_type="test-event-2"
-    )
+    event2 = BaseEvent(project_id="test-project", trajectory_id="test-trajectory", event_type="test-event-2")
     await local_event_bus.publish(event2)
-    
+
     # Verify the subscriber wasn't called
-    mock_subscriber.assert_not_called() 
+    mock_subscriber.assert_not_called()

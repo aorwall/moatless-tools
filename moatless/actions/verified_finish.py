@@ -25,10 +25,7 @@ class VerifiedFinishArgs(ActionArguments):
     model_config = ConfigDict(title="Finish")
 
     def to_prompt(self):
-        return (
-            f"Finish with reason: {self.finish_reason}\n"
-            f"Test verification: {self.test_verification}"
-        )
+        return f"Finish with reason: {self.finish_reason}\n" f"Test verification: {self.test_verification}"
 
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, VerifiedFinishArgs)

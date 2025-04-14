@@ -63,7 +63,7 @@ class Action(MoatlessComponent, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     is_terminal: bool = Field(default=False, description="Whether the action will finish the flow")
-    
+
     hidden: bool = Field(default=False, description="Whether the action should be hidden from the AI Agent")
 
     _workspace: Workspace | None = PrivateAttr(default=None)
@@ -203,14 +203,14 @@ class Action(MoatlessComponent, ABC):
         """
         cls._initialize_components()
         components = cls._get_components()
-        
+
         # Find the component where the class name matches action_name
         for qualified_name, component_class in components.items():
-            if qualified_name.split('.')[-1] == action_name:
+            if qualified_name.split(".")[-1] == action_name:
                 return component_class
-        
+
         # Get just the class names for the error message
-        available_actions = [name.split('.')[-1] for name in components.keys()]
+        available_actions = [name.split(".")[-1] for name in components.keys()]
         raise ValueError(f"Unknown action: {action_name}, available actions: {available_actions}")
 
     @classmethod
@@ -221,7 +221,6 @@ class Action(MoatlessComponent, ABC):
         if not action_class:
             raise ValueError(f"Unknown action: {name}, available actions: {cls._get_components().keys()}")
         return action_class(**kwargs)
-
 
     @classmethod
     def get_available_actions(cls) -> list[type["Action"]]:

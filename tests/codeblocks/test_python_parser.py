@@ -370,13 +370,8 @@ class SubClassWithMethod(foo.bar(SuperClass, AnotherClass)):
     def assertion(codeblock):
         assert codeblock.find_by_path(["SuperClass"]).type == CodeBlockType.CLASS
         assert codeblock.find_by_path(["SubClass"]).type == CodeBlockType.CLASS
-        assert (
-            codeblock.find_by_path(["SubClassWithMultipleClasses"]).type
-            == CodeBlockType.CLASS
-        )
-        assert (
-            codeblock.find_by_path(["SubClassWithMethod"]).type == CodeBlockType.CLASS
-        )
+        assert codeblock.find_by_path(["SubClassWithMultipleClasses"]).type == CodeBlockType.CLASS
+        assert codeblock.find_by_path(["SubClassWithMethod"]).type == CodeBlockType.CLASS
 
         relationships = codeblock.find_by_path(["SubClass"]).get_all_relationships()
         assert relationships[0] == Relationship(
@@ -385,9 +380,7 @@ class SubClassWithMethod(foo.bar(SuperClass, AnotherClass)):
             type=RelationshipType.IS_A,
             path=["SuperClass"],
         )
-        relationships = codeblock.find_by_path(
-            ["SubClassWithMultipleClasses"]
-        ).get_all_relationships()
+        relationships = codeblock.find_by_path(["SubClassWithMultipleClasses"]).get_all_relationships()
         assert relationships[0] == Relationship(
             scope=ReferenceScope.LOCAL,
             identifier="",
@@ -479,33 +472,22 @@ def test_init_span():
 """
 
     def assertion(codeblock):
-        assert (
-            codeblock.find_by_path(["UserChangeForm"]).belongs_to_span.span_type
-            == SpanType.INITATION
-        )
-        assert (
-            codeblock.find_by_path(["UserChangeForm", "Meta"]).belongs_to_span.span_type
-            == SpanType.INITATION
-        )
-        assert codeblock.find_by_path(
-            ["UserChangeForm", "Meta"]
-        ).belongs_to_span.parent_block_path == ["UserChangeForm", "Meta"]
-        assert (
-            codeblock.find_by_path(
-                ["UserChangeForm", "__init__"]
-            ).belongs_to_span.span_type
-            == SpanType.INITATION
-        )
-        assert codeblock.find_by_path(
-            ["UserChangeForm", "__init__"]
-        ).belongs_to_span.parent_block_path == ["UserChangeForm", "__init__"]
-        assert (
-            codeblock.find_by_path(["UserChangeForm", "foo"]).belongs_to_span.span_type
-            == SpanType.IMPLEMENTATION
-        )
-        assert codeblock.find_by_path(
-            ["UserChangeForm", "foo"]
-        ).belongs_to_span.parent_block_path == ["UserChangeForm", "foo"]
+        assert codeblock.find_by_path(["UserChangeForm"]).belongs_to_span.span_type == SpanType.INITATION
+        assert codeblock.find_by_path(["UserChangeForm", "Meta"]).belongs_to_span.span_type == SpanType.INITATION
+        assert codeblock.find_by_path(["UserChangeForm", "Meta"]).belongs_to_span.parent_block_path == [
+            "UserChangeForm",
+            "Meta",
+        ]
+        assert codeblock.find_by_path(["UserChangeForm", "__init__"]).belongs_to_span.span_type == SpanType.INITATION
+        assert codeblock.find_by_path(["UserChangeForm", "__init__"]).belongs_to_span.parent_block_path == [
+            "UserChangeForm",
+            "__init__",
+        ]
+        assert codeblock.find_by_path(["UserChangeForm", "foo"]).belongs_to_span.span_type == SpanType.IMPLEMENTATION
+        assert codeblock.find_by_path(["UserChangeForm", "foo"]).belongs_to_span.parent_block_path == [
+            "UserChangeForm",
+            "foo",
+        ]
 
         print(codeblock.to_prompt(show_span_id=True))
 
@@ -655,16 +637,17 @@ def test_find_nested_blocks_by_line_numbers():
         print(prompt_with_line_numbers)
 
         assert (
-                prompt_with_line_numbers
-                ==
-    """     1	def foo():
+            prompt_with_line_numbers
+            == """     1	def foo():
      2	    if True:
      3	        line_1 = 9
      4	    else:
      5	        line_3 = 11
      6	        while True:
      7	            line_2 = 10
-     8	    return False""")
+     8	    return False"""
+        )
+
 
 def test_next_and_previous():
     content = """class Foo:

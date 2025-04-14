@@ -63,7 +63,7 @@ async def evaluate_golden_patch(project_id: str, trajectory_id: str, node_id: in
             return None
 
         runtime = await setup_swebench_runtime()
-        
+
         await evaluate_instance(
             evaluation_name=project_id,
             instance_id=trajectory_id,
@@ -98,7 +98,6 @@ async def evaluate_instance(
     evaluation_key = f"projects/{evaluation_name}/trajs/{instance_id}/evaluation"
     root_node = flow.root
 
-    
     await _emit_event(evaluation_name, instance_id, "evaluation", "started")
 
     any_resolved = False
@@ -117,7 +116,6 @@ async def evaluate_instance(
 
     patch = swebench_instance["patch"]
     try:
-        
         child_node = Node(
             node_id=root_node.get_all_nodes()[-1].node_id + 1,
             parent=root_node,
@@ -137,9 +135,7 @@ async def evaluate_instance(
             logger.warning(f"Instance {instance_id} not found in report for node {child_node.node_id}: {report}")
             raise ValueError(f"Instance {instance_id} not found in report for node {child_node.node_id}: {report}")
 
-        logger.info(
-            f"Evaluation complete for node {child_node.node_id}. Resolved: {report[instance_id]['resolved']}"
-        )
+        logger.info(f"Evaluation complete for node {child_node.node_id}. Resolved: {report[instance_id]['resolved']}")
 
         if report[instance_id]["resolved"]:
             any_resolved = True

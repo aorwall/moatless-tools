@@ -14,12 +14,12 @@ from moatless.workspace import Workspace
 def mock_environment():
     """Create a mock environment that simulates Maven command execution."""
     mock_env = AsyncMock(spec=BaseEnvironment)
-    
+
     # Define a helper function to generate Maven-like output based on the command
     async def execute_mock(command, fail_on_error=False):
         if "mvn --version" in command:
             return "Apache Maven 3.8.6 (84538c9988a25aec085021c365c560670ad80f63)"
-            
+
         if "mvn compile" in command:
             # Check if we should simulate a compilation failure
             if getattr(execute_mock, "simulate_compilation_failure", False):
@@ -99,12 +99,12 @@ def mock_environment():
 [INFO] Finished at: 2025-04-11T13:45:22+02:00
 [INFO] ------------------------------------------------------------------------
 """
-        
+
         # Default response for other commands
         return ""
-        
+
     mock_env.execute = execute_mock
-    
+
     return mock_env
 
 
@@ -140,61 +140,61 @@ async def checker(workspace):
 
 
 class TestMavenCompilationChecker:
-    
     @pytest.mark.asyncio
     async def test_successful_compilation(self, checker, node):
         """Test that no feedback is returned for successful compilation."""
         # Use default mock behavior (successful compilation)
         result = await checker.generate_feedback(node)
-        
+
         # Should return None for successful compilation
         assert result is None
-        
+
     @pytest.mark.asyncio
     async def test_compilation_failure(self, checker, node, mock_environment):
         """Test that proper feedback is generated for compilation failure."""
         # Set flag to make the mock environment return a compilation failure
         mock_environment.execute.simulate_compilation_failure = True
-        
+
         result = await checker.generate_feedback(node)
-        
+
         # Check that we have feedback
         assert result is not None
         assert result.feedback is not None
-        
+
         # Verify the content of the feedback
         assert "Maven compilation failed" in result.feedback
         assert "Compilation Errors" in result.feedback
         assert "CustomerController.java" in result.feedback
         assert "cannot infer type arguments" in result.feedback
         assert "incompatible types" in result.feedback
-        
+
     @pytest.mark.asyncio
     async def test_maven_not_installed(self, workspace, node):
         """Test handling of missing Maven."""
         # Create a new checker for this test
         checker = MavenCompilationChecker()
-        
+
         # Make Maven version check fail
         async def fail_execute(command, fail_on_error=False):
             if "mvn --version" in command:
                 raise Exception("Command 'mvn' not found")
             return ""
-            
+
         # Replace the execute method before initialization
         workspace.environment.execute = fail_execute
-        
+
         # Now we expect a RuntimeError to be raised during initialization
         with pytest.raises(RuntimeError) as excinfo:
             await checker.initialize(workspace)
-        
+
         # Check that the error message contains the expected information
         assert "Maven does not appear to be installed" in str(excinfo.value)
         assert "Command 'mvn' not found" in str(excinfo.value)
-        
+
     @pytest.mark.asyncio
     async def test_maven_execution_error(self, checker, node, workspace):
         """Test handling of Maven execution errors."""
+
         # Make Maven compile command fail with an execution error
         async def fail_execute(command, fail_on_error=False):
             if "mvn --version" in command:
@@ -202,41 +202,41 @@ class TestMavenCompilationChecker:
             if "mvn compile" in command:
                 raise Exception("Failed to execute Maven: error code 1")
             return ""
-            
+
         # Replace the execute method before running generate_feedback
         workspace.environment.execute = fail_execute
-        
+
         # Now we expect a RuntimeError to be raised
         with pytest.raises(RuntimeError) as excinfo:
             await checker.generate_feedback(node)
-        
+
         # Check that the error message contains the expected information
         assert "Failed to execute Maven compilation" in str(excinfo.value)
         assert "error code 1" in str(excinfo.value)
-        
+
     @pytest.mark.asyncio
     async def test_workspace_not_set(self):
         """Test handling of missing workspace."""
         checker = MavenCompilationChecker()
         node = Node.create_root(user_message="Test message")
-        
+
         result = await checker.generate_feedback(node)
-        
+
         # Should return None when workspace is not set
         assert result is None
-        
+
     @pytest.mark.asyncio
     async def test_environment_not_set(self, no_env_workspace, node):
         """Test handling of missing environment."""
         checker = MavenCompilationChecker()
-        
+
         # We should not try to initialize with a null environment
         try:
             await checker.initialize(no_env_workspace)
             assert False, "Expected ValueError not raised"
         except ValueError as e:
             assert "Environment is required" in str(e)
-            
+
         # If initialization fails, the generate_feedback should return None
         result = await checker.generate_feedback(node)
-        assert result is None 
+        assert result is None

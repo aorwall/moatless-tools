@@ -32,7 +32,7 @@ def get_parser_for_repo(repo: str) -> TestOutputParser:
         TestOutputParser: A parser instance for the repository
     """
     parser_class = REPO_TO_PARSER_CLASS.get(repo)
-    
+
     # Default to Maven parser for Java projects that aren't explicitly listed
     if not parser_class and "/" in repo and repo.endswith("-java"):
         parser_class = MavenParser
@@ -40,11 +40,11 @@ def get_parser_for_repo(repo: str) -> TestOutputParser:
         # Try to determine the appropriate parser based on other clues
         if repo.lower().endswith("java") or repo.lower().endswith("maven"):
             parser_class = MavenParser
-    
+
     # If we still don't have a parser, use Maven as default
     if not parser_class:
         parser_class = MavenParser
-        
+
     return parser_class()
 
 
@@ -63,12 +63,12 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
     # First try the python parsers
     try:
         # Check if it's a Python project by looking for Python-specific output
-        python_indicators = ["pytest", "unittest", "python", "File \"", ".py\"", "assert"]
+        python_indicators = ["pytest", "unittest", "python", 'File "', '.py"', "assert"]
         if any(indicator in log for indicator in python_indicators):
             return parse_python_log(log, repo, file_path)
     except Exception as e:
         logger.warning(f"Error using Python parser: {e}")
-    
+
     # If not Python or Python parsing failed, try with Java
     parser = get_parser_for_repo(repo)
     logger.info(f"Parsing log for {repo} with {parser.__class__.__name__}")
@@ -92,8 +92,8 @@ def parse_log(log: str, repo: str, file_path: Optional[str] = None) -> List[Test
 
         if result.failure_output:
             result.failure_output = result.failure_output.replace("/testbed/", "")
-            
+
         if not result.file_path:
             result.file_path = file_path
 
-    return test_results 
+    return test_results

@@ -25,10 +25,7 @@ def test_django_1():
             failed_count += 1
             assert r.failure_output, f"Failed test {r.name} has no failure output"
             assert r.file_path == "tests/model_fields/tests.py"
-            assert (
-                "RecursionError: maximum recursion depth exceeded while calling a Python object"
-                in r.failure_output
-            )
+            assert "RecursionError: maximum recursion depth exceeded while calling a Python object" in r.failure_output
             assert "Ran 30 tests in 0.076s" not in r.failure_output
 
         assert r.file_path
@@ -46,25 +43,15 @@ def test_django_2():
     result = parse_log(log, "django/django")
 
     # Verify that description is used as test name
-    test_basic_formset = [
-        r for r in result if r.method == "FormsFormsetTestCase.test_basic_formset"
-    ]
+    test_basic_formset = [r for r in result if r.method == "FormsFormsetTestCase.test_basic_formset"]
     assert len(test_basic_formset) == 1
-    assert (
-        test_basic_formset[0].name
-        == "A FormSet constructor takes the same arguments as Form. Create a"
-    )
+    assert test_basic_formset[0].name == "A FormSet constructor takes the same arguments as Form. Create a"
 
     # Find weirdly formatted test
-    test_absolute_max = [
-        r for r in result if r.method == "FormsFormsetTestCase.test_absolute_max"
-    ]
+    test_absolute_max = [r for r in result if r.method == "FormsFormsetTestCase.test_absolute_max"]
     assert len(test_absolute_max) == 1
     assert test_absolute_max[0].status == TestStatus.PASSED
-    assert (
-        test_absolute_max[0].name
-        == "test_absolute_max (forms_tests.tests.test_formsets.FormsFormsetTestCase)"
-    )
+    assert test_absolute_max[0].name == "test_absolute_max (forms_tests.tests.test_formsets.FormsFormsetTestCase)"
 
     failures = [r for r in result if r.status == TestStatus.FAILED]
     assert len(failures) == 2
@@ -222,9 +209,7 @@ def test_pytest_2():
     for r in result:
         if r.status == TestStatus.FAILED:
             failed_count += 1
-            assert (
-                r.failure_output
-            ), f"Failed test {r.name} with method {r.method} has no failure output"
+            assert r.failure_output, f"Failed test {r.name} with method {r.method} has no failure output"
 
         if r.status != TestStatus.SKIPPED:
             assert r.file_path
@@ -240,11 +225,7 @@ def test_pytest_3():
 
     result = parse_log(log, "pytest-dev/pytest")
 
-    failed = [
-        r
-        for r in result
-        if r.status == TestStatus.FAILED and r.file_path == "testing/test_mark.py"
-    ]
+    failed = [r for r in result if r.status == TestStatus.FAILED and r.file_path == "testing/test_mark.py"]
     assert len(failed) == 1
     assert failed[0].failure_output
 
@@ -288,10 +269,7 @@ def test_pytest_option_with_space_swebench_naming():
         "pytest-dev/pytest",
     )
     assert 1 == len(result)
-    assert (
-        "testing/test_mark.py::test_marker_expr_eval_failure_handling[NOT"
-        == result[0].name
-    )
+    assert "testing/test_mark.py::test_marker_expr_eval_failure_handling[NOT" == result[0].name
 
 
 def test_pytest_matplotlib():
@@ -327,20 +305,15 @@ def test_pytest_matplotlib_2():
     assert len(failed) == 1
     assert "def test_double_register_builtin_cmap():" in failed[0].failure_output
     assert ">       with pytest.warns(UserWarning):" in failed[0].failure_output
-    assert (
-        "E       matplotlib._api.deprecation.MatplotlibDeprecationWarning: "
-        in failed[0].failure_output
-    )
-    assert (
-        "lib/matplotlib/tests/test_colors.py:150: MatplotlibDeprecationWarning"
-        in failed[0].failure_output
-    )
+    assert "E       matplotlib._api.deprecation.MatplotlibDeprecationWarning: " in failed[0].failure_output
+    assert "lib/matplotlib/tests/test_colors.py:150: MatplotlibDeprecationWarning" in failed[0].failure_output
 
     skipped = [r for r in result if r.status == TestStatus.SKIPPED]
     assert len(skipped) == 1
     assert skipped[0].file_path == "lib/matplotlib/testing/compare.py"
 
     assert len(result) == 253
+
 
 def test_pytest_matplotlib_3_success():
     """Test parsing matplotlib pytest output"""
@@ -372,16 +345,12 @@ def test_pytest_seaborn_2():
 
     for r in result:
         if r.method is not None:
-            assert (
-                " Attri" not in r.method
-            ), f"Method name contains failure output {r.method}"
+            assert " Attri" not in r.method, f"Method name contains failure output {r.method}"
 
     failed = [r for r in result if r.status == TestStatus.FAILED]
     assert len(failed) == 48
 
     assert len(result) == 85
-
-
 
 
 def test_sphinx_1():
@@ -466,7 +435,7 @@ def test_import_error_traceback():
         _cbaraxes_class_factory = cbook._make_class_factory(CbarAxesBase, "Cbar{}")
     E   NameError: name 'CbarAxesBase' is not defined
     """
-    
+
     # Create a TestResult manually that we want to receive
     expected_result = TestResult(
         status=TestStatus.ERROR,
@@ -479,24 +448,23 @@ def test_import_error_traceback():
                 file_path="lib/mpl_toolkits/axes_grid1/__init__.py",
                 line_number=3,
                 method="<module>",
-                output="from .axes_grid import AxesGrid, Grid, ImageGrid"
+                output="from .axes_grid import AxesGrid, Grid, ImageGrid",
             ),
             TraceItem(
                 file_path="lib/mpl_toolkits/axes_grid1/axes_grid.py",
                 line_number=29,
                 method="<module>",
-                output="_cbaraxes_class_factory = cbook._make_class_factory(CbarAxesBase, \"Cbar{}\")\nNameError: name 'CbarAxesBase' is not defined"
-            )
-        ]
+                output="_cbaraxes_class_factory = cbook._make_class_factory(CbarAxesBase, \"Cbar{}\")\nNameError: name 'CbarAxesBase' is not defined",
+            ),
+        ],
     )
-    
+
     # Check if we need a better implementation for parsing these cases
     if parse_log(log, "matplotlib/matplotlib") == []:
         # For now we'll just note that this should be improved
         import warnings
-        warnings.warn(
-            "Import error traceback parsing returns empty list but should return an error TestResult"
-        )
+
+        warnings.warn("Import error traceback parsing returns empty list but should return an error TestResult")
     assert isinstance(parse_log(log, "matplotlib/matplotlib"), list)
 
 
@@ -515,34 +483,27 @@ def test_sympy_4():
         method="__new__",
         failure_output="TypeError: object of type 'int' has no len()",
         stacktrace=[
-            TraceItem(
-                file_path="sympy/utilities/runtests.py",
-                line_number=1079,
-                method="test_file",
-                output=""
-            ),
+            TraceItem(file_path="sympy/utilities/runtests.py", line_number=1079, method="test_file", output=""),
             # Additional stack trace items would be here...
             TraceItem(
                 file_path="sympy/combinatorics/permutations.py",
                 line_number=900,
                 method="__new__",
-                output="TypeError: object of type 'int' has no len()"
-            )
-        ]
+                output="TypeError: object of type 'int' has no len()",
+            ),
+        ],
     )
-    
+
     # Check if we need a better implementation
     if not result:
-        warnings.warn(
-            "Sympy error traceback parsing returns empty list but should return an error TestResult"
-        )
-    
+        warnings.warn("Sympy error traceback parsing returns empty list but should return an error TestResult")
+
     # At minimum, assert that we get a list back, but this should be improved
     assert isinstance(result, list)
-    
+
     # A stronger test would be to compare against expected_result when implemented
     # assert len(result) == 1
     # assert result[0].status == TestStatus.ERROR
     # assert result[0].file_path == expected_result.file_path
     # assert result[0].method == expected_result.method
-    # assert expected_result.failure_output in result[0].failure_output 
+    # assert expected_result.failure_output in result[0].failure_output

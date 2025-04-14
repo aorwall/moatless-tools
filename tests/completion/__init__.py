@@ -1,1 +1,1 @@
-"""Tests for the completion module.""" 
+"""Tests for the completion module."""

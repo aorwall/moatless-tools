@@ -35,36 +35,38 @@ class RemoveCodingTasks(Action):
             return "Error: Coding task handler not available"
 
         handler = self.workspace.artifact_handlers["coding_task"]
-        
+
         # Get all tasks to find which ones exist
         all_tasks = await handler.get_all_artifacts()
         # Type cast to the proper type
         coding_tasks = [task for task in all_tasks if isinstance(task, CodingTaskArtifact)]
-        
+
         # Filter for tasks that exist and those not found
         existing_task_ids = [task.id for task in coding_tasks]
         to_remove = [tid for tid in args.task_ids if tid in existing_task_ids]
         not_found = [tid for tid in args.task_ids if tid not in existing_task_ids]
-        
+
         # Remove the tasks
         for task_id in to_remove:
             await handler.delete(task_id)
-        
+
         # Build response message
         response = f"Removed {len(to_remove)} coding tasks."
         if not_found:
             response += f"\nTasks not found: {', '.join(not_found)}"
-        
+
         # List remaining tasks with checkboxes
         remaining_artifacts = await handler.get_all_artifacts()
         remaining_tasks = [task for task in remaining_artifacts if isinstance(task, CodingTaskArtifact)]
         remaining_tasks.sort(key=lambda x: x.priority)
-        
+
         if remaining_tasks:
-            task_list = "\n".join([
-                f"[{'x' if task.state == TaskState.COMPLETED else ' '}] {task.id} - {task.title}" 
-                for task in remaining_tasks
-            ])
+            task_list = "\n".join(
+                [
+                    f"[{'x' if task.state == TaskState.COMPLETED else ' '}] {task.id} - {task.title}"
+                    for task in remaining_tasks
+                ]
+            )
             response += f"\n\nRemaining tasks:\n{task_list}"
-        
-        return response 
+
+        return response

@@ -22,8 +22,10 @@ class TestAction(Action):
     def execute(self, file_context):
         return "test"
 
+
 class TestActionArguments(ActionArguments):
     pass
+
 
 def test_node_model_dump():
     # Create a root node
@@ -59,7 +61,7 @@ def test_node_model_dump():
     # Add a FinishArgs action to one of the nodes
     finish_args = FinishArgs(
         thoughts="Task is complete because all requirements are met.",
-        finish_reason="All tests pass and code is optimized."
+        finish_reason="All tests pass and code is optimized.",
     )
     child1.action_steps = [ActionStep(action=finish_args)]
 
@@ -70,19 +72,15 @@ def test_node_model_dump():
             CompletionAttempt(
                 start_time=datetime.now().timestamp() * 1000,
                 end_time=(datetime.now() + timedelta(seconds=1)).timestamp() * 1000,
-                usage=Usage(
-                    completion_tokens=100,
-                    prompt_tokens=200,
-                    completion_cost=0.001 * 100
-                )
+                usage=Usage(completion_tokens=100, prompt_tokens=200, completion_cost=0.001 * 100),
             )
-        ]
+        ],
     )
     selection = Selection(
         node_id=2,
         completion=completion,
         reason="Test selection reason",
-        trace={"test_key": "test_value", "score": 0.95}
+        trace={"test_key": "test_value", "score": 0.95},
     )
     child1.selection = selection
 
@@ -132,7 +130,7 @@ def test_node_model_dump():
     # Test loading the dumped data
     loaded_root = Node.reconstruct(dumped_data)
     loaded_child1 = loaded_root.children[0]
-    
+
     assert isinstance(loaded_child1.action_steps[0].action, FinishArgs)
     assert isinstance(loaded_child1.action, FinishArgs)
     assert loaded_child1.action.name == "Finish"
@@ -153,6 +151,6 @@ def test_node_model_dump():
     assert "value" not in custom_dump
     assert "parent" not in custom_dump  # 'parent' should still be excluded
 
-    # Test with exclude_none=True 
+    # Test with exclude_none=True
     none_dump = root.model_dump(exclude_none=True)
     assert "reward" not in none_dump  # 'reward' should be excluded as it's None

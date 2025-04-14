@@ -60,11 +60,11 @@ def sanitize_label(value: str) -> str:
 
     # Ensure it's not too long (63 character limit)
     clean_id = clean_id[:63]
-    
+
     # Final check to ensure the truncated string ends with an alphanumeric character
     if clean_id and not clean_id[-1].isalnum():
         clean_id = clean_id[:-1] + "x"
-    
+
     return clean_id
 
 

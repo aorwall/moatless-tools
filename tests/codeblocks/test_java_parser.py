@@ -46,10 +46,6 @@ def test_interface():
 """
 
     def assertion(codeblock):
-        print(
-            codeblock.to_tree(
-                include_references=True, show_spans=True, show_tokens=True
-            )
-        )
+        print(codeblock.to_tree(include_references=True, show_spans=True, show_tokens=True))
 
     _verify_parsing(content, assertion)

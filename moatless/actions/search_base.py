@@ -172,7 +172,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         if search_result_context.is_empty():
             properties["fail_reason"] = "no_search_hits"
             return Observation.create(message="No search results found", properties=properties)
-        
+
         if not self.use_identifier:
             response_str = ""
             matches = 0
@@ -180,7 +180,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                 response_str += f"\nFile: {file.file_path}\n"
                 for span in file.spans:
                     line_content = None
-                    
+
                     if span.start_line:
                         start_line = span.start_line
                         end_line = span.end_line
@@ -192,17 +192,17 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                             code_block = block_span.initiating_block
                             if code_block:
                                 line_content = code_block.content
-                                
+
                     if start_line and not line_content:
                         line_content = file.content.split("\n")[start_line - 1]
-                    
+
                     if line_content:
                         response_str += f"Line: {start_line} - {end_line} : {line_content}\n"
                         matches += 1
                     elif start_line:
                         response_str += f"Line: {start_line} - {end_line}\n"
                         matches += 1
-                    
+
             if matches > 0:
                 response_str = f"\nFound {matches} matches in {len(search_result_context.files)} files.\n{response_str}"
             else:

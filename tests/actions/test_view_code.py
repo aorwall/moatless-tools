@@ -16,10 +16,10 @@ async def test_request_non_existing_method():
     instance = get_moatless_instance(instance_id)
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
-    
+
     # Create a workspace with the repository
     workspace = Workspace(repository=repository)
-    
+
     # Initialize the ViewCode action with the workspace using the async initialize method
     action = ViewCode(repository=repository)
     await action.initialize(workspace)
@@ -44,10 +44,10 @@ async def test_request_many_spans():
     instance = get_moatless_instance(instance_id)
     repository = create_repository(instance)
     file_context = FileContext(repo=repository)
-    
+
     # Create a workspace with the repository
     workspace = Workspace(repository=repository)
-    
+
     # Initialize the ViewCode action with the workspace using the async initialize method
     action = ViewCode(repository=repository)
     await action.initialize(workspace)

@@ -36,7 +36,7 @@ class AsyncioRunner(BaseRunner):
         self.job_metadata: Dict[str, Dict[str, Any]] = {}
         # Register signal handlers for graceful shutdown
         self._setup_signal_handlers()
-        
+
         # Start a periodic job cleanup task
         self._start_cleanup_task()
 
@@ -54,12 +54,12 @@ class AsyncioRunner(BaseRunner):
         """Handle signals by scheduling task cleanup and then exiting."""
         sig_name = signal.Signals(signum).name
         self.logger.info(f"Received {sig_name} signal, cancelling all tasks...")
-        
+
         # Get the event loop and schedule the cleanup
         try:
             loop = asyncio.get_event_loop()
             loop.create_task(self._cleanup_tasks())
-            
+
             # Add a callback to stop the loop after cleanup
             loop.call_soon(lambda: sys.exit(0))
         except RuntimeError as e:
@@ -70,14 +70,14 @@ class AsyncioRunner(BaseRunner):
     async def _cleanup_tasks(self):
         """Cancel all running tasks."""
         self.logger.info(f"Cleaning up {len(self.tasks)} tasks...")
-        
+
         # Create a list of tasks to cancel to avoid modifying dict during iteration
         tasks_to_cancel = list(self.tasks.items())
-        
+
         for job_id, task in tasks_to_cancel:
             self.logger.info(f"Cancelling task for job {job_id}")
             await self._cancel_job_by_id(job_id)
-        
+
         self.logger.info("All tasks cancelled")
 
     def _job_id(self, project_id: str, trajectory_id: str) -> str:
@@ -89,12 +89,12 @@ class AsyncioRunner(BaseRunner):
         try:
             loop = asyncio.get_event_loop()
             self.cleanup_task = loop.create_task(self._periodic_cleanup())
-            
+
             # Make sure we don't get warnings when the task is destroyed
             self.cleanup_task.add_done_callback(lambda _: None)
         except RuntimeError:
             self.logger.warning("Couldn't start cleanup task: no event loop available")
-    
+
     async def _periodic_cleanup(self):
         """Periodically check for and clean up any stale jobs."""
         try:
@@ -106,18 +106,20 @@ class AsyncioRunner(BaseRunner):
             pass
         except Exception as e:
             self.logger.error(f"Error in periodic cleanup: {e}")
-            
+
     async def _cleanup_stale_jobs(self):
         """Check for and clean up any stale jobs that should be removed."""
         try:
             stale_tasks_count = 0
-            
+
             # Look for jobs that are in terminal states but still in tasks dict
             for job_id, metadata in list(self.job_metadata.items()):
                 status = metadata["status"]
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED]:
                     if job_id in self.tasks:
-                        self.logger.warning(f"Found stale job {job_id} in terminal state {status} but still in tasks dictionary")
+                        self.logger.warning(
+                            f"Found stale job {job_id} in terminal state {status} but still in tasks dictionary"
+                        )
                         try:
                             # Cancel the task if it's still running
                             self.tasks[job_id].cancel()
@@ -125,14 +127,16 @@ class AsyncioRunner(BaseRunner):
                             stale_tasks_count += 1
                         except Exception as e:
                             self.logger.error(f"Error cleaning up stale task {job_id}: {e}")
-            
+
             if stale_tasks_count > 0:
                 self.logger.info(f"Cleaned up {stale_tasks_count} stale tasks")
         except Exception as e:
             self.logger.error(f"Error in cleanup_stale_jobs: {e}")
 
     @tracer.start_as_current_span("AsyncioRunner.start_job")
-    async def start_job(self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None) -> bool:
+    async def start_job(
+        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
+    ) -> bool:
         """Start a job for the given project and trajectory.
 
         Args:
@@ -152,7 +156,9 @@ class AsyncioRunner(BaseRunner):
                 status = self.job_metadata[job_id]["status"]
                 if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED]:
                     if job_id in self.tasks:
-                        self.logger.warning(f"Found stale job {job_id} in terminal state {status}. Cleaning up before restart.")
+                        self.logger.warning(
+                            f"Found stale job {job_id} in terminal state {status}. Cleaning up before restart."
+                        )
                         try:
                             # Remove the stale task
                             self.tasks[job_id].cancel()
@@ -221,7 +227,7 @@ class AsyncioRunner(BaseRunner):
 
         # Get the current job status
         current_status = self.job_metadata[job_id]["status"]
-        
+
         # Check if the job is already in a terminal state (COMPLETED, FAILED, CANCELED)
         # We don't want to override these statuses as they might have been set by _run_job
         terminal_states = [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED]
@@ -248,7 +254,7 @@ class AsyncioRunner(BaseRunner):
             job_func: The function to run or a string with the fully qualified function name
             node_id: The node ID
         """
-        
+
         # Extract project_id and trajectory_id from job_id
         job = self.job_metadata.get(job_id)
         if not job:
@@ -257,9 +263,10 @@ class AsyncioRunner(BaseRunner):
         project_id = job["project_id"]
         trajectory_id = job["trajectory_id"]
         node_id = job["node_id"]
-        
-        self.logger.info(f"Running job {job_id} with project_id {project_id}, trajectory_id {trajectory_id} and node_id {node_id}")
 
+        self.logger.info(
+            f"Running job {job_id} with project_id {project_id}, trajectory_id {trajectory_id} and node_id {node_id}"
+        )
 
         # Update job status to running
         self.job_metadata[job_id]["status"] = JobStatus.RUNNING
@@ -283,10 +290,10 @@ class AsyncioRunner(BaseRunner):
                 # Determine how to call the function based on its parameters
                 if not "project_id" in parameters or not "trajectory_id" in parameters or not "node_id" in parameters:
                     raise ValueError("Function must accept project_id, trajectory_id and node_id as arguments")
-                
+
                 # Function accepts both project_id and trajectory_id
                 result = job_func(project_id=project_id, trajectory_id=trajectory_id, node_id=node_id)
-                
+
                 # Check if the result is a coroutine and await it if necessary
                 if inspect.iscoroutine(result):
                     await result
@@ -389,15 +396,15 @@ class AsyncioRunner(BaseRunner):
         job_id = self._job_id(project_id, trajectory_id)
         exists_in_metadata = job_id in self.job_metadata
         exists_in_tasks = job_id in self.tasks
-        
+
         if exists_in_metadata:
             status = self.job_metadata[job_id]["status"]
             self.logger.info(f"Job {job_id} exists in metadata with status: {status}")
-            
+
             # If the job is in a terminal state but still in tasks, log a warning
             if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED] and exists_in_tasks:
                 self.logger.warning(f"Job {job_id} is in terminal state {status} but still in tasks dictionary")
-                
+
         return exists_in_metadata
 
     @tracer.start_as_current_span("AsyncioRunner.retry_job")
@@ -613,29 +620,29 @@ class AsyncioRunner(BaseRunner):
 
     async def cleanup(self):
         """Cleanup all resources used by the runner.
-        
+
         This method can be called explicitly when the application is shutting down
         to ensure all tasks are properly cancelled and resources are released.
         """
         self.logger.info("Explicitly cleaning up AsyncioRunner resources...")
-        
+
         # Cancel the cleanup task if it exists
-        if hasattr(self, 'cleanup_task') and self.cleanup_task and not self.cleanup_task.done():
+        if hasattr(self, "cleanup_task") and self.cleanup_task and not self.cleanup_task.done():
             self.cleanup_task.cancel()
             try:
                 await asyncio.wait_for(self.cleanup_task, timeout=0.1)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
-        
+
         await self._cleanup_tasks()
-        
+
         # Also clean up any tasks that might have been completed but not removed
         await self._cleanup_stale_jobs()
-        
+
         # Clear any remaining job metadata
         job_count = len(self.job_metadata)
         if job_count > 0:
             self.logger.info(f"Clearing {job_count} job metadata entries")
             self.job_metadata.clear()
-            
+
         self.logger.info("AsyncioRunner cleanup completed")

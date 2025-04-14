@@ -174,9 +174,9 @@ class BaseCompletionModel(MoatlessComponent, ABC):
             raise ValueError("System prompt cannot be changed after initialization")
 
         self._response_schema = schemas
-        
+
         self._completion_params = self._get_completion_params(self._response_schema)
-            
+
         if self.model_base_url:
             self._completion_params["api_base"] = self.model_base_url
 
@@ -185,10 +185,10 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
         if self.headers:
             self._completion_params["headers"] = self.headers
-        
+
         if self.params:
             self._completion_params.update(self.params)
-        
+
         self._post_validation_fn = post_validation_fn
 
         if self.few_shot_examples:
@@ -356,7 +356,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                             invocation.current_attempt.failure_reason = str(e)
 
                         tool_call_id = None
-                        
+
                         if completion_response.choices[0].message.tool_calls:
                             # TODO: Support multiple tool calls
                             tool_call_id = completion_response.choices[0].message.tool_calls[0].id
@@ -434,7 +434,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         Raises:
             CompletionRuntimeError: For provider errors
         """
-        
+
         if self.merge_same_role_messages:
             messages = self._merge_same_role_messages(messages)
 

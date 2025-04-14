@@ -1375,7 +1375,9 @@ class FileContext(BaseModel):
             return []
 
     def has_file(self, file_path: str):
-        return file_path in self._files and (self._files[file_path].spans or self._files[file_path].show_all_spans or not self._files[file_path].content)
+        return file_path in self._files and (
+            self._files[file_path].spans or self._files[file_path].show_all_spans or not self._files[file_path].content
+        )
 
     def get_file(self, file_path: str) -> Optional[ContextFile]:
         return self.get_context_file(file_path)
@@ -1508,7 +1510,7 @@ class FileContext(BaseModel):
             bool: True if any file has a patch, False otherwise
         """
         return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
-    
+
     def has_test_patch(self):
         return any(file.patch for file in self._files.values() if is_test(file.file_path))
 
@@ -1771,7 +1773,7 @@ class FileContext(BaseModel):
 
     def get_test_summary(self) -> str:
         return TestFile.get_test_summary(self._test_files.values())
-    
+
     def get_test_counts(self) -> tuple[int, int, int]:
         return TestFile.get_test_counts(self._test_files.values())
 

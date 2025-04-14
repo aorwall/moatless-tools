@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class RunMavenTestsArgs(ActionArguments):
     """
     Run the specified Maven tests in the codebase.
-    
+
     Note: This action requires explicit paths to test files.
     - Only full test file paths are supported (e.g., "src/test/java/com/example/MyTest.java")
     - Directory paths, file patterns, and individual test methods are NOT supported
@@ -33,8 +33,7 @@ class RunMavenTestsArgs(ActionArguments):
     """
 
     test_files: list[str] = Field(
-        ..., 
-        description="The list of explicit test file paths to run (must be file paths, not directories or patterns)"
+        ..., description="The list of explicit test file paths to run (must be file paths, not directories or patterns)"
     )
 
     model_config = ConfigDict(title="RunMavenTests")
@@ -53,7 +52,10 @@ class RunMavenTestsArgs(ActionArguments):
                 user_input="Run the Maven tests for our user authentication module",
                 action=RunMavenTestsArgs(
                     thoughts="Running Maven tests to verify the authentication functionality works as expected",
-                    test_files=["src/test/java/com/example/auth/AuthenticationTest.java", "src/test/java/com/example/auth/LoginTest.java"],
+                    test_files=[
+                        "src/test/java/com/example/auth/AuthenticationTest.java",
+                        "src/test/java/com/example/auth/LoginTest.java",
+                    ],
                 ),
             ),
             FewShotExample.create(
@@ -69,7 +71,7 @@ class RunMavenTestsArgs(ActionArguments):
 class RunMavenTests(Action):
     """
     Runs specified Maven test files in the codebase.
-    
+
     Important requirements:
     - Only accepts explicit, complete file paths to test files
     - Does not support directories, file patterns, or individual test methods
@@ -84,17 +86,17 @@ class RunMavenTests(Action):
         2000,
         description="The maximum number of tokens in the test result output message",
     )
-    
+
     # Maven binary to use
     maven_binary: str = "mvn"
 
     async def initialize(self, workspace: Workspace):
         await super().initialize(workspace)
-        
+
         # Make sure environment is available
         if not hasattr(workspace, "environment") or workspace.environment is None:
             raise ValueError("Environment is required to run Maven tests")
-        
+
         # Make sure maven is installed
         maven_version = await workspace.environment.execute(f"{self.maven_binary} --version", fail_on_error=True)
         if not maven_version:
@@ -135,16 +137,18 @@ class RunMavenTests(Action):
             try:
                 # Try to read the file - if it succeeds, the file exists
                 await self._workspace.environment.read_file(test_file)
-                
+
                 # Check if it's a directory (this is approximate)
                 is_dir = False
                 try:
-                    output = await self._workspace.environment.execute(f"[ -d {test_file} ] && echo 'true' || echo 'false'")
+                    output = await self._workspace.environment.execute(
+                        f"[ -d {test_file} ] && echo 'true' || echo 'false'"
+                    )
                     is_dir = output.strip() == "true"
                 except Exception:
                     # If command fails, assume it's not a directory
                     pass
-                
+
                 if is_dir:
                     logger.warning(
                         f"Directory {test_file} provided instead of file, please use ListFiles to get the list of files in the directory and specify which files to run tests on"
@@ -169,7 +173,7 @@ class RunMavenTests(Action):
             )
 
         start_time = time.time()
-        
+
         # Check Maven availability
         try:
             maven_version = await self._workspace.environment.execute(f"{self.maven_binary} --version")
@@ -180,7 +184,7 @@ class RunMavenTests(Action):
                 message=f"Failed to run Maven tests. Maven does not appear to be installed: {str(e)}",
                 properties={"test_results": [], "fail_reason": "maven_not_installed"},
             )
-            
+
         # Get repo name from current directory
         try:
             repo_path = await self._workspace.environment.execute("pwd")
@@ -188,19 +192,19 @@ class RunMavenTests(Action):
         except Exception:
             # Fallback to a generic name if we can't get the directory
             repo_name = "maven-project"
-            
+
         # First run 'mvn compile' to verify the project compiles
         logger.info("Running 'mvn compile' to verify the project compiles")
         try:
             compile_output = await self._workspace.environment.execute(f"{self.maven_binary} compile")
             compile_success = "BUILD SUCCESS" in compile_output
-            
+
             if not compile_success:
                 logger.warning("Maven compilation failed")
-                
+
                 # Parse the compilation errors
                 compile_results = parse_log(compile_output, repo_name)
-                
+
                 if not compile_results:
                     # If no specific errors were parsed, create a generic error
                     compile_results = [
@@ -208,35 +212,35 @@ class RunMavenTests(Action):
                             status=TestStatus.ERROR,
                             name="Maven compilation failed",
                             file_path=None,
-                            failure_output=compile_output
+                            failure_output=compile_output,
                         )
                     ]
-                
+
                 # Create a response with the compilation errors
                 response_msg = "Maven compilation failed. Tests cannot be run until compilation errors are fixed.\n\n"
                 response_msg += "Compilation errors:\n"
                 for result in compile_results:
                     if result.name:
                         response_msg += f"- {result.name}\n"
-                
+
                 if any(result.failure_output for result in compile_results):
                     response_msg += "\nDetails:\n"
                     for result in compile_results:
                         if result.failure_output:
                             response_msg += f"{result.failure_output}\n"
-                
+
                 return Observation.create(
                     message=response_msg,
                     properties={"test_results": [], "fail_reason": "compilation_failed"},
                 )
-                
+
         except Exception as e:
             logger.warning(f"Maven compilation check failed: {str(e)}")
             # Continue with tests even if compilation check fails
-        
+
         # Run tests
         test_results = []
-        
+
         # Run tests directly on the current state of the files
         if test_files:
             for test_file in test_files:
@@ -248,13 +252,13 @@ class RunMavenTests(Action):
                     # Execute Maven command - capture both stdout and stderr
                     try:
                         stdout = await self._workspace.environment.execute(test_command)
-                        stderr = "" # We don't have direct access to stderr through the environment interface
+                        stderr = ""  # We don't have direct access to stderr through the environment interface
                     except Exception as cmd_error:
                         # If the command fails, capture the error message
                         logger.warning(f"Maven command failed: {str(cmd_error)}")
                         stdout = f"Command failed with return code 1: {test_command}"
                         stderr = str(cmd_error)
-                    
+
                     # Combine stdout and stderr for better error detection
                     output = stdout
                     if stderr:
@@ -262,46 +266,46 @@ class RunMavenTests(Action):
                             output += "\n" + stderr
                         else:
                             output = stderr
-                    
+
                     logger.debug("Test completed")
-                    
+
                     # Parse test results
                     file_results = parse_log(output, repo_name, test_file)
-                    
+
                     # Set file path if not set by parser
                     for result in file_results:
                         if not result.file_path:
                             result.file_path = test_file
-                    
+
                     test_results.extend(file_results)
-                    
+
                 except Exception as e:
                     logger.warning(f"Test failed with error: {str(e)}")
-                    
+
                     # Create a failure result
                     error_result = TestResult(
                         status=TestStatus.ERROR,
                         name=f"Failed to run test: {test_file}",
                         file_path=test_file,
-                        failure_output=str(e)
+                        failure_output=str(e),
                     )
                     test_results.append(error_result)
         else:
             # Run all tests
             test_command = f"{self.maven_binary} test"
             logger.info(f"Running all tests with command: {test_command}")
-            
+
             try:
                 # Execute Maven command
                 try:
                     stdout = await self._workspace.environment.execute(test_command)
-                    stderr = "" # We don't have direct access to stderr through the environment interface
+                    stderr = ""  # We don't have direct access to stderr through the environment interface
                 except Exception as cmd_error:
                     # If the command fails, capture the error message
                     logger.warning(f"Maven command failed: {str(cmd_error)}")
                     stdout = f"Command failed with return code 1: {test_command}"
                     stderr = str(cmd_error)
-                
+
                 # Combine stdout and stderr for better error detection
                 output = stdout
                 if stderr:
@@ -309,14 +313,12 @@ class RunMavenTests(Action):
                         output += "\n" + stderr
                     else:
                         output = stderr
-                
+
                 test_results = parse_log(output, repo_name)
             except Exception as e:
                 logger.warning(f"Tests failed with error: {str(e)}")
                 error_result = TestResult(
-                    status=TestStatus.ERROR,
-                    name="Failed to run all tests",
-                    failure_output=str(e)
+                    status=TestStatus.ERROR, name="Failed to run all tests", failure_output=str(e)
                 )
                 test_results.append(error_result)
 
@@ -385,19 +387,19 @@ class RunMavenTests(Action):
             # Convert file path to class name
             # src/test/java/com/example/MyTest.java -> com.example.MyTest
             file_without_ext = test_file[:-5]  # Remove ".java"
-            
+
             # Handle common source directories
             for prefix in ["src/test/java/", "src/main/java/", "src/it/java/"]:
                 if file_without_ext.startswith(prefix):
-                    file_without_ext = file_without_ext[len(prefix):]
+                    file_without_ext = file_without_ext[len(prefix) :]
                     break
-            
+
             # Convert / to . for package name
             class_name = file_without_ext.replace("/", ".")
-            
+
             # Build test command for specific class
             return f"{self.maven_binary} test -Dtest={class_name}"
-        
+
         # If file path doesn't end with .java, it might be a module or package
         return f"{self.maven_binary} test -Dtest={test_file}"
 
@@ -480,4 +482,4 @@ class RunMavenTests(Action):
                 max_value=-50,
                 description="The action is counterproductive, demonstrating misunderstanding or causing setbacks, Maven test failures are severe and could have been anticipated.",
             ),
-        ] 
+        ]

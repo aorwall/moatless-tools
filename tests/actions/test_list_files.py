@@ -19,25 +19,25 @@ def temp_repo():
         os.makedirs(os.path.join(temp_dir, "src", "components"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "src", "utils"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "tests"), exist_ok=True)
-        
+
         # Create JS files
         with open(os.path.join(temp_dir, "src", "components", "Button.js"), "w") as f:
             f.write("// Button component\n")
-        
+
         with open(os.path.join(temp_dir, "src", "components", "Card.js"), "w") as f:
             f.write("// Card component\n")
-            
+
         with open(os.path.join(temp_dir, "src", "utils", "helpers.js"), "w") as f:
             f.write("// Helper functions\n")
-            
+
         # Create TS files
         with open(os.path.join(temp_dir, "src", "index.ts"), "w") as f:
             f.write("// Main entry point\n")
-            
+
         # Create test files
         with open(os.path.join(temp_dir, "tests", "Button.test.js"), "w") as f:
             f.write("// Button tests\n")
-            
+
         yield temp_dir
 
 
@@ -128,7 +128,7 @@ async def test_list_files_empty_directory(list_files_action, file_context, temp_
     # Create an empty directory
     empty_dir = os.path.join(temp_repo, "empty")
     os.makedirs(empty_dir, exist_ok=True)
-    
+
     # Execute
     args = ListFilesArgs(directory="empty", recursive=False, thoughts="Listing empty directory contents")
     result = await list_files_action.execute(args, file_context)
@@ -144,18 +144,18 @@ async def test_list_files_nonexistent_directory(list_files_action, file_context,
     """Test listing files in a non-existent directory."""
     # Mock the LocalBashEnvironment.execute to return error text
     original_execute = LocalBashEnvironment.execute
-    
+
     async def mock_execute_with_error(self, command):
         if "nonexistent" in command:
             return "find: ./nonexistent: No such file or directory"
         return await original_execute(self, command)
-    
+
     # Apply the mock
-    with patch.object(LocalBashEnvironment, 'execute', mock_execute_with_error):
+    with patch.object(LocalBashEnvironment, "execute", mock_execute_with_error):
         # Execute
         args = ListFilesArgs(directory="nonexistent", recursive=False, thoughts="Listing non-existent directory")
         result = await list_files_action.execute(args, file_context)
-    
+
     # Assert
     assert isinstance(result, Observation)
     assert result.message is not None
@@ -169,11 +169,11 @@ async def test_list_files_with_environment(list_files_action, file_context, temp
     # Create a mock environment and set it on the workspace
     env = LocalBashEnvironment(cwd=temp_repo)
     list_files_action.workspace.environment = env
-    
+
     # Execute
     args = ListFilesArgs(directory="src", recursive=False, thoughts="Testing with workspace environment")
     result = await list_files_action.execute(args, file_context)
-    
+
     # Assert
     assert isinstance(result, Observation)
     assert result.message is not None
@@ -187,43 +187,40 @@ async def test_list_files_environment_failure_fallback(list_files_action, file_c
     """Test fallback to repository's list_directory when environment commands fail."""
     # Mock the LocalBashEnvironment.execute to fail
     original_execute = LocalBashEnvironment.execute
-    
+
     async def mock_execute_error(self, command):
         if "find" in command:
             raise EnvironmentExecutionError("Command failed", -1, "Error")
         return await original_execute(self, command)
-    
+
     # Mock the repository's list_directory method
     mock_repo = MagicMock(spec=FileRepository)
-    mock_repo.list_directory.return_value = {
-        "directories": ["fallback_dir"],
-        "files": ["fallback_file.txt"]
-    }
-    
+    mock_repo.list_directory.return_value = {"directories": ["fallback_dir"], "files": ["fallback_file.txt"]}
+
     # Keep a reference to the original repository
     original_repo = list_files_action._workspace.repository
-    
+
     try:
         # Replace the repository with our mock by patching the workspace
         list_files_action._workspace.repository = mock_repo
         file_context._repo = mock_repo
-        
+
         # Apply the execute mock
-        with patch.object(LocalBashEnvironment, 'execute', mock_execute_error):
+        with patch.object(LocalBashEnvironment, "execute", mock_execute_error):
             # Execute
             args = ListFilesArgs(directory="src", recursive=False, thoughts="Testing fallback mechanism")
             result = await list_files_action.execute(args, file_context)
-        
+
         # Assert fallback was used
         assert isinstance(result, Observation)
         assert result.message is not None
         assert "fallback_dir" in result.message
         assert "fallback_file.txt" in result.message
         mock_repo.list_directory.assert_called_once_with("src")
-        
+
     finally:
         # Restore the original repository
-        list_files_action._workspace.repository = original_repo 
+        list_files_action._workspace.repository = original_repo
 
 
 @pytest.mark.asyncio
@@ -233,19 +230,19 @@ async def test_list_files_after_deletion(list_files_action, file_context, temp_r
     test_file_path = os.path.join(temp_repo, "temp_test_file.txt")
     with open(test_file_path, "w") as f:
         f.write("This is a test file")
-    
+
     # Verify file is listed
     args = ListFilesArgs(directory="", recursive=False, thoughts="Checking file exists")
     result = await list_files_action.execute(args, file_context)
     assert "📄 temp_test_file.txt" in result.message
-    
+
     # Delete the file
     os.remove(test_file_path)
-    
+
     # Verify file is no longer listed
     args = ListFilesArgs(directory="", recursive=False, thoughts="Checking file was deleted")
     result = await list_files_action.execute(args, file_context)
-    assert "📄 temp_test_file.txt" not in result.message 
+    assert "📄 temp_test_file.txt" not in result.message
 
 
 @pytest.mark.asyncio
@@ -257,21 +254,21 @@ async def test_list_files_symlinks(list_files_action, file_context, temp_repo):
     external_file = os.path.join(external_dir, "external_file.txt")
     with open(external_file, "w") as f:
         f.write("This is an external file")
-    
+
     # Create a symlink in the main directory
     symlink_path = os.path.join(temp_repo, "symlink_to_external")
     try:
         os.symlink(external_dir, symlink_path, target_is_directory=True)
     except (OSError, AttributeError):
         pytest.skip("Symlink creation not supported or requires elevated permissions")
-    
+
     # Verify the symlink is shown when listing recursively
     args = ListFilesArgs(directory="", recursive=True, thoughts="Testing symlink handling")
     result = await list_files_action.execute(args, file_context)
-    
+
     # The symlink should be treated as a directory and listed
     assert "external" in result.message
-    
+
     # Without -xdev, find would follow symlinks and potentially show duplicate content
     # or infinite recursion. With -xdev, we avoid this issue.
-    assert "external_file.txt" in result.message 
+    assert "external_file.txt" in result.message

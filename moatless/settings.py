@@ -164,9 +164,9 @@ async def get_runner():
 async def get_storage() -> BaseStorage:
     """Get the storage instance."""
     global _storage
-    
+
     load_dotenv()
-    
+
     if _storage is None:
         if os.environ.get("MOATLESS_STORAGE") == "s3":
             from moatless.storage.s3_storage import S3Storage
@@ -180,9 +180,9 @@ async def get_storage() -> BaseStorage:
             if not os.environ.get("MOATLESS_DIR"):
                 raise ValueError("MOATLESS_DIR environment variable is not set")
             _storage = FileStorage(base_dir=os.environ.get("MOATLESS_DIR"))
-            
+
         logger.info(f"Storage initialized: {_storage}")
-    
+
     return _storage
 
 

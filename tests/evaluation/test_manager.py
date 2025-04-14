@@ -22,12 +22,7 @@ from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 
 # Constants for test data
-TEST_INSTANCE_IDS = [
-    "django__django-11099",
-    "django__django-13658",
-    "django__django-16255",
-    "django__django-16527"
-]
+TEST_INSTANCE_IDS = ["django__django-11099", "django__django-13658", "django__django-16255", "django__django-16527"]
 
 
 @pytest.fixture
@@ -66,18 +61,25 @@ def file_storage():
     BaseStorage._instance = None
     storage_dir = tempfile.mkdtemp()
     storage = FileStorage(storage_dir)
-    
+
     # Initialize with no updates applied
     storage._updated_eval = False
-    
+
     # Mock the read method
     async def mock_read(path, **kwargs):
         # Extract evaluation name from path
         if path == "evaluation_summaries.json":
             # Return a dictionary of all evaluation summaries
             all_summaries = {}
-            evaluation_names = ["eval_test_easy", "eval_test_summary", "eval_summary_test1", "eval_summary_test2", "eval_update_test", "eval_init_test"]
-            
+            evaluation_names = [
+                "eval_test_easy",
+                "eval_test_summary",
+                "eval_summary_test1",
+                "eval_summary_test2",
+                "eval_update_test",
+                "eval_init_test",
+            ]
+
             for eval_name in evaluation_names:
                 # Base summary data
                 summary_data = {
@@ -93,27 +95,27 @@ def file_storage():
                         "running": 0,
                         "succeeded": 0,
                         "failed": 0,
-                        "error": 0
+                        "error": 0,
                     },
                     "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
-                
+
                 # Customize data based on evaluation name
                 if eval_name == "eval_summary_test2":
                     summary_data["dataset_name"] = "medium"
                     summary_data["flow_id"] = "advanced_coding"
                     summary_data["model_id"] = "gpt-4o-2024-05-13"
-                
+
                 # For the update test, if the summary has been updated, return the updated version
                 if eval_name == "eval_update_test" and hasattr(storage, "_updated_eval") and storage._updated_eval:
                     summary_data["status"] = "running"
                     summary_data["status_summary"]["running"] = 1
                     summary_data["status_summary"]["pending"] = 1
                     summary_data["status_summary"]["created"] = 2
-                
+
                 all_summaries[eval_name] = summary_data
-            
+
             return all_summaries
         elif "evaluations/" in path:
             eval_name = path.split("/")[-1]
@@ -132,39 +134,40 @@ def file_storage():
                     "completed": 0,
                     "error": 0,
                     "resolved": 0,
-                    "failed": 0
+                    "failed": 0,
                 },
                 "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            
+
             # Customize data based on evaluation name
             if eval_name == "eval_summary_test2":
                 common_data["dataset_name"] = "medium"
                 common_data["flow_id"] = "advanced_coding"
                 common_data["model_id"] = "gpt-4o-2024-05-13"
-            
+
             # For the update test, if the summary has been updated, return the updated version
             if eval_name == "eval_update_test" and hasattr(storage, "_updated_eval"):
                 common_data["status"] = "running"
                 common_data["status_summary"]["running"] = 1
                 common_data["status_summary"]["pending"] = 1
-            
+
             return common_data
-        
+
         # For projects
         elif "projects/" in path:
             return {"id": path.split("/")[1]}
-        
+
         return {}
 
     # Mock the write method to update context for subsequent reads
     original_write = storage.write
+
     async def mock_write(path, data, **kwargs):
         if path == "evaluation_summaries.json" and "eval_update_test" in data:
             # Store that this evaluation has been updated in a class variable
             storage._updated_eval = True
-        
+
         # Call the original write method without passing context
         return await original_write(path, data)
 
@@ -180,23 +183,23 @@ def file_storage():
             # For exists_in_project checks during evaluation creation
             return False
         return True
-        
+
     # Mock the exists_in_project method
     async def mock_exists_in_project(key, project_id=None):
         # Keep track of which evaluations have been created
         if not hasattr(storage, "_created_evaluations"):
             storage._created_evaluations = set()
-            
+
         # When creating an evaluation, return False to allow creation
         if key == "evaluation.json" and not project_id in storage._created_evaluations:
             # After checking, mark this evaluation as created for future checks
             storage._created_evaluations.add(project_id)
             return False
-            
+
         # When loading an existing evaluation, return True
         if key == "evaluation.json" and project_id in storage._created_evaluations:
             return True
-            
+
         return False
 
     # Assign the mock methods
@@ -205,7 +208,7 @@ def file_storage():
     storage.exists = mock_exists
     storage.exists_in_project = mock_exists_in_project
     storage.assert_exists_in_trajectory = AsyncMock(return_value=True)
-    
+
     # Mock the read_from_project method with a proper implementation that uses project_id
     async def mock_read_from_project(key, project_id):
         if key == "evaluation.json":
@@ -223,14 +226,15 @@ def file_storage():
                         "status": "created",
                         "inputs": {"prompt": f"Test prompt for {instance_id}"},
                         "expected": {"output": f"Expected output for {instance_id}"},
-                        "created_at": datetime.now(timezone.utc).isoformat()
-                    } for instance_id in TEST_INSTANCE_IDS
-                ]
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                    for instance_id in TEST_INSTANCE_IDS
+                ],
             }
         return {}
-    
+
     storage.read_from_project = mock_read_from_project
-    
+
     return storage
 
 
@@ -240,7 +244,7 @@ def mock_swebench_instance():
     with patch("moatless.evaluation.manager.get_swebench_instance") as mock:
         mock.return_value = {
             "instance_id": TEST_INSTANCE_IDS[0],
-            "problem_statement": f"Test problem statement for {TEST_INSTANCE_IDS[0]}"
+            "problem_statement": f"Test problem statement for {TEST_INSTANCE_IDS[0]}",
         }
         yield mock
 
@@ -269,15 +273,15 @@ def flow_manager(mock_runner, file_storage, mock_event_bus, mock_agent_manager, 
         storage=file_storage,
         eventbus=mock_event_bus,
         agent_manager=mock_agent_manager,
-        model_manager=mock_model_manager
+        model_manager=mock_model_manager,
     )
-    
+
     # Mock the create_flow method to avoid the need for flow configs
     mock_flow = AsyncMock()
     mock_flow.persist = AsyncMock()
     manager.create_flow = AsyncMock()
     manager.create_flow.return_value = mock_flow
-    
+
     # Mock get_trajectory to return a mock response
     async def mock_get_trajectory(project_id, trajectory_id):
         return TrajectoryResponseDTO(
@@ -285,14 +289,13 @@ def flow_manager(mock_runner, file_storage, mock_event_bus, mock_agent_manager, 
             project_id=project_id,
             status="created",
             job_status=JobStatus.PENDING,
-            
             agent_id="test_agent",
             model_id="gpt-4o-mini-2024-07-18",
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
         )
-    
+
     manager.get_trajectory = mock_get_trajectory
-    
+
     return manager
 
 
@@ -301,13 +304,9 @@ def manager(mock_runner, file_storage, mock_event_bus, flow_manager, mock_sweben
     """Fixture to create an EvaluationManager with mocked dependencies."""
     with patch.object(EvaluationManager, "get_dataset_instance_ids", return_value=TEST_INSTANCE_IDS):
         manager = EvaluationManager(
-            runner=mock_runner, 
-            storage=file_storage, 
-            eventbus=mock_event_bus,
-            flow_manager=flow_manager
+            runner=mock_runner, storage=file_storage, eventbus=mock_event_bus, flow_manager=flow_manager
         )
         yield manager
-
 
 
 @pytest.mark.asyncio
@@ -318,19 +317,19 @@ async def test_create_evaluation_with_dataset(manager, flow_manager, file_storag
         flow_id="simple_coding",
         model_id="gpt-4o-mini-2024-07-18",
         evaluation_name="eval_test_easy",
-        dataset_name="easy"
+        dataset_name="easy",
     )
-    
+
     assert evaluation.evaluation_name == "eval_test_easy"
     assert evaluation.dataset_name == "easy"
     assert evaluation.flow_id == "simple_coding"
     assert evaluation.model_id == "gpt-4o-mini-2024-07-18"
     assert evaluation.status in [EvaluationStatus.PENDING, EvaluationStatus.PAUSED]
     assert len(evaluation.instances) == 4
-    
+
     for instance in evaluation.instances:
         assert instance.status == InstanceStatus.CREATED
-    
+
     saved_eval = await manager.get_evaluation("eval_test_easy")
     assert saved_eval is not None
     assert saved_eval.evaluation_name == "eval_test_easy"
@@ -351,18 +350,18 @@ async def test_evaluation_summary_creation(manager, file_storage):
         flow_id="simple_coding",
         model_id="gpt-4o-mini-2024-07-18",
         evaluation_name="eval_test_summary",
-        dataset_name="easy"
+        dataset_name="easy",
     )
-    
+
     # Check that the summary was created in the all-summaries file
     exists = await file_storage.exists("evaluation_summaries.json")
     assert exists is True
-    
+
     # Read the summaries data directly from storage
     all_summaries = await file_storage.read("evaluation_summaries.json")
     assert all_summaries is not None
     assert "eval_test_summary" in all_summaries
-    
+
     summary_data = all_summaries["eval_test_summary"]
     assert summary_data["evaluation_name"] == "eval_test_summary"
     assert summary_data["dataset_name"] == "easy"
@@ -370,7 +369,7 @@ async def test_evaluation_summary_creation(manager, file_storage):
     assert summary_data["model_id"] == "gpt-4o-mini-2024-07-18"
     assert summary_data["status"] == "pending"
     assert summary_data["instance_count"] == 4
-    
+
     # Check that status summary fields are initialized
     assert "status_summary" in summary_data
     assert summary_data["status_summary"]["created"] == 4
@@ -385,35 +384,35 @@ async def test_list_evaluation_summaries(manager):
         flow_id="simple_coding",
         model_id="gpt-4o-mini-2024-07-18",
         evaluation_name="eval_summary_test1",
-        dataset_name="easy"
+        dataset_name="easy",
     )
-    
+
     await manager.create_evaluation(
         flow_id="advanced_coding",
         model_id="gpt-4o-2024-05-13",
         evaluation_name="eval_summary_test2",
-        dataset_name="medium"
+        dataset_name="medium",
     )
-    
+
     # Get the summaries
     summaries = await manager.list_evaluation_summaries()
-    
+
     # Verify we have at least our two summaries
     assert len(summaries) >= 2
-    
+
     # Verify the summaries contain the correct data for our evaluations
     summary_names = [s.evaluation_name for s in summaries]
     assert "eval_summary_test1" in summary_names
     assert "eval_summary_test2" in summary_names
-    
+
     # Get the specific summaries for our tests
     summary1 = next(s for s in summaries if s.evaluation_name == "eval_summary_test1")
     summary2 = next(s for s in summaries if s.evaluation_name == "eval_summary_test2")
-    
+
     assert summary1.dataset_name == "easy"
     assert summary1.flow_id == "simple_coding"
     assert summary1.model_id == "gpt-4o-mini-2024-07-18"
-    
+
     assert summary2.dataset_name == "medium"
     assert summary2.flow_id == "advanced_coding"
     assert summary2.model_id == "gpt-4o-2024-05-13"
@@ -427,16 +426,16 @@ async def test_update_evaluation_summary(manager):
         flow_id="simple_coding",
         model_id="gpt-4o-mini-2024-07-18",
         evaluation_name="eval_update_test",
-        dataset_name="easy"
+        dataset_name="easy",
     )
 
     # Get the initial summary
     summaries = await manager.list_evaluation_summaries()
     initial_summary = next((s for s in summaries if s.evaluation_name == "eval_update_test"), None)
     assert initial_summary is not None
-    
+
     # Skip status verification since it might vary based on existing evaluations
-    
+
     # Update the evaluation status and an instance
     evaluation.status = EvaluationStatus.RUNNING
     evaluation.started_at = datetime.now(timezone.utc)
@@ -448,7 +447,7 @@ async def test_update_evaluation_summary(manager):
 
     # Set a flag indicating the next read should return the updated version
     manager.storage._updated_eval = True
-    
+
     # Get the updated summary
     updated_summaries = await manager.list_evaluation_summaries()
     updated_summary = next(s for s in updated_summaries if s.evaluation_name == "eval_update_test")
@@ -457,7 +456,3 @@ async def test_update_evaluation_summary(manager):
     assert updated_summary.status == "running"
     assert updated_summary.status_summary.running == 1
     assert updated_summary.status_summary.pending == 1
-
-    
-    
-    

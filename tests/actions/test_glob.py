@@ -18,25 +18,25 @@ def temp_repo():
         os.makedirs(os.path.join(temp_dir, "src", "components"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "src", "utils"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "tests"), exist_ok=True)
-        
+
         # Create JS files
         with open(os.path.join(temp_dir, "src", "components", "Button.js"), "w") as f:
             f.write("// Button component")
-        
+
         with open(os.path.join(temp_dir, "src", "components", "Card.js"), "w") as f:
             f.write("// Card component")
-            
+
         with open(os.path.join(temp_dir, "src", "utils", "helpers.js"), "w") as f:
             f.write("// Helper functions")
-            
+
         # Create TS files
         with open(os.path.join(temp_dir, "src", "index.ts"), "w") as f:
             f.write("// Main entry point")
-            
+
         # Create test files
         with open(os.path.join(temp_dir, "tests", "Button.test.js"), "w") as f:
             f.write("// Button tests")
-            
+
         yield temp_dir
 
 
@@ -114,7 +114,7 @@ async def test_max_results_limit(glob_tool, file_context, temp_repo):
     assert result.message is not None
     assert "Found 2 files" in result.message
     # Count the number of file paths in the result
-    file_paths = [line for line in result.message.split('\n') if line.strip().startswith('📄')]
+    file_paths = [line for line in result.message.split("\n") if line.strip().startswith("📄")]
     assert len(file_paths) == 2
 
 
@@ -136,17 +136,16 @@ async def test_invalid_pattern(glob_tool, file_context):
     """Test behavior with an invalid pattern."""
     # Mock the matching_files method of FileRepository
     original_matching_files = glob_tool.workspace.repository.matching_files
-    
+
     async def mock_error(file_pattern):
         raise ValueError("Invalid pattern")
-    
+
     # Apply the mock
-    with patch.object(glob_tool.workspace.repository.__class__, 'matching_files', 
-                     side_effect=mock_error):
+    with patch.object(glob_tool.workspace.repository.__class__, "matching_files", side_effect=mock_error):
         # Execute
         args = GlobArgs(pattern="[invalid", max_results=100, thoughts="Testing invalid pattern")
         result = await glob_tool.execute(args, file_context)
-    
+
     # Assert
     assert isinstance(result, Observation)
     assert result.message is not None
@@ -158,7 +157,7 @@ async def test_missing_workspace(file_context):
     """Test behavior when workspace is missing."""
     # Setup a GlobTool without a workspace
     glob_tool = GlobTool()
-    
+
     # Execute
     args = GlobArgs(pattern="**/*.js", max_results=100, thoughts="Testing missing workspace")
     with pytest.raises(RuntimeError, match="No workspace set"):
@@ -173,10 +172,10 @@ async def test_missing_repository(file_context):
     workspace = MagicMock(spec=Workspace)
     workspace.repository = None
     glob_tool._workspace = workspace
-    
+
     # Execute
     args = GlobArgs(pattern="**/*.js", max_results=100, thoughts="Testing missing repository")
-    
+
     # The GlobTool._execute implementation raises ValueError, but the base Action.execute
     # raises RuntimeError first when checking workspace.repository, so we need to check for that
     with pytest.raises((ValueError, RuntimeError)):
@@ -189,20 +188,20 @@ async def test_repository_without_matching_files(file_context):
     # Setup a GlobTool with a repository that doesn't have matching_files
     glob_tool = GlobTool()
     workspace = MagicMock(spec=Workspace)
-    
+
     # Create a real repo-like object but without the matching_files method
     class RepoWithoutMatching:
         def __init__(self):
             pass
-            
+
     # Create a mock repository without matching_files method
     mock_repo = RepoWithoutMatching()
-    
+
     workspace.repository = mock_repo
     glob_tool._workspace = workspace
-    
+
     # Execute
     args = GlobArgs(pattern="**/*.js", max_results=100, thoughts="Testing repository without matching_files")
-    
+
     with pytest.raises(ValueError, match="Repository does not support glob matching"):
-        await glob_tool.execute(args, file_context) 
+        await glob_tool.execute(args, file_context)

@@ -35,7 +35,7 @@ def temp_dir():
 @pytest.fixture
 def file_storage(temp_dir):
     """Fixture to create a storage instance with a test directory."""
-    
+
     settings._storage = FileStorage(base_dir=temp_dir)
     return settings._storage
 
@@ -88,7 +88,7 @@ def set_env_vars(monkeypatch, request, temp_dir):
 
     if not os.path.exists(repo_dir):
         os.makedirs(repo_dir)
-        
+
     # Create MOATLESS_DIR if specified on command line, otherwise tempfile is used
     if moatless_dir:
         logger.debug(f"Setting MOATLESS_DIR={moatless_dir}")
@@ -100,7 +100,7 @@ def set_env_vars(monkeypatch, request, temp_dir):
     monkeypatch.setenv("REPO_DIR", repo_dir)
 
     yield
-    
+
     # Clean up temp directories after tests
     if moatless_dir and os.path.exists(moatless_dir) and "--keep-files" not in request.config.getoption:
         shutil.rmtree(moatless_dir, ignore_errors=True)
@@ -108,6 +108,4 @@ def set_env_vars(monkeypatch, request, temp_dir):
 
 # Add the llm_integration marker
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "llm_integration: mark test as requiring LLM integration"
-    )
+    config.addinivalue_line("markers", "llm_integration: mark test as requiring LLM integration")

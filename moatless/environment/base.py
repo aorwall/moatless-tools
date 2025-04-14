@@ -55,7 +55,7 @@ class BaseEnvironment(abc.ABC):
             EnvironmentExecutionError: If there's an error reading the file
         """
         pass
-        
+
     @abc.abstractmethod
     async def write_file(self, path: str, content: str) -> None:
         """

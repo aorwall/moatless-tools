@@ -94,7 +94,7 @@ class NodeTreeItem(BaseTreeItem):
     """Represents a node item in the tree."""
 
     type: str = ItemType.NODE
-    is_duplicate: bool = False  
+    is_duplicate: bool = False
     parent_node_id: Optional[int] = None
     tokens: Optional[int] = None
 
@@ -173,16 +173,16 @@ def create_completion_tree_item(
     parent_id: str,
     node_id: int,
     action_step_id: Optional[int] = None,
-    item_id: Optional[str] = None
+    item_id: Optional[str] = None,
 ) -> CompletionTreeItem:
     """Create a CompletionTreeItem from a completion invocation.
-    
+
     Args:
         completion: The completion invocation to create the tree item from
         parent_id: The ID of the parent item (node or action)
         node_id: The ID of the node this completion belongs to
         action_step_id: Optional action step ID if this completion is for an action
-        
+
     Returns:
         A CompletionTreeItem representing the completion
     """
@@ -193,52 +193,52 @@ def create_completion_tree_item(
 
     return CompletionTreeItem(
         id=f"{parent_id}-completion",
-        label="Completion", 
+        label="Completion",
         detail=get_completion_detail(completion),
         time=completion_time,
         tokens=tokens,
         node_id=node_id,
         action_step_id=action_step_id,
-        item_id=item_id
+        item_id=item_id,
     )
 
 
 def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> NodeTreeItem:
     # Create node item
     timestamp = get_timestamp(node)
-    
+
     # Generate detail text for node
     detail_parts = []
-    
+
     # Add action names if available
     if node.action_steps:
-        action_names = [step.action.name for step in node.action_steps if hasattr(step.action, 'name')]
+        action_names = [step.action.name for step in node.action_steps if hasattr(step.action, "name")]
         if action_names:
             detail_parts.append(f"Actions: {', '.join(action_names)}")
-    
+
     # Add reward if available
     if node.reward and node.reward.value is not None:
         detail_parts.append(f"Reward: {node.reward.value:.2f}")
-    
+
     # Add error if available
     if node.error:
         error_text = node.error[:50] + "..." if len(node.error) > 50 else node.error
         detail_parts.append(f"Error: {error_text}")
-    
+
     # Add evaluation result if available
     if node.evaluation_result:
         status = "Resolved" if node.evaluation_result.resolved else "Failed"
         detail_parts.append(f"Evaluation: {status}")
-    
+
     # Join all parts with separator
     detail = " | ".join(detail_parts) if detail_parts else None
-    
+
     usage = node.usage()
     if usage and usage.prompt_tokens > 0:
         tokens = usage.completion_tokens + usage.prompt_tokens
     else:
         tokens = None
-    
+
     node_item = NodeTreeItem(
         id=f"node-{node.node_id}",
         node_id=node.node_id,
@@ -255,10 +255,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
     if node.completions and node.completions.get("build_action"):
         completion = node.completions["build_action"]
         completion_item = create_completion_tree_item(
-            completion=completion,
-            parent_id=node_item.id,
-            node_id=node_item.node_id,
-            item_id="agent"
+            completion=completion, parent_id=node_item.id, node_id=node_item.node_id, item_id="agent"
         )
         node_item.children.append(completion_item)
 
@@ -304,10 +301,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         # Add action completion if available
         if step.completion and step.completion.usage:
             action_completion = create_completion_tree_item(
-                completion=step.completion,
-                parent_id=action_id,
-                node_id=node_item.node_id,
-                item_id=f"action_{i}"
+                completion=step.completion, parent_id=action_id, node_id=node_item.node_id, item_id=f"action_{i}"
             )
             action_item.children.append(action_completion)
 
@@ -319,10 +313,10 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
                 completion=node.reward.completion,
                 parent_id=action_id,
                 node_id=node_item.node_id,
-                item_id="value_function"
+                item_id="value_function",
             )
             node_item.children.append(reward_completion)
-             
+
         if node.reward.value is not None:
             node_item.children.append(
                 RewardTreeItem(
@@ -332,20 +326,24 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
                     node_id=node_item.node_id,
                 )
             )
-            
+
             # Add selection info if available
-            if hasattr(node, 'selection') and node.selection:
-                reason = f"Reason: {node.selection.reason[:100]}..." if len(node.selection.reason) > 100 else f"Reason: {node.selection.reason}"
-                
+            if hasattr(node, "selection") and node.selection:
+                reason = (
+                    f"Reason: {node.selection.reason[:100]}..."
+                    if len(node.selection.reason) > 100
+                    else f"Reason: {node.selection.reason}"
+                )
+
                 node_item.children.append(
                     SelectionTreeItem(
                         id=f"{node_item.id}-selection",
                         label="Selection",
                         detail=f"Node {node.selection.node_id} ({reason})",
-                        node_id=node_item.node_id
+                        node_id=node_item.node_id,
                     )
                 )
-    
+
     if node.error:
         node_item.children.append(
             ErrorTreeItem(

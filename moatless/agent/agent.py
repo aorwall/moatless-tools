@@ -65,7 +65,7 @@ class ActionAgent(MoatlessComponent):
         action_args: list[type[ActionArguments]] = []
         for action in self.actions:
             self._action_map[action.args_schema] = action
-            
+
             if not action.hidden:
                 action_args.append(action.args_schema)
 
@@ -114,7 +114,7 @@ class ActionAgent(MoatlessComponent):
                 current_action_step.set(None)
                 if node.terminal:
                     break
-                
+
         except Exception as e:
             logger.exception(f"Node{node.node_id}: Failed to run.")
             node.error = f"{e.__class__.__name__}: {str(e)}\n\n{traceback.format_exc()}"

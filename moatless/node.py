@@ -22,12 +22,9 @@ class ActionStep(BaseModel):
     completion: Optional[CompletionInvocation] = None
     start_time: datetime = Field(default_factory=datetime.now, description="The start time of the action step")
     end_time: datetime = Field(default_factory=datetime.now, description="The end time of the action step")
-    
-    model_config = ConfigDict(
-        ser_json_timedelta="iso8601",
-        json_encoders={datetime: lambda dt: dt.isoformat()}
-    )
-    
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601", json_encoders={datetime: lambda dt: dt.isoformat()})
+
     @field_validator("start_time", "end_time", mode="before")
     @classmethod
     def parse_datetime(cls, value):
@@ -47,7 +44,7 @@ class ActionStep(BaseModel):
 
         if self.completion:
             data["completion"] = self.completion.model_dump(**kwargs)
-    
+
         return data
 
     def reset(self):
@@ -68,23 +65,22 @@ class ActionStep(BaseModel):
 
 
 class Selection(BaseModel):
-    
     node_id: Optional[int] = Field(default=None)
     completion: Optional[CompletionInvocation] = Field(default=None)
     reason: str
     trace: dict[str, Any] = Field(default_factory=dict)
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        
+
         if self.completion:
             data["completion"] = self.completion.model_dump(**kwargs)
-            
+
         if self.trace:
             data["trace"] = self.trace
-            
+
         return data
-    
+
     @classmethod
     def model_validate(cls, obj: Any, **kwargs) -> "Selection":
         if isinstance(obj, dict):
@@ -93,8 +89,7 @@ class Selection(BaseModel):
                 obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
 
         return super().model_validate(obj, **kwargs)
-    
-    
+
 
 class FeedbackData(BaseModel):
     """Structured feedback data model"""
@@ -102,7 +97,7 @@ class FeedbackData(BaseModel):
     feedback: str = Field(..., description="Direct feedback to the AI assistant")
     analysis: Optional[str] = Field(None, description="Analysis of the task and alternative branch attempts")
     completion: Optional[CompletionInvocation] = Field(None, description="Completion used to generate the feedback")
-    
+
     # TODO: Remove this field
     suggested_node_id: Optional[int] = Field(None, description="ID of the node that should be expanded next (optional)")
 
@@ -120,16 +115,20 @@ class Reward(BaseModel):
         ge=-100,
         le=100,
     )
+    tags: Optional[list[str]] = Field(
+        default=None,
+        description="Tags associated with the reward. Used for classification and troubleshooting.",
+    )
     completion: Optional[CompletionInvocation] = None
-    
+
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)
-        
+
         if self.completion:
             data["completion"] = self.completion.model_dump(**kwargs)
-            
+
         return data
-    
+
     @classmethod
     def model_validate(cls, obj: Any, **kwargs) -> "Reward":
         if isinstance(obj, dict):
@@ -137,7 +136,6 @@ class Reward(BaseModel):
             if "completion" in obj:
                 obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
         return super().model_validate(obj, **kwargs)
-
 
 
 class EvaluationResult(BaseModel):
@@ -148,12 +146,9 @@ class EvaluationResult(BaseModel):
     end_time: datetime = Field(..., description="The end time of the evaluation")
     evaluation: str = Field(default="SWE-Bench", description="The evaluation")
     details: Optional[dict[str, Any]] = Field(None, description="Details about the evaluation")
-    
-    model_config = ConfigDict(
-        ser_json_timedelta="iso8601",
-        json_encoders={datetime: lambda dt: dt.isoformat()}
-    )
-    
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601", json_encoders={datetime: lambda dt: dt.isoformat()})
+
     @field_validator("start_time", "end_time", mode="before")
     @classmethod
     def parse_datetime(cls, value):
@@ -206,11 +201,8 @@ class Node(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
     evaluation_result: Optional[EvaluationResult] = Field(None, description="The evaluation result of the node")
 
-    model_config = ConfigDict(
-        ser_json_timedelta="iso8601",
-        json_encoders={datetime: lambda dt: dt.isoformat()}
-    )
-    
+    model_config = ConfigDict(ser_json_timedelta="iso8601", json_encoders={datetime: lambda dt: dt.isoformat()})
+
     @field_validator("timestamp", mode="before")
     @classmethod
     def parse_datetime(cls, value):
@@ -344,7 +336,7 @@ class Node(BaseModel):
         for child in self.children:
             expandable_nodes.extend(child.get_expandable_descendants())
         return expandable_nodes
-    
+
     def get_visited_descendants(self) -> list["Node"]:
         """Get all visited descendants of this node, including self if visited."""
         visited_nodes = []
@@ -432,7 +424,7 @@ class Node(BaseModel):
         for completion in self.completions.values():
             if completion and completion.usage:
                 usage += completion.usage
-                
+
         if self.reward and self.reward.completion and self.reward.completion.usage:
             usage += self.reward.completion.usage
 
@@ -510,7 +502,7 @@ class Node(BaseModel):
 
         if self.reward and "reward" not in exclude_set:
             node_dict["reward"] = self.reward.model_dump(**kwargs)
-            
+
         if self.selection and "selection" not in exclude_set:
             try:
                 node_dict["selection"] = self.selection.model_dump(**kwargs)
@@ -570,7 +562,7 @@ class Node(BaseModel):
 
         if "terminal" not in node_data:
             node_data["terminal"] = False
-            
+
         if "selection" in node_data and node_data["selection"] is not None:
             node_data["selection"] = Selection.model_validate(node_data["selection"])
 

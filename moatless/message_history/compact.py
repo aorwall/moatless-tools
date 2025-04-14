@@ -206,7 +206,11 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                 current_messages.append(NodeMessage(actions=actions, observations=observations))
 
                 # Handle file context for non-ViewCode actions
-                if self.include_file_context and not isinstance(previous_node.action, ViewCodeArgs) and previous_node.file_context:
+                if (
+                    self.include_file_context
+                    and not isinstance(previous_node.action, ViewCodeArgs)
+                    and previous_node.file_context
+                ):
                     files_to_show = set()
                     has_edits = False
                     context_files = previous_node.file_context.get_context_files()

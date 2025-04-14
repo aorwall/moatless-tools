@@ -45,19 +45,25 @@ class DockerRunner(BaseRunner):
         self.timeout_seconds = timeout_seconds
         self.logger = logging.getLogger(__name__)
         self.running_containers: Dict[str, Dict[str, Any]] = {}
-            
+
         # Get source directory - prefer explicitly passed parameter over environment variable
-        self.moatless_source_dir = moatless_source_dir or os.environ.get("MOATLESS_HOST_RUNNER_SOURCE_DIR") or os.environ.get("MOATLESS_RUNNER_MOUNT_SOURCE_DIR")
-        
+        self.moatless_source_dir = (
+            moatless_source_dir
+            or os.environ.get("MOATLESS_HOST_RUNNER_SOURCE_DIR")
+            or os.environ.get("MOATLESS_RUNNER_MOUNT_SOURCE_DIR")
+        )
+
         # Get components directory - prefer host path if running in container
-        self.components_path = os.environ.get("MOATLESS_HOST_COMPONENTS_PATH") or os.environ.get("MOATLESS_COMPONENTS_PATH")
-        
+        self.components_path = os.environ.get("MOATLESS_HOST_COMPONENTS_PATH") or os.environ.get(
+            "MOATLESS_COMPONENTS_PATH"
+        )
+
         # Get moatless data directory - prefer host path if running in container
         self.moatless_dir = os.environ.get("MOATLESS_HOST_DIR") or os.environ.get("MOATLESS_DIR")
-        
+
         # Determine if running on ARM64 architecture
         self.is_arm64 = platform.machine().lower() in ["arm64", "aarch64"]
-        
+
         logger.info(f"Docker runner initialized with:")
         logger.info(f"  - Source dir: {self.moatless_source_dir}")
         logger.info(f"  - Components path: {self.components_path}")
@@ -144,7 +150,7 @@ class DockerRunner(BaseRunner):
 
             # Create command to run Docker container
             cmd = ["docker", "run", "--name", container_name, "-d"]
-            
+
             # Add platform flag if running on ARM64 architecture
             if self.is_arm64:
                 cmd.extend(["--platform=linux/amd64"])
@@ -156,7 +162,7 @@ class DockerRunner(BaseRunner):
             # Add environment variables
             for env_var in env_vars:
                 cmd.extend(["-e", env_var])
-                
+
             cmd.extend(["-v", f"{self.moatless_dir}:/data/moatless"])
 
             # Add volume mounts for components

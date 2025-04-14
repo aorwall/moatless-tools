@@ -35,56 +35,58 @@ class FinishCodingTasks(Action):
             return "Error: Coding task handler not available"
 
         handler = self.workspace.artifact_handlers["coding_task"]
-        
+
         # Get all tasks to validate IDs and current state
         all_artifacts = await handler.get_all_artifacts()
         coding_tasks = [task for task in all_artifacts if isinstance(task, CodingTaskArtifact)]
         all_task_dict = {task.id: task for task in coding_tasks}
-        
+
         completed = []
         not_found = []
         already_completed = []
-        
+
         # Process each task ID
         for task_id in args.task_ids:
             if task_id not in all_task_dict:
                 not_found.append(task_id)
                 continue
-                
+
             task = all_task_dict[task_id]
-            
+
             if task.state == TaskState.COMPLETED:
                 already_completed.append(task_id)
                 continue
-                
+
             # Update task state to completed
             updated_task = task.model_copy(update={"state": TaskState.COMPLETED})
             await handler.update(updated_task)
             completed.append(task_id)
-        
+
         # Prepare response
         response_parts = []
-        
+
         if completed:
             response_parts.append(f"Completed {len(completed)} coding tasks: {', '.join(completed)}")
-        
+
         if not_found:
             response_parts.append(f"Tasks not found: {', '.join(not_found)}")
-            
+
         if already_completed:
             response_parts.append(f"Tasks already completed: {', '.join(already_completed)}")
-        
+
         # List all tasks with their current status
         updated_artifacts = await handler.get_all_artifacts()
         updated_tasks = [task for task in updated_artifacts if isinstance(task, CodingTaskArtifact)]
         updated_tasks.sort(key=lambda x: x.priority)
-        
-        task_list = "\n".join([
-            f"[{'x' if task.state == TaskState.COMPLETED else ' '}] {task.id} - {task.title}" 
-            for task in updated_tasks
-        ])
-        
+
+        task_list = "\n".join(
+            [
+                f"[{'x' if task.state == TaskState.COMPLETED else ' '}] {task.id} - {task.title}"
+                for task in updated_tasks
+            ]
+        )
+
         response = "\n".join(response_parts)
         response += f"\n\nAll coding tasks:\n{task_list}"
-        
-        return response 
+
+        return response

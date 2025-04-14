@@ -204,9 +204,13 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
             # Then check for custom components if MOATLESS_COMPONENTS_PATH is set
             custom_path = os.getenv("MOATLESS_COMPONENTS_PATH")
             if not custom_path:
-                logger.info(f"MOATLESS_COMPONENTS_PATH must be set to load custom components for [{cls.get_component_type()}].")
+                logger.info(
+                    f"MOATLESS_COMPONENTS_PATH must be set to load custom components for [{cls.get_component_type()}]."
+                )
             elif not os.path.isdir(custom_path):
-                logger.warning(f"Custom components path [{custom_path}] does not exist for [{cls.get_component_type()}]")
+                logger.warning(
+                    f"Custom components path [{custom_path}] does not exist for [{cls.get_component_type()}]"
+                )
             else:
                 logger.debug(f"Custom components path found: [{custom_path}]")
 
@@ -220,7 +224,9 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
                         if ispkg:
                             pkg_path = os.path.join(custom_path, modname)
                             # Now walk all modules in this package
-                            for subfinder, submodname, subispkg in pkgutil.walk_packages([pkg_path], prefix=f"{modname}."):
+                            for subfinder, submodname, subispkg in pkgutil.walk_packages(
+                                [pkg_path], prefix=f"{modname}."
+                            ):
                                 try:
                                     logger.debug(f"Attempting to import {submodname}")
                                     module = importlib.import_module(submodname)
@@ -244,7 +250,9 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
                                 except Exception as e:
                                     logger.exception(f"Failed to load from custom module {submodname}: {e}")
                 except Exception as e:
-                    logger.exception(f"Failed to load custom components for [{cls.get_component_type()}] from [{custom_path}]")
+                    logger.exception(
+                        f"Failed to load custom components for [{cls.get_component_type()}] from [{custom_path}]"
+                    )
                 finally:
                     # Remove the path we added
                     sys.path.pop(0)

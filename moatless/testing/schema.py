@@ -4,7 +4,6 @@ from typing import Optional, List
 from pydantic import BaseModel, Field, model_validator
 
 
-
 class TestStatus(str, Enum):
     FAILED = "FAILED"
     PASSED = "PASSED"
@@ -116,7 +115,7 @@ class TestFile(BaseModel):
 
         sum_tokens = 0
         test_result_strings = []
-        
+
         # Process each test file
         for test_file in test_files:
             # Process each test result in the file
@@ -137,18 +136,19 @@ class TestFile(BaseModel):
 
                     # Format the test result string
                     from moatless.utils.tokenizer import count_tokens
+
                     test_result_str = f"* {attributes}\n```\n{truncated_message}\n```\n"
                     test_result_tokens = count_tokens(test_result_str)
-                    
+
                     # Always include at least one result
                     if not test_result_strings or sum_tokens + test_result_tokens <= max_tokens:
                         test_result_strings.append(test_result_str)
                         sum_tokens += test_result_tokens
-                        
+
                         # If we've reached the token limit and have at least one result, break
                         if sum_tokens >= max_tokens and test_result_strings:
                             break
-            
+
             # Break out of the outer loop if we've reached the token limit
             if sum_tokens >= max_tokens and test_result_strings:
                 break

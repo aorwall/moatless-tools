@@ -4,11 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import ActionArguments
-from moatless.artifacts.coding_task import (
-    CodingTaskArtifact,
-    FileLocation,
-    FileRelationType
-)
+from moatless.artifacts.coding_task import CodingTaskArtifact, FileLocation, FileRelationType
 from moatless.artifacts.task import TaskState
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
@@ -21,7 +17,7 @@ class CodingTaskItem(BaseModel):
         ...,
         description="Identifier or short name for the task. This will be used as the task's ID in the system.",
     )
-    
+
     title: str = Field(
         ...,
         description="Short title or description of the task.",
@@ -73,16 +69,13 @@ class AddCodingTasksArgs(ActionArguments):
                             title="Create authentication interface",
                             instructions="Create a new interface for authentication that defines login and logout methods.",
                             related_files=[
-                                FileLocation(
-                                    file_path="src/auth/interface.ts",
-                                    relation_type=FileRelationType.CREATE
-                                ),
+                                FileLocation(file_path="src/auth/interface.ts", relation_type=FileRelationType.CREATE),
                                 FileLocation(
                                     file_path="src/auth/existing.ts",
                                     start_line=10,
                                     end_line=25,
-                                    relation_type=FileRelationType.REFERENCE
-                                )
+                                    relation_type=FileRelationType.REFERENCE,
+                                ),
                             ],
                             priority=10,
                         ),
@@ -91,10 +84,7 @@ class AddCodingTasksArgs(ActionArguments):
                             title="Implement authentication service",
                             instructions="Implement the auth service based on the interface.",
                             related_files=[
-                                FileLocation(
-                                    file_path="src/services/auth.ts",
-                                    relation_type=FileRelationType.UPDATE
-                                )
+                                FileLocation(file_path="src/services/auth.ts", relation_type=FileRelationType.UPDATE)
                             ],
                             priority=20,
                         ),
@@ -134,4 +124,4 @@ class AddCodingTasks(Action):
 
         # Format output with checkboxes
         task_details = "\n".join([f"[ ] {task.id} - {task.title}" for task in created_tasks])
-        return f"Added {len(created_tasks)} coding tasks:\n{task_details}" 
+        return f"Added {len(created_tasks)} coding tasks:\n{task_details}"

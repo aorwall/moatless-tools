@@ -23,7 +23,7 @@ class AgenticLoop(AgenticFlow):
                 raise ValueError(f"Node with ID {node_id} not found")
         else:
             current_node = self.root.get_last_node()
-    
+
         if message:  # Assume to continue with a new node if a message is provided
             current_node = self._create_next_node(current_node)
             current_node.user_message = message
@@ -60,7 +60,7 @@ class AgenticLoop(AgenticFlow):
                 raise e
             finally:
                 pass
-            
+
             if node_id:
                 self.log(logger.info, f"Node{current_node.node_id} finished. Returning.")
                 break

@@ -18,12 +18,12 @@ class FileRelationType(str, Enum):
 
 class FileLocation(BaseModel):
     """Represents a file location with path and line range"""
+
     file_path: str = Field(description="Path to the file")
     start_line: Optional[int] = Field(default=None, description="Starting line number")
     end_line: Optional[int] = Field(default=None, description="Ending line number")
     relation_type: FileRelationType = Field(
-        default=FileRelationType.REFERENCE,
-        description="How this file relates to the task"
+        default=FileRelationType.REFERENCE, description="How this file relates to the task"
     )
 
 
@@ -35,10 +35,7 @@ class CodingTaskArtifact(Artifact):
     state: TaskState = TaskState.OPEN
     title: str = Field(description="Short title or description of the task")
     instructions: str = Field(description="Detailed instructions for completing the task")
-    related_files: List[FileLocation] = Field(
-        default_factory=list,
-        description="List of files related to this task"
-    )
+    related_files: List[FileLocation] = Field(default_factory=list, description="List of files related to this task")
     result: Optional[str] = Field(default=None, description="The result of the task")
     priority: int = Field(
         default=100,
@@ -60,4 +57,4 @@ class CodingTaskHandler(TaskHandler):
     @classmethod
     def get_artifact_class(cls) -> builtins.type[CodingTaskArtifact]:
         """Return the CodingTaskArtifact class that this handler manages"""
-        return CodingTaskArtifact 
+        return CodingTaskArtifact

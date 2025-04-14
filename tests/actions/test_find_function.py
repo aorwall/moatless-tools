@@ -14,10 +14,7 @@ from moatless.workspace import Workspace
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    os.environ.get("VOYAGE_API_KEY") is None,
-    reason="VOYAGE_API_KEY environment variable not set"
-)
+@pytest.mark.skipif(os.environ.get("VOYAGE_API_KEY") is None, reason="VOYAGE_API_KEY environment variable not set")
 async def test_find_function_init_method():
     instance_id = "django__django-13658"
     instance = get_moatless_instance(instance_id)
@@ -29,10 +26,8 @@ async def test_find_function_init_method():
 
     # Create and initialize workspace
     workspace = Workspace(repository=repository, code_index=code_index)
-    
-    action = FindFunction(
-        repository=repository, code_index=code_index, completion_model=completion_model
-    )
+
+    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
     # Initialize the action with the workspace
     await action.initialize(workspace)
 
@@ -49,10 +44,7 @@ async def test_find_function_init_method():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(
-    os.environ.get("VOYAGE_API_KEY") is None,
-    reason="VOYAGE_API_KEY environment variable not set"
-)
+@pytest.mark.skipif(os.environ.get("VOYAGE_API_KEY") is None, reason="VOYAGE_API_KEY environment variable not set")
 async def test_find_function():
     instance_id = "django__django-14855"
     instance = get_moatless_instance(instance_id)
@@ -64,10 +56,8 @@ async def test_find_function():
 
     # Create and initialize workspace
     workspace = Workspace(repository=repository, code_index=code_index)
-    
-    action = FindFunction(
-        repository=repository, code_index=code_index, completion_model=completion_model
-    )
+
+    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
     # Initialize the action with the workspace
     await action.initialize(workspace)
 
@@ -87,45 +77,38 @@ async def test_find_function_with_mocks():
     repository = MagicMock(spec=Repository)
     repository.file_exists.return_value = True  # Ensure file exists
     repository.get_file_content.return_value = "def test_function():\n    pass"
-    
+
     code_index = AsyncMock(spec=CodeIndex)
     file_context = FileContext(repo=repository)
     completion_model = AsyncMock(spec=BaseCompletionModel)
-    
+
     # Mock search response
     mock_span_hit = SpanHit(span_id="test_function")
-    mock_search_hit = SearchCodeHit(
-        file_path="test_file.py",
-        spans=[mock_span_hit]
-    )
+    mock_search_hit = SearchCodeHit(file_path="test_file.py", spans=[mock_span_hit])
     mock_search_response = SearchCodeResponse(hits=[mock_search_hit])
-    
+
     # Configure the mock to return our predefined response
     code_index.find_function.return_value = mock_search_response
-    
+
     # Create workspace and action
     workspace = Workspace(repository=repository, code_index=code_index)
-    action = FindFunction(
-        repository=repository, code_index=code_index, completion_model=completion_model
-    )
+    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
     await action.initialize(workspace)
-    
+
     # Execute action
     action_args = FindFunctionArgs(
         scratch_pad="",
         function_name="test_function",
         file_pattern="**/*.py",
     )
-    
+
     # Since we can't easily mock the span system, add the span directly to the file_context
     context_file = file_context.add_file("test_file.py")
     context_file.spans.append(ContextSpan(span_id="test_function"))
-    
+
     message = await action.execute(action_args, file_context)
-    
+
     # Verify
-    code_index.find_function.assert_awaited_once_with(
-        "test_function", class_name=None, file_pattern="**/*.py"
-    )
+    code_index.find_function.assert_awaited_once_with("test_function", class_name=None, file_pattern="**/*.py")
     assert len(file_context.files) == 1
     assert "test_function" in file_context.files[0].span_ids

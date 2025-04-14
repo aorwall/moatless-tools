@@ -25,7 +25,10 @@ class MessageHistoryGenerator(BaseMemory):
     """
 
     max_tokens: Optional[int] = Field(default=None, description="Maximum number of tokens allowed in message history")
-    max_tokens_per_observation: Optional[int] = Field(default=None, description="Maximum number of tokens allowed in each observation, if exeeded the summary will be shown on previous messages")
+    max_tokens_per_observation: Optional[int] = Field(
+        default=None,
+        description="Maximum number of tokens allowed in each observation, if exeeded the summary will be shown on previous messages",
+    )
     include_file_context: bool = Field(default=True, description="Whether to include file context in messages")
     include_git_patch: bool = Field(default=True, description="Whether to include git patch in messages")
     thoughts_in_action: bool = Field(
@@ -60,8 +63,8 @@ class MessageHistoryGenerator(BaseMemory):
     ) -> list[AllMessageValues]:
         """
         Generate messages based on token limits.
-        
-        This implementation will try to include the first message (user query) 
+
+        This implementation will try to include the first message (user query)
         and as many of the recent messages as possible, prioritizing the most recent.
         The selection is dynamic based on the token limit.
         """
@@ -70,45 +73,45 @@ class MessageHistoryGenerator(BaseMemory):
         for i, node in enumerate(previous_nodes):
             if node.action_steps:
                 last_executed_idx = i
-                
+
         # First, generate all messages
         all_messages = []
         tool_idx = 0
-        
+
         for i, node in enumerate(previous_nodes):
-            is_last_executed_node = (i == last_executed_idx)
+            is_last_executed_node = i == last_executed_idx
             node_messages, _ = await self._process_single_node(node, workspace, tool_idx, is_last_executed_node)
-            
+
             # Update tool_idx for the next node
             for msg in node_messages:
                 if isinstance(msg, dict) and msg.get("role") == "assistant" and "tool_calls" in msg:
                     tool_calls = msg.get("tool_calls")
                     if tool_calls is not None:
                         tool_idx += len(tool_calls)
-                    
+
             all_messages.extend(node_messages)
-        
+
         # If we don't have a token limit or all messages fit, return them all
         total_tokens = sum(count_tokens(str(msg)) for msg in all_messages)
         if not self.max_tokens or total_tokens <= self.max_tokens:
             logger.info(f"Generated {len(all_messages)} messages with {total_tokens} tokens")
             return all_messages
-            
+
         # We need to select messages based on the token limit
         # Always try to include the first message
         first_message = all_messages[0] if all_messages else None
         first_message_tokens = count_tokens(str(first_message)) if first_message else 0
-        
+
         # If we can't fit even the first message, we need to truncate it somehow
         if first_message_tokens > self.max_tokens:
             logger.warning(f"First message exceeds token limit ({first_message_tokens} > {self.max_tokens})")
             # Return just the first message and we'll need to handle truncation elsewhere
             raise RuntimeError("First message exceeds token limit")
-        
+
         # Start with the first message
         selected_messages = [first_message] if first_message else []
         remaining_tokens = self.max_tokens - first_message_tokens
-        
+
         # Try to include recent messages, starting from the most recent
         for msg in reversed(all_messages[1:]):
             msg_tokens = count_tokens(str(msg))
@@ -119,15 +122,15 @@ class MessageHistoryGenerator(BaseMemory):
             else:
                 # This message doesn't fit
                 continue
-        
+
         # Sort messages to maintain conversation order
         selected_messages.sort(key=lambda msg: all_messages.index(msg))
-        
+
         actual_tokens = sum(count_tokens(str(msg)) for msg in selected_messages)
         logger.info(
             f"Generated {len(selected_messages)} messages with {actual_tokens} tokens (limited by max_tokens={self.max_tokens})"
         )
-        
+
         return selected_messages
 
     async def _process_single_node(
@@ -191,7 +194,7 @@ class MessageHistoryGenerator(BaseMemory):
                         ChatCompletionTextObject(
                             type="text",
                             text=f"The {artifact.type} {artifact.id} was {change.change_type}",
-                            cache_control=None
+                            cache_control=None,
                         )
                     )
                     message_content.append(artifact.to_prompt_message_content())
@@ -206,7 +209,9 @@ class MessageHistoryGenerator(BaseMemory):
 
         return None, 0
 
-    async def _process_assistant_message(self, node: Node, tool_idx_start: int, is_last_node: bool = False) -> tuple[dict, list, int]:
+    async def _process_assistant_message(
+        self, node: Node, tool_idx_start: int, is_last_node: bool = False
+    ) -> tuple[dict, list, int]:
         """
         Process the assistant message and tool calls, returning the messages and token count.
 
@@ -263,7 +268,9 @@ class MessageHistoryGenerator(BaseMemory):
                         observation_text = action_step.observation.message
 
                     if observation_text:
-                        message_content.append(ChatCompletionTextObject(type="text", text=observation_text, cache_control=None))
+                        message_content.append(
+                            ChatCompletionTextObject(type="text", text=observation_text, cache_control=None)
+                        )
                         tokens += count_tokens(observation_text)
 
                 tool_responses.append(
@@ -284,7 +291,9 @@ class MessageHistoryGenerator(BaseMemory):
 
         # Add assistant message if available
         if node.assistant_message:
-            assistant_content.append(ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None))
+            assistant_content.append(
+                ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None)
+            )
             tokens += count_tokens(node.assistant_message)
 
         # Add content and tool calls to assistant message
@@ -311,7 +320,7 @@ class MessageHistoryGenerator(BaseMemory):
         messages = []
         tool_idx = 0
         tokens = 0
-        
+
         # Find the last executed node (the last one with action steps)
         last_executed_idx = -1
         for i, node in enumerate(previous_nodes):
@@ -320,8 +329,10 @@ class MessageHistoryGenerator(BaseMemory):
 
         # Process nodes in order (oldest to newest)
         for i, node in enumerate(previous_nodes):
-            is_last_executed_node = (i == last_executed_idx)
-            node_messages, node_tokens = await self._process_single_node(node, workspace, tool_idx, is_last_executed_node)
+            is_last_executed_node = i == last_executed_idx
+            node_messages, node_tokens = await self._process_single_node(
+                node, workspace, tool_idx, is_last_executed_node
+            )
 
             # Update the tool index for tool calls in assistant messages
             for msg in node_messages:

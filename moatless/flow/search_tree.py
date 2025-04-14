@@ -179,9 +179,11 @@ class SearchTree(AgenticFlow):
         expandable_nodes = root.get_expandable_descendants()
 
         selection = await self.selector.select(expandable_nodes)
-        
+
         if isinstance(selection, Node):
-            logger.warning(f"Selector returned a Node instead of a Selection. Setting Selection to Node{selection.node_id} for backward compatibility.")
+            logger.warning(
+                f"Selector returned a Node instead of a Selection. Setting Selection to Node{selection.node_id} for backward compatibility."
+            )
             selection = Selection(node_id=selection.node_id, reason="Legacy Node returned by selector")
 
         node.selection = selection

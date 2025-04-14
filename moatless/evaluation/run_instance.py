@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: int | None = None):
     logger.info(f"Running swebench instance {project_id} {trajectory_id} {node_id}")
-    
+
     from moatless.settings import get_storage
 
     load_dotenv()
@@ -41,8 +41,9 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
     current_project_id.set(project_id)
     current_trajectory_id.set(trajectory_id)
-    
+
     import litellm
+
     litellm.callbacks = [LogHandler(storage=storage)]
 
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
@@ -74,6 +75,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
         logger.info(f"Using index store dir: {index_store_dir}")
         from moatless.index.code_index import CodeIndex
+
         code_index = CodeIndex.from_persist_dir(
             persist_dir=index_store_dir,
             file_repo=repository,

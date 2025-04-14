@@ -23,34 +23,34 @@ class TestRunMavenTestsAction:
     def mock_environment(self):
         """Create a mock environment that simulates Maven command execution."""
         mock_env = AsyncMock(spec=BaseEnvironment)
-        
+
         # Define a helper function to generate Maven-like output based on the command
         async def execute_mock(command, fail_on_error=False):
             if "mvn --version" in command:
                 return "Apache Maven 3.8.6 (84538c9988a25aec085021c365c560670ad80f63)"
-            
+
             if "pwd" in command:
                 return "/path/to/project"
-                
+
             if "[ -d" in command:
                 path = command.split("[ -d ")[1].split(" ]")[0]
                 if path == "src/test/java/com/example":
                     return "true"
                 return "false"
-            
+
             if "mvn compile" in command:
                 # Check if we should simulate a compilation failure
                 if getattr(execute_mock, "simulate_compilation_failure", False):
                     return self._get_maven_compilation_failure_output()
                 # Default to successful compilation
                 return "[INFO] BUILD SUCCESS"
-            
+
             if "mvn test" in command:
                 # Extract the test class if specified with -Dtest
                 test_class = None
                 if "-Dtest=" in command:
                     test_class = command.split("-Dtest=")[1].split()[0]
-                
+
                 # Simulate a successful test
                 if test_class and "SuccessTest" in test_class:
                     return self._get_maven_success_output(test_class)
@@ -63,20 +63,20 @@ class TestRunMavenTestsAction:
                 # Default case - run all tests
                 else:
                     return self._get_maven_mixed_output()
-            
+
             # Default response for other commands
             return ""
-            
+
         mock_env.execute = execute_mock
-        
+
         # Define read_file behavior - all files exist except for NonExistentTest
         async def read_file_mock(file_path):
             if "NonExistentTest" in file_path:
                 raise FileNotFoundError(f"File not found: {file_path}")
             return "file content"
-            
+
         mock_env.read_file = read_file_mock
-        
+
         return mock_env
 
     @pytest.fixture
@@ -326,11 +326,11 @@ java.lang.AssertionError: expected:<true> but was:<false>
         """Test running a successful Maven test."""
         args = RunMavenTestsArgs(
             test_files=["src/test/java/com/example/SuccessTest.java"],
-            thoughts="Testing successful Maven test execution"
+            thoughts="Testing successful Maven test execution",
         )
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify the response contains the expected summary format
         assert "passed" in result.message
         assert "failed" in result.message
@@ -343,12 +343,11 @@ java.lang.AssertionError: expected:<true> but was:<false>
     async def test_run_failing_test(self, run_maven_tests_action, file_context):
         """Test running a Maven test with failures."""
         args = RunMavenTestsArgs(
-            test_files=["src/test/java/com/example/FailTest.java"],
-            thoughts="Testing Maven test with failures"
+            test_files=["src/test/java/com/example/FailTest.java"], thoughts="Testing Maven test with failures"
         )
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify the response
         assert "AssertionError" in result.message
         assert "expected:<true> but was:<false>" in result.message
@@ -359,12 +358,11 @@ java.lang.AssertionError: expected:<true> but was:<false>
     async def test_run_test_with_errors(self, run_maven_tests_action, file_context):
         """Test running a Maven test with errors."""
         args = RunMavenTestsArgs(
-            test_files=["src/test/java/com/example/ErrorTest.java"],
-            thoughts="Testing Maven test with errors"
+            test_files=["src/test/java/com/example/ErrorTest.java"], thoughts="Testing Maven test with errors"
         )
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify the response
         assert "errors" in result.message.lower()
         assert len(result.artifact_changes) == 1
@@ -374,15 +372,14 @@ java.lang.AssertionError: expected:<true> but was:<false>
     async def test_compilation_failure(self, run_maven_tests_action, file_context, mock_environment):
         """Test Maven compilation failure is handled correctly."""
         args = RunMavenTestsArgs(
-            test_files=["src/test/java/com/example/SuccessTest.java"],
-            thoughts="Testing compilation failure handling"
+            test_files=["src/test/java/com/example/SuccessTest.java"], thoughts="Testing compilation failure handling"
         )
-        
+
         # Set flag to make the mock environment return a compilation failure
         mock_environment.execute.simulate_compilation_failure = True
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify the response
         assert "Maven compilation failed" in result.message
         assert "Tests cannot be run until compilation errors are fixed" in result.message
@@ -390,10 +387,10 @@ java.lang.AssertionError: expected:<true> but was:<false>
         assert "cannot infer type arguments" in result.message
         assert "incompatible types" in result.message or "cannot find symbol" in result.message
         assert result.properties.get("fail_reason") == "compilation_failed"
-        
+
         # Verify no test results were returned
         assert result.properties.get("test_results") == []
-        
+
         # Verify no test files were processed
         file_context.add_test_files.assert_not_called()
 
@@ -406,11 +403,11 @@ java.lang.AssertionError: expected:<true> but was:<false>
                 "src/test/java/com/example/FailTest.java",
                 "src/test/java/com/example/ErrorTest.java",
             ],
-            thoughts="Testing running multiple Maven tests"
+            thoughts="Testing running multiple Maven tests",
         )
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify the response
         assert "Total:" in result.message
         assert len(result.artifact_changes) == 3
@@ -420,15 +417,15 @@ java.lang.AssertionError: expected:<true> but was:<false>
         """Test behavior when a non-existent file is provided."""
         # Override the file_exists check
         file_context.file_exists = lambda path: "NonExistentTest" not in path
-        
+
         args = RunMavenTestsArgs(
             test_files=["src/test/java/com/example/NonExistentTest.java"],
-            thoughts="Testing non-existent test file behavior"
+            thoughts="Testing non-existent test file behavior",
         )
-        
+
         with patch.object(mock_environment, "read_file", side_effect=FileNotFoundError("File not found")):
             result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # With our implementation, this should return "Files not found" message
         assert "Files not found" in result.message
         assert result.properties.get("fail_reason") == "no_test_files"
@@ -436,13 +433,10 @@ java.lang.AssertionError: expected:<true> but was:<false>
     @pytest.mark.asyncio
     async def test_directory_instead_of_file(self, run_maven_tests_action, file_context):
         """Test behavior when a directory is provided instead of a file."""
-        args = RunMavenTestsArgs(
-            test_files=["src/test/java/com/example"],
-            thoughts="Testing directory path behavior"
-        )
-        
+        args = RunMavenTestsArgs(test_files=["src/test/java/com/example"], thoughts="Testing directory path behavior")
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Should include a message about directories
         assert "Directories provided" in result.message
 
@@ -451,14 +445,13 @@ java.lang.AssertionError: expected:<true> but was:<false>
         """Test that shadow_mode prevents running tests."""
         # Set shadow_mode to True
         file_context.shadow_mode = True
-        
+
         args = RunMavenTestsArgs(
-            test_files=["src/test/java/com/example/SuccessTest.java"],
-            thoughts="Testing shadow mode check"
+            test_files=["src/test/java/com/example/SuccessTest.java"], thoughts="Testing shadow mode check"
         )
-        
+
         result = await run_maven_tests_action.execute(args, file_context)
-        
+
         # Verify we get the shadow mode message
         assert "Maven tests can only be run when file_context.shadow_mode is False" in result.message
-        assert result.properties.get("fail_reason") == "shadow_mode_enabled" 
+        assert result.properties.get("fail_reason") == "shadow_mode_enabled"

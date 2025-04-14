@@ -194,11 +194,7 @@ def process_stream(stream):
 """)
 
     # Test searching with special regex characters
-    special_chars = [
-        "[test].data",
-        "*.+?|{test}$^",
-        "This is a (test) string"
-    ]
+    special_chars = ["[test].data", "*.+?|{test}$^", "This is a (test) string"]
 
     for search_text in special_chars:
         matches = await temp_repo.find_exact_matches(search_text, "tests/test_functions.py")
@@ -214,18 +210,18 @@ def process_stream(stream):
     matches = await temp_repo.find_exact_matches("def test_partitions():", "tests/")
     assert len(matches) == 1
     assert matches[0] == ("tests/test_functions.py", 5)
-    
+
     # Test searching with ** patterns
     matches = await temp_repo.find_exact_matches("for ps_name, xs_names in stream:", "**/*.py")
     assert len(matches) == 1
     assert matches[0][0] == "src/backends/backend_ps.py"
     assert matches[0][1] == 6
-    
+
     # Test with more specific ** pattern
     matches = await temp_repo.find_exact_matches("for ps_name, xs_names in stream:", "**/backend_ps.py")
     assert len(matches) == 1
     assert matches[0][0] == "src/backends/backend_ps.py"
-    
+
     # Test with path pattern
     matches = await temp_repo.find_exact_matches("for ps_name, xs_names in stream:", "src/**/backend_ps.py")
     assert len(matches) == 1
@@ -264,31 +260,25 @@ class DocstringParser:
 """)
 
     # Test with exact path pattern
-    matches = await temp_repo.find_exact_matches(
-        "_parse_parameters_section", "sphinx/ext/napoleon/docstring.py"
-    )
+    matches = await temp_repo.find_exact_matches("_parse_parameters_section", "sphinx/ext/napoleon/docstring.py")
     assert len(matches) >= 1  # May find multiple matches
     assert all(match[0] == "sphinx/ext/napoleon/docstring.py" for match in matches)
-    
+
     # Test with regex and exact path pattern
     regex_matches = await temp_repo.find_regex_matches(
         "def _parse_(other_parameters|parameters)_section", "sphinx/ext/napoleon/docstring.py"
     )
     assert len(regex_matches) == 2
     assert {m["file_path"] for m in regex_matches} == {"sphinx/ext/napoleon/docstring.py"}
-    
+
     # Test with path pattern including wildcards
-    matches = await temp_repo.find_exact_matches(
-        "_parse_parameters_section", "sphinx/ext/*/docstring.py"
-    )
+    matches = await temp_repo.find_exact_matches("_parse_parameters_section", "sphinx/ext/*/docstring.py")
     assert len(matches) >= 1  # May find multiple matches
     assert all(match[0] == "sphinx/ext/napoleon/docstring.py" for match in matches)
-    
+
     # Test with directory search
-    matches = await temp_repo.find_exact_matches(
-        "_parse_parameters_section", "sphinx/ext/napoleon/"
-    )
-    assert len(matches) >= 1  # May find multiple matches 
+    matches = await temp_repo.find_exact_matches("_parse_parameters_section", "sphinx/ext/napoleon/")
+    assert len(matches) >= 1  # May find multiple matches
     assert all(match[0] == "sphinx/ext/napoleon/docstring.py" for match in matches)
 
 
@@ -360,7 +350,7 @@ class Response:
     # Verify specific line matches
     timeout_error_matches = [m for m in matches if "TimeoutError" in m["content"]]
     decode_error_matches = [m for m in matches if "DecodeError" in m["content"]]
-    
+
     assert len(timeout_error_matches) >= 1
     assert len(decode_error_matches) >= 1
 
@@ -373,7 +363,7 @@ async def test_find_regex_with_root_level_directory(temp_repo):
     requests_dir.mkdir()
     (requests_dir / "packages").mkdir()
     (requests_dir / "packages" / "urllib3").mkdir()
-    
+
     # Create test files in the root-level requests directory
     exceptions_file = requests_dir / "packages" / "urllib3" / "exceptions.py"
     exceptions_file.write_text("""
@@ -407,16 +397,16 @@ def handle_errors():
     # Test using the exact path pattern mentioned by the user
     matches = await temp_repo.find_regex_matches("TimeoutError|DecodeError", "**/requests/**/*.py")
     assert len(matches) >= 3  # Should find at least 3 matches
-    
+
     # Verify we found both files
     file_paths = {match["file_path"] for match in matches}
     assert "requests/packages/urllib3/exceptions.py" in file_paths
     assert "requests/models.py" in file_paths
-    
+
     # Test using a pattern without the leading **/ to ensure it still works
     matches2 = await temp_repo.find_regex_matches("TimeoutError|DecodeError", "requests/**/*.py")
     assert len(matches2) >= 3
-    
+
     # Files should match the same ones
     file_paths2 = {match["file_path"] for match in matches2}
     assert file_paths == file_paths2
@@ -428,7 +418,7 @@ async def test_batch_grep_processing(temp_repo):
     # Create a requests-like directory structure with many files
     batch_test_dir = Path(temp_repo.repo_path) / "batch_test"
     batch_test_dir.mkdir()
-    
+
     # Create 30 Python files with error patterns
     expected_files = []
     for i in range(30):
@@ -453,22 +443,22 @@ def process_{i}():
     except ValueError:
         log_error("Value error")
 """)
-    
+
     # Test batch processing with the improved implementation
     matches = await temp_repo.find_regex_matches("TimeoutError|DecodeError", "**/batch_test/**/*.py")
-    
+
     # We should find matches in 10 files (every 3rd out of 30)
     # and each file has 2 matches (TimeoutError and DecodeError)
     assert len(matches) == 20
-    
+
     # Check that all expected files were found
     found_files = {match["file_path"] for match in matches}
     for expected_file in expected_files:
         assert expected_file in found_files
-    
+
     # Verify we found both error types
     timeout_matches = [m for m in matches if "TimeoutError" in m["content"]]
     decode_matches = [m for m in matches if "DecodeError" in m["content"]]
-    
+
     assert len(timeout_matches) == 10
     assert len(decode_matches) == 10

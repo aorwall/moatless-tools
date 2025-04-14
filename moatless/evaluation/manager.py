@@ -46,12 +46,12 @@ class EvaluationManager:
         if self._initialized:
             logger.info("EvaluationManager already initialized, skipping")
             return
-            
+
         if not self._subscribed_to_events:
             await self.eventbus.subscribe(self._handle_event)
             self._subscribed_to_events = True
             logger.info("EvaluationManager subscribed to events")
-            
+
         self._initialized = True
 
     async def create_evaluation(
@@ -264,12 +264,13 @@ class EvaluationManager:
             return instance
 
         try:
-            
             events = await self.eventbus.read_events(
                 project_id=evaluation.evaluation_name,
                 trajectory_id=instance.instance_id,
             )
-            logger.info(f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}")
+            logger.info(
+                f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}"
+            )
             # set timestamps
             if not instance.started_at:
                 event = next(
@@ -294,7 +295,7 @@ class EvaluationManager:
                 )
                 if event:
                     instance.start_evaluating_at = event.timestamp
-                    
+
             if not instance.evaluated_at:
                 event = next(
                     (e for e in events if e.scope == "evaluation" and e.event_type == "completed"),
@@ -666,7 +667,7 @@ class EvaluationManager:
             list_trajectories_method = getattr(self.storage, "list_trajectories")
             if callable(list_trajectories_method):
                 return await list_trajectories_method(evaluation_name)
-        
+
         # Fallback: try to get instances from the evaluation object
         evaluation = await self._load_evaluation(evaluation_name)
         if evaluation:

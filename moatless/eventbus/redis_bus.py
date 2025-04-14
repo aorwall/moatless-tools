@@ -39,10 +39,10 @@ class RedisEventBus(BaseEventBus):
         self._redis_url = redis_url or os.environ.get("REDIS_URL")
         if not self._redis_url:
             raise ValueError("REDIS_URL environment variable not set")
-            
+
         # Generate a unique worker ID for this process
         self._worker_id = f"worker-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-        
+
         # Create Redis client - we'll use a connection pool for better performance
         self._redis: Optional[redis.Redis] = None
         self._pubsub: Optional[redis.client.PubSub] = None
@@ -50,10 +50,10 @@ class RedisEventBus(BaseEventBus):
         self._redis_available = False
         self._initialized = False
         self._closing = False
-        
+
         # Set up subscription channel with worker ID to prevent duplicate processing
         self._channel = f"events:{self._worker_id}"
-        
+
         logger.info(f"Initialized RedisEventBus with Redis URL: {self._redis_url}, worker ID: {self._worker_id}")
 
     async def _setup_redis(self) -> None:
@@ -62,10 +62,10 @@ class RedisEventBus(BaseEventBus):
             # Create connection pool with proper configuration
             self._redis = redis.Redis.from_url(
                 self._redis_url,
-                decode_responses=True  # Auto-decode responses 
+                decode_responses=True,  # Auto-decode responses
             )
             self._pubsub = self._redis.pubsub()
-            
+
             # Test connection
             await self._redis.ping()
             self._redis_available = True
@@ -79,7 +79,7 @@ class RedisEventBus(BaseEventBus):
         if not self._redis:
             await self._setup_redis()
             return
-            
+
         try:
             await self._redis.ping()
             self._redis_available = True
@@ -121,18 +121,18 @@ class RedisEventBus(BaseEventBus):
             # in multi-worker setups, and also to global events channel
             await self._pubsub.subscribe(self._channel)
             await self._pubsub.subscribe("events:global")
-            
+
             logger.info(f"Subscribed to channels: {self._channel} and events:global")
-            
+
             async for message in self._pubsub.listen():
                 if isinstance(message, dict) and message.get("type") == "message":
                     # Redis returns bytes, so we need to decode
                     data = message.get("data", "")
-                    
+
                     try:
                         event_dict = json.loads(data)
                         event = BaseEvent.model_validate(event_dict)
-                        
+
                         channel = message.get("channel", "")
                         logger.debug(
                             f"Received event {event.scope} {event.event_type} on channel {channel} "
@@ -142,7 +142,9 @@ class RedisEventBus(BaseEventBus):
                         for callback in self.subscribers:
                             with tracer.start_as_current_span("RedisEventBus._handle_redis_messages.callback"):
                                 try:
-                                    logger.debug(f"Notifying subscriber {callback.__name__} for event {event.event_type}")
+                                    logger.debug(
+                                        f"Notifying subscriber {callback.__name__} for event {event.event_type}"
+                                    )
                                     if asyncio.iscoroutinefunction(callback):
                                         await self._run_async_callback(callback, event)
                                     else:
@@ -216,17 +218,17 @@ class RedisEventBus(BaseEventBus):
         metadata["worker_id"] = self._worker_id
         metadata["published_at"] = str(asyncio.get_event_loop().time())
         event.metadata = metadata
-        
+
         # Save to storage first
         await self._save_event(event)
-        
+
         # Then to Redis
         await self._save_event_to_redis(event)
 
         try:
             event_data = event.model_dump(mode="json")
             serialized = json.dumps(event_data)
-            
+
             # Determine routing strategy based on event type
             # For system events, broadcast to all workers on global channel
             # For specific events, target the worker-specific channel
@@ -275,7 +277,7 @@ class RedisEventBus(BaseEventBus):
         try:
             event_data = event.model_dump(mode="json")
             serialized = json.dumps(event_data)
-            
+
             # Redis rpush is a coroutine in redis.asyncio
             await self._redis.rpush(key, serialized)
             logger.debug(f"Saved event to Redis: {event.event_type}")
@@ -350,7 +352,7 @@ class RedisEventBus(BaseEventBus):
         if self._closing:
             logger.debug("Redis event bus already closing, ignoring duplicate close call")
             return
-            
+
         self._closing = True
         logger.info(f"Closing Redis event bus connections for worker {self._worker_id}")
 

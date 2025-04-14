@@ -93,7 +93,7 @@ class GrepToolArgs(ActionArguments):
                     include="src/controllers/**/*.js",
                     max_results=15,
                 ),
-            )
+            ),
         ]
 
 

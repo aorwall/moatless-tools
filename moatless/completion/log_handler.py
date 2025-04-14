@@ -70,7 +70,7 @@ class LogHandler(CustomLogger):
         else:
             logger.debug(f"No response found in kwargs: {kwargs}")
             original_response = None
-            
+
         # Ensure we're not passing coroutine objects directly
         if hasattr(original_response, "__class__") and original_response.__class__.__name__ == "coroutine":
             logger.warning("Got coroutine in original_response, converting to string")
@@ -101,15 +101,15 @@ class LogHandler(CustomLogger):
             "original_response_obj": original_response,
             "original_response": self._handle_kwargs_item(kwargs.get("async_complete_streaming_response")),
             "original_input": self._handle_kwargs_item(original_input),
-            "litellm_response": self._handle_kwargs_item(response_obj)
+            "litellm_response": self._handle_kwargs_item(response_obj),
         }
-        
+
         if "traceback_exception" in kwargs:
             data["traceback_exception"] = self._handle_kwargs_item(kwargs["traceback_exception"])
-            
+
         if "exception" in kwargs:
             data["exception"] = self._handle_kwargs_item(kwargs["exception"])
-    
+
         await self._write_to_file_async(data)
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
@@ -119,7 +119,7 @@ class LogHandler(CustomLogger):
             logger.warning("Got coroutine in failure response_obj, converting to string")
             response_obj = str(response_obj)
         await self.async_log_success_event(kwargs, response_obj, start_time, end_time)
-        
+
     async def async_log_stream_event(self, kwargs, response_obj, start_time, end_time):
         logger.info(f"Processing stream event for node {current_node_id.get()}")
         if hasattr(response_obj, "__class__") and response_obj.__class__.__name__ == "coroutine":
@@ -169,12 +169,12 @@ class LogHandler(CustomLogger):
             return {
                 "error_type": item.__class__.__name__,
                 "error_message": str(item),
-                "traceback": getattr(item, "__traceback__", None) and str(item.__traceback__)
+                "traceback": getattr(item, "__traceback__", None) and str(item.__traceback__),
             }
         elif isinstance(item, datetime):
             return item.isoformat()
         elif isinstance(item, bytes) or isinstance(item, bytearray):
-            return item.decode('utf-8', errors='replace')
+            return item.decode("utf-8", errors="replace")
         # Catch-all for other non-serializable objects
         try:
             json.dumps(item)

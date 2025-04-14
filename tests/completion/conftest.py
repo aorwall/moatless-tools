@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class TestAction(ResponseSchema):
     """Test action schema for completion tests"""
+
     name = "test_action"
     command: str = Field(..., description="Command to execute")
     args: List[str] = Field(default_factory=list, description="Command arguments")
@@ -18,7 +19,7 @@ class TestAction(ResponseSchema):
         command: The command to execute
         args: Optional list of command arguments
         """
-    
+
     @classmethod
     def tool_schema(cls, thoughts_in_action: bool = False) -> dict:
         return {
@@ -31,11 +32,11 @@ class TestAction(ResponseSchema):
                     "properties": {
                         "command": {"type": "string", "description": "Command to execute"},
                         "args": {"type": "array", "items": {"type": "string"}, "description": "Command arguments"},
-                        **({"thoughts": {"type": "string"}} if thoughts_in_action else {})
+                        **({"thoughts": {"type": "string"}} if thoughts_in_action else {}),
                     },
-                    "required": ["command"]
-                }
-            }
+                    "required": ["command"],
+                },
+            },
         }
 
 

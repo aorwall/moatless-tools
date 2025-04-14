@@ -24,6 +24,7 @@ def test_action_name():
     action = TestAction()
     assert action.name == "TestAction"
 
+
 def test_action_args_name():
     print(FinishArgs.name)
 
@@ -49,6 +50,7 @@ def test_get_action_by_args_class():
     assert Action.get_action_by_args_class(StringReplaceArgs) == StringReplace
     assert Action.get_action_by_args_class(ViewCodeArgs) == ViewCode
     assert Action.get_action_by_args_class(SemanticSearchArgs) == SemanticSearch
+
 
 def test_get_action_by_name():
     """Test that get_action_by_name correctly finds actions by their class name."""
