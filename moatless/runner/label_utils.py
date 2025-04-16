@@ -1,6 +1,7 @@
 """Utility functions for creating and managing container labels."""
 
 import asyncio
+import hashlib
 from typing import Callable
 from typing import Dict, List, Optional
 
@@ -38,6 +39,108 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
             f"{func_name}{args}\n"
             f"logging.debug('Job execution completed')"
         )
+
+
+def create_resource_id(project_id: str, trajectory_id: str, prefix: str = "run") -> str:
+    """Create a resource ID that's valid for both Kubernetes jobs and Docker containers.
+    
+    This will generate an ID with the format: {prefix}-{sanitized_project_id}-{sanitized_trajectory_id}
+    
+    Args:
+        project_id: The project ID (required, must not be empty)
+        trajectory_id: The trajectory ID (required, must not be empty)
+        prefix: Prefix for the resource name ("run" for Kubernetes jobs, "moatless" for Docker containers)
+    
+    Returns:
+        A valid resource ID string
+        
+    Raises:
+        ValueError: If project_id or trajectory_id is empty
+    """
+    # Validate required parameters
+    if not project_id:
+        raise ValueError("project_id must be provided and not empty")
+    if not trajectory_id:
+        raise ValueError("trajectory_id must be provided and not empty")
+        
+    # Sanitize project_id: replace special chars and Unicode with dashes
+    sanitized_project = project_id.lower()
+    # Handle non-ASCII characters by replacing them with dashes
+    sanitized_project = ''.join(c if c.isascii() and (c.isalnum() or c == '-') else '-' for c in sanitized_project)
+    # Replace underscores, dots, and other special chars with dashes
+    sanitized_project = sanitized_project.replace('_', '-').replace('.', '-')
+    # Normalize multiple dashes into a single dash
+    while '--' in sanitized_project:
+        sanitized_project = sanitized_project.replace('--', '-')
+    
+    # Sanitize trajectory_id using the same approach
+    sanitized_traj = trajectory_id.lower()
+    # Handle non-ASCII characters by replacing them with dashes
+    sanitized_traj = ''.join(c if c.isascii() and (c.isalnum() or c == '-') else '-' for c in sanitized_traj)
+    # Replace underscores, dots, and other special chars with dashes
+    sanitized_traj = sanitized_traj.replace('_', '-').replace('.', '-')
+    # Normalize multiple dashes into a single dash
+    while '--' in sanitized_traj:
+        sanitized_traj = sanitized_traj.replace('--', '-')
+    
+    # Calculate max available length
+    max_total_length = 63  # Maximum length for both Kubernetes and Docker
+    max_id_length = max_total_length - len(prefix) - 2  # -2 for the hyphens
+    
+    # Determine how much space to give each ID part
+    if len(sanitized_project) + len(sanitized_traj) + 1 <= max_id_length:  # +1 for hyphen
+        # Both fit completely
+        resource_id = f"{prefix}-{sanitized_project}-{sanitized_traj}"
+    else:
+        # Need to truncate - allocate space fairly between project and trajectory IDs
+        # Aim for roughly equal portions but reserve at least 10 chars for each if possible
+        min_chars = 10
+        
+        # Total space available for both IDs together
+        available_space = max_id_length - 1  # -1 for the hyphen between them
+        
+        if available_space >= min_chars * 2:
+            # We have enough space for minimum requirements
+            # Divide remaining space proportionally based on original lengths
+            total_original_length = len(sanitized_project) + len(sanitized_traj)
+            
+            # Allocate space based on proportions
+            project_proportion = len(sanitized_project) / total_original_length
+            traj_proportion = len(sanitized_traj) / total_original_length
+            
+            max_project_length = max(min_chars, int(available_space * project_proportion))
+            max_traj_length = available_space - max_project_length
+            
+            # Adjust if needed to ensure minimum sizes
+            if max_traj_length < min_chars:
+                max_traj_length = min_chars
+                max_project_length = available_space - max_traj_length
+            
+            # Ensure we haven't exceeded available space
+            if max_project_length + max_traj_length > available_space:
+                max_project_length = available_space - max_traj_length
+        else:
+            # Not enough space - just divide available space roughly equally
+            max_project_length = available_space // 2
+            max_traj_length = available_space - max_project_length
+        
+        # Truncate if needed
+        truncated_project = sanitized_project[:max_project_length]
+        truncated_traj = sanitized_traj[:max_traj_length]
+        
+        resource_id = f"{prefix}-{truncated_project}-{truncated_traj}"
+    
+    # Clean up the resource ID
+    # If starts or ends with a dash, replace with 'x'
+    if resource_id.startswith(f"{prefix}--"):
+        resource_id = f"{prefix}-x{resource_id[len(prefix)+2:]}"
+    if resource_id.endswith('-'):
+        resource_id = f"{resource_id[:-1]}x"
+    
+    # Maximum length check
+    resource_id = resource_id[:63]
+    
+    return resource_id
 
 
 def sanitize_label(value: str) -> str:
@@ -105,6 +208,7 @@ def create_labels(
         "app": "moatless-worker",
         "project_id": project_label,
         "trajectory_id": trajectory_label,
+        "moatless.managed": "true",
     }
 
     if func_name:

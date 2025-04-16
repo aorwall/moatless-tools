@@ -30,6 +30,8 @@ class InstanceStatus(str, Enum):
     COMPLETED = "completed"
     EVALUATING = "evaluating"
     EVALUATED = "evaluated"
+    RESOLVED = "resolved"
+    FAILED = "failed"
     ERROR = "error"
 
 

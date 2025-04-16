@@ -9,6 +9,7 @@ from typing import Any
 from dotenv import load_dotenv
 from moatless.completion.log_handler import LogHandler
 from moatless.context_data import current_project_id, current_trajectory_id
+from moatless.environment.local import LocalBashEnvironment
 from moatless.evaluation.schema import EvaluationEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.run_flow import (
@@ -46,8 +47,6 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
     litellm.callbacks = [LogHandler(storage=storage)]
 
-    logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
-
     settings = await storage.read_from_trajectory(
         path="settings.json", trajectory_id=trajectory_id, project_id=project_id
     )
@@ -58,17 +57,15 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
     try:
         flow = await setup_flow(project_id, trajectory_id)
 
-        if not node_id and flow.is_finished():
-            logger.warning(f"Flow already finished for instance {trajectory_id}")
-            return None
-
         repo_path = os.environ.get("REPO_PATH")
         if not repo_path:
-            raise ValueError("REPO_PATH is not set")
+            raise ValueError("REPO_PATH is not set")        
 
         repository = GitRepository(repo_path=repo_path)
-
+        environment = LocalBashEnvironment(cwd=repo_path)
+        
         runtime = await setup_swebench_runtime()
+        
         index_store_dir = os.environ.get("INDEX_STORE_DIR")
         if not index_store_dir:
             raise ValueError("INDEX_STORE_DIR is not set")
@@ -81,7 +78,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
             file_repo=repository,
         )
 
-        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime)
+        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, environment=environment)
 
         logger.info(f"Flow created for instance {trajectory_id}")
 

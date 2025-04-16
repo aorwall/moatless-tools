@@ -24,7 +24,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
     The JSON file will be named "{type}.json" and stored in the trajectory directory.
     """
 
-    _storage: BaseStorage = PrivateAttr()
+    _storage: BaseStorage | None = PrivateAttr(default=None)
     _artifacts: dict[str, T] = PrivateAttr(default={})
 
     @classmethod
@@ -43,28 +43,39 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         # Initialize empty artifacts dictionary
 
         if self._artifacts:
+            logger.info(f"Artifacts already loaded for type {self.type}")
             return
 
         self._artifacts = {}
+        if not self._storage:
+            logger.warning(f"No storage set for {self.type} handler")
+            return
 
         path = f"{self.type}.json"
 
         # If storage doesn't have our key, return empty
-        if not await self._storage.exists(path):
+        if  not await self._storage.exists_in_trajectory(path):
             logger.info(f"No artifacts found for type {self.type}. Creating empty artifact store.")
             return
 
         try:
+            
             artifact_data = await self._storage.read_from_trajectory(path)
             artifact_class = self.get_artifact_class()
+            logger.info(f"Loading artifacts for type {self.type} from {path}")
 
-            for item in artifact_data["artifacts"]:
-                try:
-                    artifact = artifact_class.model_validate(item)
-                    artifact.status = "persisted"  # Mark as persisted since it was loaded from storage
-                    self._artifacts[artifact.id] = artifact
-                except Exception as e:
-                    logger.error(f"Error loading artifact from {item}: {e}")
+            # Fix: Ensure artifact_data is properly accessed as a dictionary
+            if isinstance(artifact_data, dict) and "artifacts" in artifact_data:
+                artifacts_list = artifact_data["artifacts"]
+                for item in artifacts_list:
+                    try:
+                        artifact = artifact_class.model_validate(item)
+                        artifact.status = "persisted"  # Mark as persisted since it was loaded from storage
+                        self._artifacts[artifact.id] = artifact
+                    except Exception as e:
+                        logger.error(f"Error loading artifact from {item}: {e}")
+            else:
+                logger.error(f"Invalid artifact data format: {artifact_data}")
 
         except Exception as e:
             logger.exception(f"Error loading artifacts of type {self.type}: {e}")
@@ -91,6 +102,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
 
         artifact.status = "new"
         self._artifacts[artifact.id] = artifact
+        # Ensure artifacts are saved after creation
         await self._save_artifacts()
         return artifact
 
@@ -106,6 +118,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
             artifact.status = "updated"
 
         self._artifacts[artifact.id] = artifact
+        # Ensure artifacts are saved after update
         await self._save_artifacts()
         return artifact
 
@@ -117,6 +130,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
             raise ValueError(f"Artifact with ID {artifact_id} not found")
 
         del self._artifacts[artifact_id]
+        # Ensure artifacts are saved after deletion
         await self._save_artifacts()
 
     async def search(self, criteria: list[SearchCriteria]) -> list[T]:
@@ -170,10 +184,19 @@ class JsonArtifactHandler(ArtifactHandler[T]):
 
     async def _save_artifacts(self) -> None:
         """Save artifacts to storage"""
+        if not self._storage:
+            logger.warning(f"No storage set for {self.type} handler")
+            return
+
         path = f"{self.type}.json"
         artifact_data = [artifact.model_dump() for artifact in self._artifacts.values()]
         artifacts_dict = {"artifacts": artifact_data}
-        await self._storage.write_to_trajectory(path, artifacts_dict)
+        
+        try:
+            logger.info(f"Saving {len(artifact_data)} artifacts of type {self.type} to {path}")
+            await self._storage.write_to_trajectory(path, artifacts_dict)
+        except Exception as e:
+            logger.exception(f"Error saving artifacts of type {self.type}: {e}")
 
     def generate_id(self) -> str:
         """Generate a unique ID for an artifact"""

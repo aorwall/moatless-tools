@@ -9,12 +9,13 @@ from kubernetes.client import ApiException
 from opentelemetry import trace
 
 from moatless.runner.label_utils import (
-    create_annotations,
-    create_job_args,
     create_labels,
-    sanitize_label,
+    create_annotations,
     get_project_label,
     get_trajectory_label,
+    create_resource_id,
+    create_job_args,
+    sanitize_label,
 )
 from moatless.runner.runner import (
     BaseRunner,
@@ -44,7 +45,6 @@ class KubernetesRunner(BaseRunner):
         service_account: str | None = None,
         kubernetes_provider: str | None = None,
         node_selector: dict | None = None,
-        max_jobs_per_project: int = 5,
     ):
         """Initialize the runner with Kubernetes client configuration.
 
@@ -56,7 +56,6 @@ class KubernetesRunner(BaseRunner):
             service_account: Service account to use for jobs
             kubernetes_provider: Kubernetes provider to use
             node_selector: Node selector labels for job pods (default: {"node-purpose": "testbeds"})
-            max_jobs_per_project: Maximum number of jobs allowed per project
         """
         self.namespace = namespace or os.getenv("KUBERNETES_RUNNER_NAMESPACE", "moatless-tools")
         self.image = image
@@ -65,11 +64,14 @@ class KubernetesRunner(BaseRunner):
         self.service_account = service_account
         self.kubernetes_provider = kubernetes_provider or os.getenv("KUBERNETES_RUNNER_PROVIDER", "in-cluster")
         logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
-        self.node_selector = node_selector or {"node-purpose": "testbed-dev"}
+        
+        if node_selector:
+            self.node_selector = node_selector
+        else:
+            node_selector_label = os.getenv("KUBERNETES_RUNNER_NODE_SELECTOR_LABEL", "testbeds")
+            self.node_selector = {"node-purpose": node_selector_label}
+            
         self.logger = logging.getLogger(__name__)
-        self.max_jobs_per_project = max_jobs_per_project
-        self.use_project_namespaces = os.getenv("USE_PROJECT_NAMESPACES", "true").lower() == "true"
-        logger.info(f"Using project namespaces: {self.use_project_namespaces}")
 
         # Load the Kubernetes configuration
         try:
@@ -87,289 +89,6 @@ class KubernetesRunner(BaseRunner):
         self.batch_v1 = client.BatchV1Api()
         self.core_v1 = client.CoreV1Api()
 
-    async def _get_or_create_project_namespace(self, project_id: str) -> str:
-        """Get or create a namespace for a project and set up resource quota.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            Namespace name
-        """
-        if not self.use_project_namespaces:
-            return self.namespace
-
-        # Create a valid namespace name
-        namespace_name = self._create_namespace_name(project_id)
-
-        try:
-            # Check if namespace exists
-            self.core_v1.read_namespace(name=namespace_name)
-            self.logger.info(f"Using existing namespace {namespace_name} for project {project_id}")
-
-            # Check if the required resources exist in the namespace
-            await self._ensure_namespace_resources(namespace_name)
-        except ApiException as e:
-            if e.status == 404:
-                # Create namespace
-                await self._create_project_namespace(namespace_name, project_id)
-            else:
-                self.logger.exception(f"Error checking namespace {namespace_name}: {e}")
-                # Fall back to default namespace
-                return self.namespace
-
-        return namespace_name
-
-    def _create_namespace_name(self, project_id: str) -> str:
-        """Create a valid Kubernetes namespace name for a project.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            Valid namespace name
-        """
-        # Sanitize project_id to follow RFC 1123 requirements
-        # Must be lowercase alphanumeric chars or '-', max 63 chars, start/end with alphanumeric
-        sanitized_id = self._sanitize_kubernetes_label(project_id)
-
-        # Create namespace with prefix and sanitized project ID
-        prefix = "moatless-"
-
-        # Calculate how much of the project ID we can include
-        # For longer IDs, we need to include a hash to ensure uniqueness
-        max_length = 63 - len(prefix)
-
-        if len(sanitized_id) <= max_length:
-            # For shorter IDs, use the full sanitized ID
-            namespace_name = f"{prefix}{sanitized_id}"
-        else:
-            # For longer IDs, truncate and add a hash for uniqueness
-            project_hash = str(hash(project_id) % 10000000)
-
-            # Reserve space for the hash (plus a hyphen)
-            hash_space = len(project_hash) + 1
-            truncated_id = sanitized_id[: max_length - hash_space]
-
-            # Combine truncated ID with hash
-            namespace_name = f"{prefix}{truncated_id}-{project_hash}"
-
-            # Ensure we're still within the length limit
-            namespace_name = namespace_name[:63]
-
-        # Ensure namespace name starts and ends with alphanumeric character
-        if not namespace_name[0].isalnum():
-            namespace_name = f"x{namespace_name[1:]}"
-        if not namespace_name[-1].isalnum():
-            namespace_name = f"{namespace_name[:-1]}x"
-
-        return namespace_name
-
-    async def _create_project_namespace(self, namespace_name: str, project_id: str) -> None:
-        """Create a namespace for a project.
-
-        Args:
-            namespace_name: Name for the namespace
-            project_id: The project ID
-        """
-        project_hash = str(hash(project_id) % 10000000)
-
-        # Create namespace
-        namespace = client.V1Namespace(
-            metadata=client.V1ObjectMeta(
-                name=namespace_name,
-                labels={"moatless-project": project_hash},  # Use hash for label value too
-                annotations={"moatless.ai/project-id": project_id},
-            )
-        )
-
-        try:
-            self.core_v1.create_namespace(body=namespace)
-            self.logger.info(f"Created namespace {namespace_name} for project {project_id}")
-        except ApiException as e:
-            if e.status == 409:  # Conflict - namespace already exists
-                self.logger.info(f"Namespace {namespace_name} already exists for project {project_id}")
-            else:
-                self.logger.exception(f"Error creating namespace {namespace_name}: {e}")
-                return
-
-        # Create resource quota for the namespace
-        await self._create_resource_quota(namespace_name)
-
-        # Copy shared ConfigMap and Secret to the new namespace
-        await self._copy_shared_resources(namespace_name)
-
-    async def _ensure_namespace_resources(self, namespace: str) -> None:
-        """Ensure the namespace has all required resources.
-
-        Args:
-            namespace: Namespace to check
-        """
-        try:
-            await self._ensure_resource_quota(namespace)
-            await self._ensure_config_map(namespace)
-            await self._ensure_secret(namespace)
-        except Exception as exc:
-            self.logger.exception(f"Error ensuring resources in namespace {namespace}: {exc}")
-
-    async def _ensure_resource_quota(self, namespace: str) -> None:
-        """Ensure resource quota exists in namespace.
-
-        Args:
-            namespace: Namespace to check
-        """
-        try:
-            # Check if the general quota exists
-            try:
-                self.core_v1.read_namespaced_resource_quota(name="project-job-limit", namespace=namespace)
-                general_exists = True
-            except ApiException as e:
-                if e.status == 404:
-                    general_exists = False
-                else:
-                    raise
-
-            # Check if the active quota exists
-            try:
-                self.core_v1.read_namespaced_resource_quota(name="project-active-job-limit", namespace=namespace)
-                active_exists = True
-            except ApiException as e:
-                if e.status == 404:
-                    active_exists = False
-                else:
-                    raise
-
-            # If either quota doesn't exist, create both to ensure consistency
-            if not general_exists or not active_exists:
-                self.logger.info(f"Resource quotas not found in namespace {namespace}, creating them")
-                await self._create_resource_quota(namespace)
-
-        except ApiException as e:
-            self.logger.exception(f"Error checking resource quotas in namespace {namespace}: {e}")
-            # Create resource quota as fallback
-            await self._create_resource_quota(namespace)
-
-    async def _ensure_config_map(self, namespace: str) -> None:
-        """Ensure ConfigMap exists in namespace.
-
-        Args:
-            namespace: Namespace to check
-        """
-        try:
-            self.core_v1.read_namespaced_config_map(name="moatless-tools-env", namespace=namespace)
-        except ApiException as e:
-            if e.status == 404:
-                # ConfigMap not found, copy it
-                self.logger.info(f"ConfigMap not found in namespace {namespace}, copying it")
-                await self._copy_shared_resources(namespace)
-
-    async def _ensure_secret(self, namespace: str) -> None:
-        """Ensure Secret exists in namespace.
-
-        Args:
-            namespace: Namespace to check
-        """
-        try:
-            self.core_v1.read_namespaced_secret(name="moatless-tools-secrets", namespace=namespace)
-        except ApiException as e:
-            if e.status == 404:
-                # Secret not found, copy it
-                self.logger.info(f"Secret not found in namespace {namespace}, copying it")
-                await self._copy_secret_to_namespace(namespace)
-
-    async def _copy_shared_resources(self, namespace: str) -> None:
-        """Copy shared ConfigMap and Secret from default namespace to project namespace.
-
-        Args:
-            namespace: Target namespace to copy resources to
-        """
-        try:
-            await self._copy_config_map_to_namespace(namespace)
-            await self._copy_secret_to_namespace(namespace)
-        except Exception as exc:
-            self.logger.exception(f"Error copying shared resources to namespace {namespace}: {exc}")
-
-    async def _copy_config_map_to_namespace(self, namespace: str) -> None:
-        """Copy ConfigMap to a namespace.
-
-        Args:
-            namespace: Target namespace
-        """
-        try:
-            # Get the ConfigMap from the source namespace
-            config_map = self.core_v1.read_namespaced_config_map("moatless-tools-env", self.namespace)
-
-            # Create a new ConfigMap in the target namespace
-            new_config_map = client.V1ConfigMap(
-                metadata=client.V1ObjectMeta(name="moatless-tools-env", namespace=namespace), data=config_map.data
-            )
-
-            self.core_v1.create_namespaced_config_map(namespace, new_config_map)
-            self.logger.info(f"Copied ConfigMap moatless-tools-env to namespace {namespace}")
-        except ApiException as e:
-            if e.status == 409:  # Conflict - resource already exists
-                self.logger.info(f"ConfigMap moatless-tools-env already exists in namespace {namespace}")
-            else:
-                self.logger.exception(f"Error copying ConfigMap to namespace {namespace}: {e}")
-
-    async def _copy_secret_to_namespace(self, namespace: str) -> None:
-        """Copy Secret to a namespace.
-
-        Args:
-            namespace: Target namespace
-        """
-        try:
-            # Get the Secret from the source namespace
-            secret = self.core_v1.read_namespaced_secret("moatless-tools-secrets", self.namespace)
-
-            # Create a new Secret in the target namespace
-            new_secret = client.V1Secret(
-                metadata=client.V1ObjectMeta(name="moatless-tools-secrets", namespace=namespace),
-                data=secret.data,
-                type=secret.type,
-            )
-
-            self.core_v1.create_namespaced_secret(namespace, new_secret)
-            self.logger.info(f"Copied Secret moatless-tools-secrets to namespace {namespace}")
-        except ApiException as e:
-            if e.status == 409:  # Conflict - resource already exists
-                self.logger.info(f"Secret moatless-tools-secrets already exists in namespace {namespace}")
-            else:
-                self.logger.exception(f"Error copying Secret to namespace {namespace}: {e}")
-
-    async def _create_resource_quota(self, namespace: str) -> None:
-        """Create a resource quota for a namespace.
-
-        Args:
-            namespace: Namespace name
-        """
-        # Create a resource quota that limits the number of active pods
-
-        active_quota = client.V1ResourceQuota(
-            metadata=client.V1ObjectMeta(
-                name="project-active-job-limit",
-                namespace=namespace,
-            ),
-            spec=client.V1ResourceQuotaSpec(
-                hard={
-                    "pods": str(self.max_jobs_per_project),
-                },
-                scopes=["NotTerminating"],  # Only count pods that are not terminating
-            ),
-        )
-
-        try:
-            self.core_v1.create_namespaced_resource_quota(namespace=namespace, body=active_quota)
-
-            self.logger.info(
-                f"Created resource quotas in namespace {namespace} with limit of {self.max_jobs_per_project} active pods"
-            )
-        except ApiException as e:
-            if e.status == 409:  # Conflict - resource already exists
-                self.logger.info(f"Resource quota already exists in namespace {namespace}")
-            else:
-                self.logger.exception(f"Error creating resource quota in namespace {namespace}: {e}")
-
     @tracer.start_as_current_span("KubernetesRunner.start_job")
     async def start_job(
         self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
@@ -386,29 +105,24 @@ class KubernetesRunner(BaseRunner):
             True if the job was scheduled successfully, False otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-
-        # Get or create namespace for the project
-        namespace = await self._get_or_create_project_namespace(project_id)
+        job_status = await self.get_job_status(project_id, trajectory_id)
+        logger.info(f"Job {job_id} status: {job_status}")
 
         # Check if job exists and get its status
-        if await self.job_exists(project_id, trajectory_id):
-            job_status = await self.get_job_status(project_id, trajectory_id)
-
-            # If job exists but failed, delete it first, then create a new one
-            if job_status == JobStatus.FAILED:
-                logger.info(f"Found failed job {job_id}, deleting it before creating a new one")
-                try:
-                    await self.cancel_job(project_id, trajectory_id)
-                    # Short wait to ensure job is deleted
-                    import asyncio
-
-                    await asyncio.sleep(1)
-                except Exception as e:
-                    logger.warning(f"Error deleting failed job {job_id}: {e}")
-            else:
-                logger.info(f"Job {job_id} already exists with status {job_status}, skipping")
+        if job_status == JobStatus.RUNNING:
+            logger.info(f"Job {job_id} already exists with status {job_status}, skipping")
+            return True
+        elif job_status in [JobStatus.PENDING, JobStatus.COMPLETED]:
+            logger.info(f"Found job {job_id} with status {job_status}, deleting it before creating a new one")
+            try:
+                await self.cancel_job(project_id, trajectory_id)
+                # Short wait to ensure job is deleted
+                import asyncio
+                await asyncio.sleep(1)
+            except Exception as e:
+                logger.warning(f"Error deleting job {job_id}: {e}")
                 return False
-
+            
         try:
             self.logger.info(f"Creating Kubernetes job for function: {job_func}")
 
@@ -424,17 +138,17 @@ class KubernetesRunner(BaseRunner):
                 node_id=node_id,
             )
 
-            # Create the job in the project namespace
+            # Create the job in the namespace
             api_response = self.batch_v1.create_namespaced_job(
-                namespace=namespace,
+                namespace=self.namespace,
                 body=job,
             )
-            self.logger.info(f"Created job {api_response.metadata.name} in namespace {namespace}")
+            self.logger.info(f"Created job {api_response.metadata.name} in namespace {self.namespace}")
             return True
 
         except ApiException as e:
             if e.status == 403 and "exceeded quota" in str(e):
-                self.logger.warning(f"Quota exceeded for project {project_id} in namespace {namespace}")
+                self.logger.warning(f"Quota exceeded for project {project_id} in namespace {self.namespace}")
                 return False
             self.logger.exception(f"Exception when creating job {job_id}: {e}")
             return False
@@ -453,22 +167,15 @@ class KubernetesRunner(BaseRunner):
         """
         try:
             result = []
-            namespace = self.namespace
+            
+            # List jobs in the namespace
+            jobs = await self._list_jobs_in_namespace(self.namespace, project_id)
 
-            if project_id:
-                # For a specific project, look in its namespace
-                if self.use_project_namespaces:
-                    namespace = self._create_namespace_name(project_id)
-                jobs = await self._list_jobs_in_namespace(namespace, project_id)
-
-                # Process jobs from this namespace
-                for job in jobs.items:
-                    job_info = await self._process_job_info(job, project_id)
-                    if job_info:
-                        result.append(job_info)
-            else:
-                # For all projects, check all relevant namespaces
-                result = await self._get_all_jobs()
+            # Process jobs from this namespace
+            for job in jobs.items:
+                job_info = await self._process_job_info(job, project_id)
+                if job_info:
+                    result.append(job_info)
 
             return result
 
@@ -478,48 +185,6 @@ class KubernetesRunner(BaseRunner):
         except Exception:
             self.logger.exception(f"Error getting jobs for project {project_id}")
             return []
-
-    async def _get_all_jobs(self) -> list[JobInfo]:
-        """Get all jobs from all project namespaces.
-
-        Returns:
-            List of JobInfo objects
-        """
-        result = []
-
-        if self.use_project_namespaces:
-            # Get all namespaces with moatless-project label
-            namespaces = self.core_v1.list_namespace(label_selector="moatless-project")
-
-            # Iterate through each namespace
-            for ns in namespaces.items:
-                namespace_name = ns.metadata.name
-
-                # Get all moatless jobs in this namespace
-                jobs = self.batch_v1.list_namespaced_job(
-                    namespace=namespace_name,
-                    label_selector="app=moatless-worker",
-                )
-
-                # Process jobs from this namespace
-                for job in jobs.items:
-                    job_info = await self._process_job_info(job)
-                    if job_info:
-                        result.append(job_info)
-        else:
-            # Just check the default namespace
-            jobs = self.batch_v1.list_namespaced_job(
-                namespace=self.namespace,
-                label_selector="app=moatless-worker",
-            )
-
-            # Process jobs
-            for job in jobs.items:
-                job_info = await self._process_job_info(job)
-                if job_info:
-                    result.append(job_info)
-
-        return result
 
     async def _list_jobs_in_namespace(self, namespace: str, project_id: str = None) -> Any:
         """List jobs in a namespace with optional project filtering.
@@ -553,10 +218,9 @@ class KubernetesRunner(BaseRunner):
         """
         try:
             summary = JobsStatusSummary(project_id=project_id)
-            namespace = self._create_namespace_name(project_id)
 
             # Get all jobs for this project
-            jobs = await self._list_jobs_in_namespace(namespace, project_id)
+            jobs = await self._list_jobs_in_namespace(self.namespace, project_id)
 
             # Count jobs by status
             for job in jobs.items:
@@ -565,14 +229,11 @@ class KubernetesRunner(BaseRunner):
 
                 await self._update_summary_for_job(summary, job_id, status)
 
-            # Get quota information
-            await self._add_quota_info_to_summary(summary, namespace)
-
             return summary
 
         except ApiException as e:
             self.logger.exception(
-                f"Exception when getting job summary for project {project_id} in namespace {namespace}: {e}"
+                f"Exception when getting job summary for project {project_id} in namespace {self.namespace}: {e}"
             )
             return JobsStatusSummary(project_id=project_id)
         except Exception as exc:
@@ -590,21 +251,20 @@ class KubernetesRunner(BaseRunner):
             JobDetails object containing detailed information about the job
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = self._create_namespace_name(project_id)
-
+        
         try:
             # Check if job exists
             if not await self.job_exists(project_id, trajectory_id):
                 return None
 
             # Get the Kubernetes Job resource
-            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=namespace)
+            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
 
             # Get job status
             job_status = self._get_job_status_from_k8s_job(job)
 
             # Get associated pod(s)
-            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+            pod_list = self.core_v1.list_namespaced_pod(namespace=self.namespace, label_selector=f"job-name={job_id}")
 
             # Get the first pod (most relevant)
             pod = None
@@ -615,7 +275,7 @@ class KubernetesRunner(BaseRunner):
             logs = ""
             if pod:
                 try:
-                    logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=namespace)
+                    logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=self.namespace)
                 except ApiException as e:
                     self.logger.warning(f"Error getting logs for pod {pod.metadata.name}: {e}")
 
@@ -645,7 +305,7 @@ class KubernetesRunner(BaseRunner):
             job_labels = job.metadata.labels or {}
             overview_data = {
                 "job_name": job.metadata.name,
-                "namespace": namespace,
+                "namespace": self.namespace,
                 "project_id": project_id,
                 "trajectory_id": trajectory_id,
                 "creation_time": job.metadata.creation_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -891,7 +551,7 @@ class KubernetesRunner(BaseRunner):
             return job_details
 
         except ApiException as e:
-            self.logger.exception(f"Exception when getting job details for {job_id} in namespace {namespace}: {e}")
+            self.logger.exception(f"Exception when getting job details for {job_id} in namespace {self.namespace}: {e}")
             return None
         except Exception as exc:
             self.logger.exception(f"Error getting job details for {job_id}: {exc}")
@@ -910,9 +570,6 @@ class KubernetesRunner(BaseRunner):
         if status == JobStatus.PENDING:
             summary.pending_jobs += 1
             summary.job_ids["pending"].append(job_id)
-        elif status == JobStatus.INITIALIZING:
-            summary.initializing_jobs += 1
-            summary.job_ids["initializing"].append(job_id)
         elif status == JobStatus.RUNNING:
             summary.running_jobs += 1
             summary.job_ids["running"].append(job_id)
@@ -933,86 +590,8 @@ class KubernetesRunner(BaseRunner):
             summary: JobsStatusSummary to update
             namespace: Kubernetes namespace
         """
-        if not self.use_project_namespaces:
-            return
-
-        try:
-            active_quota = self.core_v1.read_namespaced_resource_quota(
-                name="project-active-job-limit", namespace=namespace
-            )
-
-            quota_info = {}
-
-            if active_quota.status and active_quota.status.hard and active_quota.status.used:
-                quota_info.update(
-                    {
-                        "max_active_pods": active_quota.status.hard.get("pods", str(self.max_jobs_per_project)),
-                        "used_active_pods": active_quota.status.used.get("pods", "0"),
-                    }
-                )
-
-            # Only log the quota information instead of trying to add it to the model
-            self.logger.debug(f"Quota info for namespace {namespace}: {quota_info}")
-        except ApiException as e:
-            self.logger.debug(f"Error getting quota info for namespace {namespace}: {e}")
-            pass
-
-    async def _process_job_info(self, job, project_id: str = None) -> JobInfo | None:
-        """Process a Kubernetes job and convert it to JobInfo.
-
-        Args:
-            job: Kubernetes job object
-            project_id: Optional project ID for filtering
-
-        Returns:
-            JobInfo object or None if job should be skipped
-        """
-        job_id = job.metadata.name
-        job_status = self._get_job_status_from_k8s_job(job)
-
-        job_project_id = None
-        job_trajectory_id = None
-
-        # Extract project and trajectory IDs from annotations
-        if job.metadata.annotations:
-            if "moatless.ai/project-id" in job.metadata.annotations:
-                job_project_id = job.metadata.annotations["moatless.ai/project-id"]
-            if "moatless.ai/trajectory-id" in job.metadata.annotations:
-                job_trajectory_id = job.metadata.annotations["moatless.ai/trajectory-id"]
-        # Fallback to labels if annotations not available
-        elif job.metadata.labels and "project_id" in job.metadata.labels:
-            job_project_id = job.metadata.labels.get("project_id")
-            # Try to extract trajectory_id from job name pattern "run-{project_id}-{trajectory_id}"
-            if job_id.startswith(f"run-{job_project_id}"):
-                # Extract trajectory_id from job name
-                try:
-                    parts = job_id.split("-")
-                    if len(parts) >= 3:
-                        job_trajectory_id = parts[2]
-                except IndexError:
-                    self.logger.warning(f"Could not extract trajectory_id from job name {job_id}")
-
-        # If project_id is specified and doesn't match, skip this job
-        if project_id and job_project_id != project_id:
-            return None
-
-        pod_metadata = None
-        if job_status in [JobStatus.RUNNING, JobStatus.FAILED]:
-            pod_metadata = await self._get_pod_metadata(job_project_id, job_trajectory_id)
-
-        return JobInfo(
-            id=job_id,
-            status=job_status,
-            project_id=job_project_id,
-            trajectory_id=job_trajectory_id,
-            enqueued_at=job.metadata.creation_timestamp if job.metadata.creation_timestamp else None,
-            started_at=job.status.start_time if job.status and job.status.start_time else None,
-            ended_at=job.status.completion_time if job.status and job.status.completion_time else None,
-            metadata={
-                "error": self._get_job_error(job) if job_status == JobStatus.FAILED else None,
-                "pod_status": pod_metadata,
-            },
-        )
+        # Removed since we no longer manage quotas per project namespace
+        pass
 
     @tracer.start_as_current_span("KubernetesRunner.cancel_job")
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None):
@@ -1026,28 +605,26 @@ class KubernetesRunner(BaseRunner):
             None
         """
         try:
-            namespace = self._create_namespace_name(project_id)
-
             project_label = self._get_project_label(project_id)
 
             if trajectory_id is None:
                 # Cancel all jobs for the project
-                self.logger.info(f"Canceling all jobs for project {project_id} in namespace {namespace}")
+                self.logger.info(f"Canceling all jobs for project {project_id} in namespace {self.namespace}")
 
                 label_selector = f"app=moatless-worker,project_id={project_label}"
 
                 # List all jobs for this project
                 jobs = self.batch_v1.list_namespaced_job(
-                    namespace=namespace,
+                    namespace=self.namespace,
                     label_selector=label_selector,
                 )
 
                 # Delete each job
                 for job in jobs.items:
-                    self.logger.info(f"Deleting job {job.metadata.name} in namespace {namespace}")
+                    self.logger.info(f"Deleting job {job.metadata.name} in namespace {self.namespace}")
                     self.batch_v1.delete_namespaced_job(
                         name=job.metadata.name,
-                        namespace=namespace,
+                        namespace=self.namespace,
                         body=client.V1DeleteOptions(
                             propagation_policy="Background",
                         ),
@@ -1055,12 +632,12 @@ class KubernetesRunner(BaseRunner):
             else:
                 # Cancel a specific job
                 job_id = self._job_id(project_id, trajectory_id)
-                self.logger.info(f"Canceling job {job_id} in namespace {namespace}")
+                self.logger.info(f"Canceling job {job_id} in namespace {self.namespace}")
 
                 try:
                     self.batch_v1.delete_namespaced_job(
                         name=job_id,
-                        namespace=namespace,
+                        namespace=self.namespace,
                         body=client.V1DeleteOptions(
                             propagation_policy="Background",
                         ),
@@ -1069,7 +646,7 @@ class KubernetesRunner(BaseRunner):
                     if e.status != 404:  # Not Found
                         raise
                     self.logger.warning(
-                        f"Job {job_id} not found in namespace {namespace}, it may have already been deleted"
+                        f"Job {job_id} not found in namespace {self.namespace}, it may have already been deleted"
                     )
 
         except ApiException as e:
@@ -1087,53 +664,7 @@ class KubernetesRunner(BaseRunner):
         Returns:
             The job name compliant with Kubernetes naming conventions
         """
-        # Kubernetes has specific restrictions on resource names
-        # The name must be lowercase, start with an alphanumeric character,
-        # and only contain lowercase alphanumeric characters, '-', or '.'
-
-        # Sanitize and lowercase both IDs
-        sanitized_project = project_id.lower()
-        sanitized_project = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_project)
-
-        sanitized_traj = trajectory_id.lower()
-        sanitized_traj = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_traj)
-
-        # Create a hash for uniqueness
-        traj_hash = str(hash(trajectory_id) % 10000000)  # 7 digits max
-
-        # Prefix for job names
-        prefix = "run-"
-
-        # Reserve space for the hash plus hyphen
-        hash_part = f"-{traj_hash}"  # 8 chars (including hyphen)
-
-        # Calculate available space
-        max_total_length = 63  # Maximum Kubernetes name length
-        available_length = max_total_length - len(prefix) - len(hash_part)
-
-        # Allocate space for trajectory_id (up to 24 chars)
-        max_traj_length = min(24, available_length // 3)  # At most 24 chars for trajectory
-
-        # Remaining space goes to project_id
-        max_project_length = available_length - max_traj_length - 1  # -1 for hyphen between project and trajectory
-
-        # Truncate IDs if needed
-        truncated_project = sanitized_project[:max_project_length]
-        truncated_traj = sanitized_traj[-max_traj_length:] if len(sanitized_traj) > max_traj_length else sanitized_traj
-
-        # Construct job ID
-        job_id = f"{prefix}{truncated_project}-{truncated_traj}{hash_part}"
-
-        # Ensure it starts and ends with alphanumeric character
-        if not job_id[0].isalnum():
-            job_id = f"x{job_id[1:]}"
-        if not job_id[-1].isalnum():
-            job_id = f"{job_id[:-1]}x"
-
-        # Maximum length for Kubernetes resource names
-        job_id = job_id[:63]
-
-        return job_id
+        return create_resource_id(project_id, trajectory_id, prefix="run")
 
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
         """Check if a job exists.
@@ -1146,16 +677,53 @@ class KubernetesRunner(BaseRunner):
             True if the job exists, False otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = self._create_namespace_name(project_id)
-
+        self.logger.info(f"Checking if job {job_id} exists in namespace {self.namespace}")
+        
+        # Try to get the job directly first
         try:
-            self.batch_v1.read_namespaced_job(name=job_id, namespace=namespace)
+            self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
+            self.logger.info(f"Job {job_id} found directly in namespace {self.namespace}")
             return True
         except ApiException as e:
             if e.status == 404:
-                return False
-            self.logger.exception(f"Error checking if job {job_id} exists: {e}")
+                # Job not found by direct API call, try checking for associated pods
+                try:
+                    # Check if there are any pods with this job-name label
+                    pod_list = self.core_v1.list_namespaced_pod(
+                        namespace=self.namespace, 
+                        label_selector=f"job-name={job_id}",
+                        limit=1  # We only need to know if any exist
+                    )
+                    
+                    # If we found any pods, the job still logically exists
+                    if pod_list.items:
+                        pod = pod_list.items[0]
+                        self.logger.info(
+                            f"Job {job_id} not found directly but found associated pod {pod.metadata.name} "
+                            f"in phase {pod.status.phase}"
+                        )
+                        return True
+                    
+                    # No pods found either, job truly doesn't exist
+                    return False
+                    
+                except ApiException as pod_e:
+                    self.logger.warning(f"Error checking for pods for job {job_id}: {pod_e}")
+                    # If we can't check pods either, fall back to "not found"
+                    return False
+            
+            # For other API errors, log but don't assume job doesn't exist
+            self.logger.warning(f"Error checking if job {job_id} exists: {e}, status code: {e.status}")
+            if e.status >= 500:
+                # For server errors, assume job might exist to prevent unnecessary job termination
+                self.logger.warning(f"Server error checking job {job_id}, assuming it might exist")
+                return True
+            
             return False
+        except Exception as exc:
+            # For unexpected errors, log and assume job might exist to be safe
+            self.logger.exception(f"Unexpected error checking if job {job_id} exists: {exc}")
+            return True
 
     def _get_job_status_from_k8s_job(self, job) -> JobStatus:
         """Get the job status from a Kubernetes job.
@@ -1167,9 +735,8 @@ class KubernetesRunner(BaseRunner):
             The job status
         """
         # Check if job is still active
-        if job.status.active:
-            return JobStatus.RUNNING
-
+        self.logger.info(f"Job {job.metadata.name} status: {job.status}")
+        
         # Check if job completed successfully
         if job.status.succeeded:
             return JobStatus.COMPLETED
@@ -1178,8 +745,8 @@ class KubernetesRunner(BaseRunner):
         if job.status.failed:
             return JobStatus.FAILED
 
-        # Job is created but not started yet
-        return JobStatus.PENDING
+        # Consider the job has running if a job deployment exists and is not completed
+        return JobStatus.RUNNING
 
     async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         """Get the status of a job.
@@ -1192,14 +759,14 @@ class KubernetesRunner(BaseRunner):
             The job status
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = self._create_namespace_name(project_id)
-
+        
         try:
             # Get the Kubernetes Job resource
-            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=namespace)
+            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
             return self._get_job_status_from_k8s_job(job)
         except ApiException as e:
             if e.status == 404:
+                self.logger.info(f"Job {job_id} not found in namespace {self.namespace}")
                 return JobStatus.NOT_STARTED
             self.logger.exception(f"Error getting job status for {job_id}: {e}")
             return JobStatus.NOT_STARTED
@@ -1240,8 +807,6 @@ class KubernetesRunner(BaseRunner):
                     "api_version": api_resources.group_version,
                     "provider": self.kubernetes_provider,
                     "namespace": self.namespace,
-                    "use_project_namespaces": self.use_project_namespaces,
-                    "max_jobs_per_project": self.max_jobs_per_project,
                 },
             )
             return info
@@ -1264,11 +829,10 @@ class KubernetesRunner(BaseRunner):
             String containing the logs if available, None otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = self._create_namespace_name(project_id)
 
         try:
             # Get pods associated with the job
-            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+            pod_list = self.core_v1.list_namespaced_pod(namespace=self.namespace, label_selector=f"job-name={job_id}")
 
             # If no pods found, return None
             if not pod_list.items:
@@ -1276,7 +840,7 @@ class KubernetesRunner(BaseRunner):
 
             # Get logs from the first pod
             pod = pod_list.items[0]
-            logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=namespace)
+            logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=self.namespace)
             return logs
         except ApiException as e:
             self.logger.warning(f"Error getting logs for job {job_id}: {e}")
@@ -1284,60 +848,6 @@ class KubernetesRunner(BaseRunner):
         except Exception as exc:
             self.logger.exception(f"Unexpected error getting logs for job {job_id}: {exc}")
             return None
-
-    def _sanitize_kubernetes_label(self, value: str) -> str:
-        """Sanitize a string to be used as a Kubernetes label value.
-
-        Args:
-            value: The string to sanitize
-
-        Returns:
-            A sanitized string that complies with Kubernetes label value requirements
-        """
-        # Kubernetes label values must only contain alphanumeric chars, '-', '_' or '.'
-        # Must start and end with alphanumeric character
-        # Max length is 63 characters
-
-        # Replace invalid characters with '-'
-        # For namespace names, we need to follow RFC 1123 which doesn't allow '_'
-        sanitized = sanitize_label(value)
-
-        # Replace underscores with hyphens for namespace compatibility
-        sanitized = sanitized.replace("_", "-")
-
-        # Ensure it's not too long
-        if len(sanitized) > 63:
-            sanitized = sanitized[:63]
-
-        # Ensure it starts and ends with alphanumeric
-        if sanitized and not sanitized[0].isalnum():
-            sanitized = f"x{sanitized[1:]}"
-        if sanitized and not sanitized[-1].isalnum():
-            sanitized = f"{sanitized[:-1]}x"
-
-        return sanitized
-
-    def _get_project_label(self, project_id: str) -> str:
-        """Get a sanitized project ID for use in Kubernetes labels.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            Sanitized project ID suitable for use as a Kubernetes label value
-        """
-        return get_project_label(project_id)
-
-    def _get_trajectory_label(self, trajectory_id: str) -> str:
-        """Get a sanitized trajectory ID for use in Kubernetes labels.
-
-        Args:
-            trajectory_id: The trajectory ID
-
-        Returns:
-            Sanitized trajectory ID suitable for use as a Kubernetes label value
-        """
-        return get_trajectory_label(trajectory_id)
 
     async def _get_pod_metadata(self, project_id: str, trajectory_id: str) -> dict | None:
         """Get metadata from the pod associated with a job.
@@ -1353,11 +863,10 @@ class KubernetesRunner(BaseRunner):
             return None
 
         job_id = self._job_id(project_id, trajectory_id)
-        namespace = self._create_namespace_name(project_id)
 
         try:
             # Get pods associated with the job
-            pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
+            pod_list = self.core_v1.list_namespaced_pod(namespace=self.namespace, label_selector=f"job-name={job_id}")
 
             # If no pods found, return None
             if not pod_list.items:
@@ -1420,7 +929,7 @@ class KubernetesRunner(BaseRunner):
         try:
             # Get more detailed error from the pod
             job_id = job.metadata.name
-            namespace = job.metadata.namespace
+            namespace = job.metadata.namespace or self.namespace
 
             # Get pods associated with the job
             pod_list = self.core_v1.list_namespaced_pod(namespace=namespace, label_selector=f"job-name={job_id}")
@@ -1679,3 +1188,82 @@ class KubernetesRunner(BaseRunner):
             node_selector["moatless.ai/node-id"] = str(node_id)
 
         return node_selector
+
+    def _get_project_label(self, project_id: str) -> str:
+        """Get a sanitized project ID for use in Kubernetes labels.
+
+        Args:
+            project_id: The project ID
+
+        Returns:
+            Sanitized project ID suitable for use as a Kubernetes label value
+        """
+        return get_project_label(project_id)
+
+    def _get_trajectory_label(self, trajectory_id: str) -> str:
+        """Get a sanitized trajectory ID for use in Kubernetes labels.
+
+        Args:
+            trajectory_id: The trajectory ID
+
+        Returns:
+            Sanitized trajectory ID suitable for use as a Kubernetes label value
+        """
+        return get_trajectory_label(trajectory_id)
+
+    async def _process_job_info(self, job, project_id: str = None) -> JobInfo | None:
+        """Process a Kubernetes job and convert it to JobInfo.
+
+        Args:
+            job: Kubernetes job object
+            project_id: Optional project ID for filtering
+
+        Returns:
+            JobInfo object or None if job should be skipped
+        """
+        job_id = job.metadata.name
+        job_status = self._get_job_status_from_k8s_job(job)
+
+        job_project_id = None
+        job_trajectory_id = None
+
+        # Extract project and trajectory IDs from annotations
+        if job.metadata.annotations:
+            if "moatless.ai/project-id" in job.metadata.annotations:
+                job_project_id = job.metadata.annotations["moatless.ai/project-id"]
+            if "moatless.ai/trajectory-id" in job.metadata.annotations:
+                job_trajectory_id = job.metadata.annotations["moatless.ai/trajectory-id"]
+        # Fallback to labels if annotations not available
+        elif job.metadata.labels and "project_id" in job.metadata.labels:
+            job_project_id = job.metadata.labels.get("project_id")
+            # Try to extract trajectory_id from job name pattern "run-{project_id}-{trajectory_id}"
+            if job_id.startswith(f"run-{job_project_id}"):
+                # Extract trajectory_id from job name
+                try:
+                    parts = job_id.split("-")
+                    if len(parts) >= 3:
+                        job_trajectory_id = parts[2]
+                except IndexError:
+                    self.logger.warning(f"Could not extract trajectory_id from job name {job_id}")
+
+        # If project_id is specified and doesn't match, skip this job
+        if project_id and job_project_id != project_id:
+            return None
+
+        pod_metadata = None
+        if job_status in [JobStatus.RUNNING, JobStatus.FAILED]:
+            pod_metadata = await self._get_pod_metadata(job_project_id, job_trajectory_id)
+
+        return JobInfo(
+            id=job_id,
+            status=job_status,
+            project_id=job_project_id,
+            trajectory_id=job_trajectory_id,
+            enqueued_at=job.metadata.creation_timestamp if job.metadata.creation_timestamp else None,
+            started_at=job.status.start_time if job.status and job.status.start_time else None,
+            ended_at=job.status.completion_time if job.status and job.status.completion_time else None,
+            metadata={
+                "error": self._get_job_error(job) if job_status == JobStatus.FAILED else None,
+                "pod_status": pod_metadata,
+            },
+        )

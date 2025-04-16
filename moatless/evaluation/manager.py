@@ -104,6 +104,9 @@ class EvaluationManager:
                 message=problem_statement,
                 trajectory_id=instance.instance_id,
                 project_id=evaluation.evaluation_name,
+                metadata={
+                    "instance_id": instance.instance_id,
+                },
             )
 
         await self._save_evaluation(evaluation)
@@ -192,13 +195,23 @@ class EvaluationManager:
                     project_id=evaluation_name, trajectory_id=instance.instance_id
                 )
 
-                if job_status in [JobStatus.RUNNING, JobStatus.INITIALIZING]:
+                if job_status in [JobStatus.RUNNING]:
                     instance.status = InstanceStatus.RUNNING
 
                     evaluation_is_running = True
+                elif instance.status == InstanceStatus.ERROR:
+                    instance.status = InstanceStatus.ERROR
+                elif instance.iterations is not None and instance.iterations > 1:
+                    instance.status = InstanceStatus.PAUSED
+                else:
+                    instance.status = InstanceStatus.PENDING
 
                 instance.job_status = job_status
-
+            elif instance.resolved:
+                instance.status = InstanceStatus.RESOLVED
+            else:
+                instance.status = InstanceStatus.FAILED
+    
         if evaluation_is_completed:
             evaluation.status = EvaluationStatus.COMPLETED
         elif not evaluation_is_running:

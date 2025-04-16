@@ -3,9 +3,12 @@ import os
 
 from dotenv import load_dotenv
 
+from litellm import Type
 from moatless.eventbus.base import BaseEventBus
 from moatless.eventbus.local_bus import LocalEventBus
 from moatless.runner.asyncio_runner import AsyncioRunner
+from moatless.runner.runner import BaseRunner
+from moatless.runner.scheduler import SchedulerRunner
 from moatless.storage.base import BaseStorage
 from moatless.storage.file_storage import FileStorage
 
@@ -142,21 +145,23 @@ async def get_runner():
     load_dotenv()
     if _runner is None:
         runner_type = os.environ.get("MOATLESS_RUNNER")
+        runner_impl: Type[BaseRunner] 
         if runner_type == "kubernetes":
             from moatless.runner.kubernetes_runner import KubernetesRunner
 
-            _runner = KubernetesRunner()
+            runner_impl = KubernetesRunner
         elif runner_type == "docker":
             from moatless.runner.docker_runner import DockerRunner
 
-            _runner = DockerRunner()
-        elif runner_type == "rq":
-            from moatless.runner.rq import RQRunner
-
-            _runner = RQRunner(redis_url=os.environ.get("REDIS_URL"))
+            runner_impl = DockerRunner
         else:
             logger.info("Use Local Runner")
-            _runner = AsyncioRunner()
+            runner_impl = AsyncioRunner
+            
+        if os.environ.get("REDIS_URL"):
+            _runner = SchedulerRunner(runner_impl, storage_type="redis", redis_url=os.environ.get("REDIS_URL"))
+        else:
+            _runner = runner_impl()
 
     return _runner
 

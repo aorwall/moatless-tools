@@ -148,6 +148,73 @@ async def test_validate_completion_valid_tool(mock_completion, mock_litellm_tool
 
 @pytest.mark.asyncio
 @patch("litellm.acompletion", new_callable=AsyncMock)
+async def test_validate_completion_mixed_valid_invalid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+    """Test that only valid toolcalls are returned and invalid ones are ignored (no retry if any valid)"""
+    model = ToolCallCompletionModel(model="test")  # type: ignore
+    model.initialize(response_schema=test_schema, system_prompt="Test prompt")
+
+    valid_args = {"command": "test", "args": ["--flag"], "thoughts": "Valid call"}
+    invalid_args = {"invalid_field": "fail"}
+    # One valid, one invalid tool name, one invalid args
+    tool_calls = [
+        {"name": "TestActionArgs", "args": json.dumps(valid_args)},  # valid
+        {"name": "invalid_tool", "args": json.dumps(valid_args)},    # invalid tool name
+        {"name": "TestActionArgs", "args": json.dumps(invalid_args)}, # invalid args
+    ]
+    mock_response = mock_litellm_tool_response(tool_calls=tool_calls)
+
+    structured_outputs, text_response, thought = await model._validate_completion(completion_response=mock_response)
+    # Only the valid toolcall should be returned
+    assert structured_outputs
+    assert len(structured_outputs) == 1
+    assert structured_outputs[0].command == "test"
+    assert structured_outputs[0].args == ["--flag"]
+    assert structured_outputs[0].thoughts == "Valid call"
+    assert text_response == "Test response"
+    assert thought is None
+
+@pytest.mark.asyncio
+@patch("litellm.acompletion", new_callable=AsyncMock)
+async def test_validate_completion_all_invalid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+    """Test that retry is triggered if all toolcalls are invalid (invalid name or args)"""
+    model = ToolCallCompletionModel(model="test")  # type: ignore
+    model.initialize(response_schema=test_schema, system_prompt="Test prompt")
+
+    invalid_args = {"invalid_field": "fail"}
+    tool_calls = [
+        {"name": "invalid_tool", "args": json.dumps(invalid_args)},
+        {"name": "invalid_tool2", "args": json.dumps(invalid_args)},
+    ]
+    mock_response = mock_litellm_tool_response(tool_calls=tool_calls)
+
+    with pytest.raises(CompletionRetryError):
+        await model._validate_completion(completion_response=mock_response)
+
+@pytest.mark.asyncio
+@patch("litellm.acompletion", new_callable=AsyncMock)
+async def test_validate_completion_all_valid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+    """Test that all valid toolcalls are returned if all are valid (no retry)"""
+    model = ToolCallCompletionModel(model="test")  # type: ignore
+    model.initialize(response_schema=test_schema, system_prompt="Test prompt")
+
+    valid_args1 = {"command": "test1", "args": ["--flag1"], "thoughts": "Valid1"}
+    valid_args2 = {"command": "test2", "args": ["--flag2"], "thoughts": "Valid2"}
+    tool_calls = [
+        {"name": "TestActionArgs", "args": json.dumps(valid_args1)},
+        {"name": "TestActionArgs", "args": json.dumps(valid_args2)},
+    ]
+    mock_response = mock_litellm_tool_response(tool_calls=tool_calls)
+
+    structured_outputs, text_response, thought = await model._validate_completion(completion_response=mock_response)
+    assert structured_outputs
+    assert len(structured_outputs) == 2
+    assert {o.command for o in structured_outputs} == {"test1", "test2"}
+    assert text_response == "Test response"
+    assert thought is None
+
+
+@pytest.mark.asyncio
+@patch("litellm.acompletion", new_callable=AsyncMock)
 async def test_validate_completion_invalid_tool_name(
     mock_completion, mock_litellm_tool_response, test_schema, test_messages
 ):

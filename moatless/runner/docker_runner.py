@@ -5,9 +5,10 @@ import platform
 import subprocess
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Optional, Dict, Tuple
+from typing import Any, Optional, Dict, Tuple, List, Deque, NamedTuple
+from collections import deque
 
-from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels
+from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels, create_resource_id
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
@@ -30,7 +31,9 @@ class DockerRunner(BaseRunner):
         self,
         job_ttl_seconds: int = 3600,
         timeout_seconds: int = 3600,
-        moatless_source_dir: str = None,
+        moatless_source_dir: Optional[str] = None,
+        default_image_name: Optional[str] = None,
+        max_concurrent_containers: Optional[int] = None,
     ):
         """Initialize the runner with Docker configuration.
 
@@ -40,11 +43,17 @@ class DockerRunner(BaseRunner):
             moatless_source_dir: Path to the moatless source code directory to mount
                                 at /opt/moatless in the container. If None, no source
                                 directory will be mounted.
+            default_image_name: Default Docker image name to use for all jobs. If provided,
+                              this overrides the standard image name generation.
+            max_concurrent_containers: Maximum number of containers that can run concurrently.
+                                     If None, there is no limit.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
         self.logger = logging.getLogger(__name__)
         self.running_containers: Dict[str, Dict[str, Any]] = {}
+        self.default_image_name = default_image_name
+        self.max_concurrent_containers = max_concurrent_containers
 
         # Get source directory - prefer explicitly passed parameter over environment variable
         self.moatless_source_dir = (
@@ -71,58 +80,71 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
 
     async def start_job(
-        self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
+        self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None, 
+        image_name: Optional[str] = None
     ) -> bool:
-        """Start a job as a Docker container.
+        """Start a job in a Docker container.
 
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
             job_func: The function to run
-            node_id: Optional node ID to pass to the job function
+            node_id: Optional node ID (ignored in DockerRunner)
+            image_name: Optional image name, overrides default
 
         Returns:
-            True if the job was scheduled successfully, False otherwise
+            True if the job was started successfully, False otherwise
         """
+        self.logger.info(f"Starting job for {project_id}/{trajectory_id}")
+        
+        # Get function info
+        func_module = job_func.__module__
+        func_name = job_func.__name__
+        
+        # Check if the module name ends with the function name
+        if func_module.endswith(f".{func_name}"):
+            # Use the module path directly as the function is the module's name
+            fully_qualified_name = func_module
+        else:
+            # Normal case: append the function name to the module path
+            fully_qualified_name = f"{func_module}.{func_name}"
+        
+        # Create container ID/name
+        container_name = self._container_name(project_id, trajectory_id)
+        
+        # Check if we already have a container running for this job
+        exists = await self._container_exists(container_name)
+        if exists:
+            self.logger.info(f"Container {container_name} already exists, not starting a new one")
+            return False
+            
+        # Use the specified image or default
+        if not image_name:
+            image_name = self._get_image_name(trajectory_id)
+            
+        # Record the job in our tracking dict
+        job_key = f"{project_id}:{trajectory_id}"
+        self.running_containers[job_key] = {
+            "project_id": project_id,
+            "trajectory_id": trajectory_id,
+            "status": JobStatus.RUNNING,
+            "started_at": datetime.now()
+        }
+        
         try:
-            # Get function info
-            func_module = job_func.__module__
-            func_name = job_func.__name__
-
-            # Check if the module name ends with the function name
-            if func_module.endswith(f".{func_name}"):
-                # Use the module path directly as the function is the module's name
-                fully_qualified_name = func_module
-            else:
-                # Normal case: append the function name to the module path
-                fully_qualified_name = f"{func_module}.{func_name}"
-
-            self.logger.info(f"Creating Docker container for function: {fully_qualified_name}")
-
-            # Create container name from project and trajectory IDs
-            container_name = self._container_name(project_id, trajectory_id)
-
-            # Check if container already exists
-            if await self._container_exists(container_name):
-                # Check if the container is completed or failed
-                container_status = await self._get_container_status(container_name)
-                if container_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
-                    # Remove the existing container first
-                    self.logger.info(
-                        f"Container {container_name} exists with status {container_status}, removing and restarting"
-                    )
-                    await self._stop_container(container_name)
-                else:
-                    self.logger.info(
-                        f"Container {container_name} already exists with status {container_status}, skipping"
-                    )
-                    return False
+            # Create the helper module for running functions in the container
+            # ... existing code ...
 
             # Extract OpenTelemetry context for propagation
             otel_context = extract_trace_context()
 
             # Build the Docker image name
-            image_name = self._get_image_name(trajectory_id)
+            if image_name:
+                # Use the provided image name for this job
+                image_name_to_use = image_name
+            else:
+                # Get image name from the _get_image_name method (which may use default_image_name)
+                image_name_to_use = self._get_image_name(trajectory_id)
 
             # Prepare environment variables
             env_vars = [
@@ -136,11 +158,13 @@ class DockerRunner(BaseRunner):
                 "REPO_DIR=/testbed",
                 "SKIP_CONDA_ACTIVATE=true",
                 "INSTANCE_PATH=/data/instance.json",
+                "VIRTUAL_ENV=",  # Empty value tells UV to ignore virtual environments
+                "UV_NO_VENV=1",  # Tell UV explicitly not to use venv
             ]
 
             # Add API key environment variables from current environment
             for key, value in os.environ.items():
-                if key.endswith("API_KEY") or key.startswith("AWS_"):
+                if key.endswith("API_KEY") or key.startswith("AWS_") or key.startswith("GCP_") or key.startswith("AZURE_"):
                     env_vars.append(f"{key}={value}")
 
             # Add OpenTelemetry context if available
@@ -163,7 +187,9 @@ class DockerRunner(BaseRunner):
             for env_var in env_vars:
                 cmd.extend(["-e", env_var])
 
-            cmd.extend(["-v", f"{self.moatless_dir}:/data/moatless"])
+            # Add volume mounts for data directory only if it exists
+            if self.moatless_dir:
+                cmd.extend(["-v", f"{self.moatless_dir}:/data/moatless"])
 
             # Add volume mounts for components
             if self.components_path:
@@ -178,7 +204,7 @@ class DockerRunner(BaseRunner):
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
             logger.info(f"Running command: {args}")
-            cmd.extend([image_name, "sh", "-c", f"uv run - <<EOF\n{args}\nEOF"])
+            cmd.extend([image_name_to_use, "sh", "-c", f"uv run - <<EOF\n{args}\nEOF"])
 
             logger.info(f"Running Docker command: {' '.join(cmd)}")
             # Run the command
@@ -204,98 +230,122 @@ class DockerRunner(BaseRunner):
 
         except Exception as exc:
             self.logger.exception(f"Error starting job {project_id}-{trajectory_id}: {exc}")
-            return False
+            raise exc
 
     async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
-        """Get all jobs for a project.
+        """Get a list of jobs.
 
         Args:
-            project_id: The project ID
+            project_id: Optional project ID to filter jobs
 
         Returns:
-            List of JobInfo objects with job status information
+            List of JobInfo objects
         """
         result = []
 
         try:
-            # Build the docker command to list containers with labels
-            cmd = [
-                "docker",
-                "ps",
-                "-a",
-                "--format",
-                '{{.Names}}|{{.Label "moatless.project_id"}}|{{.Label "moatless.trajectory_id"}}|{{.State}}|{{.Label "moatless.started_at"}}',
-                "--filter",
-                "label=moatless.managed=true",
-            ]
-
-            # Add project filter if specified
-            if project_id is not None:
-                cmd.extend(["--filter", f"label=moatless.project_id={project_id}"])
-
-            # Run docker command
-            stdout, return_code = await self._run_docker_command(*cmd)
-
-            if return_code != 0:
-                self.logger.error(f"Failed to list containers: {stdout}")
-                return result
-
-            # Parse the output and build job info objects
-            lines = stdout.strip().split("\n")
-            for line in lines:
-                if not line:
+            # Build command to list containers
+            cmd = ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Label \"project_id\"}}|{{.Label \"trajectory_id\"}}|{{.State}}|{{.CreatedAt}}"]
+            
+            # Add filter by project if specified
+            if project_id:
+                sanitized_project_id = sanitize_label(project_id)
+                cmd.extend(["--filter", f"label=project_id={sanitized_project_id}"])
+                
+            # Add filter for Moatless-managed containers
+            cmd.extend(["--filter", "label=moatless.managed=true"])
+            
+            # Execute command
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                self.logger.error(f"Error listing containers: {stderr.decode()}")
+                return []
+                
+            # Parse output
+            output = stdout.decode().strip()
+            if not output:
+                return []
+                
+            for line in output.split("\n"):
+                parts = line.strip().split("|")
+                if len(parts) < 5:
+                    self.logger.warning(f"Invalid container info format: {line}")
                     continue
-
-                parts = line.split("|")
-                if len(parts) < 4:
+                    
+                container_name, container_project_id, container_trajectory_id, container_state, created_at = parts[:5]
+                
+                # Skip containers without proper project or trajectory ID
+                if not container_project_id or not container_trajectory_id:
                     continue
-
-                container_name = parts[0]
-                container_project_id = parts[1]
-                container_trajectory_id = parts[2]
-                container_state = parts[3]
-                started_at_str = parts[4] if len(parts) > 4 else None
-
-                # Convert status string to JobStatus enum
-                status = JobStatus.RUNNING
+                    
+                # Determine status
                 if container_state == "running":
                     status = JobStatus.RUNNING
                 elif container_state == "created":
                     status = JobStatus.PENDING
                 elif container_state == "exited":
-                    # Check exit code
-                    exit_code = await self._get_container_exit_code(container_name)
-                    status = JobStatus.COMPLETED if exit_code == 0 else JobStatus.FAILED
+                    # Get exit code to determine if completed or failed
+                    try:
+                        inspect_cmd = ["docker", "inspect", "--format", "{{.State.ExitCode}}", container_name]
+                        inspect_process = await asyncio.create_subprocess_exec(
+                            *inspect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                        )
+                        inspect_stdout, _ = await inspect_process.communicate()
+                        
+                        if inspect_process.returncode == 0:
+                            exit_code = int(inspect_stdout.decode().strip())
+                            
+                            if exit_code == 0:
+                                status = JobStatus.COMPLETED
+                                # Clean up completed containers
+                                await self._cleanup_container(container_name)
+                            else:
+                                status = JobStatus.FAILED
+                                # Also clean up failed containers
+                                await self._cleanup_container(container_name)
+                        else:
+                            status = JobStatus.FAILED
+                    except Exception as e:
+                        self.logger.error(f"Error getting exit code for {container_name}: {e}")
+                        status = JobStatus.FAILED
                 elif container_state == "removing":
                     status = JobStatus.CANCELED
                 else:
-                    status = JobStatus.INITIALIZING
-
-                # Parse started_at datetime if available
-                started_at = None
-                if started_at_str:
+                    status = JobStatus.RUNNING
+                
+                # Parse timestamp
+                try:
+                    created_datetime = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S %z")
+                except ValueError:
+                    # fallback to alternative format if the first one doesn't work
                     try:
-                        started_at = datetime.fromisoformat(started_at_str)
+                        created_datetime = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S %Z")
                     except ValueError:
-                        pass
-
-                result.append(
-                    JobInfo(
-                        id=container_name,
-                        status=status,
-                        project_id=container_project_id,
-                        trajectory_id=container_trajectory_id,
-                        enqueued_at=started_at,
-                        started_at=started_at,
-                        ended_at=None,
-                        metadata={},
-                    )
+                        self.logger.warning(f"Could not parse timestamp: {created_at}")
+                        created_datetime = datetime.now()
+                
+                # Create JobInfo object
+                job_info = JobInfo(
+                    id=f"{container_project_id}:{container_trajectory_id}",
+                    project_id=container_project_id,
+                    trajectory_id=container_trajectory_id,
+                    status=status,
+                    enqueued_at=created_datetime,
+                    started_at=created_datetime,
+                    ended_at=datetime.now() if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED] else None
                 )
-
+                
+                result.append(job_info)
+                
+            return result
+            
         except Exception as exc:
-            self.logger.exception(f"Error listing jobs: {exc}")
-
-        return result
+            self.logger.exception(f"Error getting jobs: {exc}")
+            return []
 
     async def _get_container_exit_code(self, container_name: str) -> int:
         """Get the exit code of a container.
@@ -331,12 +381,13 @@ class DockerRunner(BaseRunner):
         try:
             if trajectory_id is None:
                 # Cancel all jobs for the project
+                sanitized_project_id = sanitize_label(project_id)
                 cmd = [
                     "docker",
                     "ps",
                     "-q",
                     "--filter",
-                    f"label=moatless.project_id={project_id}",
+                    f"label=project_id={sanitized_project_id}",
                     "--filter",
                     "label=moatless.managed=true",
                 ]
@@ -359,7 +410,7 @@ class DockerRunner(BaseRunner):
             else:
                 # Cancel a specific job
                 container_name = self._container_name(project_id, trajectory_id)
-                await self._stop_container(container_name)
+                await self._cleanup_container(container_name)
 
         except Exception as exc:
             self.logger.exception(f"Error canceling job(s): {exc}")
@@ -374,11 +425,20 @@ class DockerRunner(BaseRunner):
         Returns:
             True if the job exists, False otherwise
         """
-        container_name = self._container_name(project_id, trajectory_id)
-
         try:
-            # Use Docker to check if the container exists
-            cmd = ["docker", "ps", "-a", "--filter", f"name={container_name}", "--format", "{{.Names}}"]
+            # Sanitize the project and trajectory IDs for use as Docker labels
+            sanitized_project_id = sanitize_label(project_id)
+            sanitized_trajectory_id = sanitize_label(trajectory_id)
+            
+            # Use Docker to check if the container exists by project_id and trajectory_id labels
+            # This is more reliable than filtering by container name
+            cmd = [
+                "docker", "ps", "-a", 
+                "--filter", f"label=project_id={sanitized_project_id}", 
+                "--filter", f"label=trajectory_id={sanitized_trajectory_id}",
+                "--filter", "label=moatless.managed=true",
+                "--format", "{{.Names}}"
+            ]
 
             process = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -386,6 +446,7 @@ class DockerRunner(BaseRunner):
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
+                self.logger.warning(f"Docker command error: {stderr.decode()}")
                 return False
 
             output = stdout.decode().strip()
@@ -418,8 +479,119 @@ class DockerRunner(BaseRunner):
         Returns:
             JobStatus enum value representing the job status
         """
-        container_name = self._container_name(project_id, trajectory_id)
-        return await self._get_container_status(container_name)
+        try:
+            # First, try the direct approach by checking if the container exists by name
+            container_name = self._container_name(project_id, trajectory_id)
+            
+            # Check if the container exists by name first
+            inspect_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.ExitCode}}", container_name]
+            process = await asyncio.create_subprocess_exec(
+                *inspect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                # Container exists, get its status
+                container_info = stdout.decode().strip().split(",")
+                if len(container_info) >= 2:
+                    state, exit_code_str = container_info[:2]
+                    
+                    # Map Docker status to JobStatus
+                    if state == "running":
+                        return JobStatus.RUNNING
+                    elif state == "created":
+                        return JobStatus.PENDING
+                    elif state == "exited":
+                        try:
+                            exit_code = int(exit_code_str)
+                            if exit_code == 0:
+                                return JobStatus.COMPLETED
+                            else:
+                                return JobStatus.FAILED
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Invalid exit code: {exit_code_str}")
+                            return JobStatus.FAILED
+                    elif state == "removing":
+                        return JobStatus.CANCELED
+                    else:
+                        # Other states (paused, restarting, etc.)
+                        return JobStatus.RUNNING
+            
+            # If not found by name, try using the labels as a backup
+            # Sanitize IDs for use in labels
+            sanitized_project_id = sanitize_label(project_id)
+            sanitized_trajectory_id = sanitize_label(trajectory_id)
+            
+            # Check if any container exists with these labels
+            cmd = [
+                "docker", "ps", "-a",
+                "--filter", f"label=project_id={sanitized_project_id}",
+                "--filter", f"label=trajectory_id={sanitized_trajectory_id}",
+                "--filter", "label=moatless.managed=true",
+                "--format", "{{.Names}}"
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0 or not stdout:
+                self.logger.debug(f"No containers found for {project_id}/{trajectory_id}")
+                return JobStatus.NOT_STARTED
+            
+            # Get the container name from the output
+            found_container_name = stdout.decode().strip().split("\n")[0]
+            
+            # Now get the status of this specific container
+            status_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.ExitCode}}", found_container_name]
+            status_process = await asyncio.create_subprocess_exec(
+                *status_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            status_stdout, status_stderr = await status_process.communicate()
+            
+            if status_process.returncode != 0:
+                if b"No such object" in status_stderr:
+                    # Container was removed
+                    self.logger.debug(f"Container {found_container_name} was removed")
+                    return JobStatus.NOT_STARTED
+                self.logger.warning(f"Error getting container status: {status_stderr.decode()}")
+                return JobStatus.NOT_STARTED
+            
+            # Parse the status output
+            status_output = status_stdout.decode().strip()
+            status_parts = status_output.split(",")
+            
+            if len(status_parts) < 2:
+                self.logger.warning(f"Unexpected status format: {status_output}")
+                return JobStatus.NOT_STARTED
+            
+            state, exit_code_str = status_parts
+            
+            # Map Docker status to JobStatus
+            if state == "running":
+                return JobStatus.RUNNING
+            elif state == "created":
+                return JobStatus.PENDING
+            elif state == "exited":
+                try:
+                    exit_code = int(exit_code_str)
+                    if exit_code == 0:
+                        return JobStatus.COMPLETED
+                    else:
+                        return JobStatus.FAILED
+                except (ValueError, TypeError):
+                    self.logger.warning(f"Invalid exit code: {exit_code_str}")
+                    return JobStatus.FAILED
+            elif state == "removing":
+                return JobStatus.CANCELED
+            else:
+                # Other states (paused, restarting, etc.)
+                return JobStatus.RUNNING
+        
+        except Exception as exc:
+            self.logger.exception(f"Error getting job status: {exc}")
+            return JobStatus.NOT_STARTED
 
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the Docker runner.
@@ -440,11 +612,35 @@ class DockerRunner(BaseRunner):
             running_containers = len(self.running_containers)
 
             return RunnerInfo(
-                runner_type="docker", status=RunnerStatus.RUNNING, data={"running_containers": running_containers}
+                runner_type="docker", 
+                status=RunnerStatus.RUNNING, 
+                data={
+                    "running_containers": running_containers,
+                }
             )
         except Exception as exc:
             self.logger.exception(f"Error checking if runner is up: {exc}")
             return RunnerInfo(runner_type="docker", status=RunnerStatus.ERROR, data={"error": str(exc)})
+
+    async def get_queue_size(self) -> int:
+        """Get the current size of the job queue.
+        
+        Since we no longer have job queueing, this always returns 0.
+        
+        Returns:
+            Always 0 since we no longer queue jobs
+        """
+        return 0
+
+    def get_available_slots(self) -> int:
+        """Get the number of available container slots.
+        
+        Since we no longer limit the number of containers, this returns a large number.
+        
+        Returns:
+            Always returns a large number since we don't limit containers anymore
+        """
+        return 1000  # Return a large number as we don't limit container count
 
     async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
         """Get a summary of job statuses for a project.
@@ -468,9 +664,6 @@ class DockerRunner(BaseRunner):
                 if job.status == JobStatus.PENDING:
                     summary.pending_jobs += 1
                     summary.job_ids["pending"].append(job.id)
-                elif job.status == JobStatus.INITIALIZING:
-                    summary.initializing_jobs += 1
-                    summary.job_ids["initializing"].append(job.id)
                 elif job.status == JobStatus.RUNNING:
                     summary.running_jobs += 1
                     summary.job_ids["running"].append(job.id)
@@ -547,37 +740,7 @@ class DockerRunner(BaseRunner):
         Returns:
             Container name string
         """
-        # Create a valid Docker container name by replacing invalid characters
-        sanitized_project_id = sanitize_label(project_id.lower())
-        sanitized_trajectory_id = sanitize_label(trajectory_id.lower())
-
-        # Generate a hash of the combination of project_id and trajectory_id to ensure uniqueness
-        import hashlib
-
-        unique_hash = hashlib.md5(f"{project_id}:{trajectory_id}".encode()).hexdigest()[:6]
-
-        # Reserve 8 chars for prefix ("moatless-"), 6 chars for hash, and 2 chars for separators
-        reserved_length = 8 + 6 + 2
-        max_total_id_length = 63 - reserved_length
-
-        # Prioritize trajectory_id, then use remaining space for project_id
-        if len(sanitized_trajectory_id) <= max_total_id_length:
-            # Trajectory ID fits completely, use remaining space for project_id
-            remaining_space = max_total_id_length - len(sanitized_trajectory_id)
-            project_id_part = sanitized_project_id[:remaining_space] if remaining_space > 0 else ""
-            trajectory_id_part = sanitized_trajectory_id
-        else:
-            # Trajectory ID is too long, truncate it
-            trajectory_id_part = sanitized_trajectory_id[:max_total_id_length]
-            project_id_part = ""
-
-        # Format: moatless-{trajectory_id_part}-{project_id_part}-{hash}
-        if project_id_part:
-            container_name = f"moatless-{trajectory_id_part}-{project_id_part}-{unique_hash}"
-        else:
-            container_name = f"moatless-{trajectory_id_part}-{unique_hash}"
-
-        return container_name
+        return create_resource_id(project_id, trajectory_id, prefix="moatless")
 
     def _get_image_name(self, trajectory_id: str) -> str:
         """Get the Docker image name based on the trajectory ID.
@@ -588,6 +751,11 @@ class DockerRunner(BaseRunner):
         Returns:
             Docker image name
         """
+        # Use default image if specified
+        if self.default_image_name:
+            return self.default_image_name
+            
+        # Otherwise, use the standard image name generation logic
         instance_id_split = trajectory_id.split("__")
         repo_name = instance_id_split[0]
         instance_id = instance_id_split[1]
@@ -609,50 +777,121 @@ class DockerRunner(BaseRunner):
             return False
 
     async def _get_container_status(self, container_name: str) -> JobStatus:
-        """Get the status of a container.
+        """Get the status of a Docker container.
 
         Args:
-            container_name: The container name
+            container_name: Name of the container
 
         Returns:
             JobStatus enum value representing the container status
         """
-        logger.info(f"Getting status for container: {container_name}")
-        if not await self._container_exists(container_name):
-            return JobStatus.NOT_STARTED
-
         try:
-            container_status_output, return_code = await self._run_docker_command(
-                "docker", "inspect", "--format", "{{.State.Status}}", container_name
+            # Extract project_id and trajectory_id from container labels
+            cmd = [
+                "docker", "inspect",
+                "--format", "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels \"project_id\"}},{{index .Config.Labels \"trajectory_id\"}}",
+                container_name
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
-
-            if return_code != 0:
+            stdout, stderr = await process.communicate()
+            
+            # If container not found by name, try searching by labels
+            if process.returncode != 0:
+                if b"No such container" in stderr:
+                    # Try to find container by project_id and trajectory_id from the container name
+                    # Get project_id and trajectory_id from container_name if possible
+                    parts = container_name.split("-")
+                    if len(parts) >= 3:
+                        # Format is often moatless-trajectory_id-project_id-hash or moatless-trajectory_id-hash
+                        try:
+                            # Get alternative containers with matching project_id and trajectory_id from labels
+                            find_cmd = [
+                                "docker", "ps", "-a", "--format", 
+                                "{{.Names}},{{.State.Status}},{{.State.Running}},{{.State.ExitCode}}",
+                                "--filter", "label=moatless.managed=true"
+                            ]
+                            
+                            # If we have the original container name in our tracking dict, use its info
+                            for key, container in self.running_containers.items():
+                                project_parts = key.split(":")
+                                if len(project_parts) == 2:
+                                    proj_id, traj_id = project_parts
+                                    # Sanitize the IDs for use as Docker labels
+                                    sanitized_proj_id = sanitize_label(proj_id)
+                                    sanitized_traj_id = sanitize_label(traj_id)
+                                    find_cmd.extend([
+                                        "--filter", f"label=project_id={sanitized_proj_id}", 
+                                        "--filter", f"label=trajectory_id={sanitized_traj_id}"
+                                    ])
+                                    break
+                                    
+                            find_process = await asyncio.create_subprocess_exec(
+                                *find_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                            )
+                            find_stdout, _ = await find_process.communicate()
+                            find_output = find_stdout.decode().strip()
+                            
+                            if find_output:
+                                # Use the first matching container's status
+                                container_info = find_output.split("\n")[0].split(",")
+                                if len(container_info) >= 4:
+                                    _, status, running, exit_code = container_info[:4]
+                                    # Update our container name for future reference
+                                    self.logger.info(f"Found alternative container for {container_name}: {container_info[0]}")
+                                    
+                                    # Continue processing with this info
+                                    return self._parse_container_status(status, running, exit_code)
+                        except Exception as e:
+                            self.logger.warning(f"Error searching for alternative container: {e}")
+                            
+                self.logger.warning(f"Error getting container status: {stderr.decode()}")
                 return JobStatus.NOT_STARTED
-
-            container_status = container_status_output.strip()
-
-            if container_status == "running":
-                return JobStatus.RUNNING
-            elif container_status == "created":
-                return JobStatus.PENDING
-            elif container_status == "exited":
-                # Check exit code to determine if completed or failed
-                exit_code_output, _ = await self._run_docker_command(
-                    "docker", "inspect", "--format", "{{.State.ExitCode}}", container_name
-                )
-                exit_code = int(exit_code_output.strip())
-
-                return JobStatus.COMPLETED if exit_code == 0 else JobStatus.FAILED
-            elif container_status == "removing":
-                return JobStatus.CANCELED
-            else:
-                return JobStatus.INITIALIZING
-
+                
+            # Parse the output
+            container_info = stdout.decode().strip().split(",")
+            if len(container_info) < 3:
+                self.logger.warning(f"Unexpected output format from docker inspect: {stdout.decode()}")
+                return JobStatus.NOT_STARTED
+                
+            status, running, exit_code = container_info[:3]
+            
+            return self._parse_container_status(status, running, exit_code)
+            
         except Exception as exc:
-            self.logger.exception(f"Error getting status for container {container_name}: {exc}")
-            return JobStatus.NOT_STARTED
+            self.logger.exception(f"Error getting container status: {exc}")
+            return JobStatus.FAILED
+        
+    def _parse_container_status(self, status: str, running: str, exit_code: str) -> JobStatus:
+        """Parse Docker container status into JobStatus enum.
+        
+        Args:
+            status: Container status string
+            running: Whether container is running ("true" or "false")
+            exit_code: Exit code as string
+            
+        Returns:
+            JobStatus enum value
+        """
+        # Map Docker status to JobStatus
+        if running.lower() == "true":
+            return JobStatus.RUNNING
+        elif status == "created":
+            # Container is created but not yet started - consider it RUNNING
+            return JobStatus.RUNNING
+        elif status == "exited":
+            # Container has exited
+            if exit_code == "0":
+                return JobStatus.COMPLETED
+            else:
+                return JobStatus.FAILED
+        else:
+            # Other statuses (paused, restarting, etc.) - map to appropriate JobStatus
+            return JobStatus.RUNNING
 
-    async def _stop_container(self, container_name: str) -> bool:
+    async def _cleanup_container(self, container_name: str) -> bool:
         """Stop and remove a container.
 
         Args:
@@ -688,6 +927,17 @@ class DockerRunner(BaseRunner):
         except Exception as exc:
             self.logger.exception(f"Error stopping container {container_name}: {exc}")
             return False
+
+    async def cleanup_job(self, project_id: str, trajectory_id: str):
+        """Stop and remove the container associated with a specific job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+        """
+        container_name = self._container_name(project_id, trajectory_id)
+        self.logger.info(f"Cleaning up container {container_name} for job {project_id}:{trajectory_id}")
+        await self._cleanup_container(container_name)
 
     async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
         """Get detailed information about a job.
@@ -838,3 +1088,23 @@ class DockerRunner(BaseRunner):
         except Exception as exc:
             self.logger.exception(f"Error getting job details for {container_name}: {exc}")
             return None
+
+    async def _get_running_container_count(self) -> int:
+        """Get the actual count of running containers from Docker.
+
+        Returns:
+            Number of running containers managed by moatless
+        """
+        try:
+            cmd = ["docker", "ps", "-q", "--filter", "label=moatless.managed=true"]
+            stdout, return_code = await self._run_docker_command(*cmd)
+            
+            if return_code != 0:
+                self.logger.error(f"Failed to get running container count: {stdout}")
+                return 0
+
+            container_ids = [id for id in stdout.strip().split("\n") if id]
+            return len(container_ids)
+        except Exception as exc:
+            self.logger.exception(f"Error getting running container count: {exc}")
+            return 0

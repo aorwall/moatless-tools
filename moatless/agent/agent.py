@@ -338,15 +338,15 @@ class ActionAgent(MoatlessComponent):
         if isinstance(obj, dict):
             obj = obj.copy()
 
-            obj["actions"] = [Action.model_validate(action_data) for action_data in obj.get("actions", [])]
+            obj["actions"] = [Action.from_dict(action_data) for action_data in obj.get("actions", [])]
 
             if "memory" in obj:
-                obj["memory"] = BaseMemory.model_validate(obj["memory"])
+                obj["memory"] = BaseMemory.from_dict(obj["memory"])
             else:
                 obj["memory"] = MessageHistoryGenerator()
 
             if "completion_model" in obj:
-                obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
+                obj["completion_model"] = BaseCompletionModel.from_dict(obj["completion_model"])
 
             instance = super().model_validate(obj)
 

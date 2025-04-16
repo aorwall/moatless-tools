@@ -332,11 +332,13 @@ class AsyncioRunner(BaseRunner):
             jobs.append(
                 JobInfo(
                     id=meta["id"],
+                    project_id=meta["project_id"],
+                    trajectory_id=meta["trajectory_id"],
                     status=cast(JobStatus, meta["status"]),
                     enqueued_at=meta["enqueued_at"],
                     started_at=meta["started_at"],
                     ended_at=meta["ended_at"],
-                    metadata={"exc_info": meta["exc_info"]} if meta["exc_info"] else None,
+                    metadata={"exc_info": meta["exc_info"]} if meta["exc_info"] else {},
                 )
             )
 
@@ -493,9 +495,6 @@ class AsyncioRunner(BaseRunner):
             if status == JobStatus.PENDING:
                 summary.pending_jobs += 1
                 summary.job_ids["pending"].append(job_id)
-            elif status == JobStatus.INITIALIZING:
-                summary.initializing_jobs += 1
-                summary.job_ids["initializing"].append(job_id)
             elif status == JobStatus.RUNNING:
                 summary.running_jobs += 1
                 summary.job_ids["running"].append(job_id)

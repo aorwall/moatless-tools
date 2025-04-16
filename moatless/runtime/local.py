@@ -370,23 +370,22 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
         logger.info(f"Resetting modified files: {modified_files}")
 
         # Reset only the modified files to their base state
-        if modified_files:
-            reset_command = f"git checkout {self.swebench_instance['base_commit']} {' '.join(modified_files)}"
+        for modified_file in modified_files:
+            reset_command = f"git checkout {self.swebench_instance['base_commit']} {modified_file}"
             stdout, return_code = await self._execute_command(reset_command)
             logger.info(f"Command: {reset_command} Reset output: {stdout} {return_code}")
             if return_code != 0:
                 logger.error(f"Failed to reset modified files: {stdout}")
 
-            # Clean untracked files and directories, but only in directories with modified files
-            dir_paths = {str(Path(file).parent) for file in modified_files if file}
-            if dir_paths:
-                clean_paths = " ".join(dir_paths)
-                clean_command = f"git clean -fd {clean_paths}"
-                stdout, return_code = await self._execute_command(clean_command)
-                logger.info(f"Command: {clean_command} Clean output: {stdout} {return_code}")
-                if return_code != 0:
-                    logger.error(f"Failed to clean repository: {stdout}")
-                    return False
+                # Try to clean untracked files and directories if checkout failed
+                dir_path = str(Path(modified_file).parent)
+                if dir_path:
+                    clean_command = f"git clean -fd {dir_path}"
+                    stdout, return_code = await self._execute_command(clean_command)
+                    logger.info(f"Command: {clean_command} Clean output: {stdout} {return_code}")
+                    if return_code != 0:
+                        logger.error(f"Failed to clean repository: {stdout}")
+                        return False
 
         return True
 

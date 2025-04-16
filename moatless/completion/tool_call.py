@@ -59,12 +59,12 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         Returns:
             Tuple of:
-            - List of validated structured outputs
+            - List of validated structured outputs (only valid toolcalls; invalid toolcalls are ignored)
             - Optional text response
             - Optional thought string (always None for tool call model)
 
         Raises:
-            CompletionRejectError: If validation fails
+            CompletionRetryError: If all toolcalls are invalid (invalid name, bad JSON, or validation error)
         """
         message = completion_response.choices[0].message
         content = message.content or ""
@@ -81,7 +81,8 @@ class ToolCallCompletionModel(BaseCompletionModel):
         valid_names = [s.name for s in self._response_schema] if self._response_schema else []
 
         retry_messages = []
-        retry = False
+        num_toolcalls = len(message.tool_calls)
+        num_invalid = 0
 
         for tool_call in message.tool_calls:
             tool_name = tool_call.function.name
@@ -91,7 +92,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
                     tool_call, f"Tool {tool_name} not found. Available tools: {valid_names}"
                 )
                 retry_messages.append(retry_message)
-                retry = True
+                num_invalid += 1
                 continue
 
             # Check for duplicate arguments
@@ -107,7 +108,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
             except json.JSONDecodeError as e:
                 retry_message = self._create_retry_message(tool_call, f"Invalid JSON in tool args: {e}")
                 retry_messages.append(retry_message)
-                retry = True
+                num_invalid += 1
                 continue
 
             # Find matching schema for tool
@@ -121,7 +122,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
             if not schema:
                 retry_message = self._create_retry_message(tool_call, f"Tool {tool_name} not found.")
                 retry_messages.append(retry_message)
-                retry = True
+                num_invalid += 1
                 continue
 
             try:
@@ -130,15 +131,17 @@ class ToolCallCompletionModel(BaseCompletionModel):
             except ValidationError as e:
                 retry_message = self._create_retry_message(tool_call, f"Tool arguments is invalid. Error: {e}")
                 retry_messages.append(retry_message)
-                retry = True
+                num_invalid += 1
                 continue
 
-        if retry:
+        if num_toolcalls > 0 and num_invalid == num_toolcalls:
+            # All toolcalls failed
             raise CompletionRetryError(
-                message=f"Tool {tool_name} could not be executed as other tools failed.",
+                message="All toolcalls failed validation or had invalid names.",
                 retry_messages=retry_messages,
             )
 
+        # If at least one valid, ignore the invalids and return only valid ones
         return structured_outputs, content, None
 
     def _get_response_model(self, tool_name: str) -> type[ResponseSchema]:

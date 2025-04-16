@@ -1,6 +1,7 @@
 """Tests for the DockerRunner implementation."""
 
 import asyncio
+import subprocess
 from datetime import datetime, timedelta
 from typing import AsyncGenerator, List, Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, patch, call
@@ -150,9 +151,8 @@ async def test_get_jobs(docker_runner):
         first_call = mock_subprocess.call_args_list[0]
         cmd_str = " ".join(str(arg) for arg in first_call[0])
         assert "docker" in cmd_str
-        # The command could be either ps or some other format,
-        # but it should have the filter for the project
-        assert "moatless.project_id=test-project" in cmd_str
+        # The command should have the filter for the project with the new label format
+        assert "label=project_id=test-project" in cmd_str
 
 
 @pytest.mark.asyncio
@@ -226,7 +226,7 @@ async def test_cancel_all_jobs_for_project(docker_runner):
         assert "docker" in cmd_str
         assert "ps" in cmd_str
         assert "filter" in cmd_str
-        assert "moatless.project_id=test-project" in cmd_str
+        assert "label=project_id=test-project" in cmd_str
 
 
 @pytest.mark.asyncio
@@ -284,6 +284,9 @@ async def test_get_runner_info(docker_runner):
         info = await docker_runner.get_runner_info()
         assert info.status == RunnerStatus.RUNNING
         assert info.runner_type == "docker"
+        
+        # Check for running_containers in the data
+        assert "running_containers" in info.data
 
         # Case 2: Docker is not accessible
         mock_process.returncode = 1
@@ -389,3 +392,89 @@ async def test_get_image_name(docker_runner):
     # Test with different repository name
     image_name = docker_runner._get_image_name("other-repo__test-instance")
     assert image_name == "aorwall/sweb.eval.x86_64.other-repo_moatless_test-instance"
+
+
+@pytest.mark.asyncio
+async def test_labels_include_managed_flag(docker_runner):
+    """Test that containers are created with the moatless.managed=true label."""
+    with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+        # Mock process for container existence check (returns non-zero to indicate container doesn't exist)
+        mock_existence_process = AsyncMock()
+        mock_existence_process.returncode = 1
+        mock_existence_process.communicate.return_value = (b"", b"")
+
+        # Mock process for container creation (returns zero and container ID)
+        mock_creation_process = AsyncMock()
+        mock_creation_process.returncode = 0
+        mock_creation_process.communicate.return_value = (b"container-id\n", b"")
+
+        # Configure subprocess to return different mocks for different calls
+        mock_subprocess.side_effect = [mock_existence_process, mock_creation_process]
+
+        # Start the job
+        await docker_runner.start_job("test-project", "test-repo__instance", lambda: None)
+
+        # Verify docker run was called
+        assert mock_subprocess.call_count == 2
+
+        # The second call should be to create the container
+        args = mock_subprocess.call_args_list[1][0]
+        
+        # Check that the moatless.managed=true label is included
+        # Find where the --label arguments are
+        label_args = []
+        for i, arg in enumerate(args):
+            if arg == "--label" and i + 1 < len(args):
+                label_args.append(args[i + 1])
+        
+        # Verify the managed label is present
+        assert any("moatless.managed=true" in label for label in label_args), "moatless.managed=true label not found"
+        
+        # Also check for project_id and trajectory_id labels
+        assert any("project_id=" in label for label in label_args), "project_id label not found"
+        assert any("trajectory_id=" in label for label in label_args), "trajectory_id label not found"
+
+
+@pytest.mark.asyncio
+async def test_image_name_override():
+    """Test that default_image_name and per-job image_name parameters work correctly."""
+    default_image = "default-image:latest"
+    custom_image = "custom-image:latest"
+    
+    # Test with default_image_name set in constructor
+    runner_with_default = DockerRunner(default_image_name=default_image)
+    assert runner_with_default._get_image_name("any-trajectory-id") == default_image
+    
+    # Test with default runner (no default image)
+    runner_without_default = DockerRunner()
+    
+    # Should raise an error with invalid trajectory format
+    with pytest.raises(IndexError):
+        runner_without_default._get_image_name("invalid-format")
+    
+    # Should construct a proper image name when trajectory_id has the expected format
+    valid_trajectory_id = "repo__instance"
+    expected_image = "aorwall/sweb.eval.x86_64.repo_moatless_instance"
+    assert runner_without_default._get_image_name(valid_trajectory_id) == expected_image
+    
+    # Test that per-job image name works when starting a job
+    with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+        # Mock for container existence check and creation
+        mock_existence_process = AsyncMock()
+        mock_existence_process.returncode = 1
+        mock_existence_process.communicate.return_value = (b"", b"")
+        
+        mock_creation_process = AsyncMock()
+        mock_creation_process.returncode = 0
+        mock_creation_process.communicate.return_value = (b"container-id\n", b"")
+        
+        mock_subprocess.side_effect = [mock_existence_process, mock_creation_process]
+        
+        # Start a job with a custom image
+        runner = DockerRunner(default_image_name=default_image)
+        await runner.start_job("test-project", "job2", lambda: None, image_name=custom_image)
+        
+        # Check that the custom image was used in the docker run command
+        docker_run_call = mock_subprocess.call_args_list[1][0]
+        cmd_str = " ".join(str(arg) for arg in docker_run_call)
+        assert custom_image in cmd_str, f"Custom image {custom_image} not found in Docker command"

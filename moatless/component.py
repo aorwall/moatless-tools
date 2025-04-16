@@ -44,14 +44,16 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
 
     @classmethod
     def from_dict(cls, data: dict):
-        discriminator_key = f"{cls.get_component_type()}_class"
-        if discriminator_key not in data:
-            logger.error(
-                f"Failed to create Discrimnator key {discriminator_key} is missing on {cls.get_component_type()}. Data: {data}"
-            )
-            raise ValueError(f"Expected discriminator key {discriminator_key} to be set.")
+        if isinstance(data, dict):
+            discriminator_key = f"{cls.get_component_type()}_class"
+            if discriminator_key not in data:
+                logger.error(
+                    f"Failed to create {cls.get_component_type()} because Discrimnator key {discriminator_key} is missing on {cls.get_component_type()}. Data: {data}"
+                )
+                raise ValueError(f"Expected discriminator key {discriminator_key} to be set.")
 
-        return cls.model_validate(data)
+            return cls.model_validate(data)
+        return data
 
     @classmethod
     def model_validate(cls, obj: Any):

@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field
 
 class JobStatus(str, Enum):
     PENDING = "pending"  # Job created but not yet scheduled
-    INITIALIZING = "initializing"  # Pod scheduled, containers being created/pulled/setup
     RUNNING = "running"  # Pod is running and executing the task
     COMPLETED = "completed"  # Job finished successfully
     FAILED = "failed"  # Job execution failed
     CANCELED = "canceled"  # Job was manually canceled
+    STOPPED = "stopped"  # Job was running but stopped unexpectedly (e.g., container vanished)
     NOT_STARTED = "not_started"  # Job not found or not started yet
+
 
 
 class RunnerStatus(str, Enum):
@@ -33,12 +34,12 @@ class JobInfo(BaseModel):
 
     id: str
     status: JobStatus
-    project_id: Optional[str] = None
-    trajectory_id: Optional[str] = None
-    enqueued_at: Optional[datetime] = None
+    project_id: str
+    trajectory_id: str
+    enqueued_at: datetime
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
-    metadata: Optional[dict[str, Any]] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobsStatusSummary(BaseModel):
@@ -122,55 +123,128 @@ class BaseRunner(ABC):
     async def start_job(
         self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
     ) -> bool:
-        """Start a job for the given project and trajectory."""
+        """Start a job.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            job_func: The function to run
+            node_id: Optional node ID
+
+        Returns:
+            True if the job was started successfully, False otherwise
+        """
         pass
 
     @abstractmethod
     async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
-        """Get a list of jobs for the given project."""
+        """Get a list of jobs.
+        
+        Args:
+            project_id: The project ID, or None for all projects
+
+        Returns:
+            List of JobInfo objects
+        """
         pass
 
     @abstractmethod
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
-        """Cancel a job for the given project and trajectory."""
+        """Cancel a job or all jobs for a project.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID, or None for all jobs in the project
+        """
         pass
 
     @abstractmethod
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
-        """Check if a job exists for the given project and trajectory."""
-        pass
-
-    @abstractmethod
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
-        """Get the status of a job for the given project and trajectory."""
-        pass
-
-    @abstractmethod
-    async def get_runner_info(self) -> RunnerInfo:
-        """Get information about the runner."""
-        pass
-
-    @abstractmethod
-    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
-        """Get a summary of job statuses for the given project."""
-        pass
-
-    @abstractmethod
-    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
-        """Get detailed information about a job.
-
+        """Check if a job exists.
+        
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
 
         Returns:
-            JobDetails object containing detailed information about the job if available
+            True if the job exists, False otherwise
         """
         pass
 
+    @abstractmethod
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+        """Get the status of a job.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            JobStatus enum value
+        """
+        pass
+
+    @abstractmethod
+    async def get_runner_info(self) -> RunnerInfo:
+        """Get information about the runner.
+        
+        Returns:
+            RunnerInfo object with information about the runner
+        """
+        pass
+
+    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
+        """Get a summary of job statuses for a project.
+        
+        Args:
+            project_id: The project ID
+
+        Returns:
+            JobsStatusSummary object with counts of jobs in each state
+        """
+        # Default implementation, runners can override
+        summary = JobsStatusSummary(project_id=project_id)
+        
+        # Get all jobs for the project
+        jobs = await self.get_jobs(project_id)
+        summary.total_jobs = len(jobs)
+        
+        # Count jobs by status
+        for job in jobs:
+            if job.status == JobStatus.PENDING:
+                summary.pending_jobs += 1
+                summary.job_ids["pending"].append(job.id)
+            elif job.status == JobStatus.RUNNING:
+                summary.running_jobs += 1
+                summary.job_ids["running"].append(job.id)
+            elif job.status == JobStatus.COMPLETED:
+                summary.completed_jobs += 1
+                summary.job_ids["completed"].append(job.id)
+            elif job.status == JobStatus.FAILED:
+                summary.failed_jobs += 1
+                summary.job_ids["failed"].append(job.id)
+            elif job.status == JobStatus.CANCELED:
+                summary.canceled_jobs += 1
+                summary.job_ids["canceled"].append(job.id)
+                
+        return summary
+
+    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
+        """Get detailed information about a job.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            JobDetails object if available, None otherwise
+        """
+        # Default implementation returns None, concrete runners can override
+        return None
+
     async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:
         """Get logs for a job.
-
+        
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -178,5 +252,36 @@ class BaseRunner(ABC):
         Returns:
             String containing the logs if available, None otherwise
         """
-        # Default implementation returns None - each runner can override as needed
+        # Default implementation returns None, concrete runners can override
         return None
+
+    async def get_queue_size(self) -> int:
+        """Get the current size of the job queue.
+        
+        Returns:
+            The number of jobs in the queue
+        """
+        # Default implementation returns 0, concrete runners can override
+        return 0
+
+    async def reset_jobs(self, project_id: str | None = None) -> bool:
+        """Reset all jobs or jobs for a specific project.
+        
+        Args:
+            project_id: Optional project ID to reset jobs for
+            
+        Returns:
+            True if jobs were reset successfully, False otherwise
+        """
+        # Default implementation returns False, concrete runners can override
+        return False
+
+    async def cleanup_job(self, project_id: str, trajectory_id: str) -> None:
+        """Clean up resources after a job completes.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+        """
+        # Default implementation does nothing, concrete runners can override
+        pass

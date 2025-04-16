@@ -3,3 +3,4 @@ from moatless.completion.base import (
     CompletionResponse,
     LLMResponseFormat,
 )
+from moatless.completion.multi_tool_call import MultiToolCallCompletionModel

@@ -163,8 +163,10 @@ def get_action_detail(action: ActionArguments) -> str:
 
     # return first property that is set
     for key, value in action.model_dump().items():
-        if value and key != "thought":
+        if value and isinstance(value, str):
             return f"({key}={value[:100]}...)" if len(value) > 100 else f"({key}={value})"
+        elif value:
+            return f"({key}={value})"
     return ""
 
 
@@ -311,7 +313,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         if node.reward.completion:
             reward_completion = create_completion_tree_item(
                 completion=node.reward.completion,
-                parent_id=action_id,
+                parent_id=node_item.id,
                 node_id=node_item.node_id,
                 item_id="value_function",
             )

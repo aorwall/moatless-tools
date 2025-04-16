@@ -213,12 +213,6 @@ class RedisEventBus(BaseEventBus):
         if event.trajectory_id is None:
             event.trajectory_id = current_trajectory_id.get()
 
-        # Add metadata to help with debugging
-        metadata = getattr(event, "metadata", {}) or {}
-        metadata["worker_id"] = self._worker_id
-        metadata["published_at"] = str(asyncio.get_event_loop().time())
-        event.metadata = metadata
-
         # Save to storage first
         await self._save_event(event)
 

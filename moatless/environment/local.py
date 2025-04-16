@@ -29,7 +29,7 @@ class LocalBashEnvironment(BaseEnvironment):
         self.env = env
         self.shell = shell
 
-    async def execute(self, command: str, fail_on_error: bool = True) -> str:
+    async def execute(self, command: str, fail_on_error: bool = False) -> str:
         """
         Execute a command on the local machine.
 
@@ -55,7 +55,7 @@ class LocalBashEnvironment(BaseEnvironment):
                 process = await asyncio.create_subprocess_shell(
                     command,
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                     cwd=self.cwd,
                     env=process_env,
                 )
@@ -63,30 +63,24 @@ class LocalBashEnvironment(BaseEnvironment):
                 process = await asyncio.create_subprocess_exec(
                     *command.split(),
                     stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT,
                     cwd=self.cwd,
                     env=process_env,
                 )
 
-            stdout, stderr = await process.communicate()
+            stdout, _ = await process.communicate()  # TODO: Combine stdout and stderr
             output = stdout.decode()
-            error = stderr.decode()
             return_code = process.returncode or 0  # Ensure return_code is never None
 
             if output.strip():
                 logger.info("Command output:")
                 logger.info(output[200:])
-            if error.strip():
-                logger.warning("Command stderr:")
-                logger.warning(error[200:])
-
-                output += error
 
             if return_code != 0:
                 logger.warning(f"Command return code {return_code}")
                 if fail_on_error:
                     raise EnvironmentExecutionError(
-                        f"Command failed with return code {return_code}: {command}", return_code, error
+                        f"Command failed with return code {return_code}: {command}", return_code, output
                     )
 
             return output

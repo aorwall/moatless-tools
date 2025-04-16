@@ -46,7 +46,7 @@ class CodingTaskArtifact(Artifact):
         return {"type": "text", "text": self.instructions, "cache_control": None}
 
 
-class CodingTaskHandler(TaskHandler):
+class CodingTaskHandler(JsonArtifactHandler[CodingTaskArtifact]):
     """
     Handler for CodingTaskArtifact objects.
     Stores coding tasks in a JSON file named "coding_task.json" in the trajectory directory.

@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 
 from moatless.actions.list_files import ListFilesArgs
 from moatless.actions.read_files import ReadFiles, ReadFilesArgs
+from moatless.actions.view_diff import ViewDiffArgs
 from moatless.completion.json import JsonCompletionModel
 from moatless.actions.action import CompletionModelMixin
 from moatless.completion.react import ReActCompletionModel
@@ -235,7 +236,14 @@ class FlowManager:
             }
 
             await self.save_project(project_id, project_settings)
-
+            
+        #loop.root.action_steps = [
+        #    ActionStep(
+        #        action = ViewDiffArgs(
+        #        ) # type: ignore
+        #    )
+        #]
+        
         await self.save_trajectory(project_id, trajectory_id, loop)
 
         return loop
@@ -753,3 +761,25 @@ class FlowManager:
                 result[file_name] = f"Error reading file: {str(e)}"
 
         return result
+
+    async def save_trajectory_settings(self, project_id: str, trajectory_id: str, settings: dict):
+        """Save settings for a trajectory.
+        
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+            settings: The settings data to save
+            
+        Raises:
+            ValueError: If the trajectory does not exist
+        """
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+        
+        # Check if the trajectory exists
+        if not await self._storage.exists(f"{trajectory_path}/trajectory.json"):
+            raise ValueError(f"Trajectory {trajectory_id} not found in project {project_id}")
+            
+        # Save the settings
+        await self._storage.write(f"{trajectory_path}/settings.json", settings)
+        
+        return settings

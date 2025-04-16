@@ -14,6 +14,8 @@ from moatless.artifacts.coding_task import (
     CodingTaskHandler,
     FileLocation,
     FileRelationType,
+    CodingTaskArtifact,
+    TaskState,
 )
 
 from moatless.context_data import current_project_id, current_trajectory_id
@@ -334,3 +336,86 @@ async def test_complete_coding_task_workflow(add_action, finish_action, remove_a
     assert "workflow-3" not in result or "workflow-3 - Low priority task" not in result
     assert "workflow-1" in result
     assert "workflow-2" in result
+
+
+@pytest.mark.asyncio
+async def test_json_handler_persistence(workspace, file_context, context_setup, file_storage):
+    """Test that JsonArtifactHandler properly persists and loads artifacts between different instances."""
+    project_id, trajectory_id = context_setup
+    
+    # Create task using AddCodingTasks action
+    add_action = AddCodingTasks()
+    add_action.workspace = workspace
+    
+    # Add a task
+    tasks = [
+        CodingTaskItem(
+            id="persistence-test",
+            title="Test persistence",
+            instructions="This task will test persistence across handler instances",
+            related_files=[
+                FileLocation(file_path="src/persistence.js", relation_type=FileRelationType.UPDATE)
+            ],
+            priority=5,
+        )
+    ]
+    add_args = AddCodingTasksArgs(thoughts="Creating a task to test JSON handler persistence", tasks=tasks)
+    await add_action.execute(add_args, file_context=file_context)
+    
+    # Verify the task was written to storage
+    storage_path = Path(file_storage.base_dir) / "projects" / project_id / "trajs" / trajectory_id / "coding_task.json"
+    assert storage_path.exists(), "Task file was not created"
+    
+    # Create a completely new handler instance (simulating a new session/process)
+    new_handler = CodingTaskHandler()
+    new_handler._storage = file_storage
+    
+    # Explicitly clear any cached artifacts to force loading from storage
+    new_handler._artifacts = {}
+    
+    # Force a reload from storage
+    await new_handler._load_artifacts()
+    
+    # Verify the task was loaded
+    all_artifacts = await new_handler.get_all_artifacts()
+    coding_tasks = [task for task in all_artifacts if isinstance(task, CodingTaskArtifact)]
+    assert len(coding_tasks) == 1, f"Expected 1 task, found {len(coding_tasks)}"
+    assert coding_tasks[0].id == "persistence-test", "Task ID mismatch"
+    
+    # Create a new workspace with the new handler
+    new_workspace = Workspace()
+    new_workspace.artifact_handlers = {"coding_task": new_handler}
+    
+    # Create a new finish action with the new workspace
+    new_finish_action = FinishCodingTasks()
+    new_finish_action.workspace = new_workspace
+    
+    # Try to finish the task with the new action instance
+    finish_args = FinishCodingTasksArgs(
+        thoughts="Finishing task to verify persistence", 
+        task_ids=["persistence-test"]
+    )
+    
+    # This should succeed if the task was properly persisted and loaded by the new handler
+    observation = await new_finish_action.execute(finish_args, file_context=file_context)
+    result = observation.message
+    
+    # Verify that the task was found and completed
+    assert result is not None
+    assert "Completed 1 coding tasks" in result
+    assert "persistence-test" in result
+    assert "[x] persistence-test - Test persistence" in result
+    assert "Tasks not found" not in result
+    
+    # Verify task data was maintained and updated
+    all_artifacts = await new_handler.get_all_artifacts()
+    coding_tasks = [task for task in all_artifacts if isinstance(task, CodingTaskArtifact)]
+    persisted_task = next((t for t in coding_tasks if t.id == "persistence-test"), None)
+    assert persisted_task is not None
+    assert isinstance(persisted_task, CodingTaskArtifact)
+    assert persisted_task.title == "Test persistence"
+    assert persisted_task.instructions == "This task will test persistence across handler instances"
+    assert len(persisted_task.related_files) == 1
+    assert persisted_task.related_files[0].file_path == "src/persistence.js"
+    assert persisted_task.related_files[0].relation_type == FileRelationType.UPDATE
+    assert persisted_task.state == TaskState.COMPLETED

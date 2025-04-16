@@ -23,6 +23,7 @@ from kubernetes.client import (
 )
 from moatless.runner.kubernetes_runner import KubernetesRunner
 from moatless.runner.runner import BaseRunner, JobInfo, JobStatus, RunnerStatus
+from moatless.runner.label_utils import create_resource_id
 
 
 class TestKubernetesRunner(KubernetesRunner):
@@ -35,54 +36,6 @@ class TestKubernetesRunner(KubernetesRunner):
     def __init__(self, namespace="test-namespace", image="test-image", **kwargs):
         """Initialize with test-specific defaults."""
         super().__init__(namespace=namespace, image=image, **kwargs)
-        # By default, use project namespaces in tests to match real behavior
-        self.use_project_namespaces = True
-
-    async def _get_or_create_project_namespace(self, project_id: str) -> str:
-        """Return the namespace name without actually creating it."""
-        if not self.use_project_namespaces:
-            return self.namespace
-        return self._create_namespace_name(project_id)
-
-    def _create_namespace_name(self, project_id: str) -> str:
-        """Generate namespace name using the simplified pattern."""
-        # Sanitize project ID (using lowercase as simple sanitization for tests)
-        sanitized_id = project_id.lower()
-        # Replace invalid characters with hyphens including underscores
-        sanitized_id = "".join(c if c.isalnum() or c == "-" or c == "." else "-" for c in sanitized_id)
-        # Replace underscores with hyphens for RFC 1123 compliance
-        sanitized_id = sanitized_id.replace("_", "-")
-
-        # Create namespace with prefix and sanitized project ID
-        prefix = "moatless-"
-
-        # Calculate how much of the project ID we can include
-        max_length = 63 - len(prefix)
-
-        if len(sanitized_id) <= max_length:
-            # For shorter IDs, use the full sanitized ID
-            namespace_name = f"{prefix}{sanitized_id}"
-        else:
-            # For longer IDs, truncate and add a hash for uniqueness
-            project_hash = str(hash(project_id) % 10000000)
-
-            # Reserve space for the hash (plus a hyphen)
-            hash_space = len(project_hash) + 1
-            truncated_id = sanitized_id[: max_length - hash_space]
-
-            # Combine truncated ID with hash
-            namespace_name = f"{prefix}{truncated_id}-{project_hash}"
-
-            # Ensure we're still within the length limit
-            namespace_name = namespace_name[:63]
-
-        # Ensure it starts and ends with alphanumeric character
-        if not namespace_name[0].isalnum():
-            namespace_name = f"x{namespace_name[1:]}"
-        if not namespace_name[-1].isalnum():
-            namespace_name = f"{namespace_name[:-1]}x"
-
-        return namespace_name
 
     async def _process_job_info(self, job, project_id: str = None) -> JobInfo | None:
         """Test-specific implementation for processing job info."""
@@ -92,31 +45,19 @@ class TestKubernetesRunner(KubernetesRunner):
         job_project_id = None
         job_trajectory_id = None
 
-        # Extract project_id and trajectory_id in different ways depending on whether
-        # we're using project namespaces
+        # Extract project_id and trajectory_id from job metadata
         if job.metadata.labels and "project_id" in job.metadata.labels:
             job_project_id = job.metadata.labels.get("project_id")
-
+            
             if job.metadata.labels.get("trajectory_id"):
                 job_trajectory_id = job.metadata.labels.get("trajectory_id")
-            # Extract trajectory_id from job name
-            elif self.use_project_namespaces:
-                # For project namespaces, job name is just run-{trajectory_id}(-hash)
-                if job_id.startswith("run-"):
-                    parts = job_id[4:].split("-")  # Skip "run-" prefix
-                    if len(parts) >= 1:
-                        # If hash is used, ignore it
-                        job_trajectory_id = parts[0]
             else:
-                # For non-project namespaces, job name is run-{project_id}-{trajectory_id}
-                if project_id and job_id.startswith(f"run-{project_id}-"):
+                # Extract trajectory_id from job name pattern "run-{project_id}-{trajectory_id}"
+                if job_id.startswith(f"run-{job_project_id}-"):
                     parts = job_id.split("-")
                     if len(parts) >= 3:
                         job_trajectory_id = parts[2]
-                else:
-                    # Skip if project_id doesn't match
-                    return None
-
+                
         # Fallback to annotations
         elif job.metadata.annotations:
             if "moatless.ai/project-id" in job.metadata.annotations:
@@ -204,9 +145,8 @@ class TestKubernetesRunner(KubernetesRunner):
         if node_id is not None:
             job.metadata.annotations["moatless.ai/node-id"] = str(node_id)
 
-        # Set the namespace property when using project namespaces
-        if self.use_project_namespaces:
-            job.metadata.namespace = self._create_namespace_name(project_id)
+        # Set the namespace property to the default namespace for testing
+        job.metadata.namespace = self.namespace
 
         return job
 
@@ -248,56 +188,8 @@ class TestKubernetesRunner(KubernetesRunner):
         return await self.start_job(project_id, trajectory_id, func_name)
 
     def _job_id(self, project_id: str, trajectory_id: str) -> str:
-        """Generate job ID using the updated format based on whether project namespaces are used."""
-        # Kubernetes has specific restrictions on resource names
-        # The name must be lowercase, start with an alphanumeric character,
-        # and only contain lowercase alphanumeric characters, '-', or '.'
-
-        if self.use_project_namespaces:
-            # When using project namespaces, only need trajectory_id in the job name
-
-            # Sanitize and lowercase the trajectory_id
-            sanitized_id = trajectory_id.lower()
-            sanitized_id = "".join(c if c.isalnum() or c == "-" else "-" for c in sanitized_id)
-
-            # Check if we need to truncate the trajectory_id
-            prefix = "run-"
-            max_length = 63 - len(prefix)
-
-            if len(sanitized_id) <= max_length:
-                # For shorter trajectory IDs, use the full sanitized ID
-                job_id = f"{prefix}{sanitized_id}"
-            else:
-                # For longer trajectory IDs, truncate and add a hash for uniqueness
-                traj_hash = str(hash(trajectory_id) % 10000000)
-
-                # Reserve space for the hash (plus a hyphen)
-                hash_space = len(traj_hash) + 1
-                truncated_id = sanitized_id[: max_length - hash_space]
-
-                # Combine truncated ID with hash
-                job_id = f"{prefix}{truncated_id}-{traj_hash}"
-
-                # Ensure we're still within the length limit
-                job_id = job_id[:63]
-        else:
-            # Use the original format when not using project namespaces
-            job_id = f"run-{project_id}-{trajectory_id}"
-
-            # Make compliant with Kubernetes naming restrictions
-            job_id = job_id.lower()
-            job_id = "".join(c if c.isalnum() or c == "-" else "-" for c in job_id)
-
-        # Ensure it starts and ends with alphanumeric character
-        if not job_id[0].isalnum():
-            job_id = f"x{job_id[1:]}"
-        if not job_id[-1].isalnum():
-            job_id = f"{job_id[:-1]}x"
-
-        # Maximum length for Kubernetes resource names
-        job_id = job_id[:63]
-
-        return job_id
+        """Generate job ID for Kubernetes."""
+        return create_resource_id(project_id, trajectory_id, prefix="run")
 
 
 @pytest_asyncio.fixture  # type: ignore
@@ -346,23 +238,19 @@ def create_mock_job(name, status="Running", succeeded=0, failed=0, active=1, nam
     job.metadata = MagicMock(spec=V1ObjectMeta)
     job.metadata.name = name
 
-    # Extract project_id and trajectory_id from the job name
-    # Names can be either "run-{project_id}-{trajectory_id}" or "run-{trajectory_id}"
+    # Extract project_id and trajectory_id from job name
+    # Names follow pattern "run-{project_id}-{trajectory_id}"
     parts = name.split("-")
-
-    if parts[0] != "run":
+    
+    if len(parts) < 3 or parts[0] != "run":
         # If name doesn't follow the expected pattern, use defaults
         project_id = "unknown"
         trajectory_id = "unknown"
-    elif len(parts) >= 3 and parts[1] != "":
-        # Old format: run-{project_id}-{trajectory_id}
+    else:
+        # For simple case: run-{project_id}-{trajectory_id}
+        # Note: In more complex cases with truncation, these might be approximations
         project_id = parts[1]
         trajectory_id = parts[2]
-    else:
-        # New format: run-{trajectory_id} or run-{trajectory_id}-{hash}
-        project_id = "unknown"  # Project ID is in the namespace, not the job name
-        # Only use the first part after "run-" as trajectory_id (ignore hash if any)
-        trajectory_id = parts[1] if len(parts) > 1 else "unknown"
 
     # Use provided namespace or use test-namespace as default
     job.metadata.namespace = namespace or "test-namespace"
@@ -409,7 +297,7 @@ async def test_start_job(kubernetes_runner, mock_k8s_api):
 
     project_id = "test-project"
     trajectory_id = "test-trajectory"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
     # For project namespaces, job name is different
     expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
@@ -490,9 +378,6 @@ async def test_start_job_already_exists(kubernetes_runner):
 @pytest.mark.asyncio
 async def test_get_jobs(kubernetes_runner, mock_k8s_api):
     """Test retrieving jobs with various filters."""
-    # For this test, we want to use the default namespace for simplicity
-    kubernetes_runner.use_project_namespaces = False
-
     batch_api = mock_k8s_api["batch_api"]
 
     # Create mock job list
@@ -539,7 +424,7 @@ async def test_cancel_job(kubernetes_runner, mock_k8s_api):
 
     project_id = "test-project"
     trajectory_id = "test-trajectory"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
     expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
 
     # Cancel a specific job
@@ -559,24 +444,14 @@ async def test_cancel_all_project_jobs(kubernetes_runner, mock_k8s_api):
     batch_api = mock_k8s_api["batch_api"]
 
     project_id = "test-project"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
-    # Create mock job list depending on whether project namespaces are used
-    if kubernetes_runner.use_project_namespaces:
-        # With project namespaces, job names only contain trajectory_id
-        job_list = MagicMock()
-        job_list.items = [
-            create_mock_job("run-trajectory1", namespace=expected_namespace),
-            create_mock_job("run-trajectory2", namespace=expected_namespace),
-        ]
-    else:
-        # Without project namespaces, job names contain project_id and trajectory_id
-        job_list = MagicMock()
-        job_list.items = [
-            create_mock_job("run-test-project-trajectory1"),
-            create_mock_job("run-test-project-trajectory2"),
-        ]
-
+    # Create mock job list
+    job_list = MagicMock()
+    job_list.items = [
+        create_mock_job("run-test-project-trajectory1"),
+        create_mock_job("run-test-project-trajectory2"),
+    ]
     batch_api.list_namespaced_job.return_value = job_list
 
     # Cancel all jobs for test-project
@@ -596,6 +471,7 @@ async def test_cancel_all_project_jobs(kubernetes_runner, mock_k8s_api):
 async def test_job_exists(kubernetes_runner, mock_k8s_api):
     """Test checking if a job exists."""
     batch_api = mock_k8s_api["batch_api"]
+    core_api = mock_k8s_api["core_api"]
 
     project_id = "test-project"
     trajectory_id = "test-trajectory"
@@ -605,12 +481,17 @@ async def test_job_exists(kubernetes_runner, mock_k8s_api):
     batch_api.read_namespaced_job.return_value = create_mock_job(expected_job_id)
     assert await kubernetes_runner.job_exists("test-project", "test-trajectory") is True
 
-    # Job doesn't exist case
+    # Job doesn't exist case - also ensure no pods exist
     from kubernetes.client.rest import ApiException
 
     error_response = ApiException()
     error_response.status = 404
     batch_api.read_namespaced_job.side_effect = error_response
+    
+    # Mock an empty pod list response for the pod check
+    empty_pod_list = MagicMock()
+    empty_pod_list.items = []
+    core_api.list_namespaced_pod.return_value = empty_pod_list
 
     assert await kubernetes_runner.job_exists("test-project", "nonexistent") is False
 
@@ -645,13 +526,6 @@ async def test_get_job_status(kubernetes_runner, mock_k8s_api):
     status = await kubernetes_runner.get_job_status("test-project", "test-trajectory")
     assert status == JobStatus.FAILED
 
-    # Test for pending job
-    pending_job = create_mock_job(expected_job_id, active=0, succeeded=0, failed=0)
-    batch_api.read_namespaced_job.return_value = pending_job
-
-    status = await kubernetes_runner.get_job_status("test-project", "test-trajectory")
-    assert status == JobStatus.PENDING
-
     # Test for non-existent job
     from kubernetes.client.rest import ApiException
 
@@ -661,65 +535,6 @@ async def test_get_job_status(kubernetes_runner, mock_k8s_api):
 
     status = await kubernetes_runner.get_job_status("test-project", "nonexistent")
     assert status == JobStatus.NOT_STARTED
-
-
-@pytest.mark.asyncio
-async def test_retry_job(kubernetes_runner, mock_k8s_api):
-    """Test that a failed job can be retried."""
-    batch_api = mock_k8s_api["batch_api"]
-
-    # Reset the delete_namespaced_job mock to clear previous calls
-    batch_api.delete_namespaced_job.reset_mock()
-
-    project_id = "test-project"
-    trajectory_id = "test-trajectory"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
-    expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
-
-    # Create a failed job with JOB_FUNC in env vars
-    failed_job = create_mock_job(expected_job_id, active=0, succeeded=0, failed=1, namespace=expected_namespace)
-
-    # Make sure the container has the JOB_FUNC env var properly set
-    for container in failed_job.spec.template.spec.containers:
-        # Replace the env list with a properly mocked one that has correct name attributes
-        env_vars = []
-        for var in [
-            {"name": "PROJECT_ID", "value": "test-project"},
-            {"name": "TRAJECTORY_ID", "value": "test-trajectory"},
-            {"name": "JOB_FUNC", "value": "test_module.test_function"},
-        ]:
-            mock_env = MagicMock()
-            mock_env.name = var["name"]
-            mock_env.value = var["value"]
-            env_vars.append(mock_env)
-        container.env = env_vars
-
-    batch_api.read_namespaced_job.return_value = failed_job
-
-    # Add annotations to the job metadata
-    failed_job.metadata.annotations = {
-        "moatless.ai/project-id": "test-project",
-        "moatless.ai/trajectory-id": "test-trajectory",
-        "moatless.ai/function": "test_module.test_function",
-    }
-
-    # Set up create job response
-    new_job = create_mock_job(expected_job_id, active=1, succeeded=0, failed=0, namespace=expected_namespace)
-    batch_api.create_namespaced_job.return_value = new_job
-
-    # Mock _get_image_name method to avoid IndexError
-    with (
-        patch.object(kubernetes_runner, "_get_image_name", return_value="test-image"),
-        patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=True)),
-        patch.object(kubernetes_runner, "cancel_job", AsyncMock(return_value=None)),
-    ):  # Override cancel_job to avoid double deletion
-        # Retry the job
-        result = await kubernetes_runner.retry_job("test-project", "test-trajectory")
-
-        # Verify the job was recreated
-        assert result is True
-        batch_api.create_namespaced_job.assert_called_once()
-
 
 @pytest.mark.asyncio
 async def test_get_runner_info(kubernetes_runner, mock_k8s_api):
@@ -759,7 +574,6 @@ async def test_get_runner_info(kubernetes_runner, mock_k8s_api):
     assert runner_info.data["ready_nodes"] == 1
     assert runner_info.data["api_version"] == "batch/v1"
     assert runner_info.data["namespace"] == "test-namespace"
-    assert "max_jobs_per_project" in runner_info.data
 
     # Test error case
     batch_api.get_api_resources.side_effect = Exception("Test error")
@@ -782,7 +596,7 @@ async def test_get_job_logs(kubernetes_runner, mock_k8s_api):
     project_id = "test-project"
     trajectory_id = "test-trajectory"
     expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
     # Create pod list with one pod
     pod_list = MagicMock()
@@ -830,7 +644,7 @@ async def test_get_job_error(kubernetes_runner, mock_k8s_api):
     project_id = "test-project"
     trajectory_id = "test-trajectory"
     expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
     # Create a failed job
     failed_job = create_mock_job(expected_job_id, active=0, succeeded=0, failed=1, namespace=expected_namespace)
@@ -876,7 +690,7 @@ async def test_create_job_object(kubernetes_runner):
     trajectory_id = "test-trajectory"
     job_id = kubernetes_runner._job_id(project_id, trajectory_id)
     job_func = "test_module.test_function"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
     # Test without node_id
     job_obj = kubernetes_runner._create_job_object(
@@ -895,9 +709,8 @@ async def test_create_job_object(kubernetes_runner):
     assert job_obj.metadata.annotations["moatless.ai/trajectory-id"] == trajectory_id
     assert job_obj.metadata.annotations["moatless.ai/function"] == job_func
 
-    # Verify the namespace is set correctly when using project namespaces
-    if kubernetes_runner.use_project_namespaces:
-        assert job_obj.metadata.namespace == expected_namespace
+    # Verify the namespace is set correctly 
+    assert job_obj.metadata.namespace == expected_namespace
 
     # Test with node_id
     node_id = 42
@@ -931,71 +744,6 @@ async def test_create_job_object(kubernetes_runner):
 
 
 @pytest.mark.asyncio
-async def test_create_namespace_name_idempotent(kubernetes_runner):
-    """Test that _create_namespace_name is idempotent for the same project ID."""
-    # Test with a variety of project IDs
-    test_cases = [
-        "test-project",
-        "project-with-hyphens",
-        "projectWithCamelCase",  # should convert to lowercase
-        "project_with_underscores",
-        "project.with.dots",
-        "very-long-project-id-that-might-exceed-the-limit-for-kubernetes-namespace-names",  # should truncate and add hash
-    ]
-
-    # Store results to check consistency across multiple runs
-    results = {}
-
-    for project_id in test_cases:
-        # Get namespace name multiple times
-        namespace1 = kubernetes_runner._create_namespace_name(project_id)
-        namespace2 = kubernetes_runner._create_namespace_name(project_id)
-        namespace3 = kubernetes_runner._create_namespace_name(project_id)
-
-        # Verify all calls return the same result (idempotency)
-        assert namespace1 == namespace2
-        assert namespace2 == namespace3
-
-        # Store the result for this project_id
-        results[project_id] = namespace1
-
-        # Verify the namespace follows basic Kubernetes naming conventions
-        assert len(namespace1) <= 63, f"Namespace {namespace1} exceeds 63 chars: {len(namespace1)}"
-        assert namespace1[0].isalnum(), f"Namespace {namespace1} doesn't start with alphanumeric"
-        assert namespace1[-1].isalnum(), f"Namespace {namespace1} doesn't end with alphanumeric"
-
-        # Verify the namespace starts with the expected prefix
-        assert namespace1.startswith("moatless-"), f"Namespace {namespace1} doesn't have expected prefix"
-
-        # For non-long project IDs, verify the full sanitized ID is in the namespace
-        if len(project_id) < 30:
-            sanitized_id = project_id.lower()
-            sanitized_id = "".join(c if c.isalnum() or c == "-" or c == "." else "-" for c in sanitized_id)
-            sanitized_id = sanitized_id.replace("_", "-")
-            assert sanitized_id in namespace1, f"Sanitized ID {sanitized_id} not found in namespace {namespace1}"
-        # For long project IDs, verify it contains a hash and part of the original ID
-        else:
-            # Should contain at least the first part of the project ID
-            first_part = project_id[:15].lower()
-            first_part = "".join(c if c.isalnum() or c == "-" or c == "." else "-" for c in first_part)
-            first_part = first_part.replace("_", "-")
-            assert first_part in namespace1, f"First part {first_part} not found in namespace {namespace1}"
-
-            # Should contain a numeric hash
-            assert any(c.isdigit() for c in namespace1), f"No numeric hash found in namespace {namespace1}"
-
-            # Should have a hyphen before the hash
-            assert "-" in namespace1, f"No hyphen separator found in namespace {namespace1}"
-
-    # Run a second pass to ensure consistent results across different method calls
-    for project_id in test_cases:
-        namespace = kubernetes_runner._create_namespace_name(project_id)
-        assert (
-            namespace == results[project_id]
-        ), f"Got inconsistent result {namespace} vs {results[project_id]} for {project_id}"
-
-
-@pytest.mark.asyncio
 async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
     """Test getting job status summary."""
     batch_api = mock_k8s_api["batch_api"]
@@ -1011,36 +759,21 @@ async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
     pod_list.items = [pod]
     core_api.list_namespaced_pod.return_value = pod_list
 
-    # Setup job names based on use_project_namespaces setting
+    # Setup job list
     project_id = "test-project"
-    expected_namespace = kubernetes_runner._create_namespace_name(project_id)
+    expected_namespace = kubernetes_runner.namespace
 
-    if kubernetes_runner.use_project_namespaces:
-        # With project namespaces enabled, job names only include trajectory_id
-        job_list = MagicMock()
-        job_list.items = [
-            create_mock_job("run-running", active=1, succeeded=0, failed=0, namespace=expected_namespace),
-            create_mock_job("run-completed", active=0, succeeded=1, failed=0, namespace=expected_namespace),
-            create_mock_job("run-failed", active=0, succeeded=0, failed=1, namespace=expected_namespace),
-        ]
-    else:
-        # Without project namespaces, job names include project_id and trajectory_id
-        job_list = MagicMock()
-        job_list.items = [
-            create_mock_job("run-test-project-running", active=1, succeeded=0, failed=0),
-            create_mock_job("run-test-project-completed", active=0, succeeded=1, failed=0),
-            create_mock_job("run-test-project-failed", active=0, succeeded=0, failed=1),
-        ]
+    job_list = MagicMock()
+    job_list.items = [
+        create_mock_job("run-test-project-running", active=1, succeeded=0, failed=0),
+        create_mock_job("run-test-project-completed", active=0, succeeded=1, failed=0),
+        create_mock_job("run-test-project-failed", active=0, succeeded=0, failed=1),
+    ]
 
     # Add annotations to each job
     for job in job_list.items:
-        if kubernetes_runner.use_project_namespaces:
-            # When using project namespaces, extract trajectory_id from job name format "run-{trajectory_id}"
-            trajectory_id = job.metadata.name.split("-")[1] if len(job.metadata.name.split("-")) > 1 else "unknown"
-        else:
-            # Without project namespaces, extract from the end of the name "run-{project_id}-{trajectory_id}"
-            trajectory_id = job.metadata.name.split("-")[-1]
-
+        # Extract trajectory_id from the end of the name "run-{project_id}-{trajectory_id}"
+        trajectory_id = job.metadata.name.split("-")[-1]
         job.metadata.annotations = {"moatless.ai/project-id": project_id, "moatless.ai/trajectory-id": trajectory_id}
 
     batch_api.list_namespaced_job.return_value = job_list
@@ -1057,3 +790,62 @@ async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
     assert len(summary.job_ids["running"]) == 1
     assert len(summary.job_ids["completed"]) == 1
     assert len(summary.job_ids["failed"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_job_exists_with_pods_fallback(kubernetes_runner, mock_k8s_api):
+    """Test that job_exists fallbacks to checking pods when job not found directly."""
+    project_id = "test-project"
+    trajectory_id = "test-trajectory"
+    job_id = kubernetes_runner._job_id(project_id, trajectory_id)
+    
+    batch_api = mock_k8s_api["batch_api"]
+    core_api = mock_k8s_api["core_api"]
+    
+    # Setup batch_api to raise a 404 when trying to get the job directly
+    api_exception = client.ApiException(status=404, reason="Not Found")
+    batch_api.read_namespaced_job.side_effect = api_exception
+    
+    # First test with no pods - should return False
+    pod_list_empty = MagicMock()
+    pod_list_empty.items = []
+    core_api.list_namespaced_pod.return_value = pod_list_empty
+    
+    exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
+    assert not exists
+    
+    # Verify correct label selector was used
+    core_api.list_namespaced_pod.assert_called_with(
+        namespace=kubernetes_runner.namespace,
+        label_selector=f"job-name={job_id}",
+        limit=1
+    )
+    
+    # Now test with a pod present - should return True
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata = MagicMock()
+    pod.metadata.name = f"pod-{job_id}"
+    pod.status = MagicMock()
+    pod.status.phase = "Running"
+    
+    pod_list_with_pod = MagicMock()
+    pod_list_with_pod.items = [pod]
+    core_api.list_namespaced_pod.return_value = pod_list_with_pod
+    
+    exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
+    assert exists
+    
+    # Test with server error
+    api_exception_server = client.ApiException(status=500, reason="Internal Server Error")
+    batch_api.read_namespaced_job.side_effect = api_exception_server
+    
+    # Should assume job exists for safety
+    exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
+    assert exists
+    
+    # Test with unexpected exception
+    batch_api.read_namespaced_job.side_effect = Exception("Unexpected error")
+    
+    # Should assume job exists for safety
+    exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
+    assert exists

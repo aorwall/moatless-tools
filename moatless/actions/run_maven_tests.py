@@ -3,6 +3,8 @@ import os
 import time
 from pathlib import Path
 
+from moatless.environment.base import EnvironmentExecutionError
+from moatless.testing.java.maven_parser import MavenParser
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
@@ -16,7 +18,6 @@ from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.testing.schema import TestFile
 from moatless.testing.schema import TestResult, TestStatus
-from moatless.testing.parser_registry import parse_log
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,8 @@ class RunMavenTests(Action):
         maven_version = await workspace.environment.execute(f"{self.maven_binary} --version", fail_on_error=True)
         if not maven_version:
             raise ValueError("Maven is not installed")
+        
+        
 
     async def execute(
         self,
@@ -126,7 +129,9 @@ class RunMavenTests(Action):
 
         if self._workspace.environment is None:
             raise ValueError("Environment is not set in workspace")
-
+        
+        maven_parser = MavenParser()
+        
         # Check which test files exist
         non_existent_files = []
         directories = []
@@ -173,37 +178,16 @@ class RunMavenTests(Action):
             )
 
         start_time = time.time()
-
-        # Check Maven availability
-        try:
-            maven_version = await self._workspace.environment.execute(f"{self.maven_binary} --version")
-            logger.info(f"Maven version: {maven_version.splitlines()[0] if maven_version else 'Unknown'}")
-        except Exception as e:
-            logger.warning(f"Maven version check failed: {str(e)}")
-            return Observation.create(
-                message=f"Failed to run Maven tests. Maven does not appear to be installed: {str(e)}",
-                properties={"test_results": [], "fail_reason": "maven_not_installed"},
-            )
-
-        # Get repo name from current directory
-        try:
-            repo_path = await self._workspace.environment.execute("pwd")
-            repo_name = os.path.basename(repo_path.strip())
-        except Exception:
-            # Fallback to a generic name if we can't get the directory
-            repo_name = "maven-project"
-
         # First run 'mvn compile' to verify the project compiles
         logger.info("Running 'mvn compile' to verify the project compiles")
         try:
-            compile_output = await self._workspace.environment.execute(f"{self.maven_binary} compile")
+            compile_output = await self._workspace.environment.execute(f"{self.maven_binary} compile test-compile")
             compile_success = "BUILD SUCCESS" in compile_output
 
             if not compile_success:
                 logger.warning("Maven compilation failed")
 
-                # Parse the compilation errors
-                compile_results = parse_log(compile_output, repo_name)
+                compile_results = maven_parser.parse_test_output(compile_output)
 
                 if not compile_results:
                     # If no specific errors were parsed, create a generic error
@@ -270,7 +254,7 @@ class RunMavenTests(Action):
                     logger.debug("Test completed")
 
                     # Parse test results
-                    file_results = parse_log(output, repo_name, test_file)
+                    file_results = maven_parser.parse_test_output(output, test_file)
 
                     # Set file path if not set by parser
                     for result in file_results:
@@ -299,22 +283,12 @@ class RunMavenTests(Action):
                 # Execute Maven command
                 try:
                     stdout = await self._workspace.environment.execute(test_command)
-                    stderr = ""  # We don't have direct access to stderr through the environment interface
-                except Exception as cmd_error:
+                except EnvironmentExecutionError as cmd_error:
                     # If the command fails, capture the error message
-                    logger.warning(f"Maven command failed: {str(cmd_error)}")
-                    stdout = f"Command failed with return code 1: {test_command}"
-                    stderr = str(cmd_error)
+                    logger.exception(f"Maven command failed: {test_command}")
+                    stdout = cmd_error.stderr
 
-                # Combine stdout and stderr for better error detection
-                output = stdout
-                if stderr:
-                    if output:
-                        output += "\n" + stderr
-                    else:
-                        output = stderr
-
-                test_results = parse_log(output, repo_name)
+                test_results = maven_parser.parse_test_output(stdout, repo_name)
             except Exception as e:
                 logger.warning(f"Tests failed with error: {str(e)}")
                 error_result = TestResult(

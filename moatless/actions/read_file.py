@@ -4,7 +4,7 @@ from typing import Optional, ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.actions.action import Action
-from moatless.actions.schema import ActionArguments, Observation
+from moatless.actions.schema import ActionArguments, Observation, RewardScaleEntry
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
@@ -153,3 +153,43 @@ class ReadFile(Action):
             message=f"```{args.file_path} {line_info}\n{content}{truncation_note}\n```",
             summary=f"Read lines {args.start_line or 1}-{actual_end} from {args.file_path}",
         )
+
+    @classmethod
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
+        criteria = [
+            "File Selection Relevance: Assess whether the file being read is directly relevant to the task at hand.",
+            "Line Range Appropriateness: Evaluate if the selected line range (if specified) contains the necessary information without excessive content.",
+            "Information Extraction: Determine if the agent effectively extracts and utilizes the information gathered from reading the file.",
+            "Avoiding Unnecessary Reads: Check if the agent avoids redundant reads of the same file sections.",
+        ]
+        return criteria
+
+    @classmethod
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
+        return [
+            RewardScaleEntry(
+                min_value=75,
+                max_value=100,
+                description="The file read is highly relevant, with an optimal line range selection that provides exactly the needed information for the task.",
+            ),
+            RewardScaleEntry(
+                min_value=50,
+                max_value=74,
+                description="The file read is relevant with a reasonable line range, though some content may be unnecessary or some useful content may be missing.",
+            ),
+            RewardScaleEntry(
+                min_value=25,
+                max_value=49,
+                description="The file read has some relevance but includes excessive unnecessary content or misses important sections.",
+            ),
+            RewardScaleEntry(
+                min_value=0,
+                max_value=24,
+                description="The file read has minimal relevance to the task or reads an inappropriate amount of content.",
+            ),
+            RewardScaleEntry(
+                min_value=-49,
+                max_value=-1,
+                description="The file read is irrelevant to the task, demonstrates misunderstanding of the codebase, or attempts to read non-existent files.",
+            ),
+        ]

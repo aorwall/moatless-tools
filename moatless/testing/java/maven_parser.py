@@ -256,6 +256,30 @@ class MavenParser(TestOutputParser):
                     )
                 )
 
+        # Extract errors from the summary section
+        summary_error_pattern = re.compile(r"\[ERROR\]\s+([\w\.]+)\.(\w+)\s+»\s+([\w]+)\s+(.+)$")
+        for line in log.splitlines():
+            summary_error_match = summary_error_pattern.search(line)
+            if summary_error_match:
+                class_name = summary_error_match.group(1)
+                method_name = summary_error_match.group(2)
+                error_type = summary_error_match.group(3)
+                error_message = summary_error_match.group(4).strip()
+                
+                test_name = f"{class_name}.{method_name}"
+                
+                # Check if we already have this test result
+                if not any(r.name == test_name for r in test_results):
+                    test_results.append(
+                        TestResult(
+                            status=TestStatus.ERROR,
+                            name=test_name,
+                            file_path=file_path or self._convert_class_to_file_path(class_name),
+                            method=method_name,
+                            failure_output=f"{error_type}: {error_message}",
+                        )
+                    )
+
         # If we got no results but have errors in the log, create a generic error result
         if not test_results and any(error in log for error in ["ERROR", "Exception", "Build failed", "BUILD FAILURE"]):
             # Try to extract more specific error information

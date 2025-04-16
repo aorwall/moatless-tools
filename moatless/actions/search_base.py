@@ -191,10 +191,10 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                             end_line = block_span.end_line
                             code_block = block_span.initiating_block
                             if code_block:
-                                line_content = code_block.content
+                                line_content = code_block.content.strip()
 
                     if start_line and not line_content:
-                        line_content = file.content.split("\n")[start_line - 1]
+                        line_content = file.content.split("\n")[start_line - 1].strip()
 
                     if line_content:
                         response_str += f"Line: {start_line} - {end_line} : {line_content}\n"
@@ -202,6 +202,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                     elif start_line:
                         response_str += f"Line: {start_line} - {end_line}\n"
                         matches += 1
+            
 
             if matches > 0:
                 response_str = f"\nFound {matches} matches in {len(search_result_context.files)} files.\n{response_str}"
