@@ -41,7 +41,7 @@ class ReActCompletionModel(BaseCompletionModel):
         system_prompt += dedent(f"""\n# Response format
 
 Use the following format:
-{'' if not self.disable_thoughts else '''
+{'' if self.disable_thoughts else '''
 Thought: You should always think about what to do'''}
 Action: The action to take followed by the input arguments based on the schema below
 
@@ -49,7 +49,7 @@ Use one of the following actions and provide input arguments matching the schema
                             
 {input_schemas}
 
-Important: Do not include multiple{' Thought-' if self.disable_thoughts else ''} Action blocks. Do not include code blocks or additional text outside of this format.
+Important: Do not include multiple{'' if self.disable_thoughts else ' Thought-'} Action blocks. Do not include code blocks or additional text outside of this format.
 """)
         return system_prompt
 
