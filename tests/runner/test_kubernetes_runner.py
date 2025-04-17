@@ -779,17 +779,13 @@ async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
     batch_api.list_namespaced_job.return_value = job_list
 
     # Get summary
-    summary = await kubernetes_runner.get_job_status_summary(project_id)
+    summary = await kubernetes_runner.get_job_status_summary()
 
     # Verify summary contains all jobs
-    assert summary.project_id == project_id
     assert summary.total_jobs == 3
     assert summary.running_jobs == 1
     assert summary.completed_jobs == 1
     assert summary.failed_jobs == 1
-    assert len(summary.job_ids["running"]) == 1
-    assert len(summary.job_ids["completed"]) == 1
-    assert len(summary.job_ids["failed"]) == 1
 
 
 @pytest.mark.asyncio

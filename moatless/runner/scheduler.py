@@ -15,7 +15,7 @@ from moatless.runner.runner import (
     RunnerStatus,
     JobsStatusSummary,
     JobDetails,
-    JobDetailSection,
+    JobDetailSection, JobFunction,
 )
 from moatless.runner.storage.storage import JobStorage
 from moatless.runner.storage.memory import InMemoryJobStorage
@@ -96,8 +96,7 @@ class SchedulerRunner(BaseRunner):
             
             # If job exists but is in a terminal state, we'll re-queue it
             self.logger.info(f"Re-queueing job {project_id}-{trajectory_id} with previous status {existing_job.status} and job status {job_status}")
-            
-            
+
             # Remove the job from storage
             # TODO: Just update the existing one?
             await self.storage.remove_job(project_id, trajectory_id)
@@ -109,13 +108,10 @@ class SchedulerRunner(BaseRunner):
             project_id=project_id,
             trajectory_id=trajectory_id,
             enqueued_at=datetime.now(),
-            metadata={
-                "job_func": {
-                    "module": job_func.__module__,
-                    "name": job_func.__name__,
-                },
-                "node_id": node_id,
-            }
+            job_func=JobFunction(
+                module=job_func.__module__,
+                name=job_func.__name__
+            )
         )
         
         # Store job in storage
@@ -123,7 +119,7 @@ class SchedulerRunner(BaseRunner):
         
         # Try to start the job immediately if possible
         try:
-            await self._try_start_job(job_info, job_func, node_id)
+            await self._try_start_job(job_info)
         except Exception as e:
             self.logger.exception(f"Error trying to start job {project_id}-{trajectory_id}: {e}")
         
@@ -138,9 +134,10 @@ class SchedulerRunner(BaseRunner):
         Returns:
             List of JobInfo objects
         """
-        logger.info(f"Getting jobs for project {project_id}")
-        # Get jobs from storage
-        return await self.storage.get_jobs(project_id)
+        logger.debug(f"Getting jobs for project {project_id}")
+        jobs = await self.storage.get_jobs(project_id)
+        jobs = [job for job in jobs if job.status not in [JobStatus.COMPLETED, JobStatus.CANCELED]]
+        return jobs
     
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
         """Cancel a job or all jobs for a project.
@@ -186,7 +183,7 @@ class SchedulerRunner(BaseRunner):
         """
         job = await self.storage.get_job(project_id, trajectory_id)
         if job is None:
-            return JobStatus.NOT_STARTED
+            return JobStatus.UNKNOWN
         return job.status
     
     async def get_runner_info(self) -> RunnerInfo:
@@ -196,60 +193,8 @@ class SchedulerRunner(BaseRunner):
             RunnerInfo object with runner status information
         """
         # Get the underlying runner info
-        runner_info = await self.runner.get_runner_info()
-        
-        # Add scheduler-specific information
-        queued_jobs = await self.storage.get_queued_jobs_count()
-        running_jobs = await self.storage.get_running_jobs_count()
-        
-        runner_info.data.update({
-            "scheduler": {
-                "max_jobs_per_project": self.max_jobs_per_project,
-                "max_total_jobs": self.max_total_jobs,
-                "storage_type": self.storage.__class__.__name__,
-                "scheduler_running": self._scheduler_running,
-                "queued_jobs": queued_jobs,
-                "running_jobs": running_jobs,
-                "available_slots": max(0, self.max_total_jobs - running_jobs),
-            }
-        })
-        
-        return runner_info
-    
-    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
-        """Get a summary of job statuses for a project.
-        
-        Args:
-            project_id: The project ID
+        return await self.runner.get_runner_info()
 
-        Returns:
-            JobsStatusSummary object
-        """
-        jobs = await self.storage.get_jobs(project_id)
-        
-        summary = JobsStatusSummary(project_id=project_id)
-        summary.total_jobs = len(jobs)
-        
-        # Count jobs by status
-        for job in jobs:
-            if job.status in [JobStatus.PENDING]:
-                summary.pending_jobs += 1
-                summary.job_ids["pending"].append(job.id)
-            elif job.status == JobStatus.RUNNING:
-                summary.running_jobs += 1
-                summary.job_ids["running"].append(job.id)
-            elif job.status == JobStatus.COMPLETED:
-                summary.completed_jobs += 1
-                summary.job_ids["completed"].append(job.id)
-            elif job.status == JobStatus.FAILED:
-                summary.failed_jobs += 1
-                summary.job_ids["failed"].append(job.id)
-            elif job.status == JobStatus.CANCELED:
-                summary.canceled_jobs += 1
-                summary.job_ids["canceled"].append(job.id)
-        
-        return summary
-    
     async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
         """Get detailed information about a job.
         
@@ -346,14 +291,8 @@ class SchedulerRunner(BaseRunner):
                         except Exception as e:
                             self.logger.warning(f"Error canceling job {job.id} with underlying runner: {e}")
                     
-                    # Mark job as canceled
-                    job.status = JobStatus.CANCELED
-                    job.ended_at = datetime.now()
-                    await self.storage.update_job(job)
-            
-            # Delete all jobs from storage
-            await self.storage.delete_jobs(project_id)
-            
+                await self.storage.remove_job(job.project_id, job.trajectory_id)
+        
             self.logger.info(f"Reset {len(jobs)} jobs{f' for project {project_id}' if project_id else ''}")
             return True
             
@@ -435,39 +374,11 @@ class SchedulerRunner(BaseRunner):
                 f"Cannot start job {job.id}: project limit reached ({project_running}/{self.max_jobs_per_project})"
             )
             return
-        
-        # Get job function from metadata
-        if not job.metadata or "job_func" not in job.metadata:
-            self.logger.error(f"Job {job.id} has no function metadata, cannot start")
-            return
-        
-        job_func_meta = job.metadata["job_func"]
-        module_name = job_func_meta["module"]
-        func_name = job_func_meta["name"]
-        
-        # Import the function
-        try:
-            module = importlib.import_module(module_name)
-            job_func = getattr(module, func_name)
-        except Exception as e:
-            self.logger.exception(f"Error importing job function {module_name}.{func_name}: {e}")
-            
-            # Update job status to FAILED
-            job.status = JobStatus.FAILED
-            job.ended_at = datetime.now()
-            if job.metadata is None:
-                job.metadata = {}
-            job.metadata["error"] = f"Error importing job function: {str(e)}"
-            await self.storage.update_job(job)
-            return
-        
-        # Get node ID from metadata
-        node_id = job.metadata.get("node_id")
-        
+
         # Try to start the job
-        await self._try_start_job(job, job_func, node_id)
+        await self._try_start_job(job)
     
-    async def _try_start_job(self, job: JobInfo, job_func: Callable, node_id: int | None = None) -> None:
+    async def _try_start_job(self, job: JobInfo) -> None:
         """Try to start a job with the underlying runner.
         
         Args:
@@ -493,10 +404,26 @@ class SchedulerRunner(BaseRunner):
                 f"Cannot start job {job.id}: project limit reached ({project_running}/{self.max_jobs_per_project})"
             )
             return
-        
+
+        # Import the function
+        try:
+            module = importlib.import_module(job.job_func.module)
+            job_func = getattr(module, job.job_func.name)
+        except Exception as e:
+            self.logger.exception(f"Error importing job function {job.job_func}: {e}")
+
+            # Update job status to FAILED
+            job.status = JobStatus.FAILED
+            job.ended_at = datetime.now()
+            if job.metadata is None:
+                job.metadata = {}
+            job.metadata["error"] = f"Error importing job function: {str(e)}"
+            await self.storage.update_job(job)
+            return
+
         # Try to start the job with the underlying runner
         try:
-            success = await self.runner.start_job(job.project_id, job.trajectory_id, job_func, node_id)
+            success = await self.runner.start_job(job.project_id, job.trajectory_id, job_func, job.node_id)
             
             if success:
                 # Job started successfully
@@ -536,8 +463,6 @@ class SchedulerRunner(BaseRunner):
             # Job exists, get current status from the underlying runner
             current_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
             
-            self.logger.info(f"Job {job.id} status from runner: {current_status}, our status: {job.status}")
-        
             if current_status == JobStatus.COMPLETED:
                 job.status = JobStatus.COMPLETED
                 job.ended_at = datetime.now()
@@ -549,14 +474,20 @@ class SchedulerRunner(BaseRunner):
                 job.ended_at = datetime.now()
                 job.metadata["error"] = "Job failed during execution"
                 await self.storage.update_job(job)
-                
+                self.logger.info(f"Job {job.id} failed")
+            elif current_status == JobStatus.UNKNOWN and job.status in [JobStatus.RUNNING, JobStatus.PENDING]:
+                job.status = JobStatus.UNKNOWN
+                await self.storage.update_job(job)
+                self.logger.info(f"Job {job.id} unknown")
             elif current_status != JobStatus.RUNNING and job.status == JobStatus.RUNNING:
                 # Any other status for a RUNNING job means it's stopped unexpectedly
+                
                 job.status = JobStatus.STOPPED
                 job.ended_at = datetime.now()
                 job.metadata["error"] = f"Job stopped unexpectedly with status: {current_status}"
                 await self.storage.update_job(job)
-            
+                self.logger.info(f"Job {job.id} stopped")
+                
         except Exception as e:
             self.logger.exception(f"Error updating status for job {job.id}: {e}")
             
@@ -582,7 +513,7 @@ class SchedulerRunner(BaseRunner):
             # Get only PENDING or RUNNING jobs from our storage
             all_jobs = await self.storage.get_jobs()
             active_jobs = [job for job in all_jobs 
-                          if job.status in [JobStatus.PENDING, JobStatus.RUNNING]]
+                          if job.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.UNKNOWN]]
             
             if not active_jobs:
                 self.logger.debug("No active jobs found")
@@ -595,7 +526,7 @@ class SchedulerRunner(BaseRunner):
                 # Check if job exists in runner
                 job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
                 
-                if job_status == JobStatus.NOT_STARTED and job.status == JobStatus.RUNNING:
+                if job_status == JobStatus.PENDING and job.status == JobStatus.RUNNING:
                     self.logger.warning(f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED")
                     job.status = JobStatus.STOPPED
                     job.ended_at = datetime.now()

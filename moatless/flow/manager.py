@@ -156,6 +156,7 @@ class FlowManager:
                 feedback_generator=config.feedback_generator,
                 discriminator=config.discriminator,
                 max_iterations=config.max_iterations,
+                max_expansions=config.max_expansions or 1,
                 max_cost=config.max_cost,
                 min_finished_nodes=config.min_finished_nodes,
                 max_finished_nodes=config.max_finished_nodes,

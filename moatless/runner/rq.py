@@ -358,7 +358,7 @@ class RQRunner(BaseRunner):
         ):
             return JobStatus.CANCELED
 
-        return JobStatus.NOT_STARTED
+        return JobStatus.PENDING
 
     def _job_id(self, project_id: str, trajectory_id: str) -> str:
         return f"run_{project_id}_{trajectory_id}"

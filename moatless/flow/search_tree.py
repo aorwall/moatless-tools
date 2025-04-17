@@ -165,7 +165,19 @@ class SearchTree(AgenticFlow):
         if finish_reason:
             node.terminal = True
 
-        return self.get_best_trajectory(), finish_reason
+        if not self.root.discriminator_result and self.discriminator:
+            self.root.discriminator_result = self.discriminator.select(self.get_finished_nodes())
+            self.log(
+                logger.info,
+                f"Selected Node{self.root.discriminator_result.selected_node_id} as best node",
+            )
+            
+        if self.root.discriminator_result and self.root.discriminator_result.selected_node_id:
+            selected_node = self.get_node_by_id(self.root.discriminator_result.selected_node_id)
+            if selected_node:
+                return selected_node, finish_reason
+
+        return self.root.get_last_node(), finish_reason
 
     @tracer.start_as_current_span("SearchTree._select")
     async def _select(self, node: Node) -> Node | None:
@@ -174,6 +186,12 @@ class SearchTree(AgenticFlow):
         if not node.is_executed():
             self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping selection.")
             return node
+        
+        # Find first unexecuted node if it exists
+        for check_node in self.root.get_all_nodes():
+            if not check_node.observation and not check_node.children:
+                logger.info(f"Selecting unexecuted node {check_node.node_id} as it is the first unexecuted node")
+                return check_node
 
         root = node.get_root()
         expandable_nodes = root.get_expandable_descendants()
@@ -212,7 +230,16 @@ class SearchTree(AgenticFlow):
         if not node.is_executed():
             self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping expansion.")
             return node
-
+        
+        if node.is_fully_expanded():
+            return None
+        
+        # Find first unexecuted child if it exists
+        for child in node.children:
+            if not child.observation:
+                logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
+                return child
+        
         child_node = await self.expander.expand(node)
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
@@ -321,31 +348,6 @@ class SearchTree(AgenticFlow):
                 current.value += reward
             current = current.parent
 
-    def get_best_trajectory(self) -> Node | None:
-        """
-        Get the best finished trajectory to return
-        """
-
-        nodes = self.get_finished_nodes()
-        if not nodes:
-            nodes = self.get_leaf_nodes()
-            self.log(
-                logger.info,
-                f"get_best_trajectory() No finished nodes found. Will select from {len(nodes)} leaf nodes.",
-            )
-
-        if len(nodes) == 1:
-            return nodes[0]
-
-        if self.discriminator is None:
-            self.log(
-                logger.info,
-                "No discriminator provided. Returning the first finished node.",
-            )
-            return nodes[-1]
-
-        return self.discriminator.select(nodes)
-
     def is_finished(self) -> str | None:
         # Check max cost
         total_cost = self.total_usage().completion_cost
@@ -436,6 +438,9 @@ class SearchTree(AgenticFlow):
 
             if "selector" in obj and isinstance(obj["selector"], dict):
                 obj["selector"] = BaseSelector.from_dict(obj["selector"])
+                
+            if "expander" in obj and isinstance(obj["expander"], dict):
+                obj["expander"] = Expander.model_validate(obj["expander"])
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.from_dict(obj["agent"])

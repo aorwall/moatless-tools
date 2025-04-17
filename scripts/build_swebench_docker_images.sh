@@ -150,6 +150,7 @@ for INSTANCE_ID in $INSTANCE_IDS; do
     cat > Dockerfile.temp << EOL
 FROM swebench/sweb.eval.x86_64.$DOCKER_BASE_IMAGE
 
+WORKDIR /opt/moatless
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy libraries and moatless directory from base image
@@ -162,6 +163,10 @@ RUN git config --global --add safe.directory /testbed
 # Create necessary directories
 RUN mkdir -p /testbed/.moatless
 
+# Set environment variables for UV to find the correct Python
+ENV VIRTUAL_ENV=""
+ENV UV_SYSTEM_PYTHON=$(which python3)
+
 # Copy instance specific files
 COPY instances/${INSTANCE_ID}.json /data/instance.json
 COPY .moatless_index_store/${INSTANCE_ID} /data/index_store
@@ -170,7 +175,6 @@ ENV REPO_PATH=/testbed
 ENV INDEX_STORE_DIR=/data/index_store/${INSTANCE_ID}
 ENV INSTANCE_PATH=/data/instance.json
 
-WORKDIR /opt/moatless
 EOL
 
     # Copy index store files from environment variable directory

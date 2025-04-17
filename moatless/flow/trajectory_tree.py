@@ -276,7 +276,6 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
     # Add actions
     for i, step in enumerate(node.action_steps):
         if isinstance(step.action, ThinkArgs):
-            logger.info(f"Thought: {step.action.thought}")
             thought_item = ThoughtTreeItem(
                 id=f"{node_item.id}-thought",
                 label="Thought",

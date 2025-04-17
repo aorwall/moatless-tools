@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Optional, Type
+from typing import Any, Callable, Optional, Type, List
 
 from pydantic import BaseModel, Field
 
@@ -13,8 +13,7 @@ class JobStatus(str, Enum):
     FAILED = "failed"  # Job execution failed
     CANCELED = "canceled"  # Job was manually canceled
     STOPPED = "stopped"  # Job was running but stopped unexpectedly (e.g., container vanished)
-    NOT_STARTED = "not_started"  # Job not found or not started yet
-
+    UNKNOWN = "unknown"
 
 
 class RunnerStatus(str, Enum):
@@ -26,8 +25,11 @@ class RunnerStatus(str, Enum):
 class RunnerInfo(BaseModel):
     runner_type: str
     status: RunnerStatus
-    data: dict[str, Any]
+    data:  dict[str, Any] = Field(default_factory=dict)
 
+class JobFunction(BaseModel):
+    module: Optional[str]
+    name: str
 
 class JobInfo(BaseModel):
     """Information about a job."""
@@ -36,16 +38,18 @@ class JobInfo(BaseModel):
     status: JobStatus
     project_id: str
     trajectory_id: str
+    node_id: Optional[int] = None
+    job_func: Optional[JobFunction] = None
     enqueued_at: datetime
     started_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None
+
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobsStatusSummary(BaseModel):
-    """Summary of job status counts for a project."""
+    """Summary of job status counts."""
 
-    project_id: str
     total_jobs: int = 0
     pending_jobs: int = 0
     initializing_jobs: int = 0
@@ -53,16 +57,6 @@ class JobsStatusSummary(BaseModel):
     completed_jobs: int = 0
     failed_jobs: int = 0
     canceled_jobs: int = 0
-    job_ids: dict[str, list[str]] = Field(
-        default_factory=lambda: {
-            "pending": [],
-            "initializing": [],
-            "running": [],
-            "completed": [],
-            "failed": [],
-            "canceled": [],
-        }
-    )
 
 
 class JobDetailSection(BaseModel):
@@ -193,7 +187,7 @@ class BaseRunner(ABC):
         """
         pass
 
-    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
+    async def get_job_status_summary(self) -> JobsStatusSummary:
         """Get a summary of job statuses for a project.
         
         Args:
@@ -203,30 +197,24 @@ class BaseRunner(ABC):
             JobsStatusSummary object with counts of jobs in each state
         """
         # Default implementation, runners can override
-        summary = JobsStatusSummary(project_id=project_id)
-        
-        # Get all jobs for the project
-        jobs = await self.get_jobs(project_id)
-        summary.total_jobs = len(jobs)
-        
+        summary = JobsStatusSummary()
+
+        jobs = await self.get_jobs()
+
         # Count jobs by status
         for job in jobs:
+            summary.total_jobs += 1
             if job.status == JobStatus.PENDING:
                 summary.pending_jobs += 1
-                summary.job_ids["pending"].append(job.id)
             elif job.status == JobStatus.RUNNING:
                 summary.running_jobs += 1
-                summary.job_ids["running"].append(job.id)
             elif job.status == JobStatus.COMPLETED:
                 summary.completed_jobs += 1
-                summary.job_ids["completed"].append(job.id)
             elif job.status == JobStatus.FAILED:
                 summary.failed_jobs += 1
-                summary.job_ids["failed"].append(job.id)
             elif job.status == JobStatus.CANCELED:
                 summary.canceled_jobs += 1
-                summary.job_ids["canceled"].append(job.id)
-                
+
         return summary
 
     async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:

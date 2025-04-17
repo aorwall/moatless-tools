@@ -186,29 +186,49 @@ class RunTests(Action):
         return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)  # type: ignore
 
     def create_test_files(self, test_file_paths: list[str], test_results: list[TestResult]) -> list[TestFile]:
+        results_by_file: dict[str | None, list[TestResult]] = {}
+        for result in test_results:
+            results_by_file.setdefault(result.file_path, []).append(result)
+
         test_files = []
 
-        # Parse the output and update test_file objects
-        for test_file_path in test_file_paths:
-            test_file = TestFile(file_path=test_file_path)
+        # Create TestFile objects for all groups of results with a valid file_path
+        for file_path, file_test_results in results_by_file.items():
+            if file_path is None:
+                # Handle results with no file path separately
+                num_results_no_path = len(file_test_results)
+                if num_results_no_path > 0:
+                    logger.warning(
+                        f"Received {num_results_no_path} test results with no associated file path. These cannot be added to the TestFile list."
+                    )
+                continue
 
-            # Filter test results for this file
-            file_test_results = [
-                result for result in test_results if result.file_path and result.file_path == test_file.file_path
-            ]
+            # Create TestFile for results with a valid file_path
+            test_file = TestFile(file_path=file_path, test_results=file_test_results)
 
-            test_file.test_results = file_test_results
             if file_test_results:
+                # Log counts for this group
                 logger.info(
-                    f"Test results for {test_file.file_path}: "
+                    f"Test results for {file_path}: "
                     f"{sum(1 for r in file_test_results if r.status == TestStatus.PASSED)} passed, "
                     f"{sum(1 for r in file_test_results if r.status == TestStatus.FAILED)} failed, "
-                    f"{sum(1 for r in file_test_results if r.status == TestStatus.ERROR)} errors"
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.ERROR)} errors, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.SKIPPED)} skipped"
                 )
-            else:
-                logger.warning(f"No test results found for {test_file.file_path}")
+
+                # Log a warning if these results were not for an explicitly requested file
+                if file_path not in test_file_paths:
+                    logger.warning(f"Received unexpected test results for {file_path}")
 
             test_files.append(test_file)
+
+        # Ensure TestFile objects exist for requested paths even if they had no results
+        processed_paths = {tf.file_path for tf in test_files}
+        for test_file_path in test_file_paths:
+            if test_file_path not in processed_paths:
+                logger.warning(f"No test results found for requested file {test_file_path}")
+                test_file = TestFile(file_path=test_file_path, test_results=[])
+                test_files.append(test_file)
 
         return test_files
 

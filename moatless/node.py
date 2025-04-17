@@ -137,6 +137,29 @@ class Reward(BaseModel):
                 obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
         return super().model_validate(obj, **kwargs)
 
+class DiscriminatorResult(BaseModel):
+    """Result from discriminator."""
+
+    selected_node_id: Optional[int] = Field(None, description="The node ID of the selected node")
+    trace: dict[str, Any] = Field(default_factory=dict, description="The trace of the discriminator")
+    completion: Optional[CompletionInvocation] = Field(None, description="Completion used to generate the discriminator result")
+
+    @classmethod
+    def model_validate(cls, obj: Any, **kwargs) -> "DiscriminatorResult":
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            if "completion" in obj:
+                obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
+
+        return super().model_validate(obj, **kwargs)
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+
+        if self.completion:
+            data["completion"] = self.completion.model_dump(**kwargs)
+
+        return data
 
 class EvaluationResult(BaseModel):
     """Evaluation result for a node."""
@@ -199,8 +222,9 @@ class Node(BaseModel):
     agent_id: Optional[str] = Field(None, description="The agent ID associated with the node")
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
     timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
+    discriminator_result: Optional[DiscriminatorResult] = Field(None, description="The discriminator result of the node")
     evaluation_result: Optional[EvaluationResult] = Field(None, description="The evaluation result of the node")
-
+    
     model_config = ConfigDict(ser_json_timedelta="iso8601", json_encoders={datetime: lambda dt: dt.isoformat()})
 
     @field_validator("timestamp", mode="before")
@@ -516,6 +540,9 @@ class Node(BaseModel):
         if self.file_context and "file_context" not in exclude_set:
             node_dict["file_context"] = self.file_context.model_dump(**kwargs)
 
+        if self.discriminator_result and "discriminator_result" not in exclude_set:
+            node_dict["discriminator_result"] = self.discriminator_result.model_dump(**kwargs)
+
         node_dict["action_steps"] = [action_step.model_dump(**kwargs) for action_step in self.action_steps]
 
         if not kwargs.get("exclude") or "children" not in kwargs.get("exclude", set()):
@@ -570,6 +597,9 @@ class Node(BaseModel):
             node_data["file_context"] = FileContext.from_dict(
                 repo=repo, runtime=runtime, data=node_data["file_context"]
             )
+            
+        if node_data.get("discriminator_result"):
+            node_data["discriminator_result"] = DiscriminatorResult.model_validate(node_data["discriminator_result"])
 
         node_data["visits"] = node_data.get("visits", 0)
         node_data["value"] = node_data.get("value", 0.0)

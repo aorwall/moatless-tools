@@ -35,35 +35,15 @@ class MockRunner(BaseRunner):
         job_key = f"{project_id}:{trajectory_id}"
         
         # Create job record
-        self.jobs[job_key] = {
-            "project_id": project_id,
-            "trajectory_id": trajectory_id,
-            "status": JobStatus.RUNNING,
-            "started_at": datetime.now(),
-        }
+        self.jobs[job_key] = JobInfo(
+            project_id= project_id,
+            trajectory_id= trajectory_id,
+            status=JobStatus.RUNNING,
+            enqueued_at=datetime.now(),
+        )
         
         return True
-    
-    async def get_jobs(self, project_id=None):
-        """Get all jobs (mock implementation)."""
-        result = []
-        
-        for job_key, job_data in self.jobs.items():
-            if project_id is None or job_data["project_id"] == project_id:
-                job_info = JobInfo(
-                    id=job_key,
-                    status=job_data["status"],
-                    project_id=job_data["project_id"],
-                    trajectory_id=job_data["trajectory_id"],
-                    started_at=job_data.get("started_at"),
-                    ended_at=job_data.get("ended_at"),
-                    enqueued_at=job_data.get("enqueued_at", datetime.now()),
-                    metadata=job_data.get("metadata", {})
-                )
-                result.append(job_info)
-                
-        return result
-        
+
     async def cancel_job(self, project_id, trajectory_id=None):
         """Mock canceling a job."""
         if trajectory_id is None:
@@ -74,13 +54,13 @@ class MockRunner(BaseRunner):
                     to_cancel.append(key)
             
             for key in to_cancel:
-                self.jobs[key]["status"] = JobStatus.CANCELED
+                self.jobs[key].status = JobStatus.CANCELED
                 self.canceled_jobs.append(key)
         else:
             # Cancel specific job
             job_key = f"{project_id}:{trajectory_id}"
             if job_key in self.jobs:
-                self.jobs[job_key]["status"] = JobStatus.CANCELED
+                self.jobs[job_key].status = JobStatus.CANCELED
                 self.canceled_jobs.append(job_key)
                 
     async def job_exists(self, project_id, trajectory_id):
@@ -92,7 +72,7 @@ class MockRunner(BaseRunner):
         """Mock getting job status."""
         job_key = f"{project_id}:{trajectory_id}"
         if job_key in self.jobs:
-            return self.jobs[job_key]["status"]
+            return self.jobs[job_key].status
         return JobStatus.PENDING  # Changed from NOT_STARTED to PENDING
         
     async def get_runner_info(self):
@@ -102,29 +82,10 @@ class MockRunner(BaseRunner):
             status=RunnerStatus.RUNNING,
             data={"mock": True}
         )
-        
-    async def get_job_status_summary(self, project_id):
-        """Mock getting job status summary."""
-        summary = JobsStatusSummary(project_id=project_id)
-        
-        for key, data in self.jobs.items():
-            if data["project_id"] == project_id:
-                summary.total_jobs += 1
-                if data["status"] == JobStatus.RUNNING:
-                    summary.running_jobs += 1
-                    summary.job_ids["running"].append(key)
-                elif data["status"] == JobStatus.COMPLETED:
-                    summary.completed_jobs += 1
-                    summary.job_ids["completed"].append(key)
-                elif data["status"] == JobStatus.FAILED:
-                    summary.failed_jobs += 1
-                    summary.job_ids["failed"].append(key)
-                elif data["status"] == JobStatus.CANCELED:
-                    summary.canceled_jobs += 1
-                    summary.job_ids["canceled"].append(key)
-                    
-        return summary
-        
+
+    async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
+       return list(self.jobs.values())
+
     async def get_job_details(self, project_id, trajectory_id):
         """Mock getting job details."""
         job_key = f"{project_id}:{trajectory_id}"
@@ -174,11 +135,7 @@ class MockRunner(BaseRunner):
                     self.canceled_jobs.remove(key)
                     
         return True
-        
-    async def get_queue_size(self):
-        """Get queue size (mock implementation)."""
-        return 0
-        
+
     async def cleanup_job(self, project_id: str, trajectory_id: str):
         """Clean up a job (mock implementation)."""
         job_key = f"{project_id}:{trajectory_id}"
@@ -213,14 +170,12 @@ def scheduler(mock_runner):
         
         yield scheduler
 
+def mock_job_func():
+    pass
 
 @pytest.mark.asyncio
 async def test_start_job(scheduler):
     """Test starting a new job."""
-    # Define a mock job function
-    def mock_job_func():
-        pass
-    
     # Start a job
     project_id = "test-project"
     trajectory_id = "test-trajectory"
@@ -242,14 +197,11 @@ async def test_start_job(scheduler):
     assert job.status in [JobStatus.PENDING, JobStatus.RUNNING]
     assert job.enqueued_at is not None
 
-
 @pytest.mark.asyncio
 async def test_job_exists(scheduler):
     """Test checking if a job exists."""
     # Define a mock job function
-    def mock_job_func():
-        pass
-    
+
     # Start a job
     await scheduler.start_job("test-project", "test-trajectory", mock_job_func)
     

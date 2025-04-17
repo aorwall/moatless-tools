@@ -323,8 +323,13 @@ class EvaluationManager:
             instance.usage = flow.total_usage()
             instance.iterations = len(flow.root.get_all_nodes())
 
-            leaf_nodes = flow.root.get_leaf_nodes()
-            node = leaf_nodes[0]
+            node = None
+            if flow.root.discriminator_result and flow.root.discriminator_result.selected_node_id:
+                node = flow.get_node_by_id(flow.root.discriminator_result.selected_node_id)
+                
+            if not node:
+                node = flow.root.get_last_node()
+            
             if node.error:
                 instance.status = InstanceStatus.ERROR
                 instance.error = node.error
@@ -336,7 +341,7 @@ class EvaluationManager:
                 instance.status = InstanceStatus.RUNNING
                 return instance
 
-            if not instance.completed_at:
+            if not instance.completed_at and instance.status != InstanceStatus.EVALUATED:
                 # TODO: Handle trajectories with multiple leaf nodes
                 if node.terminal:
                     if node.reward:
@@ -355,13 +360,8 @@ class EvaluationManager:
                 instance.resolved = node.evaluation_result.resolved
 
             if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
-                leaf_nodes = flow.root.get_leaf_nodes()
-
-                # Just consider the instance resolved if any node is resolved for now...
-                for node in leaf_nodes:
-                    if node.evaluation_result and node.evaluation_result.resolved:
-                        instance.resolved = node.evaluation_result.resolved
-                        break
+                if node.evaluation_result:
+                    instance.resolved = node.evaluation_result.resolved
 
                 if instance.status != InstanceStatus.EVALUATED:
                     instance.status = InstanceStatus.EVALUATED

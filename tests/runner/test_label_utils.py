@@ -5,21 +5,38 @@ from moatless.runner.label_utils import create_resource_id
 def test_create_resource_id_basic():
     """Test basic functionality of create_resource_id."""
     resource_id = create_resource_id("test-project", "test-trajectory", "run")
-    assert resource_id == "run-test-project-test-trajectory"
+    # New format with hash
+    assert resource_id.startswith("run-test-project-test-trajectory-")
+    # Hash should be 8 characters
+    assert len(resource_id.split("-")[-1]) == 8
     
     # With different prefix
     resource_id = create_resource_id("test-project", "test-trajectory", "moatless")
-    assert resource_id == "moatless-test-project-test-trajectory"
+    assert resource_id.startswith("moatless-test-project-test-trajectory-")
+    assert len(resource_id.split("-")[-1]) == 8
 
 
 def test_create_resource_id_special_characters():
     """Test special character handling in create_resource_id."""
     resource_id = create_resource_id("test_project/123", "test.trajectory@example", "run")
-    assert resource_id == "run-test-project-123-test-trajectory-example"
+    print(f"Special chars resource_id: {resource_id}")
+    
+    # Format: prefix-proj_prefix-traj_suffix-hash
+    parts = resource_id.split("-")
+    assert parts[0] == "run"
+    
+    # Check that the ID contains expected substrings
+    assert "test" in resource_id
+    assert "project" in resource_id or "123" in resource_id
+    assert "trajectory" in resource_id
+    assert "example" in resource_id
+    
+    # Hash should be 8 characters
+    assert len(parts[-1]) == 8
     
     # With invalid start/end characters
     resource_id = create_resource_id("-test-", "-trajectory-", "run")
-    assert resource_id.startswith("run-x")
+    assert resource_id.startswith("run-")
     assert not resource_id.startswith("run--")
     assert not resource_id.endswith("-")
 
@@ -35,12 +52,13 @@ def test_create_resource_id_length_limits():
     # Check length constraint
     assert len(resource_id) <= 63
     
-    # Check that both IDs are represented in some form
-    assert "project" in resource_id
+    # Check that both IDs are represented - project should be in the first 16 chars
+    assert "very-long-projec" in resource_id
     assert "trajectory" in resource_id
     
-    # Check format 
+    # Check format - prefix + hash at the end
     assert resource_id.startswith("run-")
+    assert len(resource_id.split("-")[-1]) == 8
 
 
 def test_create_resource_id_validation():
@@ -66,7 +84,9 @@ def test_create_resource_id_with_unicode():
     assert "ü" not in resource_id
     assert "é" not in resource_id
     assert "ä" not in resource_id
-    assert resource_id.startswith("run-proje-t-")
+    assert "proje-t-" in resource_id
+    # Hash at the end
+    assert len(resource_id.split("-")[-1]) == 8
 
 
 def test_resource_id_consistency():
@@ -78,4 +98,20 @@ def test_resource_id_consistency():
     
     # Different inputs should produce different IDs
     id3 = create_resource_id("project-x", "trajectory-z", "run")
-    assert id1 != id3 
+    assert id1 != id3
+
+def test_resource_id_hash_uniqueness():
+    """Test that different inputs produce different hash values."""
+    id1 = create_resource_id("project-a", "trajectory-1", "run")
+    id2 = create_resource_id("project-b", "trajectory-1", "run")
+    id3 = create_resource_id("project-a", "trajectory-2", "run")
+    
+    # Extract hash parts
+    hash1 = id1.split("-")[-1]
+    hash2 = id2.split("-")[-1]
+    hash3 = id3.split("-")[-1]
+    
+    # Verify hashes are different for different inputs
+    assert hash1 != hash2
+    assert hash1 != hash3
+    assert hash2 != hash3 

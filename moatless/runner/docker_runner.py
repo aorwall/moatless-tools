@@ -6,7 +6,6 @@ import subprocess
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional, Dict, Tuple, List, Deque, NamedTuple
-from collections import deque
 
 from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels, create_resource_id
 from moatless.runner.runner import (
@@ -32,8 +31,7 @@ class DockerRunner(BaseRunner):
         job_ttl_seconds: int = 3600,
         timeout_seconds: int = 3600,
         moatless_source_dir: Optional[str] = None,
-        default_image_name: Optional[str] = None,
-        max_concurrent_containers: Optional[int] = None,
+        default_image_name: Optional[str] = None
     ):
         """Initialize the runner with Docker configuration.
 
@@ -45,15 +43,11 @@ class DockerRunner(BaseRunner):
                                 directory will be mounted.
             default_image_name: Default Docker image name to use for all jobs. If provided,
                               this overrides the standard image name generation.
-            max_concurrent_containers: Maximum number of containers that can run concurrently.
-                                     If None, there is no limit.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
         self.logger = logging.getLogger(__name__)
-        self.running_containers: Dict[str, Dict[str, Any]] = {}
         self.default_image_name = default_image_name
-        self.max_concurrent_containers = max_concurrent_containers
 
         # Get source directory - prefer explicitly passed parameter over environment variable
         self.moatless_source_dir = (
@@ -111,30 +105,32 @@ class DockerRunner(BaseRunner):
         
         # Create container ID/name
         container_name = self._container_name(project_id, trajectory_id)
-        
-        # Check if we already have a container running for this job
-        exists = await self._container_exists(container_name)
-        if exists:
+
+        # Check if container already exists
+        if await self._container_exists(container_name):
+            # Check if the container is completed or failed
+            container_status = await self._get_container_status(container_name)
+            if container_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+                # Remove the existing container first
+                self.logger.info(
+                    f"Container {container_name} exists with status {container_status}, removing and restarting"
+                )
+                await self._cleanup_container(container_name)
+
+            else:
+                self.logger.info(
+                    f"Container {container_name} already exists with status {container_status}, skipping"
+                )
+                return False
+
             self.logger.info(f"Container {container_name} already exists, not starting a new one")
             return False
             
         # Use the specified image or default
         if not image_name:
             image_name = self._get_image_name(trajectory_id)
-            
-        # Record the job in our tracking dict
-        job_key = f"{project_id}:{trajectory_id}"
-        self.running_containers[job_key] = {
-            "project_id": project_id,
-            "trajectory_id": trajectory_id,
-            "status": JobStatus.RUNNING,
-            "started_at": datetime.now()
-        }
-        
-        try:
-            # Create the helper module for running functions in the container
-            # ... existing code ...
 
+        try:
             # Extract OpenTelemetry context for propagation
             otel_context = extract_trace_context()
 
@@ -217,15 +213,6 @@ class DockerRunner(BaseRunner):
             container_id = stdout.strip()
             self.logger.info(f"Started Docker container with ID: {container_id}")
 
-            # Store container info
-            self.running_containers[container_name] = {
-                "id": container_id,
-                "project_id": project_id,
-                "trajectory_id": trajectory_id,
-                "started_at": datetime.now(),
-                "status": JobStatus.RUNNING,
-            }
-
             return True
 
         except Exception as exc:
@@ -281,41 +268,8 @@ class DockerRunner(BaseRunner):
                 # Skip containers without proper project or trajectory ID
                 if not container_project_id or not container_trajectory_id:
                     continue
-                    
-                # Determine status
-                if container_state == "running":
-                    status = JobStatus.RUNNING
-                elif container_state == "created":
-                    status = JobStatus.PENDING
-                elif container_state == "exited":
-                    # Get exit code to determine if completed or failed
-                    try:
-                        inspect_cmd = ["docker", "inspect", "--format", "{{.State.ExitCode}}", container_name]
-                        inspect_process = await asyncio.create_subprocess_exec(
-                            *inspect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                        )
-                        inspect_stdout, _ = await inspect_process.communicate()
-                        
-                        if inspect_process.returncode == 0:
-                            exit_code = int(inspect_stdout.decode().strip())
-                            
-                            if exit_code == 0:
-                                status = JobStatus.COMPLETED
-                                # Clean up completed containers
-                                await self._cleanup_container(container_name)
-                            else:
-                                status = JobStatus.FAILED
-                                # Also clean up failed containers
-                                await self._cleanup_container(container_name)
-                        else:
-                            status = JobStatus.FAILED
-                    except Exception as e:
-                        self.logger.error(f"Error getting exit code for {container_name}: {e}")
-                        status = JobStatus.FAILED
-                elif container_state == "removing":
-                    status = JobStatus.CANCELED
-                else:
-                    status = JobStatus.RUNNING
+
+                status = await self._get_container_status(container_name)
                 
                 # Parse timestamp
                 try:
@@ -327,6 +281,8 @@ class DockerRunner(BaseRunner):
                     except ValueError:
                         self.logger.warning(f"Could not parse timestamp: {created_at}")
                         created_datetime = datetime.now()
+
+                # TODO: Get trajectory id and project id from env vars
                 
                 # Create JobInfo object
                 job_info = JobInfo(
@@ -357,6 +313,7 @@ class DockerRunner(BaseRunner):
             Exit code as an integer, or -1 if an error occurs
         """
         try:
+            
             output, return_code = await self._run_docker_command(
                 "docker", "inspect", "--format", "{{.State.ExitCode}}", container_name
             )
@@ -426,48 +383,12 @@ class DockerRunner(BaseRunner):
             True if the job exists, False otherwise
         """
         try:
-            # Sanitize the project and trajectory IDs for use as Docker labels
-            sanitized_project_id = sanitize_label(project_id)
-            sanitized_trajectory_id = sanitize_label(trajectory_id)
-            
-            # Use Docker to check if the container exists by project_id and trajectory_id labels
-            # This is more reliable than filtering by container name
-            cmd = [
-                "docker", "ps", "-a", 
-                "--filter", f"label=project_id={sanitized_project_id}", 
-                "--filter", f"label=trajectory_id={sanitized_trajectory_id}",
-                "--filter", "label=moatless.managed=true",
-                "--format", "{{.Names}}"
-            ]
-
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-
-            if process.returncode != 0:
-                self.logger.warning(f"Docker command error: {stderr.decode()}")
-                return False
-
-            output = stdout.decode().strip()
-            return output != ""
+            job_status = await self.get_job_status(project_id, trajectory_id)
+            return job_status != JobStatus.PENDING
 
         except Exception as exc:
             self.logger.exception(f"Error checking if job exists: {exc}")
             return False
-
-    async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
-        """Retry a failed job.
-
-        Args:
-            project_id: The project ID
-            trajectory_id: The trajectory ID
-
-        Returns:
-            True if the job was restarted successfully, False otherwise
-        """
-        # For now, we'll just return False as retry is not implemented
-        return False
 
     async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
         """Get the status of a job.
@@ -480,119 +401,42 @@ class DockerRunner(BaseRunner):
             JobStatus enum value representing the job status
         """
         try:
-            # First, try the direct approach by checking if the container exists by name
             container_name = self._container_name(project_id, trajectory_id)
-            
-            # Check if the container exists by name first
-            inspect_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.ExitCode}}", container_name]
+            return await self._get_container_status(container_name)
+
+        except Exception as exc:
+            self.logger.exception(f"Error getting job status: {exc}")
+            return JobStatus.PENDING
+
+    async def _get_container_status(self, container_name: str) -> JobStatus:
+        try:
+            inspect_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels \"project_id\"}},{{index .Config.Labels \"trajectory_id\"}}", container_name]
             process = await asyncio.create_subprocess_exec(
                 *inspect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode == 0:
-                # Container exists, get its status
                 container_info = stdout.decode().strip().split(",")
-                if len(container_info) >= 2:
-                    state, exit_code_str = container_info[:2]
-                    
-                    # Map Docker status to JobStatus
-                    if state == "running":
-                        return JobStatus.RUNNING
-                    elif state == "created":
-                        return JobStatus.PENDING
-                    elif state == "exited":
-                        try:
-                            exit_code = int(exit_code_str)
-                            if exit_code == 0:
-                                return JobStatus.COMPLETED
-                            else:
-                                return JobStatus.FAILED
-                        except (ValueError, TypeError):
-                            self.logger.warning(f"Invalid exit code: {exit_code_str}")
-                            return JobStatus.FAILED
-                    elif state == "removing":
-                        return JobStatus.CANCELED
-                    else:
-                        # Other states (paused, restarting, etc.)
-                        return JobStatus.RUNNING
-            
-            # If not found by name, try using the labels as a backup
-            # Sanitize IDs for use in labels
-            sanitized_project_id = sanitize_label(project_id)
-            sanitized_trajectory_id = sanitize_label(trajectory_id)
-            
-            # Check if any container exists with these labels
-            cmd = [
-                "docker", "ps", "-a",
-                "--filter", f"label=project_id={sanitized_project_id}",
-                "--filter", f"label=trajectory_id={sanitized_trajectory_id}",
-                "--filter", "label=moatless.managed=true",
-                "--format", "{{.Names}}"
-            ]
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0 or not stdout:
-                self.logger.debug(f"No containers found for {project_id}/{trajectory_id}")
-                return JobStatus.NOT_STARTED
-            
-            # Get the container name from the output
-            found_container_name = stdout.decode().strip().split("\n")[0]
-            
-            # Now get the status of this specific container
-            status_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.ExitCode}}", found_container_name]
-            status_process = await asyncio.create_subprocess_exec(
-                *status_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            status_stdout, status_stderr = await status_process.communicate()
-            
-            if status_process.returncode != 0:
-                if b"No such object" in status_stderr:
-                    # Container was removed
-                    self.logger.debug(f"Container {found_container_name} was removed")
-                    return JobStatus.NOT_STARTED
-                self.logger.warning(f"Error getting container status: {status_stderr.decode()}")
-                return JobStatus.NOT_STARTED
-            
-            # Parse the status output
-            status_output = status_stdout.decode().strip()
-            status_parts = status_output.split(",")
-            
-            if len(status_parts) < 2:
-                self.logger.warning(f"Unexpected status format: {status_output}")
-                return JobStatus.NOT_STARTED
-            
-            state, exit_code_str = status_parts
-            
-            # Map Docker status to JobStatus
-            if state == "running":
-                return JobStatus.RUNNING
-            elif state == "created":
-                return JobStatus.PENDING
-            elif state == "exited":
-                try:
-                    exit_code = int(exit_code_str)
-                    if exit_code == 0:
-                        return JobStatus.COMPLETED
-                    else:
-                        return JobStatus.FAILED
-                except (ValueError, TypeError):
-                    self.logger.warning(f"Invalid exit code: {exit_code_str}")
-                    return JobStatus.FAILED
-            elif state == "removing":
-                return JobStatus.CANCELED
+                if len(container_info) < 3:
+                    self.logger.warning(f"Unexpected output format from docker inspect command {' '.join(inspect_cmd)}: {stdout.decode()}")
+                    return JobStatus.UNKNOWN
+
+                status, running, exit_code = container_info[:3]
+
+                return self._parse_container_status(status, running, exit_code)
             else:
-                # Other states (paused, restarting, etc.)
-                return JobStatus.RUNNING
-        
+                if "No such object" in stderr.decode():
+                    # Consider the job pending if it doesn't exist. TODO: Just return None?
+                    return JobStatus.PENDING
+                else:
+                    self.logger.warning(f"Error getting job status. Stderr: {stderr.decode()}. Stdout: {stdout.decode()}")
+                    return JobStatus.UNKNOWN
+
         except Exception as exc:
             self.logger.exception(f"Error getting job status: {exc}")
-            return JobStatus.NOT_STARTED
-
+            return JobStatus.UNKNOWN
+        
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the Docker runner.
 
@@ -608,79 +452,14 @@ class DockerRunner(BaseRunner):
                     runner_type="docker", status=RunnerStatus.ERROR, data={"error": "Docker is not accessible"}
                 )
 
-            # Count running containers
-            running_containers = len(self.running_containers)
-
             return RunnerInfo(
                 runner_type="docker", 
-                status=RunnerStatus.RUNNING, 
-                data={
-                    "running_containers": running_containers,
-                }
+                status=RunnerStatus.RUNNING
             )
+
         except Exception as exc:
             self.logger.exception(f"Error checking if runner is up: {exc}")
             return RunnerInfo(runner_type="docker", status=RunnerStatus.ERROR, data={"error": str(exc)})
-
-    async def get_queue_size(self) -> int:
-        """Get the current size of the job queue.
-        
-        Since we no longer have job queueing, this always returns 0.
-        
-        Returns:
-            Always 0 since we no longer queue jobs
-        """
-        return 0
-
-    def get_available_slots(self) -> int:
-        """Get the number of available container slots.
-        
-        Since we no longer limit the number of containers, this returns a large number.
-        
-        Returns:
-            Always returns a large number since we don't limit containers anymore
-        """
-        return 1000  # Return a large number as we don't limit container count
-
-    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
-        """Get a summary of job statuses for a project.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            JobsStatusSummary with counts and IDs of jobs in different states
-        """
-        summary = JobsStatusSummary(project_id=project_id)
-
-        try:
-            # Get all jobs for the project
-            jobs = await self.get_jobs(project_id)
-
-            summary.total_jobs = len(jobs)
-
-            # Count jobs by status
-            for job in jobs:
-                if job.status == JobStatus.PENDING:
-                    summary.pending_jobs += 1
-                    summary.job_ids["pending"].append(job.id)
-                elif job.status == JobStatus.RUNNING:
-                    summary.running_jobs += 1
-                    summary.job_ids["running"].append(job.id)
-                elif job.status == JobStatus.COMPLETED:
-                    summary.completed_jobs += 1
-                    summary.job_ids["completed"].append(job.id)
-                elif job.status == JobStatus.FAILED:
-                    summary.failed_jobs += 1
-                    summary.job_ids["failed"].append(job.id)
-                elif job.status == JobStatus.CANCELED:
-                    summary.canceled_jobs += 1
-                    summary.job_ids["canceled"].append(job.id)
-
-        except Exception as exc:
-            self.logger.exception(f"Error getting job status summary: {exc}")
-
-        return summary
 
     async def _run_docker_command(self, *args) -> Tuple[str, int]:
         """Run a Docker command and return stdout and return code.
@@ -776,94 +555,6 @@ class DockerRunner(BaseRunner):
         except Exception:
             return False
 
-    async def _get_container_status(self, container_name: str) -> JobStatus:
-        """Get the status of a Docker container.
-
-        Args:
-            container_name: Name of the container
-
-        Returns:
-            JobStatus enum value representing the container status
-        """
-        try:
-            # Extract project_id and trajectory_id from container labels
-            cmd = [
-                "docker", "inspect",
-                "--format", "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels \"project_id\"}},{{index .Config.Labels \"trajectory_id\"}}",
-                container_name
-            ]
-            
-            process = await asyncio.create_subprocess_exec(
-                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            # If container not found by name, try searching by labels
-            if process.returncode != 0:
-                if b"No such container" in stderr:
-                    # Try to find container by project_id and trajectory_id from the container name
-                    # Get project_id and trajectory_id from container_name if possible
-                    parts = container_name.split("-")
-                    if len(parts) >= 3:
-                        # Format is often moatless-trajectory_id-project_id-hash or moatless-trajectory_id-hash
-                        try:
-                            # Get alternative containers with matching project_id and trajectory_id from labels
-                            find_cmd = [
-                                "docker", "ps", "-a", "--format", 
-                                "{{.Names}},{{.State.Status}},{{.State.Running}},{{.State.ExitCode}}",
-                                "--filter", "label=moatless.managed=true"
-                            ]
-                            
-                            # If we have the original container name in our tracking dict, use its info
-                            for key, container in self.running_containers.items():
-                                project_parts = key.split(":")
-                                if len(project_parts) == 2:
-                                    proj_id, traj_id = project_parts
-                                    # Sanitize the IDs for use as Docker labels
-                                    sanitized_proj_id = sanitize_label(proj_id)
-                                    sanitized_traj_id = sanitize_label(traj_id)
-                                    find_cmd.extend([
-                                        "--filter", f"label=project_id={sanitized_proj_id}", 
-                                        "--filter", f"label=trajectory_id={sanitized_traj_id}"
-                                    ])
-                                    break
-                                    
-                            find_process = await asyncio.create_subprocess_exec(
-                                *find_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                            )
-                            find_stdout, _ = await find_process.communicate()
-                            find_output = find_stdout.decode().strip()
-                            
-                            if find_output:
-                                # Use the first matching container's status
-                                container_info = find_output.split("\n")[0].split(",")
-                                if len(container_info) >= 4:
-                                    _, status, running, exit_code = container_info[:4]
-                                    # Update our container name for future reference
-                                    self.logger.info(f"Found alternative container for {container_name}: {container_info[0]}")
-                                    
-                                    # Continue processing with this info
-                                    return self._parse_container_status(status, running, exit_code)
-                        except Exception as e:
-                            self.logger.warning(f"Error searching for alternative container: {e}")
-                            
-                self.logger.warning(f"Error getting container status: {stderr.decode()}")
-                return JobStatus.NOT_STARTED
-                
-            # Parse the output
-            container_info = stdout.decode().strip().split(",")
-            if len(container_info) < 3:
-                self.logger.warning(f"Unexpected output format from docker inspect: {stdout.decode()}")
-                return JobStatus.NOT_STARTED
-                
-            status, running, exit_code = container_info[:3]
-            
-            return self._parse_container_status(status, running, exit_code)
-            
-        except Exception as exc:
-            self.logger.exception(f"Error getting container status: {exc}")
-            return JobStatus.FAILED
-        
     def _parse_container_status(self, status: str, running: str, exit_code: str) -> JobStatus:
         """Parse Docker container status into JobStatus enum.
         
@@ -917,10 +608,6 @@ class DockerRunner(BaseRunner):
             if rm_return_code != 0:
                 self.logger.warning(f"Error removing container {container_name}")
                 return False
-
-            # Remove from tracking dict
-            if container_name in self.running_containers:
-                del self.running_containers[container_name]
 
             return True
 

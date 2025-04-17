@@ -64,11 +64,6 @@ async def test_start_job(docker_runner):
         assert "run" in args
         assert "--name" in args
 
-        # Check container was stored in running_containers
-        container_name = docker_runner._container_name("test-project", "test-repo__instance")
-        assert container_name in docker_runner.running_containers
-        assert docker_runner.running_containers[container_name]["status"] == JobStatus.RUNNING
-
 
 @pytest.mark.asyncio
 async def test_start_job_already_exists(docker_runner):
@@ -284,9 +279,6 @@ async def test_get_runner_info(docker_runner):
         info = await docker_runner.get_runner_info()
         assert info.status == RunnerStatus.RUNNING
         assert info.runner_type == "docker"
-        
-        # Check for running_containers in the data
-        assert "running_containers" in info.data
 
         # Case 2: Docker is not accessible
         mock_process.returncode = 1
@@ -478,3 +470,35 @@ async def test_image_name_override():
         docker_run_call = mock_subprocess.call_args_list[1][0]
         cmd_str = " ".join(str(arg) for arg in docker_run_call)
         assert custom_image in cmd_str, f"Custom image {custom_image} not found in Docker command"
+
+
+@pytest.mark.asyncio
+async def test_get_container_status():
+    """Test the _get_container_status method with proper docker inspect command."""
+    # Create a DockerRunner instance
+    runner = DockerRunner()
+    
+    # Create a mock for the create_subprocess_exec function
+    process_mock = AsyncMock()
+    process_mock.returncode = 0
+    process_mock.communicate.return_value = (b"running,true,0,test_project,test_trajectory", b"")
+    
+    # Patch the asyncio.create_subprocess_exec function
+    with patch("asyncio.create_subprocess_exec", return_value=process_mock) as mock_exec:
+        # Call the method
+        container_name = "moatless_test_project_test_trajectory"
+        status = await runner._get_container_status(container_name)
+        
+        # Verify the correct command was executed
+        mock_exec.assert_called_once()
+        args = mock_exec.call_args[0]
+        
+        # Ensure there's only one --format flag in the command
+        format_flags = [arg for arg in args if arg == "--format"]
+        assert len(format_flags) == 1
+        
+        # Verify the correct status is returned
+        assert status == JobStatus.RUNNING
+        
+        # Ensure the process.communicate method was called
+        process_mock.communicate.assert_called_once()

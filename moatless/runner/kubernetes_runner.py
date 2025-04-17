@@ -207,392 +207,6 @@ class KubernetesRunner(BaseRunner):
             label_selector=label_selector,
         )
 
-    async def get_job_status_summary(self, project_id: str) -> JobsStatusSummary:
-        """Get a summary of job statuses for a project.
-
-        Args:
-            project_id: The project ID
-
-        Returns:
-            JobsStatusSummary with counts and IDs of jobs in different states
-        """
-        try:
-            summary = JobsStatusSummary(project_id=project_id)
-
-            # Get all jobs for this project
-            jobs = await self._list_jobs_in_namespace(self.namespace, project_id)
-
-            # Count jobs by status
-            for job in jobs.items:
-                job_id = job.metadata.name
-                status = self._get_job_status_from_k8s_job(job)
-
-                await self._update_summary_for_job(summary, job_id, status)
-
-            return summary
-
-        except ApiException as e:
-            self.logger.exception(
-                f"Exception when getting job summary for project {project_id} in namespace {self.namespace}: {e}"
-            )
-            return JobsStatusSummary(project_id=project_id)
-        except Exception as exc:
-            self.logger.exception(f"Error getting job summary for project {project_id}: {exc}")
-            return JobsStatusSummary(project_id=project_id)
-
-    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
-        """Get detailed information about a job.
-
-        Args:
-            project_id: The project ID
-            trajectory_id: The trajectory ID
-
-        Returns:
-            JobDetails object containing detailed information about the job
-        """
-        job_id = self._job_id(project_id, trajectory_id)
-        
-        try:
-            # Check if job exists
-            if not await self.job_exists(project_id, trajectory_id):
-                return None
-
-            # Get the Kubernetes Job resource
-            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
-
-            # Get job status
-            job_status = self._get_job_status_from_k8s_job(job)
-
-            # Get associated pod(s)
-            pod_list = self.core_v1.list_namespaced_pod(namespace=self.namespace, label_selector=f"job-name={job_id}")
-
-            # Get the first pod (most relevant)
-            pod = None
-            if pod_list.items:
-                pod = pod_list.items[0]
-
-            # Get pod logs if available
-            logs = ""
-            if pod:
-                try:
-                    logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=self.namespace)
-                except ApiException as e:
-                    self.logger.warning(f"Error getting logs for pod {pod.metadata.name}: {e}")
-
-            # Create JobDetails object with structured sections
-            job_details = JobDetails(
-                id=job_id,
-                status=job_status,
-                project_id=project_id,
-                trajectory_id=trajectory_id,
-                sections=[],
-                raw_data=job.to_dict(),
-            )
-
-            # Extract timestamps from job
-            if job.status.start_time:
-                job_details.started_at = job.status.start_time.replace(tzinfo=timezone.utc)
-
-            # For completion time
-            if job.status.completion_time:
-                job_details.ended_at = job.status.completion_time.replace(tzinfo=timezone.utc)
-
-            # For creation time
-            if job.metadata.creation_timestamp:
-                job_details.enqueued_at = job.metadata.creation_timestamp.replace(tzinfo=timezone.utc)
-
-            # Add Overview section
-            job_labels = job.metadata.labels or {}
-            overview_data = {
-                "job_name": job.metadata.name,
-                "namespace": self.namespace,
-                "project_id": project_id,
-                "trajectory_id": trajectory_id,
-                "creation_time": job.metadata.creation_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
-                if job.metadata.creation_timestamp
-                else "Unknown",
-                "start_time": job.status.start_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-                if job.status.start_time
-                else "Not started",
-                "completion_time": job.status.completion_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-                if job.status.completion_time
-                else "Not completed",
-                "active": job.status.active or 0,
-                "succeeded": job.status.succeeded or 0,
-                "failed": job.status.failed or 0,
-            }
-
-            overview_section = JobDetailSection(
-                name="overview",
-                display_name="Overview",
-                data=overview_data,
-            )
-            job_details.sections.append(overview_section)
-
-            # Add Job Spec section
-            spec_data = {
-                "parallelism": job.spec.parallelism,
-                "completions": job.spec.completions,
-                "active_deadline_seconds": job.spec.active_deadline_seconds,
-                "backoff_limit": job.spec.backoff_limit,
-                "ttl_seconds_after_finished": job.spec.ttl_seconds_after_finished,
-            }
-
-            spec_section = JobDetailSection(
-                name="spec",
-                display_name="Job Specification",
-                data=spec_data,
-            )
-            job_details.sections.append(spec_section)
-
-            # Add Pod Details section if pod exists
-            if pod:
-                pod_data = {
-                    "name": pod.metadata.name,
-                    "phase": pod.status.phase,
-                    "host_ip": pod.status.host_ip,
-                    "pod_ip": pod.status.pod_ip,
-                    "start_time": pod.status.start_time.strftime("%Y-%m-%d %H:%M:%S UTC")
-                    if pod.status.start_time
-                    else "Not started",
-                }
-
-                pod_section = JobDetailSection(
-                    name="pod",
-                    display_name="Pod Details",
-                    data=pod_data,
-                )
-                job_details.sections.append(pod_section)
-
-                # Add container details if available
-                if pod.spec.containers:
-                    containers_data = []
-                    for container in pod.spec.containers:
-                        container_data = {
-                            "name": container.name,
-                            "image": container.image,
-                            "command": container.command,
-                            "args": container.args,
-                            "resources": container.resources.to_dict() if container.resources else {},
-                        }
-                        containers_data.append(container_data)
-
-                    containers_section = JobDetailSection(
-                        name="containers",
-                        display_name="Containers",
-                        items=containers_data,
-                    )
-                    job_details.sections.append(containers_section)
-
-                # Add container status if available
-                if pod.status.container_statuses:
-                    statuses_data = []
-                    for status in pod.status.container_statuses:
-                        status_data = {
-                            "name": status.name,
-                            "ready": status.ready,
-                            "restart_count": status.restart_count,
-                            "image": status.image,
-                            "image_id": status.image_id,
-                            "container_id": status.container_id,
-                        }
-
-                        # Add detailed state information
-                        if status.state.running:
-                            status_data["state"] = "running"
-                            status_data["started_at"] = (
-                                status.state.running.started_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                                if status.state.running.started_at
-                                else ""
-                            )
-                        elif status.state.terminated:
-                            status_data["state"] = "terminated"
-                            status_data["exit_code"] = status.state.terminated.exit_code
-                            status_data["reason"] = status.state.terminated.reason
-                            status_data["message"] = status.state.terminated.message
-                            status_data["started_at"] = (
-                                status.state.terminated.started_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                                if status.state.terminated.started_at
-                                else ""
-                            )
-                            status_data["finished_at"] = (
-                                status.state.terminated.finished_at.strftime("%Y-%m-%d %H:%M:%S UTC")
-                                if status.state.terminated.finished_at
-                                else ""
-                            )
-                        elif status.state.waiting:
-                            status_data["state"] = "waiting"
-                            status_data["reason"] = status.state.waiting.reason
-                            status_data["message"] = status.state.waiting.message
-
-                        statuses_data.append(status_data)
-
-                    status_section = JobDetailSection(
-                        name="container_status",
-                        display_name="Container Status",
-                        items=statuses_data,
-                    )
-                    job_details.sections.append(status_section)
-
-            # Add Labels section
-            labels_section = JobDetailSection(
-                name="labels",
-                display_name="Labels",
-                data=job_labels,
-            )
-            job_details.sections.append(labels_section)
-
-            # Add Environment section (from container env if available)
-            if pod and pod.spec.containers:
-                env_data = {}
-                for container in pod.spec.containers:
-                    if container.env:
-                        for env_var in container.env:
-                            # Filter out sensitive data
-                            if env_var.name and (
-                                "API_KEY" in env_var.name
-                                or "PASSWORD" in env_var.name
-                                or "SECRET" in env_var.name
-                                or "TOKEN" in env_var.name
-                            ):
-                                env_data[env_var.name] = "********"
-                            else:
-                                env_data[env_var.name] = env_var.value if env_var.value else "[from ConfigMap/Secret]"
-
-                if env_data:
-                    env_section = JobDetailSection(
-                        name="environment",
-                        display_name="Environment",
-                        data=env_data,
-                    )
-                    job_details.sections.append(env_section)
-
-            # Add Volumes section if available
-            if pod and pod.spec.volumes:
-                volumes_data = []
-                for volume in pod.spec.volumes:
-                    volume_data = {
-                        "name": volume.name,
-                    }
-
-                    # Add volume source details
-                    if volume.config_map:
-                        volume_data["type"] = "configMap"
-                        volume_data["config_map_name"] = volume.config_map.name
-                    elif volume.secret:
-                        volume_data["type"] = "secret"
-                        volume_data["secret_name"] = volume.secret.secret_name
-                    elif volume.persistent_volume_claim:
-                        volume_data["type"] = "persistentVolumeClaim"
-                        volume_data["claim_name"] = volume.persistent_volume_claim.claim_name
-                    elif volume.empty_dir:
-                        volume_data["type"] = "emptyDir"
-                    else:
-                        volume_data["type"] = "other"
-
-                    volumes_data.append(volume_data)
-
-                volumes_section = JobDetailSection(
-                    name="volumes",
-                    display_name="Volumes",
-                    items=volumes_data,
-                )
-                job_details.sections.append(volumes_section)
-
-            # Add Logs section if available
-            if logs:
-                logs_section = JobDetailSection(
-                    name="logs",
-                    display_name="Logs",
-                    data={"logs": logs},
-                )
-                job_details.sections.append(logs_section)
-
-            # Add error information if job failed
-            if job_status == JobStatus.FAILED:
-                error_message = "Job failed"
-
-                # Check for specific error conditions
-                if job.status.conditions:
-                    for condition in job.status.conditions:
-                        if condition.type == "Failed" and condition.message:
-                            error_message = condition.message
-                            break
-
-                # Check pod for more detailed error
-                if pod and pod.status.container_statuses:
-                    for container_status in pod.status.container_statuses:
-                        if container_status.state.terminated and container_status.state.terminated.exit_code != 0:
-                            exit_code = container_status.state.terminated.exit_code
-                            reason = container_status.state.terminated.reason or ""
-                            message = container_status.state.terminated.message or ""
-
-                            error_message = f"Container exited with code {exit_code}"
-                            if reason:
-                                error_message += f": {reason}"
-                            if message:
-                                error_message += f" - {message}"
-                            break
-
-                job_details.error = error_message
-
-                error_data = {
-                    "message": error_message,
-                    "pod_phase": pod.status.phase if pod else "Unknown",
-                }
-
-                error_section = JobDetailSection(
-                    name="error",
-                    display_name="Error",
-                    data=error_data,
-                )
-                job_details.sections.append(error_section)
-
-            return job_details
-
-        except ApiException as e:
-            self.logger.exception(f"Exception when getting job details for {job_id} in namespace {self.namespace}: {e}")
-            return None
-        except Exception as exc:
-            self.logger.exception(f"Error getting job details for {job_id}: {exc}")
-            return None
-
-    async def _update_summary_for_job(self, summary: JobsStatusSummary, job_id: str, status: JobStatus) -> None:
-        """Update job status summary with a job.
-
-        Args:
-            summary: JobsStatusSummary to update
-            job_id: Job ID
-            status: Job status
-        """
-        summary.total_jobs += 1
-
-        if status == JobStatus.PENDING:
-            summary.pending_jobs += 1
-            summary.job_ids["pending"].append(job_id)
-        elif status == JobStatus.RUNNING:
-            summary.running_jobs += 1
-            summary.job_ids["running"].append(job_id)
-        elif status == JobStatus.COMPLETED:
-            summary.completed_jobs += 1
-            summary.job_ids["completed"].append(job_id)
-        elif status == JobStatus.FAILED:
-            summary.failed_jobs += 1
-            summary.job_ids["failed"].append(job_id)
-        elif status == JobStatus.CANCELED:
-            summary.canceled_jobs += 1
-            summary.job_ids["canceled"].append(job_id)
-
-    async def _add_quota_info_to_summary(self, summary: JobsStatusSummary, namespace: str) -> None:
-        """Add quota information to job status summary.
-
-        Args:
-            summary: JobsStatusSummary to update
-            namespace: Kubernetes namespace
-        """
-        # Removed since we no longer manage quotas per project namespace
-        pass
-
     @tracer.start_as_current_span("KubernetesRunner.cancel_job")
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None):
         """Cancel a job or all jobs for a project.
@@ -767,12 +381,12 @@ class KubernetesRunner(BaseRunner):
         except ApiException as e:
             if e.status == 404:
                 self.logger.info(f"Job {job_id} not found in namespace {self.namespace}")
-                return JobStatus.NOT_STARTED
+                return JobStatus.PENDING
             self.logger.exception(f"Error getting job status for {job_id}: {e}")
-            return JobStatus.NOT_STARTED
+            return JobStatus.UNKNOWN
         except Exception as exc:
             self.logger.exception(f"Unexpected error getting job status for {job_id}: {exc}")
-            return JobStatus.NOT_STARTED
+            return JobStatus.UNKNOWN
 
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.
@@ -1267,3 +881,320 @@ class KubernetesRunner(BaseRunner):
                 "pod_status": pod_metadata,
             },
         )
+
+    async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
+        """Get detailed information about a job.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+
+        Returns:
+            JobDetails object containing detailed information about the job
+        """
+        job_id = self._job_id(project_id, trajectory_id)
+
+        try:
+            # Check if job exists
+            if not await self.job_exists(project_id, trajectory_id):
+                return None
+
+            # Get the Kubernetes Job resource
+            job = self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
+
+            # Get job status
+            job_status = self._get_job_status_from_k8s_job(job)
+
+            # Get associated pod(s)
+            pod_list = self.core_v1.list_namespaced_pod(namespace=self.namespace, label_selector=f"job-name={job_id}")
+
+            # Get the first pod (most relevant)
+            pod = None
+            if pod_list.items:
+                pod = pod_list.items[0]
+
+            # Get pod logs if available
+            logs = ""
+            if pod:
+                try:
+                    logs = self.core_v1.read_namespaced_pod_log(name=pod.metadata.name, namespace=self.namespace)
+                except ApiException as e:
+                    self.logger.warning(f"Error getting logs for pod {pod.metadata.name}: {e}")
+
+            # Create JobDetails object with structured sections
+            job_details = JobDetails(
+                id=job_id,
+                status=job_status,
+                project_id=project_id,
+                trajectory_id=trajectory_id,
+                sections=[],
+                raw_data=job.to_dict(),
+            )
+
+            # Extract timestamps from job
+            if job.status.start_time:
+                job_details.started_at = job.status.start_time.replace(tzinfo=timezone.utc)
+
+            # For completion time
+            if job.status.completion_time:
+                job_details.ended_at = job.status.completion_time.replace(tzinfo=timezone.utc)
+
+            # For creation time
+            if job.metadata.creation_timestamp:
+                job_details.enqueued_at = job.metadata.creation_timestamp.replace(tzinfo=timezone.utc)
+
+            # Add Overview section
+            job_labels = job.metadata.labels or {}
+            overview_data = {
+                "job_name": job.metadata.name,
+                "namespace": self.namespace,
+                "project_id": project_id,
+                "trajectory_id": trajectory_id,
+                "creation_time": job.metadata.creation_timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+                if job.metadata.creation_timestamp
+                else "Unknown",
+                "start_time": job.status.start_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+                if job.status.start_time
+                else "Not started",
+                "completion_time": job.status.completion_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+                if job.status.completion_time
+                else "Not completed",
+                "active": job.status.active or 0,
+                "succeeded": job.status.succeeded or 0,
+                "failed": job.status.failed or 0,
+            }
+
+            overview_section = JobDetailSection(
+                name="overview",
+                display_name="Overview",
+                data=overview_data,
+            )
+            job_details.sections.append(overview_section)
+
+            # Add Job Spec section
+            spec_data = {
+                "parallelism": job.spec.parallelism,
+                "completions": job.spec.completions,
+                "active_deadline_seconds": job.spec.active_deadline_seconds,
+                "backoff_limit": job.spec.backoff_limit,
+                "ttl_seconds_after_finished": job.spec.ttl_seconds_after_finished,
+            }
+
+            spec_section = JobDetailSection(
+                name="spec",
+                display_name="Job Specification",
+                data=spec_data,
+            )
+            job_details.sections.append(spec_section)
+
+            # Add Pod Details section if pod exists
+            if pod:
+                pod_data = {
+                    "name": pod.metadata.name,
+                    "phase": pod.status.phase,
+                    "host_ip": pod.status.host_ip,
+                    "pod_ip": pod.status.pod_ip,
+                    "start_time": pod.status.start_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+                    if pod.status.start_time
+                    else "Not started",
+                }
+
+                pod_section = JobDetailSection(
+                    name="pod",
+                    display_name="Pod Details",
+                    data=pod_data,
+                )
+                job_details.sections.append(pod_section)
+
+                # Add container details if available
+                if pod.spec.containers:
+                    containers_data = []
+                    for container in pod.spec.containers:
+                        container_data = {
+                            "name": container.name,
+                            "image": container.image,
+                            "command": container.command,
+                            "args": container.args,
+                            "resources": container.resources.to_dict() if container.resources else {},
+                        }
+                        containers_data.append(container_data)
+
+                    containers_section = JobDetailSection(
+                        name="containers",
+                        display_name="Containers",
+                        items=containers_data,
+                    )
+                    job_details.sections.append(containers_section)
+
+                # Add container status if available
+                if pod.status.container_statuses:
+                    statuses_data = []
+                    for status in pod.status.container_statuses:
+                        status_data = {
+                            "name": status.name,
+                            "ready": status.ready,
+                            "restart_count": status.restart_count,
+                            "image": status.image,
+                            "image_id": status.image_id,
+                            "container_id": status.container_id,
+                        }
+
+                        # Add detailed state information
+                        if status.state.running:
+                            status_data["state"] = "running"
+                            status_data["started_at"] = (
+                                status.state.running.started_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                                if status.state.running.started_at
+                                else ""
+                            )
+                        elif status.state.terminated:
+                            status_data["state"] = "terminated"
+                            status_data["exit_code"] = status.state.terminated.exit_code
+                            status_data["reason"] = status.state.terminated.reason
+                            status_data["message"] = status.state.terminated.message
+                            status_data["started_at"] = (
+                                status.state.terminated.started_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                                if status.state.terminated.started_at
+                                else ""
+                            )
+                            status_data["finished_at"] = (
+                                status.state.terminated.finished_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                                if status.state.terminated.finished_at
+                                else ""
+                            )
+                        elif status.state.waiting:
+                            status_data["state"] = "waiting"
+                            status_data["reason"] = status.state.waiting.reason
+                            status_data["message"] = status.state.waiting.message
+
+                        statuses_data.append(status_data)
+
+                    status_section = JobDetailSection(
+                        name="container_status",
+                        display_name="Container Status",
+                        items=statuses_data,
+                    )
+                    job_details.sections.append(status_section)
+
+            # Add Labels section
+            labels_section = JobDetailSection(
+                name="labels",
+                display_name="Labels",
+                data=job_labels,
+            )
+            job_details.sections.append(labels_section)
+
+            # Add Environment section (from container env if available)
+            if pod and pod.spec.containers:
+                env_data = {}
+                for container in pod.spec.containers:
+                    if container.env:
+                        for env_var in container.env:
+                            # Filter out sensitive data
+                            if env_var.name and (
+                                    "API_KEY" in env_var.name
+                                    or "PASSWORD" in env_var.name
+                                    or "SECRET" in env_var.name
+                                    or "TOKEN" in env_var.name
+                            ):
+                                env_data[env_var.name] = "********"
+                            else:
+                                env_data[env_var.name] = env_var.value if env_var.value else "[from ConfigMap/Secret]"
+
+                if env_data:
+                    env_section = JobDetailSection(
+                        name="environment",
+                        display_name="Environment",
+                        data=env_data,
+                    )
+                    job_details.sections.append(env_section)
+
+            # Add Volumes section if available
+            if pod and pod.spec.volumes:
+                volumes_data = []
+                for volume in pod.spec.volumes:
+                    volume_data = {
+                        "name": volume.name,
+                    }
+
+                    # Add volume source details
+                    if volume.config_map:
+                        volume_data["type"] = "configMap"
+                        volume_data["config_map_name"] = volume.config_map.name
+                    elif volume.secret:
+                        volume_data["type"] = "secret"
+                        volume_data["secret_name"] = volume.secret.secret_name
+                    elif volume.persistent_volume_claim:
+                        volume_data["type"] = "persistentVolumeClaim"
+                        volume_data["claim_name"] = volume.persistent_volume_claim.claim_name
+                    elif volume.empty_dir:
+                        volume_data["type"] = "emptyDir"
+                    else:
+                        volume_data["type"] = "other"
+
+                    volumes_data.append(volume_data)
+
+                volumes_section = JobDetailSection(
+                    name="volumes",
+                    display_name="Volumes",
+                    items=volumes_data,
+                )
+                job_details.sections.append(volumes_section)
+
+            # Add Logs section if available
+            if logs:
+                logs_section = JobDetailSection(
+                    name="logs",
+                    display_name="Logs",
+                    data={"logs": logs},
+                )
+                job_details.sections.append(logs_section)
+
+            # Add error information if job failed
+            if job_status == JobStatus.FAILED:
+                error_message = "Job failed"
+
+                # Check for specific error conditions
+                if job.status.conditions:
+                    for condition in job.status.conditions:
+                        if condition.type == "Failed" and condition.message:
+                            error_message = condition.message
+                            break
+
+                # Check pod for more detailed error
+                if pod and pod.status.container_statuses:
+                    for container_status in pod.status.container_statuses:
+                        if container_status.state.terminated and container_status.state.terminated.exit_code != 0:
+                            exit_code = container_status.state.terminated.exit_code
+                            reason = container_status.state.terminated.reason or ""
+                            message = container_status.state.terminated.message or ""
+
+                            error_message = f"Container exited with code {exit_code}"
+                            if reason:
+                                error_message += f": {reason}"
+                            if message:
+                                error_message += f" - {message}"
+                            break
+
+                job_details.error = error_message
+
+                error_data = {
+                    "message": error_message,
+                    "pod_phase": pod.status.phase if pod else "Unknown",
+                }
+
+                error_section = JobDetailSection(
+                    name="error",
+                    display_name="Error",
+                    data=error_data,
+                )
+                job_details.sections.append(error_section)
+
+            return job_details
+
+        except ApiException as e:
+            self.logger.exception(f"Exception when getting job details for {job_id} in namespace {self.namespace}: {e}")
+            return None
+        except Exception as exc:
+            self.logger.exception(f"Error getting job details for {job_id}: {exc}")
+            return None

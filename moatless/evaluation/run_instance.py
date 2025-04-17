@@ -92,6 +92,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
             evaluation_name=project_id,
             instance_id=trajectory_id,
             flow=flow,
+            selected_node=node,
             runtime=runtime,
             storage=storage,
         )
@@ -115,61 +116,55 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
 
 async def evaluate_instance(
-    evaluation_name: str, instance_id: str, flow: AgenticFlow, runtime: RuntimeEnvironment, storage: BaseStorage
+    evaluation_name: str, instance_id: str, flow: AgenticFlow, selected_node: Node, runtime: RuntimeEnvironment, storage: BaseStorage
 ) -> None:
     """Evaluate an instance's results."""
 
     evaluation_key = f"projects/{evaluation_name}/trajs/{instance_id}/evaluation"
     leaf_nodes = flow.root.get_leaf_nodes()
 
-    unevaluated_nodes = [
-        node for node in leaf_nodes if not await storage.exists(f"{evaluation_key}/node_{node.node_id}/report.json")
-    ]
-
-    if not unevaluated_nodes:
-        logger.info(f"All leaf nodes evaluated for instance {instance_id}")
-        return
-
     await _emit_event(evaluation_name, instance_id, "evaluation", "started")
 
-    any_resolved = False
-
-    for i, leaf_node in enumerate(unevaluated_nodes):
-        logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(unevaluated_nodes)})")
+    resolved = None
+    
+    for i, leaf_node in enumerate(leaf_nodes):
+        logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(leaf_nodes)})")
+        
         if not leaf_node.file_context:
             raise ValueError(f"No file context for node {leaf_node.node_id}")
+        
+        if not leaf_node.evaluation_result:
+            patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
+            try:
+                evaluation_node_key = f"{evaluation_key}/node_{leaf_node.node_id}"
+                start_time = datetime.now()
+                report = await runtime.swebench_evaluate(evaluation_node_key, patch)
+                end_time = datetime.now()
 
-        patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
-        try:
-            evaluation_node_key = f"{evaluation_key}/node_{leaf_node.node_id}"
-            start_time = datetime.now()
-            report = await runtime.swebench_evaluate(evaluation_node_key, patch)
-            end_time = datetime.now()
+                if instance_id not in report:
+                    logger.warning(f"Instance {instance_id} not found in report for node {leaf_node.node_id}: {report}")
+                    continue
 
-            if instance_id not in report:
-                logger.warning(f"Instance {instance_id} not found in report for node {leaf_node.node_id}: {report}")
-                continue
+                logger.info(
+                    f"Evaluation complete for node {leaf_node.node_id}. Resolved: {report[instance_id]['resolved']}"
+                )
 
-            logger.info(
-                f"Evaluation complete for node {leaf_node.node_id}. Resolved: {report[instance_id]['resolved']}"
-            )
+                if leaf_node.node_id == selected_node.node_id:
+                    resolved = report[instance_id]["resolved"]
 
-            if report[instance_id]["resolved"]:
-                any_resolved = True
+                leaf_node.evaluation_result = EvaluationResult(
+                    resolved=report[instance_id].get("resolved", False),
+                    details=report[instance_id],
+                    start_time=start_time,
+                    end_time=end_time,
+                )
 
-            leaf_node.evaluation_result = EvaluationResult(
-                resolved=report[instance_id].get("resolved", False),
-                details=report[instance_id],
-                start_time=start_time,
-                end_time=end_time,
-            )
+                await persist_trajectory_data(flow)
 
-            await persist_trajectory_data(flow)
+            except Exception:
+                logger.exception(f"Error evaluating node {leaf_node.node_id} for instance {instance_id}")
 
-        except Exception:
-            logger.exception(f"Error evaluating node {leaf_node.node_id} for instance {instance_id}")
-
-    await _emit_event(evaluation_name, instance_id, "evaluation", "completed", data={"resolved": any_resolved})
+    await _emit_event(evaluation_name, instance_id, "evaluation", "completed", data={"resolved": resolved})
 
 
 async def _emit_event(

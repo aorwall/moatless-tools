@@ -104,16 +104,16 @@ class FlowConfig(BaseModel):
             data = data.copy()
 
             if "selector" in data and data["selector"]:
-                data["selector"] = BaseSelector.model_validate(data["selector"])
+                data["selector"] = BaseSelector.from_dict(data["selector"])
             if "value_function" in data and data["value_function"]:
-                data["value_function"] = BaseValueFunction.model_validate(data["value_function"])
+                data["value_function"] = BaseValueFunction.from_dict(data["value_function"])
             if "feedback_generator" in data and data["feedback_generator"]:
-                data["feedback_generator"] = BaseFeedbackGenerator.model_validate(data["feedback_generator"])
+                data["feedback_generator"] = BaseFeedbackGenerator.from_dict(data["feedback_generator"])
             if "discriminator" in data and data["discriminator"]:
-                data["discriminator"] = BaseDiscriminator.model_validate(data["discriminator"])
+                data["discriminator"] = BaseDiscriminator.from_dict(data["discriminator"])
             if "artifact_handlers" in data and data["artifact_handlers"]:
                 data["artifact_handlers"] = [
-                    ArtifactHandler.model_validate(handler) for handler in data["artifact_handlers"]
+                    ArtifactHandler.from_dict(handler) for handler in data["artifact_handlers"]
                 ]
 
         return data

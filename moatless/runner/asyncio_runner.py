@@ -451,7 +451,7 @@ class AsyncioRunner(BaseRunner):
         if job_id in self.job_metadata:
             return cast(JobStatus, self.job_metadata[job_id]["status"])
 
-        return JobStatus.NOT_STARTED
+        return JobStatus.PENDING
 
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.
