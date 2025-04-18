@@ -289,13 +289,6 @@ class Node(BaseModel):
 
         return self.terminal
 
-    def is_finished(self) -> bool:
-        """Determine if the node is succesfully finished"""
-        if self.action and self.action.name == "Finish":
-            return True
-
-        return False
-
     def is_executed(self) -> bool:
         """Determine if the node is executed"""
         if not self.parent and not self.action_steps:

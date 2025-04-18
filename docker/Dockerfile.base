@@ -7,20 +7,19 @@ ENV PATH="/root/.local/bin/:$PATH"
 
 RUN uv python install 3.12 --managed-python
 
+RUN mkdir -p /data/nltk_data
+ENV NLTK_DATA=/data/nltk_data
+
+RUN git clone https://github.com/aorwall/moatless-tools.git -b docker /opt/moatless
+RUN git clone https://github.com/aorwall/moatless-tree-search.git -b docker /opt/components
+
+COPY docker/update-moatless.sh /usr/local/bin/update-moatless.sh
+COPY docker/update-components.sh /usr/local/bin/update-components.sh
+
+ENV MOATLESS_DIR=/data/moatless
+ENV MOATLESS_COMPONENTS_PATH=/opt/components
+
 WORKDIR /opt/moatless
 
-# Copy project files
-COPY pyproject.toml uv.lock ./
-COPY README.md ./
-
-# Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --compile-bytecode
-
-COPY moatless ./moatless
-
-# Sync the project
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --compile-bytecode
+    uv sync --frozen --compile-bytecode 

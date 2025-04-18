@@ -26,7 +26,8 @@ class InstanceStatus(str, Enum):
     PENDING = "pending"
     SETTING_UP = "setting_up"
     RUNNING = "running"
-    PAUSED = "paused"
+    PAUSED = "paused" # TODO: Remove this
+    STOPPED = "stopped"
     COMPLETED = "completed"
     EVALUATING = "evaluating"
     EVALUATED = "evaluated"
@@ -38,7 +39,8 @@ class InstanceStatus(str, Enum):
 class EvaluationStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
-    PAUSED = "paused"
+    PAUSED = "paused" # TODO: Remove this
+    STOPPED = "stopped"
     COMPLETED = "completed"
     ERROR = "error"
 
@@ -59,6 +61,7 @@ class EvaluationInstance(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the instance was created",
     )
+    queued_at: Optional[datetime] = Field(default=None, description="When the instance was queued")
     started_at: Optional[datetime] = Field(default=None, description="When the instance started")
     completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
     start_evaluating_at: Optional[datetime] = Field(default=None, description="When the instance started evaluating")
@@ -75,8 +78,8 @@ class EvaluationInstance(BaseModel):
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
 
     def start(self):
-        self.status = InstanceStatus.RUNNING
-        self.started_at = datetime.now(timezone.utc)
+        self.status = InstanceStatus.PENDING
+        self.queued_at = datetime.now(timezone.utc)
 
     def complete(
         self,

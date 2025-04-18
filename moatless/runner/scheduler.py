@@ -456,8 +456,8 @@ class SchedulerRunner(BaseRunner):
         """
         try:
             # Only update jobs that are pending or running
-            if job.status not in [JobStatus.RUNNING, JobStatus.PENDING]:
-                self.logger.info(f"Not updating job {job.id} with status {job.status} - not in RUNNING or PENDING state")
+            if job.status not in [JobStatus.RUNNING, JobStatus.PENDING, JobStatus.UNKNOWN]:
+                self.logger.info(f"Not updating job {job.id} with status {job.status} - not in RUNNING, PENDING or UNKNOWN state")
                 return
             
             # Job exists, get current status from the underlying runner
@@ -475,10 +475,17 @@ class SchedulerRunner(BaseRunner):
                 job.metadata["error"] = "Job failed during execution"
                 await self.storage.update_job(job)
                 self.logger.info(f"Job {job.id} failed")
+
             elif current_status == JobStatus.UNKNOWN and job.status in [JobStatus.RUNNING, JobStatus.PENDING]:
                 job.status = JobStatus.UNKNOWN
                 await self.storage.update_job(job)
                 self.logger.info(f"Job {job.id} unknown")
+            
+            elif job.status == JobStatus.UNKNOWN:
+                job.status = current_status
+                await self.storage.update_job(job)
+                self.logger.info(f"Job {job.id} unknown to runner, updating to {current_status}")
+
             elif current_status != JobStatus.RUNNING and job.status == JobStatus.RUNNING:
                 # Any other status for a RUNNING job means it's stopped unexpectedly
                 

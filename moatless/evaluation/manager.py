@@ -145,7 +145,7 @@ class EvaluationManager:
         started_instances = 0
 
         for instance in evaluation.instances:
-            if instance.status == InstanceStatus.EVALUATED:
+            if instance.status == InstanceStatus.COMPLETED:
                 continue
 
             # Start the job using the wrapper function
@@ -173,7 +173,7 @@ class EvaluationManager:
 
         return evaluation
 
-    async def get_evaluation(self, evaluation_name: str) -> Evaluation:
+    async def get_evaluation(self, evaluation_name: str, sync: bool = False) -> Evaluation:
         """Get an evaluation by name."""
         # Load the evaluation from project storage
         evaluation = await self._load_evaluation(evaluation_name)
@@ -183,35 +183,28 @@ class EvaluationManager:
         if evaluation.status == EvaluationStatus.COMPLETED:
             return evaluation
 
+        if sync:
+            await self.process_evaluation_results(evaluation_name)
+
         # Process the evaluation status
         evaluation_is_running = False
         evaluation_is_completed = True
 
         for instance in evaluation.instances:
-            if instance.resolved is None:
-                evaluation_is_completed = False
+            if instance.status == InstanceStatus.COMPLETED:
+                continue
 
-                job_status = await self.runner.get_job_status(
-                    project_id=evaluation_name, trajectory_id=instance.instance_id
-                )
+            evaluation_is_completed = False
 
-                if job_status in [JobStatus.RUNNING]:
-                    instance.status = InstanceStatus.RUNNING
+            job_status = await self.runner.get_job_status(
+                project_id=evaluation_name, trajectory_id=instance.instance_id
+            )
+            
+            instance.job_status = job_status
 
-                    evaluation_is_running = True
-                elif instance.status == InstanceStatus.ERROR:
-                    instance.status = InstanceStatus.ERROR
-                elif instance.iterations is not None and instance.iterations > 1:
-                    instance.status = InstanceStatus.PAUSED
-                else:
-                    instance.status = InstanceStatus.PENDING
+            if job_status in [JobStatus.RUNNING]:
+                evaluation_is_running = True
 
-                instance.job_status = job_status
-            elif instance.resolved:
-                instance.status = InstanceStatus.RESOLVED
-            else:
-                instance.status = InstanceStatus.FAILED
-    
         if evaluation_is_completed:
             evaluation.status = EvaluationStatus.COMPLETED
         elif not evaluation_is_running:
@@ -243,18 +236,15 @@ class EvaluationManager:
             return
 
         if event.scope == "flow" and event.event_type == "started":
-            instance.status = InstanceStatus.RUNNING
             instance.started_at = event.timestamp
+            instance.status = InstanceStatus.RUNNING
         elif event.scope == "flow" and event.event_type == "completed":
             await self._process_trajectory_results(evaluation, instance)
-            instance.status = InstanceStatus.COMPLETED
             instance.completed_at = event.timestamp
         elif event.scope == "evaluation" and event.event_type == "started":
-            instance.status = InstanceStatus.EVALUATING
             instance.start_evaluating_at = event.timestamp
         elif event.scope == "evaluation" and event.event_type == "completed":
             await self._process_trajectory_results(evaluation, instance)
-            instance.status = InstanceStatus.EVALUATED
             instance.evaluated_at = event.timestamp
         elif event.event_type == "error":
             instance.status = InstanceStatus.ERROR
@@ -264,8 +254,11 @@ class EvaluationManager:
 
         await self._save_evaluation(evaluation)
 
-    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance):
+    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = False):
         """Process the results of a trajectory and update the instance with the results."""
+        
+        if instance.status == InstanceStatus.COMPLETED and not force_update:
+            return instance
 
         # Check if the instance information exists in storage
         if not await self.storage.exists_in_trajectory(
@@ -277,51 +270,18 @@ class EvaluationManager:
             return instance
 
         try:
-            events = await self.eventbus.read_events(
-                project_id=evaluation.evaluation_name,
-                trajectory_id=instance.instance_id,
-            )
-            logger.info(
-                f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}"
-            )
-            # set timestamps
-            if not instance.started_at:
-                event = next(
-                    (e for e in events if e.scope == "flow" and e.event_type == "started"),
-                    None,
-                )
-                if event:
-                    instance.started_at = event.timestamp
-
-            if not instance.completed_at:
-                event = next(
-                    (e for e in events if e.scope == "flow" and e.event_type == "completed"),
-                    None,
-                )
-                if event:
-                    instance.completed_at = event.timestamp
-
-            if not instance.start_evaluating_at:
-                event = next(
-                    (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
-                    None,
-                )
-                if event:
-                    instance.start_evaluating_at = event.timestamp
-
-            if not instance.evaluated_at:
-                event = next(
-                    (e for e in events if e.scope == "evaluation" and e.event_type == "completed"),
-                    None,
-                )
-                if event:
-                    instance.evaluated_at = event.timestamp
-
+            await self._sync_event_timestamps(evaluation, instance)
             flow = await AgenticFlow.from_trajectory_id(
                 trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
             )
+
             instance.usage = flow.total_usage()
             instance.iterations = len(flow.root.get_all_nodes())
+
+            if not flow.is_finished():
+                instance.completed_at = None
+                instance.evaluated_at = None
+                return instance
 
             node = None
             if flow.root.discriminator_result and flow.root.discriminator_result.selected_node_id:
@@ -329,56 +289,24 @@ class EvaluationManager:
                 
             if not node:
                 node = flow.root.get_last_node()
-            
+
+            if node.reward:
+                instance.reward = node.reward.value
+                            
+            if node.evaluation_result:
+                instance.resolved = node.evaluation_result.resolved
+                instance.status = InstanceStatus.COMPLETED
+                return instance
+
             if node.error:
                 instance.status = InstanceStatus.ERROR
                 instance.error = node.error
                 return instance
 
-            if not flow.is_finished():
-                instance.completed_at = None
-                instance.evaluated_at = None
-                instance.status = InstanceStatus.RUNNING
-                return instance
-
-            if not instance.completed_at and instance.status != InstanceStatus.EVALUATED:
-                # TODO: Handle trajectories with multiple leaf nodes
-                if node.terminal:
-                    if node.reward:
-                        instance.reward = node.reward.value
-
-                    if node.error:
-                        instance.error = node.error
-                        instance.status = InstanceStatus.ERROR
-                        instance.error_at = datetime.now(timezone.utc)
-                    else:
-                        instance.status = InstanceStatus.COMPLETED
-
-                instance.iterations = len(flow.root.get_all_nodes())
-
-            if node.evaluation_result:
-                instance.resolved = node.evaluation_result.resolved
-
-            if not instance.evaluated_at or instance.resolved is None or instance.status != InstanceStatus.EVALUATED:
-                if node.evaluation_result:
-                    instance.resolved = node.evaluation_result.resolved
-
-                if instance.status != InstanceStatus.EVALUATED:
-                    instance.status = InstanceStatus.EVALUATED
-                    logger.info(f"Synced instance {instance.instance_id} evaluated at {instance.evaluated_at}")
-
-                # Check if all instances have been evaluated, and update evaluation status
-                all_evaluated = self._is_evaluation_completed(evaluation)
-                if all_evaluated and evaluation.status != EvaluationStatus.COMPLETED:
-                    logger.info(
-                        f"All instances evaluated for evaluation {evaluation.evaluation_name}, setting to COMPLETED"
-                    )
-                    self._set_evaluation_completed(evaluation)
-            return instance
         except Exception as e:
             logger.exception(f"Error processing trajectory results for instance {instance.instance_id}")
             return instance
-
+        
     async def cancel_evaluation(self, evaluation_name: str):
         """Cancel all running jobs for an evaluation."""
         evaluation = await self._load_evaluation(evaluation_name)
@@ -414,7 +342,7 @@ class EvaluationManager:
             raise ValueError(f"Instance {instance_id} not found in evaluation {evaluation_name}")
 
         # Reset the instance state
-        if instance.status == InstanceStatus.EVALUATED:
+        if instance.status == InstanceStatus.COMPLETED:
             # Moving from evaluated back to pending
             instance.status = InstanceStatus.PENDING
             instance.evaluated_at = None
@@ -446,7 +374,7 @@ class EvaluationManager:
 
     def _is_evaluation_completed(self, evaluation: Evaluation) -> bool:
         """Check if all instances in an evaluation have been evaluated."""
-        return all(instance.status == InstanceStatus.EVALUATED for instance in evaluation.instances)
+        return all(instance.status == InstanceStatus.COMPLETED for instance in evaluation.instances)
 
     def _set_evaluation_completed(self, evaluation: Evaluation):
         """Set the evaluation status to COMPLETED."""
@@ -634,7 +562,7 @@ class EvaluationManager:
             await self._flow_manager.save_trajectory(evaluation.evaluation_name, instance.instance_id, flow)
 
         # Skip if already evaluated
-        if instance.status == InstanceStatus.EVALUATED:
+        if instance.status == InstanceStatus.COMPLETED:
             logger.info(f"Instance {instance_id} is already evaluated, skipping")
             return evaluation
 
@@ -722,3 +650,48 @@ class EvaluationManager:
                 logger.error(f"Error loading instance {instance_id}: {e}")
 
         return instances
+
+    async def _sync_event_timestamps(self, evaluation: Evaluation, instance: EvaluationInstance):
+        if instance.started_at and instance.completed_at and instance.start_evaluating_at and instance.evaluated_at:
+            return
+        
+        events = await self.eventbus.read_events(
+                project_id=evaluation.evaluation_name,
+                trajectory_id=instance.instance_id,
+            )
+        logger.info(
+            f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}"
+        )
+        # set timestamps
+        if not instance.started_at:
+            event = next(
+                (e for e in events if e.scope == "flow" and e.event_type == "started"),
+                None,
+            )
+            if event:
+                instance.started_at = event.timestamp
+
+        if not instance.completed_at:
+            event = next(
+                (e for e in events if e.scope == "flow" and e.event_type == "completed"),
+                None,
+            )
+            if event:
+                instance.completed_at = event.timestamp
+
+        if not instance.start_evaluating_at:
+            event = next(
+                (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
+                None,
+            )
+            if event:
+                instance.start_evaluating_at = event.timestamp
+
+        if not instance.evaluated_at:
+            event = next(
+                (e for e in events if e.scope == "evaluation" and e.event_type == "completed"),
+                None,
+            )
+            if event:
+                instance.evaluated_at = event.timestamp
+

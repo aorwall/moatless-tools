@@ -151,6 +151,10 @@ class SearchTree(AgenticFlow):
                 self.log(logger.info, f"Node{node.node_id} finished. Returning.")
                 break
 
+        # Capture finish reason if loop ended due to no selectable node
+        if not node and not finish_reason:
+            finish_reason = "no_expandable_nodes"
+
         if not len(self.get_finished_nodes()):
             self.log(
                 logger.warning,
@@ -383,12 +387,11 @@ class SearchTree(AgenticFlow):
 
     def get_finished_nodes(self) -> list[Node]:
         """Get all finished nodes in the search tree by uniqe parent node."""
-        parent_ids = set()
+        
         finished_nodes = []
         for node in self.root.get_all_nodes():
             # TODO: Pick finished node with highest/avg/lowest reward?
-            if node.is_finished() and node.parent.node_id not in parent_ids:
-                parent_ids.add(node.parent.node_id)
+            if node.is_terminal():
                 finished_nodes.append(node)
 
         return finished_nodes
