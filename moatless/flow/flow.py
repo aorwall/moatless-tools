@@ -316,7 +316,17 @@ class AgenticFlow(MoatlessComponent):
 
         storage = await get_storage()
         traj_dict = await storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
-        flow_dict = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+        if not traj_dict:
+            raise ValueError("Trajectory not found")
+        
+        try:
+            flow_dict: dict | None = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)  # type: ignore
+        except Exception:
+            flow_dict = await storage.read_from_project("flow.json", project_id)  # type: ignore
+            
+        if not flow_dict:
+            raise ValueError("Flow settings not found")
+            
         return cls.from_dicts(flow_dict, traj_dict)
 
     def get_trajectory_data(self) -> dict:

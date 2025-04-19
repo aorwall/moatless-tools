@@ -435,7 +435,12 @@ class FlowManager:
 
         try:
             trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
-            settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+            
+            try:
+                settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+            except Exception:
+                settings_data = await self._storage.read_from_project("flow.json", project_id)
+            
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
 
             job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
