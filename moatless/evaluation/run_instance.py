@@ -51,8 +51,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
         path="settings.json", trajectory_id=trajectory_id, project_id=project_id
     )
     if not settings:
-        logger.error("Trajectory settings not found.")
-        raise ValueError("Settings not found")
+        settings = await storage.read_from_project(path="settings.json", project_id=project_id)
 
     try:
         flow = await setup_flow(project_id, trajectory_id)

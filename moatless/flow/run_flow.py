@@ -42,12 +42,19 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
 
     logger.info(f"setup_flow(project_id: {project_id}, trajectory_id: {trajectory_id})")
 
-    settings = await storage.read_from_trajectory(
+    settings: dict | None = await storage.read_from_trajectory(
         path="settings.json", trajectory_id=trajectory_id, project_id=project_id
-    )
-    trajectory_dict = await storage.read_from_trajectory(
+    )  # type: ignore
+    if not settings:
+        settings = await storage.read_from_project(path="settings.json", project_id=project_id)  # type: ignore
+        if not settings:
+            raise ValueError("Settings not found")
+
+    trajectory_dict: dict | None = await storage.read_from_trajectory(
         path="trajectory.json", trajectory_id=trajectory_id, project_id=project_id
-    )
+    )  # type: ignore   
+    if not trajectory_dict:
+        raise ValueError("Trajectory not found")
 
     flow = AgenticFlow.from_dicts(settings=settings, trajectory=trajectory_dict)
 

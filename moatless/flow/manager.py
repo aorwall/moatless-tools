@@ -58,6 +58,63 @@ class FlowManager:
     async def initialize(self):
         await self._load_configs()
 
+    async def build_flow(
+        self,
+        id: str,
+        model_id: str,
+    ) -> AgenticFlow:
+        """Create a SearchTree instance from this configuration.
+
+        Args:
+            root_node: Optional root node for the search tree. If not provided,
+                      the tree will need to be initialized with a root node later.
+
+        Returns:
+            SearchTree: A configured search tree instance
+        """
+        # Create expander if not specified
+
+        flow = self.get_flow_config(id)
+        if not flow:
+            raise ValueError(f"Flow config {id} not found")
+
+        if not flow.agent:
+            if not flow.agent_id:
+                raise ValueError(f"Flow config {id} has no agent")
+            
+            flow.agent = self._agent_manager.get_agent(agent_id=flow.agent_id)
+            if not flow.agent:
+                raise ValueError(f"Agent {flow.agent_id} not found")
+            
+        if not flow.agent.completion_model:
+            if not model_id:
+                raise ValueError(f"Flow config {id} has no model")
+            
+            flow.agent.completion_model = self._model_manager.create_completion_model(model_id)
+
+        json_completion_model = JsonCompletionModel(
+            model=flow.agent.completion_model.model,
+            temperature=0.0,
+            max_tokens=flow.agent.completion_model.max_tokens,
+            timeout=flow.agent.completion_model.timeout,
+            few_shot_examples=flow.agent.completion_model.few_shot_examples,
+            headers=flow.agent.completion_model.headers,
+            params=flow.agent.completion_model.params,
+            merge_same_role_messages=flow.agent.completion_model.merge_same_role_messages,
+            message_cache=flow.agent.completion_model.message_cache,
+            model_base_url=flow.agent.completion_model.model_base_url,
+            model_api_key=flow.agent.completion_model.model_api_key,
+        )
+
+        for action in flow.agent.actions:
+            if isinstance(action, CompletionModelMixin) and not action.completion_model:
+                action.completion_model = json_completion_model.clone()
+
+        if hasattr(flow, "value_function") and hasattr(flow.value_function, "completion_model") and not flow.value_function.completion_model:
+            flow.value_function.completion_model = json_completion_model.clone()
+        
+        return flow
+
     async def create_flow(
         self,
         id: str,
@@ -296,7 +353,7 @@ class FlowManager:
         except Exception as e:
             logger.error(f"Failed to save flow configs: {e}")
 
-    def get_flow_config(self, id: str) -> FlowConfig:
+    def get_flow_config(self, id: str) -> AgenticFlow:
         """Get a flow configuration by ID."""
         logger.debug(f"Getting flow config {id}")
 
@@ -304,24 +361,25 @@ class FlowManager:
             config = self._configs[id]
             # Ensure the id is set in the config
             config["id"] = id
-            return FlowConfig.model_validate(config)
+            return AgenticFlow.from_dict(config)
         else:
+            logger.error(f"Flow config {id} not found. Available configs: {list(self._configs.keys())}")
             raise ValueError(f"Flow config {id} not found. Available configs: {list(self._configs.keys())}")
 
-    def get_all_configs(self) -> list[FlowConfig]:
+    def get_all_configs(self) -> list[AgenticFlow]:
         """Get all flow configurations."""
 
         configs = []
         for config in self._configs.values():
             try:
-                configs.append(FlowConfig.model_validate(config))
+                configs.append(AgenticFlow.from_dict(config))
             except Exception as e:
                 logger.exception(f"Failed to load flow config {config['id']}: {e}")
 
         configs.sort(key=lambda x: x.id)
         return configs
 
-    async def create_config(self, config: FlowConfig) -> FlowConfig:
+    async def create_config(self, config: AgenticFlow) -> AgenticFlow:
         """Create a new flow configuration."""
         logger.debug(f"Creating flow config {config.id}")
         if config.id in self._configs:
@@ -331,7 +389,7 @@ class FlowManager:
         await self._save_configs()
         return config
 
-    async def update_config(self, config: FlowConfig):
+    async def update_config(self, config: AgenticFlow):
         """Update an existing flow configuration."""
         logger.debug(f"Updating flow config {config.id}")
         if config.id not in self._configs:

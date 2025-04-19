@@ -444,6 +444,8 @@ class SearchTree(AgenticFlow):
                 
             if "expander" in obj and isinstance(obj["expander"], dict):
                 obj["expander"] = Expander.model_validate(obj["expander"])
+            else:
+                obj["expander"] = Expander(max_expansions=obj["max_expansions"])  # type: ignore
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.from_dict(obj["agent"])
@@ -468,9 +470,12 @@ class SearchTree(AgenticFlow):
             Dict[str, Any]: A dictionary representation of the search tree.
         """
         data = super().model_dump(**kwargs)
-        data["selector"] = self.selector.model_dump(**kwargs)
-        data["expander"] = self.expander.model_dump(**kwargs)
-        data["agent"] = self.agent.model_dump(**kwargs)
+        if self.selector:
+            data["selector"] = self.selector.model_dump(**kwargs)
+        if self.expander:
+            data["expander"] = self.expander.model_dump(**kwargs)
+        if self.agent:
+            data["agent"] = self.agent.model_dump(**kwargs)
 
         if self.value_function:
             data["value_function"] = self.value_function.model_dump(**kwargs)

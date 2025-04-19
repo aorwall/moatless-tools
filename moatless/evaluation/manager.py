@@ -18,6 +18,7 @@ from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import FlowManager
+from moatless.node import Node
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
 from opentelemetry import trace
@@ -94,21 +95,38 @@ class EvaluationManager:
                 for instance_id in instance_ids
             ],
         )
+        
+        flow = await self._flow_manager.build_flow(
+            id=evaluation.flow_id,
+            model_id=evaluation.model_id,
+        )
+        
+        await self.storage.write_to_project(
+            "flow.json",
+            flow.model_dump(),
+            project_id=evaluation.evaluation_name,
+        )
 
         for instance in evaluation.instances:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
             problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
-            await self._flow_manager.create_flow(
-                id=evaluation.flow_id,
-                model_id=evaluation.model_id,
-                message=problem_statement,
-                trajectory_id=instance.instance_id,
-                project_id=evaluation.evaluation_name,
-                metadata={
+            
+            root_node = Node.create_root(
+                user_message=problem_statement,
+            )
+            
+            trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
+            trajectory_data = {
+                "trajectory_id": instance.instance_id,
+                "project_id": evaluation.evaluation_name,
+                "nodes": root_node.dump_as_list(exclude_none=True, exclude_unset=True),
+                "metadata": {
                     "instance_id": instance.instance_id,
                 },
-            )
+            }
 
+            await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
+            
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
         return evaluation

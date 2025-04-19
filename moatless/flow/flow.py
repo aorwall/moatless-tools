@@ -32,10 +32,14 @@ tracer = trace.get_tracer("moatless.flow")
 class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    id: Optional[str] = Field(default=None, description="The flow ID.")
+
     project_id: Optional[str] = Field(None, description="The project ID")
     trajectory_id: Optional[str] = Field(None, description="The trajectory ID.")
 
-    agent: ActionAgent = Field(..., description="Agent for generating actions.")
+    agent: Optional[ActionAgent] = Field(None, description="Agent for generating actions.")
+    agent_id: Optional[str] = Field(None, description="The agent ID if read from config.")
+    
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
@@ -258,6 +262,7 @@ class AgenticFlow(MoatlessComponent):
         """Validate and reconstruct a system from a dictionary."""
         if isinstance(obj, dict):
             obj = obj.copy()
+            
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.from_dict(obj["agent"])
@@ -274,6 +279,12 @@ class AgenticFlow(MoatlessComponent):
     def from_dicts(cls, settings: dict[str, Any], trajectory: dict[str, Any]) -> "AgenticFlow":
         """Load a system instance from a dictionary."""
         flow = cls.from_dict(settings)
+        if "trajectory_id" in trajectory:
+            flow.trajectory_id = trajectory["trajectory_id"]
+        if "project_id" in trajectory:
+            flow.project_id = trajectory["project_id"]
+        if "metadata" in trajectory:
+            flow.metadata = trajectory["metadata"]
         flow._root = Node.from_dict(trajectory)
         return flow
 
@@ -311,7 +322,11 @@ class AgenticFlow(MoatlessComponent):
     def get_trajectory_data(self) -> dict:
         """Get trajectory data for persistence."""
         return {
+            "trajectory_id": self.trajectory_id,
+            "project_id": self.project_id,
+            "metadata": self.metadata,
             "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
+            
         }
 
     def get_flow_settings(self) -> dict:
@@ -321,5 +336,6 @@ class AgenticFlow(MoatlessComponent):
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""
         data = super().model_dump(exclude={"agent", "root"})
-        data["agent"] = self.agent.model_dump(**kwargs)
+        if self.agent:
+            data["agent"] = self.agent.model_dump(**kwargs)
         return data

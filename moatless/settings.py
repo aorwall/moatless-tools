@@ -122,7 +122,7 @@ async def get_event_bus() -> BaseEventBus:
     if _event_bus is None:
         storage = await get_storage()
         if os.environ.get("REDIS_URL"):
-            logger.info(f"Use RQ Runner and Redis Event Bus with redis url: {os.environ.get('REDIS_URL')}")
+            logger.info(f"Use Redis Event Bus with redis url: {os.environ.get('REDIS_URL')}")
             try:
                 from moatless.eventbus.redis_bus import RedisEventBus
 

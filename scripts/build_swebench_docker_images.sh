@@ -134,6 +134,12 @@ mkdir -p .moatless_index_store
 for INSTANCE_ID in $INSTANCE_IDS; do
     echo "Processing instance: $INSTANCE_ID"
     
+    # Check if the instance JSON file exists
+    if [ ! -f "instances/${INSTANCE_ID}.json" ]; then
+        echo "Error: Instance JSON file not found: instances/${INSTANCE_ID}.json"
+        exit 1
+    fi
+    
     # Download the index if it doesn't exist
     download_index "$INSTANCE_ID"
     if [ $? -ne 0 ]; then
