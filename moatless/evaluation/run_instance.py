@@ -47,12 +47,6 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
     litellm.callbacks = [LogHandler(storage=storage)]
 
-    settings = await storage.read_from_trajectory(
-        path="settings.json", trajectory_id=trajectory_id, project_id=project_id
-    )
-    if not settings:
-        settings = await storage.read_from_project(path="settings.json", project_id=project_id)
-
     try:
         flow = await setup_flow(project_id, trajectory_id)
 
