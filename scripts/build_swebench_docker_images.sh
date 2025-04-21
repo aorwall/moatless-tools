@@ -1,13 +1,20 @@
 #!/bin/bash
 
 # Check if dataset_file is provided
-if [ $# -ne 1 ]; then
-    echo "Usage: $0 <dataset_file>"
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    echo "Usage: $0 <dataset_file> [swegym]"
     echo "Example: $0 moatless/evaluation/datasets/verified_mini_dataset.json"
+    echo "         $0 moatless/evaluation/datasets/verified_mini_dataset.json swegym"
     exit 1
 fi
 
 DATASET_FILE=$1
+SWEGYM_MODE=false
+
+if [ $# -eq 2 ] && [ "$2" = "swegym" ]; then
+    SWEGYM_MODE=true
+    echo "Running in swegym mode"
+fi
 
 # Check if the dataset file exists
 if [ ! -f "$DATASET_FILE" ]; then
@@ -147,14 +154,21 @@ for INSTANCE_ID in $INSTANCE_IDS; do
         continue
     fi
     
-    # Replace __ with _1776_ in instance_id for the base image name
-    DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_1776_/g')
+    # Set base image name based on mode
+    if [ "$SWEGYM_MODE" = true ]; then
+        DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_s_/g' | tr '[:upper:]' '[:lower:]')
+        DOCKER_BASE_PREFIX="xingyaoww/sweb.eval.x86_64."
+    else
+        DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_1776_/g' | tr '[:upper:]' '[:lower:]')
+        DOCKER_BASE_PREFIX="swebench/sweb.eval.x86_64."
+    fi
+
     # Create the target image name in the required format - using first part before __
     DOCKER_TARGET_IMAGE="aorwall/sweb.eval.x86_64.${INSTANCE_ID%%__*}_moatless_${INSTANCE_ID#*__}"
 
     # Create temporary Dockerfile
     cat > Dockerfile.temp << EOL
-FROM swebench/sweb.eval.x86_64.$DOCKER_BASE_IMAGE
+FROM ${DOCKER_BASE_PREFIX}$DOCKER_BASE_IMAGE
 
 WORKDIR /opt/moatless
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/

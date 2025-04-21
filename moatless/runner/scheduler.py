@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import importlib
+import os
 from collections.abc import Callable
 from datetime import datetime
 from typing import Dict, List, Optional, Type, Any, Union
@@ -48,8 +49,11 @@ class SchedulerRunner(BaseRunner):
             **runner_kwargs: Additional arguments to pass to the runner implementation
         """
         self.runner = runner_impl(**runner_kwargs)
-        self.max_jobs_per_project = max_jobs_per_project
-        self.max_total_jobs = max_total_jobs
+        
+        # Read job limits from environment variables, fall back to provided values if not set
+        # A value of 0 means unlimited jobs
+        self.max_jobs_per_project = int(os.environ.get('MOATLESS_MAX_JOBS_PER_PROJECT', max_jobs_per_project))
+        self.max_total_jobs = int(os.environ.get('MOATLESS_MAX_TOTAL_JOBS', max_total_jobs))
         self.scheduler_interval_seconds = scheduler_interval_seconds
         self.logger = logging.getLogger(__name__)
         
@@ -363,13 +367,13 @@ class SchedulerRunner(BaseRunner):
         """
         # Check if we can start more jobs in total
         total_running = await self.storage.get_running_jobs_count()
-        if total_running >= self.max_total_jobs:
+        if self.max_total_jobs > 0 and total_running >= self.max_total_jobs:
             self.logger.debug(f"Cannot start job {job.id}: total limit reached ({total_running}/{self.max_total_jobs})")
             return
         
         # Check if we can start more jobs for this project
         project_running = await self.storage.get_running_jobs_count(job.project_id)
-        if project_running >= self.max_jobs_per_project:
+        if self.max_jobs_per_project > 0 and project_running >= self.max_jobs_per_project:
             self.logger.debug(
                 f"Cannot start job {job.id}: project limit reached ({project_running}/{self.max_jobs_per_project})"
             )
@@ -393,13 +397,13 @@ class SchedulerRunner(BaseRunner):
 
         # Check if we can start more jobs in total
         total_running = await self.storage.get_running_jobs_count()
-        if total_running >= self.max_total_jobs:
+        if self.max_total_jobs > 0 and total_running >= self.max_total_jobs:
             self.logger.info(f"Cannot start job {job.id}: total limit reached ({total_running}/{self.max_total_jobs})")
             return
         
         # Check if we can start more jobs for this project
         project_running = await self.storage.get_running_jobs_count(job.project_id)
-        if project_running >= self.max_jobs_per_project:
+        if self.max_jobs_per_project > 0 and project_running >= self.max_jobs_per_project:
             self.logger.info(
                 f"Cannot start job {job.id}: project limit reached ({project_running}/{self.max_jobs_per_project})"
             )
