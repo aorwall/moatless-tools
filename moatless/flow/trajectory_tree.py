@@ -97,6 +97,7 @@ class NodeTreeItem(BaseTreeItem):
     is_duplicate: bool = False
     parent_node_id: Optional[int] = None
     tokens: Optional[int] = None
+    reward: Optional[float] = None
 
     children: list[
         Union[
@@ -221,6 +222,9 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
     # Add reward if available
     if node.reward and node.reward.value is not None:
         detail_parts.append(f"Reward: {node.reward.value:.2f}")
+        reward = node.reward.value
+    else:
+        reward = None
 
     # Add error if available
     if node.error:
@@ -248,6 +252,7 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
         time=timestamp,
         is_duplicate=node.is_duplicate or False,
         parent_node_id=parent_node_id,
+        reward=reward,
         detail=detail,
         children=[],
         tokens=tokens,

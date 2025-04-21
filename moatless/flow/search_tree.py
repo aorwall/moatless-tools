@@ -10,7 +10,7 @@ from moatless.completion.stats import Usage
 from moatless.context_data import current_node_id, current_phase
 from moatless.discriminator.base import BaseDiscriminator
 from moatless.exceptions import RejectError, RuntimeError
-from moatless.expander import Expander
+from moatless.expander.expander import Expander
 from moatless.feedback.base import BaseFeedbackGenerator
 from moatless.flow import AgenticFlow
 from moatless.flow.events import (
@@ -197,8 +197,7 @@ class SearchTree(AgenticFlow):
                 logger.info(f"Selecting unexecuted node {check_node.node_id} as it is the first unexecuted node")
                 return check_node
 
-        root = node.get_root()
-        expandable_nodes = root.get_expandable_descendants()
+        expandable_nodes = self.root.get_expandable_descendants()
 
         selection = await self.selector.select(expandable_nodes)
 

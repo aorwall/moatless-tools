@@ -345,6 +345,14 @@ class Node(BaseModel):
 
         return nodes
 
+    def is_finished(self) -> bool:
+        """Determine if the node is succesfully finished"""
+        if self.action and self.action.name == "Finish":
+            return True
+
+        return False
+
+
     def get_expandable_descendants(self) -> list["Node"]:
         """Get all expandable descendants of this node, including self if expandable."""
         expandable_nodes = []
@@ -413,14 +421,10 @@ class Node(BaseModel):
         Returns:
             float: The mean reward.
         """
-        rewards = []
-        node = self
-        while node is not None:
-            if node.reward:
-                rewards.append(node.reward.value / node.visits if node.visits > 0 else 0)
-            node = node.parent
+        if self.visits and self.value:
+            return self.value / self.visits
 
-        return sum(rewards) / len(rewards) if rewards else 0
+        return 0
 
     def total_usage(self) -> Usage:
         """Calculate total token usage all nodes."""

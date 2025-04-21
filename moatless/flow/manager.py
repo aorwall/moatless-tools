@@ -16,12 +16,11 @@ from moatless.completion.react import ReActCompletionModel
 from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
 from moatless.eventbus import BaseEventBus
-from moatless.expander import Expander
+from moatless.expander.expander import Expander
 from moatless.flow import AgenticFlow, AgenticLoop, SearchTree
 from moatless.flow.run_flow import run_flow
 from moatless.flow.schema import (
     CompletionDTO,
-    FlowConfig,
     TrajectoryEventDTO,
     TrajectoryResponseDTO,
     StartTrajectoryRequest,
@@ -379,23 +378,25 @@ class FlowManager:
         configs.sort(key=lambda x: x.id)
         return configs
 
-    async def create_config(self, config: AgenticFlow) -> AgenticFlow:
+    async def create_config(self, config: dict):
         """Create a new flow configuration."""
-        logger.debug(f"Creating flow config {config.id}")
-        if config.id in self._configs:
-            raise ValueError(f"Flow config {config.id} already exists")
+        
+        flow = AgenticFlow.from_dict(config)
+        logger.debug(f"Creating flow config {flow.id}")
+        if flow.id in self._configs:
+            raise ValueError(f"Flow config {flow.id} already exists")
 
-        self._configs[config.id] = config.model_dump()
+        self._configs[flow.id] = flow.model_dump()
         await self._save_configs()
-        return config
+        return self._configs[flow.id] 
 
-    async def update_config(self, config: AgenticFlow):
+    async def update_config(self, config: dict):
         """Update an existing flow configuration."""
-        logger.debug(f"Updating flow config {config.id}")
-        if config.id not in self._configs:
-            raise ValueError(f"Flow config {config.id} not found")
+        logger.debug(f"Updating flow config {config['id']}")
+        if config['id'] not in self._configs:
+            raise ValueError(f"Flow config {config['id']} not found")
 
-        self._configs[config.id] = config.model_dump()
+        self._configs[config['id']] = config
         await self._save_configs()
 
     async def delete_config(self, id: str):
@@ -412,7 +413,11 @@ class FlowManager:
         await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
 
         trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
-        settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+        try:
+            settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+        except Exception:
+            settings_data = await self._storage.read_from_project("flow.json", project_id)
+            
         return AgenticFlow.from_dicts(settings_data, trajectory_data)
 
     def get_trajectory_status(self, flow: AgenticFlow, job_status: JobStatus) -> FlowStatus:

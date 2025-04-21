@@ -30,7 +30,7 @@ from moatless.flow.flow import AgenticFlow
 from moatless.flow.oneoff import OneOffFlow
 from moatless.flow.loop import AgenticLoop
 from moatless.flow.search_tree import SearchTree
-from moatless.flow.schema import FlowStatus, FlowConfig
+from moatless.flow.schema import FlowStatus
 from moatless.flow.manager import FlowManager
 from moatless.flow.run_flow import run_flow
 
@@ -44,6 +44,5 @@ __all__ = [
     "FlowManager",
     "run_flow",
     # Types and schemas
-    "FlowStatus",
-    "FlowConfig",
+    "FlowStatus"
 ]

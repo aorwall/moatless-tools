@@ -112,7 +112,7 @@ class EvaluationManager:
             problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
             
             root_node = Node.create_root(
-                user_message=problem_statement,
+                user_message=problem_statement
             )
             
             trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
@@ -231,6 +231,15 @@ class EvaluationManager:
             evaluation.status = EvaluationStatus.RUNNING
 
         return evaluation
+    
+    async def get_config(self, evaluation_name: str) -> dict:
+        """Get the config for an evaluation."""
+        config = await self.storage.read_from_project("flow.json", project_id=evaluation_name)
+        return config
+    
+    async def update_config(self, evaluation_name: str, config: dict):
+        """Update the config for an evaluation."""
+        await self.storage.write_to_project("flow.json", config, project_id=evaluation_name)
 
     @tracer.start_as_current_span("EvaluationManager._handle_event")
     async def _handle_event(self, event: BaseEvent):

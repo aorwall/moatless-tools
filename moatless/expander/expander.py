@@ -3,21 +3,32 @@ import random
 
 from pydantic import BaseModel, Field
 
+from moatless.component import MoatlessComponent
 from moatless.node import Node
 
 logger = logging.getLogger(__name__)
 
 
-class Expander(BaseModel):
+class Expander(MoatlessComponent):
     max_expansions: int = Field(1, description="The maximum number of children to create for each node")
     auto_expand_root: bool = Field(False, description="Whether to automatically expand the root node with max expansions")
 
-    agent_settings: list[str] = Field(
-        [],
-        description="The settings for the agent model",
-    )
+    @classmethod
+    def get_component_type(cls) -> str:
+        return "expander"
+    
+    @classmethod
+    def _get_base_class(cls) -> type[MoatlessComponent]:
+        return Expander
 
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.expander"
+    
     async def expand(self, node: Node) -> None | Node:
+        if self.max_expansions and not node.max_expansions:
+            node.max_expansions = self.max_expansions
+        
         if self.auto_expand_root and not node.parent:
             logger.info(f"Expanding root node {node.node_id} with {self.max_expansions} expansions")
             expansions = self.max_expansions
