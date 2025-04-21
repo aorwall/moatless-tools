@@ -164,7 +164,7 @@ for INSTANCE_ID in $INSTANCE_IDS; do
     fi
 
     # Create the target image name in the required format - using first part before __
-    DOCKER_TARGET_IMAGE="aorwall/sweb.eval.x86_64.${INSTANCE_ID%%__*}_moatless_${INSTANCE_ID#*__}"
+    DOCKER_TARGET_IMAGE=$(echo "aorwall/sweb.eval.x86_64.${INSTANCE_ID%%__*}_moatless_${INSTANCE_ID#*__}" | tr '[:upper:]' '[:lower:]')
 
     # Create temporary Dockerfile
     cat > Dockerfile.temp << EOL
