@@ -1,7 +1,6 @@
 from typing import Union, Type
 
 import pytest
-from instructor import OpenAISchema
 from moatless.actions.action import Action, ActionArguments
 from moatless.actions.find_function import FindFunction
 from moatless.actions.finish import Finish, FinishArgs
@@ -29,20 +28,6 @@ def test_action_args_name():
     print(FinishArgs.name)
 
     assert FinishArgs.name == "Finish"
-
-
-def test_take_action():
-    actions = [SemanticSearchArgs, StringReplace, FinishArgs]
-
-    class TakeAction(OpenAISchema):
-        action: Union[tuple(actions)] = Field(...)
-
-        model_config = {"smart_union": True}
-
-    action_type = TakeAction
-    schema = action_type.model_json_schema()
-    assert "properties" in schema
-    assert "action" in schema["properties"]
 
 
 def test_get_action_by_args_class():
