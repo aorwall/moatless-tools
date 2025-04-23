@@ -45,6 +45,8 @@ class KubernetesRunner(BaseRunner):
         service_account: str | None = None,
         kubernetes_provider: str | None = None,
         node_selector: dict | None = None,
+        update_on_start: bool = False,
+        update_branch: str = "docker"
     ):
         """Initialize the runner with Kubernetes client configuration.
 
@@ -56,6 +58,8 @@ class KubernetesRunner(BaseRunner):
             service_account: Service account to use for jobs
             kubernetes_provider: Kubernetes provider to use
             node_selector: Node selector labels for job pods (default: {"node-purpose": "testbeds"})
+            update_on_start: Whether to run update-moatless.sh when starting containers
+            update_branch: Git branch to use with update-moatless.sh script
         """
         self.namespace = namespace or os.getenv("KUBERNETES_RUNNER_NAMESPACE", "moatless-tools")
         self.image = image
@@ -63,6 +67,8 @@ class KubernetesRunner(BaseRunner):
         self.timeout_seconds = timeout_seconds
         self.service_account = service_account
         self.kubernetes_provider = kubernetes_provider or os.getenv("KUBERNETES_RUNNER_PROVIDER", "in-cluster")
+        self.update_on_start = update_on_start
+        self.update_branch = update_branch
         logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
         
         if node_selector:
@@ -88,10 +94,16 @@ class KubernetesRunner(BaseRunner):
         # Initialize Kubernetes API clients
         self.batch_v1 = client.BatchV1Api()
         self.core_v1 = client.CoreV1Api()
+        
+        # Log configuration details
+        self.logger.info(f"Kubernetes runner initialized with namespace: {self.namespace}")
+        if self.update_on_start:
+            self.logger.info(f"Update on start: enabled (branch: {self.update_branch})")
 
     @tracer.start_as_current_span("KubernetesRunner.start_job")
     async def start_job(
-        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None
+        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None,
+        update_on_start: Optional[bool] = None, update_branch: Optional[str] = None
     ) -> bool:
         """Start a job as a Kubernetes Job.
 
@@ -100,34 +112,44 @@ class KubernetesRunner(BaseRunner):
             trajectory_id: The trajectory ID
             job_func: The function to run or a string with the fully qualified function name
             node_id: Optional node ID for routing jobs to specific nodes
+            update_on_start: Whether to run update-moatless.sh when starting the container.
+                             If None, uses the runner's default setting.
+            update_branch: Git branch to use with update-moatless.sh script.
+                           If None, uses the runner's default branch.
 
         Returns:
             True if the job was scheduled successfully, False otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-        job_status = await self.get_job_status(project_id, trajectory_id)
-        logger.info(f"Job {job_id} status: {job_status}")
+        
+        # Check if job already exists
+        if await self.job_exists(project_id, trajectory_id):
+            job_status = await self.get_job_status(project_id, trajectory_id)
+            logger.info(f"Job {job_id} status: {job_status}")
 
-        # Check if job exists and get its status
-        if job_status == JobStatus.RUNNING:
-            logger.info(f"Job {job_id} already exists with status {job_status}, skipping")
-            return True
-        elif job_status in [JobStatus.PENDING, JobStatus.COMPLETED]:
-            logger.info(f"Found job {job_id} with status {job_status}, deleting it before creating a new one")
-            try:
-                await self.cancel_job(project_id, trajectory_id)
-                # Short wait to ensure job is deleted
-                import asyncio
-                await asyncio.sleep(1)
-            except Exception as e:
-                logger.warning(f"Error deleting job {job_id}: {e}")
+            if job_status == JobStatus.RUNNING:
+                logger.info(f"Job {job_id} already exists with status {job_status}, skipping")
                 return False
-            
+            else:
+                logger.info(f"Found job {job_id} with status {job_status}, deleting it before creating a new one")
+                try:
+                    await self.cancel_job(project_id, trajectory_id)
+                    # Short wait to ensure job is deleted
+                    import asyncio
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.warning(f"Error deleting job {job_id}: {e}")
+                    return False
+        
         try:
             self.logger.info(f"Creating Kubernetes job for function: {job_func}")
 
             # Extract OpenTelemetry context for propagation
             otel_context = extract_trace_context()
+
+            # Determine if we should update and which branch to use
+            should_update = self.update_on_start if update_on_start is None else update_on_start
+            branch_to_use = self.update_branch if update_branch is None else update_branch
 
             job = self._create_job_object(
                 job_id=job_id,
@@ -136,6 +158,8 @@ class KubernetesRunner(BaseRunner):
                 job_func=job_func,
                 otel_context=otel_context,
                 node_id=node_id,
+                update_on_start=should_update,
+                update_branch=branch_to_use
             )
 
             # Create the job in the namespace
@@ -362,7 +386,7 @@ class KubernetesRunner(BaseRunner):
         # Consider the job has running if a job deployment exists and is not completed
         return JobStatus.RUNNING
 
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
 
         Args:
@@ -370,7 +394,7 @@ class KubernetesRunner(BaseRunner):
             trajectory_id: The trajectory ID
 
         Returns:
-            The job status
+            The job status, or None if the job does not exist
         """
         job_id = self._job_id(project_id, trajectory_id)
         
@@ -381,12 +405,12 @@ class KubernetesRunner(BaseRunner):
         except ApiException as e:
             if e.status == 404:
                 self.logger.info(f"Job {job_id} not found in namespace {self.namespace}")
-                return JobStatus.PENDING
+                return None
             self.logger.exception(f"Error getting job status for {job_id}: {e}")
-            return JobStatus.UNKNOWN
+            return None
         except Exception as exc:
             self.logger.exception(f"Unexpected error getting job status for {job_id}: {exc}")
-            return JobStatus.UNKNOWN
+            return None
 
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.
@@ -677,9 +701,11 @@ class KubernetesRunner(BaseRunner):
         job_id: str,
         project_id: str,
         trajectory_id: str,
-        job_func: Callable,
+        job_func: Callable | str,
         otel_context: dict = None,
-        node_id: int = None,
+        node_id: int | None = None,
+        update_on_start: bool = False,
+        update_branch: str = "docker"
     ) -> client.V1Job:
         """Create a Kubernetes Job object.
 
@@ -690,26 +716,41 @@ class KubernetesRunner(BaseRunner):
             job_func: Fully qualified function name to execute
             otel_context: OpenTelemetry context for distributed tracing
             node_id: Optional node ID for job placement
+            update_on_start: Whether to run update-moatless.sh when starting the container
+            update_branch: Git branch to use with update-moatless.sh script
 
         Returns:
             Kubernetes Job object
         """
-        func_name = job_func.__name__
+        # Determine function name - handle both callable and string
+        if isinstance(job_func, str):
+            func_name = job_func
+        else:
+            func_name = job_func.__name__
+            
         env_vars = self._create_env_vars(project_id, trajectory_id, func_name, otel_context)
         volumes, volume_mounts = self._create_volumes_and_mounts()
         tolerations = self._create_tolerations()
 
         args = create_job_args(project_id, trajectory_id, job_func, node_id)
+        
+        # Build the container command
+        cmd = f"echo 'MOATLESS: Starting job for {project_id}/{trajectory_id}' && export PYTHONUNBUFFERED=1"
+        
+        # Add update script if enabled
+        if update_on_start:
+            self.logger.info(f"Will run update-moatless.sh with branch {update_branch}")
+            cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {update_branch}"
+            
+        # Add the main job command
+        cmd += f" && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF"
 
         container = client.V1Container(
             name="worker",
             image=self._get_image_name(trajectory_id),
             image_pull_policy="IfNotPresent",
             command=["bash"],
-            args=[
-                "-c",
-                f"echo 'MOATLESS: Starting job for {project_id}/{trajectory_id}' && export PYTHONUNBUFFERED=1 && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF",
-            ],
+            args=["-c", cmd],
             env=env_vars,
             env_from=[
                 client.V1EnvFromSource(
@@ -738,6 +779,9 @@ class KubernetesRunner(BaseRunner):
 
         labels = create_labels(project_id, trajectory_id, func_name)
         annotations = create_annotations(project_id, trajectory_id, func_name)
+
+        if node_id is not None:
+            annotations["moatless.ai/node-id"] = str(node_id)
 
         # Add annotations to prevent eviction by Karpenter
         annotations["karpenter.sh/do-not-evict"] = "true"

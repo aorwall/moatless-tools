@@ -175,7 +175,7 @@ class SchedulerRunner(BaseRunner):
         job = await self.storage.get_job(project_id, trajectory_id)
         return job is not None
     
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
         
         Args:
@@ -183,11 +183,11 @@ class SchedulerRunner(BaseRunner):
             trajectory_id: The trajectory ID
 
         Returns:
-            JobStatus enum representing the current status
+            JobStatus enum representing the current status, or None if the job does not exist
         """
         job = await self.storage.get_job(project_id, trajectory_id)
         if job is None:
-            return JobStatus.UNKNOWN
+            return None
         return job.status
     
     async def get_runner_info(self) -> RunnerInfo:
@@ -411,6 +411,16 @@ class SchedulerRunner(BaseRunner):
 
         # Import the function
         try:
+            if job.job_func is None:
+                self.logger.error(f"Cannot start job {job.id}: job_func is None")
+                job.status = JobStatus.FAILED
+                job.ended_at = datetime.now()
+                if job.metadata is None:
+                    job.metadata = {}
+                job.metadata["error"] = "Error importing job function: job_func is None"
+                await self.storage.update_job(job)
+                return
+                
             module = importlib.import_module(job.job_func.module)
             job_func = getattr(module, job.job_func.name)
         except Exception as e:
@@ -460,45 +470,39 @@ class SchedulerRunner(BaseRunner):
         """
         try:
             # Only update jobs that are pending or running
-            if job.status not in [JobStatus.RUNNING, JobStatus.PENDING, JobStatus.UNKNOWN]:
-                self.logger.info(f"Not updating job {job.id} with status {job.status} - not in RUNNING, PENDING or UNKNOWN state")
+            if job.status not in [JobStatus.RUNNING, JobStatus.PENDING]:
+                self.logger.info(f"Not updating job {job.id} with status {job.status} - not in RUNNING or PENDING state")
                 return
             
             # Job exists, get current status from the underlying runner
             current_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
             
-            if current_status == JobStatus.COMPLETED:
+            if current_status is None:
+                # Job doesn't exist in the runner
+                job.status = JobStatus.STOPPED
+                job.ended_at = datetime.now()
+                job.metadata["error"] = "Job disappeared from the underlying runner"
+                await self.storage.update_job(job)
+                self.logger.info(f"Job {job.id} doesn't exist in runner, marking as STOPPED")
+            elif current_status == JobStatus.COMPLETED:
                 job.status = JobStatus.COMPLETED
                 job.ended_at = datetime.now()
                 await self.storage.update_job(job)
                 self.logger.info(f"Job {job.id} completed")
-            
             elif current_status == JobStatus.FAILED:
                 job.status = JobStatus.FAILED
                 job.ended_at = datetime.now()
                 job.metadata["error"] = "Job failed during execution"
                 await self.storage.update_job(job)
                 self.logger.info(f"Job {job.id} failed")
-
-            elif current_status == JobStatus.UNKNOWN and job.status in [JobStatus.RUNNING, JobStatus.PENDING]:
-                job.status = JobStatus.UNKNOWN
-                await self.storage.update_job(job)
-                self.logger.info(f"Job {job.id} unknown")
-            
-            elif job.status == JobStatus.UNKNOWN:
-                job.status = current_status
-                await self.storage.update_job(job)
-                self.logger.info(f"Job {job.id} unknown to runner, updating to {current_status}")
-
             elif current_status != JobStatus.RUNNING and job.status == JobStatus.RUNNING:
                 # Any other status for a RUNNING job means it's stopped unexpectedly
-                
                 job.status = JobStatus.STOPPED
                 job.ended_at = datetime.now()
                 job.metadata["error"] = f"Job stopped unexpectedly with status: {current_status}"
                 await self.storage.update_job(job)
                 self.logger.info(f"Job {job.id} stopped")
-                
+
         except Exception as e:
             self.logger.exception(f"Error updating status for job {job.id}: {e}")
             
@@ -524,7 +528,7 @@ class SchedulerRunner(BaseRunner):
             # Get only PENDING or RUNNING jobs from our storage
             all_jobs = await self.storage.get_jobs()
             active_jobs = [job for job in all_jobs 
-                          if job.status in [JobStatus.PENDING, JobStatus.RUNNING, JobStatus.UNKNOWN]]
+                          if job.status in [JobStatus.PENDING, JobStatus.RUNNING]]
             
             if not active_jobs:
                 self.logger.debug("No active jobs found")
@@ -537,13 +541,13 @@ class SchedulerRunner(BaseRunner):
                 # Check if job exists in runner
                 job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
                 
-                if job_status == JobStatus.PENDING and job.status == JobStatus.RUNNING:
+                if job_status is None and job.status == JobStatus.RUNNING:
                     self.logger.warning(f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED")
                     job.status = JobStatus.STOPPED
                     job.ended_at = datetime.now()
                     job.metadata["error"] = "Job disappeared from the underlying runner while RUNNING"
                     await self.storage.update_job(job)
-                elif job_status != job.status:
+                elif job_status != job.status and job_status is not None:
                     self.logger.info(f"Job {job.id} status changed from {job.status} to {job_status}")
                     await self._update_job_status(job)
         

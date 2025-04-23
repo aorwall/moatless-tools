@@ -13,7 +13,6 @@ class JobStatus(str, Enum):
     FAILED = "failed"  # Job execution failed
     CANCELED = "canceled"  # Job was manually canceled
     STOPPED = "stopped"  # Job was running but stopped unexpectedly (e.g., container vanished)
-    UNKNOWN = "unknown"
 
 
 class RunnerStatus(str, Enum):
@@ -87,7 +86,7 @@ class BaseRunner(ABC):
     _instance = None
 
     @classmethod
-    def get_instance(cls, runner_impl: Type["BaseRunner"] = None, **kwargs) -> "BaseRunner":
+    def get_instance(cls, runner_impl: Type["BaseRunner"] | None = None, **kwargs) -> "BaseRunner":
         """
         Get or create the singleton instance of Runner.
 
@@ -166,7 +165,7 @@ class BaseRunner(ABC):
         pass
 
     @abstractmethod
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
         
         Args:
@@ -174,7 +173,7 @@ class BaseRunner(ABC):
             trajectory_id: The trajectory ID
 
         Returns:
-            JobStatus enum value
+            JobStatus enum representing the current status, or None if the job does not exist
         """
         pass
 

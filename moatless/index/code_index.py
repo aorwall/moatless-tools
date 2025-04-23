@@ -177,10 +177,16 @@ class CodeIndex:
         import asyncio
 
         import aiohttp
+        import ssl
+
+        # Create a custom SSL context that doesn't verify certificates
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
+                async with session.get(url, ssl=ssl_context) as response:
                     response.raise_for_status()
 
                     with tempfile.TemporaryDirectory() as temp_dir:

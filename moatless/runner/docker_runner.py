@@ -31,7 +31,9 @@ class DockerRunner(BaseRunner):
         job_ttl_seconds: int = 3600,
         timeout_seconds: int = 3600,
         moatless_source_dir: Optional[str] = None,
-        default_image_name: Optional[str] = None
+        default_image_name: Optional[str] = None,
+        update_on_start: bool = False,
+        update_branch: str = "docker"
     ):
         """Initialize the runner with Docker configuration.
 
@@ -43,11 +45,15 @@ class DockerRunner(BaseRunner):
                                 directory will be mounted.
             default_image_name: Default Docker image name to use for all jobs. If provided,
                               this overrides the standard image name generation.
+            update_on_start: Whether to run the update-moatless.sh script when starting containers.
+            update_branch: Git branch to use when running update-moatless.sh.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
         self.logger = logging.getLogger(__name__)
         self.default_image_name = default_image_name
+        self.update_on_start = update_on_start
+        self.update_branch = update_branch
 
         # Get source directory - prefer explicitly passed parameter over environment variable
         self.moatless_source_dir = (
@@ -72,10 +78,13 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Components path: {self.components_path}")
         logger.info(f"  - Moatless dir: {self.moatless_dir}")
         logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
+        if self.update_on_start:
+            logger.info(f"  - Update on start: True (branch: {self.update_branch})")
 
     async def start_job(
         self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None, 
-        image_name: Optional[str] = None
+        image_name: Optional[str] = None, update_on_start: Optional[bool] = None,
+        update_branch: Optional[str] = None
     ) -> bool:
         """Start a job in a Docker container.
 
@@ -85,6 +94,10 @@ class DockerRunner(BaseRunner):
             job_func: The function to run
             node_id: Optional node ID (ignored in DockerRunner)
             image_name: Optional image name, overrides default
+            update_on_start: Whether to run update-moatless.sh when starting the container.
+                             If None, uses the runner's default setting.
+            update_branch: Git branch to use with update-moatless.sh script.
+                           If None, uses the runner's default branch.
 
         Returns:
             True if the job was started successfully, False otherwise
@@ -200,7 +213,22 @@ class DockerRunner(BaseRunner):
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
             logger.info(f"Running command: {args}")
-            cmd.extend([image_name_to_use, "sh", "-c", f"uv run - <<EOF\n{args}\nEOF"])
+            
+            # Determine the command to run in the container
+            run_command = ""
+            
+            # Add update script if enabled
+            should_update = self.update_on_start if update_on_start is None else update_on_start
+            branch_to_use = self.update_branch if update_branch is None else update_branch
+            
+            if should_update:
+                self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
+                run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
+                
+            # Add the main job command
+            run_command += f"uv run - <<EOF\n{args}\nEOF"
+            
+            cmd.extend([image_name_to_use, "sh", "-c", run_command])
 
             logger.info(f"Running Docker command: {' '.join(cmd)}")
             # Run the command
@@ -270,6 +298,10 @@ class DockerRunner(BaseRunner):
                     continue
 
                 status = await self._get_container_status(container_name)
+                
+                # Skip containers with unknown status
+                if status is None:
+                    continue
                 
                 # Parse timestamp
                 try:
@@ -384,13 +416,13 @@ class DockerRunner(BaseRunner):
         """
         try:
             job_status = await self.get_job_status(project_id, trajectory_id)
-            return job_status != JobStatus.PENDING
+            return job_status is not None
 
         except Exception as exc:
             self.logger.exception(f"Error checking if job exists: {exc}")
             return False
 
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
+    async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
 
         Args:
@@ -398,7 +430,7 @@ class DockerRunner(BaseRunner):
             trajectory_id: The trajectory ID
 
         Returns:
-            JobStatus enum value representing the job status
+            JobStatus enum value representing the job status, or None if job doesn't exist
         """
         try:
             container_name = self._container_name(project_id, trajectory_id)
@@ -406,9 +438,9 @@ class DockerRunner(BaseRunner):
 
         except Exception as exc:
             self.logger.exception(f"Error getting job status: {exc}")
-            return JobStatus.PENDING
+            return None
 
-    async def _get_container_status(self, container_name: str) -> JobStatus:
+    async def _get_container_status(self, container_name: str) -> Optional[JobStatus]:
         try:
             inspect_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels \"project_id\"}},{{index .Config.Labels \"trajectory_id\"}}", container_name]
             process = await asyncio.create_subprocess_exec(
@@ -420,22 +452,22 @@ class DockerRunner(BaseRunner):
                 container_info = stdout.decode().strip().split(",")
                 if len(container_info) < 3:
                     self.logger.warning(f"Unexpected output format from docker inspect command {' '.join(inspect_cmd)}: {stdout.decode()}")
-                    return JobStatus.UNKNOWN
+                    return None
 
                 status, running, exit_code = container_info[:3]
 
                 return self._parse_container_status(status, running, exit_code)
             else:
                 if "No such object" in stderr.decode():
-                    # Consider the job pending if it doesn't exist. TODO: Just return None?
-                    return JobStatus.PENDING
+                    # Container doesn't exist, return None
+                    return None
                 else:
                     self.logger.warning(f"Error getting job status. Stderr: {stderr.decode()}. Stdout: {stdout.decode()}")
-                    return JobStatus.UNKNOWN
+                    return None
 
         except Exception as exc:
             self.logger.exception(f"Error getting job status: {exc}")
-            return JobStatus.UNKNOWN
+            return None
         
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the Docker runner.
@@ -657,6 +689,10 @@ class DockerRunner(BaseRunner):
 
             # Get container status
             job_status = await self._get_container_status(container_name)
+            
+            # If job status is None, return None
+            if job_status is None:
+                return None
 
             # Get container logs
             logs = await self.get_job_logs(project_id, trajectory_id)

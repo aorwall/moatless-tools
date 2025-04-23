@@ -294,13 +294,6 @@ class FlowManager:
 
             await self.save_project(project_id, project_settings)
             
-        #loop.root.action_steps = [
-        #    ActionStep(
-        #        action = ViewDiffArgs(
-        #        ) # type: ignore
-        #    )
-        #]
-        
         await self.save_trajectory(project_id, trajectory_id, loop)
 
         return loop
@@ -414,7 +407,7 @@ class FlowManager:
 
         trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
         try:
-            settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+            settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
         except Exception:
             settings_data = await self._storage.read_from_project("flow.json", project_id)
             
@@ -442,7 +435,7 @@ class FlowManager:
             trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
             
             try:
-                settings_data = await self._storage.read_from_trajectory("settings.json", project_id, trajectory_id)
+                settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
             except Exception:
                 settings_data = await self._storage.read_from_project("flow.json", project_id)
             
@@ -616,7 +609,7 @@ class FlowManager:
     async def get_trajectory_settings(self, project_id: str, trajectory_id: str) -> dict:
         """Get the settings for a trajectory."""
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
-        return await self._storage.read(f"{trajectory_path}/settings.json")
+        return await self._storage.read(f"{trajectory_path}/flow.json")
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
@@ -774,19 +767,19 @@ class FlowManager:
         return Node.from_dict(trajectory_data)
 
     async def read_project_settings(self, project_id: str) -> dict | None:
-        if not await self._storage.exists(f"projects/{project_id}/settings.json"):
+        if not await self._storage.exists(f"projects/{project_id}/flow.json"):
             return None
 
-        return await self._storage.read(f"projects/{project_id}/settings.json")
+        return await self._storage.read(f"projects/{project_id}/flow.json")
 
     async def save_project(self, project_id: str, settings: dict):
-        await self._storage.write(f"projects/{project_id}/settings.json", settings)
+        await self._storage.write(f"projects/{project_id}/flow.json", settings)
 
     async def save_trajectory(self, project_id: str, trajectory_id: str, flow: AgenticFlow):
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
 
         await self._storage.write(f"{trajectory_path}/trajectory.json", flow.get_trajectory_data())
-        await self._storage.write(f"{trajectory_path}/settings.json", flow.get_flow_settings())
+        await self._storage.write(f"{trajectory_path}/flow.json", flow.get_flow_settings())
 
     async def get_node_evaluation_files(self, project_id: str, trajectory_id: str, node_id: int) -> dict[str, str]:
         """Get the evaluation files for a specific node.
@@ -849,6 +842,6 @@ class FlowManager:
             raise ValueError(f"Trajectory {trajectory_id} not found in project {project_id}")
             
         # Save the settings
-        await self._storage.write(f"{trajectory_path}/settings.json", settings)
+        await self._storage.write(f"{trajectory_path}/flow.json", settings)
         
         return settings

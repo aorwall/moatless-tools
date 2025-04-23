@@ -2,7 +2,7 @@
 """Tests for the KubernetesRunner implementation."""
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import AsyncGenerator, Callable
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -122,32 +122,43 @@ class TestKubernetesRunner(KubernetesRunner):
         job_func: Callable | str,
         otel_context: dict = None,
         node_id: int = None,
+        update_on_start: bool = False,
+        update_branch: str = "docker"
     ) -> client.V1Job:
-        """Test implementation for creating a job object."""
-        # Create a minimal mock job object for testing
-        func_name = job_func.__name__ if not isinstance(job_func, str) else job_func
-
+        """Create a mock kubernetes job object."""
+        # Create a mock job with the minimum required fields
         job = MagicMock(spec=client.V1Job)
-        job.metadata = MagicMock(spec=client.V1ObjectMeta)
+        job.metadata = MagicMock()
         job.metadata.name = job_id
+        job.metadata.namespace = self.namespace
         job.metadata.labels = {
-            "app": "moatless-worker",
-            "project_id": project_id,
-            "trajectory_id": trajectory_id,
+            "project_id": self._get_project_label(project_id),
+            "trajectory_id": self._get_trajectory_label(trajectory_id),
+            "app": "moatless-worker"
         }
         job.metadata.annotations = {
             "moatless.ai/project-id": project_id,
             "moatless.ai/trajectory-id": trajectory_id,
-            "moatless.ai/function": func_name,
         }
-
-        # Include node_id in annotations if provided
+        
+        # Add node_id annotation if specified
         if node_id is not None:
             job.metadata.annotations["moatless.ai/node-id"] = str(node_id)
-
-        # Set the namespace property to the default namespace for testing
-        job.metadata.namespace = self.namespace
-
+        
+        # Mock status
+        job.status = MagicMock()
+        job.status.active = 1
+        job.status.succeeded = 0
+        job.status.failed = 0
+        job.status.start_time = datetime.now(timezone.utc)
+        job.status.completion_time = None
+        
+        # Mock spec
+        job.spec = MagicMock()
+        job.spec.template = MagicMock()
+        job.spec.template.spec = MagicMock()
+        job.spec.template.spec.containers = [MagicMock()]
+        
         return job
 
     def _get_image_name(self, trajectory_id: str = None) -> str:
@@ -160,32 +171,6 @@ class TestKubernetesRunner(KubernetesRunner):
         if node_id is not None:
             selector["moatless.ai/node-id"] = str(node_id)
         return selector
-
-    async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
-        """Test implementation for retrying a job.
-
-        In real implementation, this would delete the failed job and create a new one.
-        """
-        if not await self.job_exists(project_id, trajectory_id):
-            return False
-
-        job_id = self._job_id(project_id, trajectory_id)
-
-        # Get the job to extract function name
-        job = self.batch_v1.read_namespaced_job.return_value
-
-        # Check that job exists and is failed
-        if not job or not job.metadata.annotations or "moatless.ai/function" not in job.metadata.annotations:
-            return False
-
-        # Extract function name
-        func_name = job.metadata.annotations["moatless.ai/function"]
-
-        # Cancel existing job
-        await self.cancel_job(project_id, trajectory_id)
-
-        # Create a new job
-        return await self.start_job(project_id, trajectory_id, func_name)
 
     def _job_id(self, project_id: str, trajectory_id: str) -> str:
         """Generate job ID for Kubernetes."""
@@ -260,7 +245,6 @@ def create_mock_job(name, status="Running", succeeded=0, failed=0, active=1, nam
     job.metadata.annotations = {
         "moatless.ai/project-id": project_id,
         "moatless.ai/trajectory-id": trajectory_id,
-        "moatless.ai/function": "test_module.test_function",
     }
     job.metadata.deletion_timestamp = None
 
@@ -367,7 +351,10 @@ async def test_start_job(kubernetes_runner, mock_k8s_api):
 async def test_start_job_already_exists(kubernetes_runner):
     """Test that starting a job that already exists returns False."""
     # Mock job_exists to return True
-    with patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=True)):
+    with (
+        patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=True)),
+        patch.object(kubernetes_runner, "get_job_status", AsyncMock(return_value=JobStatus.RUNNING))
+    ):
         # Try to start the job
         result = await kubernetes_runner.start_job("test-project", "test-trajectory", "test_module.test_function")
 
@@ -534,7 +521,7 @@ async def test_get_job_status(kubernetes_runner, mock_k8s_api):
     batch_api.read_namespaced_job.side_effect = error_response
 
     status = await kubernetes_runner.get_job_status("test-project", "nonexistent")
-    assert status == JobStatus.NOT_STARTED
+    assert status is None  # Job doesn't exist, returns None instead of PENDING
 
 @pytest.mark.asyncio
 async def test_get_runner_info(kubernetes_runner, mock_k8s_api):
@@ -707,7 +694,6 @@ async def test_create_job_object(kubernetes_runner):
     assert job_obj.metadata.labels["trajectory_id"] == trajectory_id
     assert job_obj.metadata.annotations["moatless.ai/project-id"] == project_id
     assert job_obj.metadata.annotations["moatless.ai/trajectory-id"] == trajectory_id
-    assert job_obj.metadata.annotations["moatless.ai/function"] == job_func
 
     # Verify the namespace is set correctly 
     assert job_obj.metadata.namespace == expected_namespace

@@ -8,9 +8,10 @@ from moatless.completion import BaseCompletionModel
 from moatless.expander import Expander
 from moatless.file_context import FileContext
 from moatless.flow.search_tree import SearchTree
-from moatless.node import ActionStep, Node
+from moatless.node import ActionStep, Node, Thoughts
 from moatless.selector.simple import SimpleSelector
 from moatless.workspace import Workspace
+from moatless.actions.finish import Finish, FinishArgs
 
 # Mock Actions for testing purposes
 class MockActionArgs(ActionArguments):
@@ -27,28 +28,6 @@ class MockAction(Action):
     async def _execute(self, args: MockActionArgs, file_context=None) -> str:
         # This won't be called due to mocking _execute_action_step
         return "Mock action executed"
-
-# Attempt to import real FinishAction, otherwise use a mock
-try:
-    from moatless.actions.finish import FinishAction, FinishActionArgs
-except ImportError:
-    class FinishActionArgs(ActionArguments):
-        message: str = "Task finished"
-        status: str = "success"
-        thoughts: str = "finish thoughts"
-
-        @property
-        def name(self) -> str:
-            # Ensure name property exists and matches class name for lookup
-            return "FinishAction"
-
-    class FinishAction(Action):
-        args_schema = FinishActionArgs
-        is_terminal: bool = True
-
-        async def _execute(self, args: FinishActionArgs, file_context=None) -> str:
-            # This won't be called due to mocking _execute_action_step
-            return f"Finished with status {args.status}: {args.message}"
 
 # Test Fixtures
 @pytest.fixture
@@ -77,7 +56,7 @@ def simple_agent(mock_workspace):
 
     # Mock the execution part to return a simple observation
     agent._execute_action_step = AsyncMock(
-        return_value=Observation(message="Mock observation")
+        return_value=Observation(message="Mock observation")  # type: ignore
     )
 
     # Mock the generation part to create a predictable action
@@ -85,7 +64,7 @@ def simple_agent(mock_workspace):
          if not node.action_steps: # Only generate if not already present
             node.action_steps = [ActionStep(action=MockActionArgs())]
             node.assistant_message = "Assistant message for mock action."
-            node.thoughts = "Mock thoughts during generation."
+            node.thoughts = Thoughts(text="Mock thoughts during generation.")
 
     agent._generate_actions = AsyncMock(side_effect=mock_generate_actions)
     return agent
@@ -102,25 +81,21 @@ def search_tree_factory(simple_agent): # Renamed to indicate it's a factory
             selector=selector,
             expander=expander,
             agent=simple_agent,
-            value_function=None,        # Skip value function
+            value_function=None,      # Skip value function
             feedback_generator=None,  # Skip feedback generator
             discriminator=None,       # Skip discriminator
             max_iterations=max_iterations,
             max_depth=max_depth,
             max_expansions=max_expansions # Pass max_expansions here as well if create uses it
         )
-        # Need to potentially handle async initialization if agent.initialize is required
-        # For now, assuming agent is ready from its fixture
         return tree
     return _create_tree # Return the factory
 
 @pytest.fixture
 def root_node():
-    # Create root with a real FileContext
     node = Node.create_root(user_message="Initial task")
     node.file_context = FileContext(shadow_mode=True)
-    # Root node is considered executed initially
-    node.action_steps = [] # Explicitly empty, not None
+    node.action_steps = []
     return node
 
 
@@ -140,7 +115,7 @@ async def test_search_tree_single_run(search_tree_factory, root_node, simple_age
     child_node = root_node.children[0]
     assert child_node is not None
     assert child_node.node_id == 1
-    # In MCTS structure, final_node is the last *processed* node in the loop
+
     assert final_node == child_node
 
     # Verify agent methods were called for the child node
@@ -188,12 +163,11 @@ async def test_search_tree_max_iterations(search_tree_factory, root_node, simple
 @pytest.mark.asyncio
 async def test_search_tree_max_depth(search_tree_factory, root_node, simple_agent):
     # Test that the search stops when max_depth is reached
-    tree = search_tree_factory(root_node=root_node, max_depth=1, max_iterations=3)
-    final_node, reason = await tree.run()
+    tree = search_tree_factory(root=root_node, max_depth=1, max_iterations=5)
+    final_node = await tree.run()
 
     assert final_node.node_id == 1
     assert final_node.terminal is True
-    assert reason is None # Loop breaks because _select returns None, not due to is_finished()
     assert len(root_node.get_all_nodes()) == 2 # Root + 1 child
 
 
@@ -257,21 +231,21 @@ async def test_search_tree_finish_action(search_tree_factory, root_node, simple_
     original_action_map = dict(simple_agent._action_map)
 
     # Add FinishAction to the agent's known actions for this test
-    finish_action_instance = FinishAction()
+    finish_action_instance = Finish()
     simple_agent.actions.append(finish_action_instance)
-    simple_agent._action_map[FinishActionArgs] = finish_action_instance
+    simple_agent._action_map[FinishArgs] = finish_action_instance
 
     # Mock generation to produce FinishActionArgs
     async def mock_generate_finish_action(node: Node):
         if not node.action_steps:
-            node.action_steps = [ActionStep(action=FinishActionArgs(message="Test Finished"))]
+            node.action_steps = [ActionStep(action=FinishArgs(finish_reason="Test Finished"))]  # type: ignore
             node.assistant_message = "Assistant chose FinishAction."
-            node.thoughts = "Thoughts for FinishAction."
+            node.thoughts = Thoughts(text="Thoughts for FinishAction.")
     simple_agent._generate_actions = AsyncMock(side_effect=mock_generate_finish_action)
 
     # Mock execute to handle FinishActionArgs and return terminal observation
     async def mock_execute_finish(node: Node, action_step: ActionStep):
-        if isinstance(action_step.action, FinishActionArgs):
+        if isinstance(action_step.action, FinishArgs):
             obs = Observation(message="Finished task", terminal=True)
             return obs
         else:
@@ -292,7 +266,7 @@ async def test_search_tree_finish_action(search_tree_factory, root_node, simple_
         child_node = root_node.children[0]
 
         assert child_node.is_executed()
-        assert isinstance(child_node.action_steps[0].action, FinishActionArgs)
+        assert isinstance(child_node.action_steps[0].action, FinishArgs)
         # Check the specific 'is_finished' method on the node relies on action name
         assert child_node.is_finished() is True # Node method checks action name - Fixed in node.py
         assert child_node.terminal is True # State set by mocked execution observation
@@ -380,56 +354,6 @@ async def test_search_tree_run_on_existing_tree(search_tree_factory, root_node, 
     call_args, _ = simple_agent._execute_action_step.call_args
     assert call_args[0] == child2 # Check execute called on child2
 
-
-@pytest.mark.asyncio
-async def test_search_tree_run_with_node_id(search_tree_factory, root_node, simple_agent):
-    # Arrange
-    # Create a tree structure: root -> child1, child2
-    child1_fc = root_node.file_context.clone()
-    child2_fc = root_node.file_context.clone()
-    child1 = Node(node_id=1, parent=root_node, max_expansions=1, file_context=child1_fc)
-    child2 = Node(node_id=2, parent=root_node, max_expansions=1, file_context=child2_fc)
-    # Mark child1 as executed so it can be expanded from if selected
-    child1.action_steps = [ActionStep(action=MockActionArgs(), observation=Observation(message="child1 obs"))]
-    root_node.add_child(child1)
-    root_node.add_child(child2) # child2 is not executed
-
-    # Simulate Node 1 executed
-    child1.action_steps = [ActionStep(action=MockActionArgs(name="action1"))]
-    child1.observation = "Observation 1"
-
-    # Node 2 is unexecuted
-    child2.action_steps = []
-
-    # Expected cycles = 1 (select Node 2, mark as duplicate, finish)
-    tree = search_tree_factory(
-        root_node=root_node, max_iterations=2 # Should be enough
-    )
-
-    original_generate = simple_agent._generate_actions
-    original_execute = simple_agent._execute_action_step
-    try:
-        final_node, reason = await tree.run(node_id=1)
-
-        # Assertions
-        assert reason is None # Loop breaks due to node_id=1 condition
-        assert final_node.node_id == 2 # Node 2 was the last processed node
-        assert final_node.is_duplicate is True # Marked as duplicate
-        assert len(root_node.get_all_nodes()) == 3 # Root + child1 + child2 (no child3 created)
-
-        # Mock calls
-        # Root was expanded before run, child1 was executed before run
-        # Run(node_id=1) -> _select -> selects unexecuted Node 2
-        # _expand(Node 2) -> returns Node 2 (unexecuted)
-        # _simulate(Node 2) -> agent.run(Node 2)
-        # agent.run(Node 2) -> _generate_actions(Node 2) -> finds duplicate -> returns early
-        simple_agent._generate_actions.assert_called_once_with(child2)
-        simple_agent._execute_action_step.assert_not_called()
-    finally:
-        simple_agent._generate_actions = original_generate
-        simple_agent._execute_action_step = original_execute
-
-
 @pytest.mark.asyncio
 async def test_search_tree_no_expandable_nodes_finish(search_tree_factory, root_node, simple_agent):
      # Arrange
@@ -497,15 +421,14 @@ async def test_search_tree_selects_unexecuted_node(search_tree_factory, root_nod
     child2.action_steps = []
 
     # Expected cycles = 1 (select Node 2, simulate)
-    tree = search_tree_factory(root_node=root_node, max_iterations=4) # Start with 3 nodes, need 1 more iter
+    tree = search_tree_factory(root=root_node, max_iterations=4) # Start with 3 nodes, need 1 more iter
 
     original_generate = simple_agent._generate_actions
     original_execute = simple_agent._execute_action_step
     try:
-        final_node, reason = await tree.run(node_id=1)
+        final_node = await tree.run(node_id=1)
 
         # Assertions
-        assert reason is None # Loop breaks due to node_id=1 condition
         assert final_node.node_id == 2 # Node 2 was the last processed node
         assert final_node.is_duplicate is True # Marked as duplicate
         assert len(root_node.get_all_nodes()) == 3 # Root + child1 + child2 (no child3 created)

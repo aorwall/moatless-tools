@@ -27,12 +27,20 @@ async def test_find_function_init_method():
     # Create and initialize workspace
     workspace = Workspace(repository=repository, code_index=code_index)
 
-    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
+    action = FindFunction(
+        completion_model=completion_model,
+        max_search_tokens=4000,
+        max_identify_tokens=4000,
+        max_identify_prompt_tokens=4000,
+        max_hits=10,
+        add_extra_context=False,
+        use_identifier=True
+    )
     # Initialize the action with the workspace
     await action.initialize(workspace)
 
     action_args = FindFunctionArgs(
-        scratch_pad="",
+        thoughts="",
         class_name="ManagementUtility",
         function_name="__init__",
     )
@@ -57,12 +65,20 @@ async def test_find_function():
     # Create and initialize workspace
     workspace = Workspace(repository=repository, code_index=code_index)
 
-    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
+    action = FindFunction(
+        completion_model=completion_model,
+        max_search_tokens=4000,
+        max_identify_tokens=4000,
+        max_identify_prompt_tokens=4000,
+        max_hits=10,
+        add_extra_context=False,
+        use_identifier=True
+    )
     # Initialize the action with the workspace
     await action.initialize(workspace)
 
     action_args = FindFunctionArgs(
-        scratch_pad="",
+        thoughts="",
         function_name="cached_eval",
         file_pattern="**/*.py",
     )
@@ -92,12 +108,20 @@ async def test_find_function_with_mocks():
 
     # Create workspace and action
     workspace = Workspace(repository=repository, code_index=code_index)
-    action = FindFunction(repository=repository, code_index=code_index, completion_model=completion_model)
+    action = FindFunction(
+        completion_model=completion_model,
+        max_search_tokens=4000,
+        max_identify_tokens=4000,
+        max_identify_prompt_tokens=4000,
+        max_hits=10,
+        add_extra_context=False,
+        use_identifier=True
+    )
     await action.initialize(workspace)
 
     # Execute action
     action_args = FindFunctionArgs(
-        scratch_pad="",
+        thoughts="",
         function_name="test_function",
         file_pattern="**/*.py",
     )

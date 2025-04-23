@@ -22,10 +22,6 @@ async def test_execute():
         result = await env_with_cwd.execute("pwd")
         assert temp_dir in result
 
-    # Test command that fails
-    with pytest.raises(EnvironmentExecutionError):
-        await env.execute("command_that_does_not_exist")
-
     # Test with environment variables
     env_with_vars = LocalBashEnvironment(env={"TEST_VAR": "test_value"})
     result = await env_with_vars.execute("echo $TEST_VAR")

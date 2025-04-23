@@ -52,7 +52,7 @@ class SearchTree(AgenticFlow):
     reward_threshold: Optional[float] = Field(
         None, description="The min reward threshold to consider before finishing."
     )
-    max_depth: Optional[int] = Field(20, description="The maximum depth for one trajectory in simulations.")
+    max_depth: Optional[int] = Field(None, description="The maximum depth for one trajectory in simulations.")
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -75,7 +75,6 @@ class SearchTree(AgenticFlow):
         **kwargs,
     ):
         expander = expander or Expander(max_expansions=max_expansions)  # type: ignore
-
         return super().create(
             selector=selector,
             expander=expander,
@@ -145,15 +144,12 @@ class SearchTree(AgenticFlow):
 
             else:
                 self.log(logger.info, "Search complete: no more nodes to expand.")
+                finish_reason = "no_selectable_nodes"
                 break
 
             if node_id:
                 self.log(logger.info, f"Node{node.node_id} finished. Returning.")
                 break
-
-        # Capture finish reason if loop ended due to no selectable node
-        if not node and not finish_reason:
-            finish_reason = "no_expandable_nodes"
 
         if not len(self.get_finished_nodes()):
             self.log(
@@ -364,7 +360,8 @@ class SearchTree(AgenticFlow):
         finished_nodes = self.get_finished_nodes()
         unique_finished_parents = set()
         for node in finished_nodes:
-            unique_finished_parents.add(node.parent.node_id)
+            if node.parent:
+                unique_finished_parents.add(node.parent.node_id)
 
         # Check max finished nodes
         if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
@@ -426,12 +423,6 @@ class SearchTree(AgenticFlow):
             raise RuntimeError("SearchTree agent must have actions.")
 
         return True
-
-    @model_validator(mode="after")
-    def set_depth(self):
-        if self.max_expansions == 1:
-            self.max_depth = self.max_iterations
-        return self
 
     @classmethod
     def model_validate(cls, obj: Any):

@@ -27,7 +27,7 @@ class ReadFileArgs(ActionArguments):
 
     file_path: str = Field(
         ...,
-        description="The path to the file you want to read, relative to the repository root. For example: 'src/main.py' or 'config/settings.json'",
+        description="The path to the file you want to read, relative to the repository root. For example: 'src/main.py'",
     )
     start_line: Optional[int] = Field(
         None,

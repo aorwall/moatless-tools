@@ -409,50 +409,6 @@ class AsyncioRunner(BaseRunner):
 
         return exists_in_metadata
 
-    @tracer.start_as_current_span("AsyncioRunner.retry_job")
-    async def retry_job(self, project_id: str, trajectory_id: str) -> bool:
-        """Retry a failed job for the given project and trajectory.
-
-        Args:
-            project_id: The project ID
-            trajectory_id: The trajectory ID
-
-        Returns:
-            True if the job was requeued, False otherwise
-        """
-        job_id = self._job_id(project_id, trajectory_id)
-
-        # Check if job exists and is failed
-        if job_id not in self.job_metadata:
-            self.logger.warning(f"Job {job_id} not found for retry")
-            return False
-
-        meta = self.job_metadata[job_id]
-        if meta["status"] != JobStatus.FAILED:
-            self.logger.warning(f"Job {job_id} is not failed, cannot retry")
-            return False
-
-        # Cannot retry without the original job function
-        self.logger.error(f"Retrying job {job_id} is not implemented for AsyncioRunner")
-        return False
-
-    async def get_job_status(self, project_id: str, trajectory_id: str) -> JobStatus:
-        """Get the status of a job for the given project and trajectory.
-
-        Args:
-            project_id: The project ID
-            trajectory_id: The trajectory ID
-
-        Returns:
-            The job status
-        """
-        job_id = self._job_id(project_id, trajectory_id)
-
-        if job_id in self.job_metadata:
-            return cast(JobStatus, self.job_metadata[job_id]["status"])
-
-        return JobStatus.PENDING
-
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.
 
@@ -480,7 +436,7 @@ class AsyncioRunner(BaseRunner):
         Returns:
             A JobsStatusSummary object
         """
-        summary = JobsStatusSummary(project_id=project_id)
+        summary = JobsStatusSummary()
 
         # Count jobs for the project by status
         for job_id, meta in self.job_metadata.items():
@@ -494,19 +450,14 @@ class AsyncioRunner(BaseRunner):
             # Update counts and job ID lists based on status
             if status == JobStatus.PENDING:
                 summary.pending_jobs += 1
-                summary.job_ids["pending"].append(job_id)
             elif status == JobStatus.RUNNING:
                 summary.running_jobs += 1
-                summary.job_ids["running"].append(job_id)
             elif status == JobStatus.COMPLETED:
                 summary.completed_jobs += 1
-                summary.job_ids["completed"].append(job_id)
             elif status == JobStatus.FAILED:
                 summary.failed_jobs += 1
-                summary.job_ids["failed"].append(job_id)
             elif status == JobStatus.CANCELED:
                 summary.canceled_jobs += 1
-                summary.job_ids["canceled"].append(job_id)
 
         return summary
 

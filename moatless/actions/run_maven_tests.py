@@ -256,6 +256,30 @@ class RunMavenTests(Action):
                     # Parse test results
                     file_results = maven_parser.parse_test_output(output, test_file)
 
+                    # Check for AssertionErrors in the output
+                    if "AssertionError" in output:
+                        # Extract the failure message
+                        assertion_lines = []
+                        capture = False
+                        for line in output.splitlines():
+                            if "AssertionError" in line:
+                                capture = True
+                                assertion_lines.append(line)
+                            elif capture and line.strip() and not line.startswith("[INFO]"):
+                                assertion_lines.append(line)
+                            elif capture and (not line.strip() or line.startswith("[INFO]")):
+                                capture = False
+                        
+                        # If we have failure messages but no proper test results, create one
+                        if assertion_lines and not any(r.status == TestStatus.FAILED for r in file_results):
+                            error_result = TestResult(
+                                status=TestStatus.FAILED,
+                                name=f"Test failure in {test_file}",
+                                file_path=test_file,
+                                failure_output="\n".join(assertion_lines),
+                            )
+                            file_results.append(error_result)
+
                     # Set file path if not set by parser
                     for result in file_results:
                         if not result.file_path:
@@ -288,7 +312,7 @@ class RunMavenTests(Action):
                     logger.exception(f"Maven command failed: {test_command}")
                     stdout = cmd_error.stderr
 
-                test_results = maven_parser.parse_test_output(stdout, repo_name)
+                test_results = maven_parser.parse_test_output(stdout)
             except Exception as e:
                 logger.warning(f"Tests failed with error: {str(e)}")
                 error_result = TestResult(
@@ -306,6 +330,12 @@ class RunMavenTests(Action):
 
         # Build response message
         response_msg = ""
+        
+        # Add detailed error information to the response for any failures or errors
+        for result in test_results:
+            if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.failure_output:
+                response_msg += f"\n{result.name} failure details:\n{result.failure_output}\n"
+
         failure_details = TestFile.get_test_failure_details(test_file_objects)
         if failure_details:
             response_msg += f"\n{failure_details}"
@@ -388,6 +418,15 @@ class RunMavenTests(Action):
             file_test_results = [
                 result for result in test_results if result.file_path and result.file_path == test_file.file_path
             ]
+
+            # Ensure failure outputs are copied to test results
+            for result in file_test_results:
+                # Make sure errors are properly categorized
+                if "AssertionError" in (result.failure_output or ""):
+                    if result.status != TestStatus.FAILED:
+                        result.status = TestStatus.FAILED
+                elif result.status not in [TestStatus.PASSED, TestStatus.SKIPPED]:
+                    result.status = TestStatus.ERROR
 
             test_file.test_results = file_test_results
             if file_test_results:

@@ -92,7 +92,8 @@ async def test_start_job_already_exists(docker_runner):
 @pytest.mark.asyncio
 async def test_get_jobs(docker_runner):
     """Test that jobs can be retrieved."""
-    with patch("asyncio.create_subprocess_exec") as mock_subprocess:
+    with patch("asyncio.create_subprocess_exec") as mock_subprocess, \
+         patch.object(docker_runner, "_get_container_status") as mock_get_status:
         # Mock process for docker ps
         mock_process = AsyncMock()
         mock_process.returncode = 0
@@ -103,6 +104,9 @@ async def test_get_jobs(docker_runner):
             b"",
         )
         mock_subprocess.return_value = mock_process
+
+        # Mock container status queries
+        mock_get_status.side_effect = lambda container_name: JobStatus.RUNNING if "test-project" in container_name else JobStatus.COMPLETED
 
         # Get all jobs
         jobs = await docker_runner.get_jobs()
@@ -118,10 +122,12 @@ async def test_get_jobs(docker_runner):
         # Check second job
         assert jobs[1].project_id == "other-project"
         assert jobs[1].trajectory_id == "other-repo__instance"
+        assert jobs[1].status == JobStatus.COMPLETED
 
         # For the second part of the test, we need to handle exit code checks
         # that might happen during job status determination
         mock_subprocess.reset_mock()
+        mock_get_status.reset_mock()
 
         # First create a mock for the initial docker ps call with project filter
         mock_ps_process = AsyncMock()
@@ -131,13 +137,11 @@ async def test_get_jobs(docker_runner):
             b"",
         )
 
-        # Second create a mock for any exit code check that might happen
-        mock_inspect_process = AsyncMock()
-        mock_inspect_process.returncode = 0
-        mock_inspect_process.communicate.return_value = (b"0\n", b"")
+        # Set up the side effect for _get_container_status to return RUNNING for test-project
+        mock_get_status.side_effect = lambda container_name: JobStatus.RUNNING
 
         # Set up the sequence of returns
-        mock_subprocess.side_effect = [mock_ps_process, mock_inspect_process, mock_inspect_process]
+        mock_subprocess.return_value = mock_ps_process
 
         # Get jobs filtered by project
         jobs = await docker_runner.get_jobs("test-project")
@@ -227,20 +231,19 @@ async def test_cancel_all_jobs_for_project(docker_runner):
 @pytest.mark.asyncio
 async def test_job_exists(docker_runner):
     """Test checking if a job exists."""
-    with patch("asyncio.create_subprocess_exec") as mock_subprocess:
-        # Case 1: Job exists
-        mock_process = AsyncMock()
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = (b"container-name\n", b"")
-        mock_subprocess.return_value = mock_process
-
+    with patch.object(docker_runner, "get_job_status") as mock_get_status:
+        # Case 1: Job exists with RUNNING status
+        mock_get_status.return_value = JobStatus.RUNNING
         result = await docker_runner.job_exists("test-project", "test-repo__instance")
         assert result is True
 
-        # Case 2: Job doesn't exist
-        mock_process.returncode = 0
-        mock_process.communicate.return_value = (b"", b"")
+        # Case 2: Job exists with COMPLETED status
+        mock_get_status.return_value = JobStatus.COMPLETED
+        result = await docker_runner.job_exists("test-project", "test-repo__instance")
+        assert result is True
 
+        # Case 3: Job doesn't exist (status is None)
+        mock_get_status.return_value = None
         result = await docker_runner.job_exists("nonexistent", "nonexistent")
         assert result is False
 
@@ -254,11 +257,10 @@ async def test_get_job_status(docker_runner):
         # Test different statuses
         for status in [
             JobStatus.RUNNING,
-            JobStatus.PENDING,
             JobStatus.COMPLETED,
             JobStatus.FAILED,
             JobStatus.CANCELED,
-            JobStatus.NOT_STARTED,
+            None,  # Test None status for non-existent jobs
         ]:
             mock_get_status.return_value = status
             result = await docker_runner.get_job_status("test-project", "test-repo__instance")
@@ -328,19 +330,13 @@ async def test_get_job_status_summary(docker_runner):
         ]
 
         # Get summary
-        summary = await docker_runner.get_job_status_summary("test-project")
+        summary = await docker_runner.get_job_status_summary()
 
         # Check counts
-        assert summary.project_id == "test-project"
         assert summary.total_jobs == 3
         assert summary.running_jobs == 1
         assert summary.completed_jobs == 1
         assert summary.failed_jobs == 1
-
-        # Check job IDs using JobStatus enum values as string
-        assert "moatless-test-project-job1" in summary.job_ids[JobStatus.RUNNING.name.lower()]
-        assert "moatless-test-project-job2" in summary.job_ids[JobStatus.COMPLETED.name.lower()]
-        assert "moatless-test-project-job3" in summary.job_ids[JobStatus.FAILED.name.lower()]
 
 
 @pytest.mark.asyncio

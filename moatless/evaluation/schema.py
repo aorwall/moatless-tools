@@ -32,6 +32,7 @@ class InstanceStatus(str, Enum):
     EVALUATING = "evaluating"
     EVALUATED = "evaluated"
     RESOLVED = "resolved"
+    PARTIALLY_RESOLVED = "partially_resolved"
     FAILED = "failed"
     ERROR = "error"
 

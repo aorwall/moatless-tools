@@ -209,9 +209,6 @@ def create_annotations(project_id: str, trajectory_id: str, func_name: Optional[
         "moatless.ai/trajectory-id": trajectory_id,
     }
 
-    if func_name:
-        annotations["moatless.ai/function"] = func_name
-
     return annotations
 
 

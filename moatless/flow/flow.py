@@ -101,7 +101,7 @@ class AgenticFlow(MoatlessComponent):
                 shadow_mode=shadow_mode,
                 max_expansions=max_expansions,
             )
-
+            
         instance = cls(
             trajectory_id=trajectory_id,
             project_id=project_id,
@@ -291,7 +291,7 @@ class AgenticFlow(MoatlessComponent):
     @classmethod
     def from_dir(cls, trajectory_dir: Path) -> "AgenticFlow":
         """Load a system instance from a directory."""
-        settings_path = trajectory_dir / "settings.json"
+        settings_path = trajectory_dir / "flow.json"
         if not settings_path.exists():
             raise FileNotFoundError(f"Settings file not found in {trajectory_dir}")
 
@@ -320,7 +320,7 @@ class AgenticFlow(MoatlessComponent):
             raise ValueError("Trajectory not found")
         
         try:
-            flow_dict: dict | None = await storage.read_from_trajectory("settings.json", project_id, trajectory_id)  # type: ignore
+            flow_dict: dict | None = await storage.read_from_trajectory("flow.json", project_id, trajectory_id)  # type: ignore
         except Exception:
             flow_dict = await storage.read_from_project("flow.json", project_id)  # type: ignore
             

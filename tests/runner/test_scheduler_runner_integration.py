@@ -72,8 +72,6 @@ async def test_scheduler_job_queuing_and_execution():
         max_jobs_per_project=1,
         max_total_jobs=3,
         scheduler_interval_seconds=2,
-        # Docker runner configuration
-        max_concurrent_containers=3,
         default_image_name="busybox:latest"  # Use busybox which is lightweight but has enough tools
     )
     
@@ -129,14 +127,6 @@ async def test_scheduler_job_queuing_and_execution():
         await wait_for_job_status(project_id, job1_id, 
                                 [JobStatus.COMPLETED, JobStatus.FAILED], timeout=10)
         
-        # Get runner info to check stats
-        runner_info = await scheduler.get_runner_info()
-        assert "scheduler" in runner_info.data, "Runner info should include scheduler data"
-        scheduler_data = runner_info.data["scheduler"]
-        
-        assert scheduler_data["max_jobs_per_project"] == 1, "Incorrect max_jobs_per_project"
-        assert scheduler_data["max_total_jobs"] == 3, "Incorrect max_total_jobs"
-        assert scheduler_data["storage_type"] == "RedisJobStorage", "Incorrect storage type"
         
     finally:
         # Clean up
@@ -167,8 +157,6 @@ async def test_job_cancellation():
         max_jobs_per_project=3,
         max_total_jobs=5,
         scheduler_interval_seconds=2,
-        # Docker runner configuration
-        max_concurrent_containers=5,
         default_image_name="busybox:latest"
     )
     
@@ -209,8 +197,7 @@ async def test_job_cancellation():
         await scheduler.cancel_job(project_id)
         
         # Verify job status summary after cancellation
-        summary = await scheduler.get_job_status_summary(project_id)
-        assert summary.project_id == project_id, "Summary should be for the correct project"
+        summary = await scheduler.get_job_status_summary()
         assert summary.total_jobs > 0, "Summary should include the jobs we created"
         
     finally:

@@ -281,28 +281,6 @@ async def test_get_job_status(asyncio_runner):
     status = await asyncio_runner.get_job_status("nonexistent", "nonexistent")
     assert status == JobStatus.PENDING
 
-
-@pytest.mark.asyncio
-async def test_retry_job(asyncio_runner):
-    """Test that retry_job returns False since it's not implemented."""
-
-    # Create a job function that fails but accepts required parameters
-    async def failing_job(project_id, trajectory_id, node_id):
-        raise ValueError("Test error")
-
-    # Start the job
-    await asyncio_runner.start_job("test-project", "test-trajectory", failing_job)
-
-    # Wait for the job to fail
-    await asyncio.sleep(0.1)
-
-    # Try to retry the job
-    result = await asyncio_runner.retry_job("test-project", "test-trajectory")
-
-    # Check that retry returns False
-    assert result is False
-
-
 @pytest.mark.asyncio
 async def test_get_runner_info(asyncio_runner):
     """Test getting runner information."""
@@ -370,7 +348,6 @@ async def test_get_job_status_summary(asyncio_runner):
     summary = await asyncio_runner.get_job_status_summary("test-project")
 
     # Verify summary
-    assert summary.project_id == "test-project"
     assert summary.total_jobs == 4
     assert summary.completed_jobs + summary.failed_jobs + summary.running_jobs == 4
 

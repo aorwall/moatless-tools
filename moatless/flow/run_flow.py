@@ -44,7 +44,7 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
 
     try:
         settings: dict | None = await storage.read_from_trajectory(
-            path="settings.json", trajectory_id=trajectory_id, project_id=project_id
+            path="flow.json", trajectory_id=trajectory_id, project_id=project_id
         )  # type: ignore
     except Exception:
         settings = await storage.read_from_project(path="flow.json", project_id=project_id)  # type: ignore

@@ -281,7 +281,7 @@ class EvaluationManager:
 
         await self._save_evaluation(evaluation)
 
-    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = False):
+    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = True):
         """Process the results of a trajectory and update the instance with the results."""
         
         if instance.status == InstanceStatus.COMPLETED and not force_update:
@@ -322,8 +322,18 @@ class EvaluationManager:
                             
             if node.evaluation_result:
                 instance.resolved = node.evaluation_result.resolved
-                instance.status = InstanceStatus.COMPLETED
+                instance.status = InstanceStatus.RESOLVED if node.evaluation_result.resolved else InstanceStatus.FAILED
+            
+            if instance.status == InstanceStatus.RESOLVED:
                 return instance
+            
+            for node in flow.root.get_leaf_nodes():
+                if node.evaluation_result:
+                    if node.evaluation_result.resolved:
+                        instance.status = InstanceStatus.PARTIALLY_RESOLVED
+                        return instance
+            
+            
 
             if node.error:
                 instance.status = InstanceStatus.ERROR
