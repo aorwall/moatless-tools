@@ -4,7 +4,6 @@ import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union
 
-import redis.asyncio as redis
 
 from moatless.runner.runner import JobInfo, JobStatus
 from moatless.runner.storage.storage import JobStorage
@@ -19,6 +18,11 @@ class RedisJobStorage(JobStorage):
             redis_url: Redis connection URL
             prefix: Key prefix for Redis storage
         """
+        try:
+            import redis.asyncio as redis
+        except ImportError:
+            raise ImportError("redis is not installed. Please install it with `pip install redis`.")
+
         self._redis = redis.from_url(redis_url)
         self._prefix = prefix
     
