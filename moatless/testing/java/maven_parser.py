@@ -265,9 +265,9 @@ class MavenParser(TestOutputParser):
                 method_name = summary_error_match.group(2)
                 error_type = summary_error_match.group(3)
                 error_message = summary_error_match.group(4).strip()
-                
+
                 test_name = f"{class_name}.{method_name}"
-                
+
                 # Check if we already have this test result
                 if not any(r.name == test_name for r in test_results):
                     test_results.append(

@@ -48,9 +48,7 @@ async def evaluate_golden_patch(project_id: str, trajectory_id: str, node_id: in
 
     logger.info(f"current_project_id: {current_project_id}, current {current_trajectory_id}")
 
-    settings = await storage.read_from_trajectory(
-        path="flow.json", trajectory_id=trajectory_id, project_id=project_id
-    )
+    settings = await storage.read_from_trajectory(path="flow.json", trajectory_id=trajectory_id, project_id=project_id)
     if not settings:
         logger.error("Trajectory settings not found.")
         raise ValueError("Settings not found")

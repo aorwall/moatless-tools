@@ -1,1 +1,1 @@
-"""Tests for the job scheduler package.""" 
+"""Tests for the job scheduler package."""

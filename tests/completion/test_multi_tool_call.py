@@ -40,18 +40,11 @@ def mock_litellm_multi_tool_response():
 
     def _create_mock(tool_calls=None, usage=None):
         # Create the MultiToolCall wrapper containing multiple tool calls
-        wrapper_args = {
-            "tool_calls": tool_calls or [],
-            "thoughts": "Processing multiple tools"
-        }
-        
+        wrapper_args = {"tool_calls": tool_calls or [], "thoughts": "Processing multiple tools"}
+
         # Create a single tool call that contains the wrapper
         function = Function(name="MultiToolCall", arguments=json.dumps(wrapper_args))
-        message_tool_calls = [
-            ChatCompletionMessageToolCall(
-                function=function, id="wrapper-call", type="function"
-            )
-        ]
+        message_tool_calls = [ChatCompletionMessageToolCall(function=function, id="wrapper-call", type="function")]
 
         # Create message
         message = Message(content="Test response", tool_calls=message_tool_calls, role="assistant")
@@ -119,31 +112,31 @@ async def test_validate_completion_multiple_tools(
     tool_calls = [
         {
             "name": "TestActionArgs",
-            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"}
+            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"},
         },
         {
             "name": "AnotherActionArgs",
-            "args": {"path": "/tmp/test", "recursive": True, "thoughts": "Testing path processing"}
-        }
+            "args": {"path": "/tmp/test", "recursive": True, "thoughts": "Testing path processing"},
+        },
     ]
-    
+
     mock_response = mock_litellm_multi_tool_response(tool_calls=tool_calls)
 
     structured_outputs, text_response, thought = await model._validate_completion(completion_response=mock_response)
 
     assert structured_outputs
     assert len(structured_outputs) == 2
-    
+
     # Verify first tool call
     assert structured_outputs[0].command == "test"
     assert structured_outputs[0].args == ["--flag"]
     assert structured_outputs[0].thoughts == "Testing command execution"
-    
+
     # Verify second tool call
     assert structured_outputs[1].path == "/tmp/test"
     assert structured_outputs[1].recursive is True
     assert structured_outputs[1].thoughts == "Testing path processing"
-    
+
     assert text_response == "Test response"
     assert thought == "Processing multiple tools"
 
@@ -163,14 +156,14 @@ async def test_validate_completion_partial_valid_tools(
     tool_calls = [
         {
             "name": "TestActionArgs",
-            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"}
+            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"},
         },
         {
             "name": "AnotherActionArgs",
-            "args": {"recursive": True}  # Missing required 'path' field
-        }
+            "args": {"recursive": True},  # Missing required 'path' field
+        },
     ]
-    
+
     mock_response = mock_litellm_multi_tool_response(tool_calls=tool_calls)
 
     # This should still return the valid tool call but log a warning about the invalid one
@@ -198,14 +191,14 @@ async def test_validate_completion_all_invalid_tools(
     tool_calls = [
         {
             "name": "TestActionArgs",
-            "args": {"invalid_field": "test"}  # Missing required 'command'
+            "args": {"invalid_field": "test"},  # Missing required 'command'
         },
         {
             "name": "AnotherActionArgs",
-            "args": {"recursive": True}  # Missing required 'path'
-        }
+            "args": {"recursive": True},  # Missing required 'path'
+        },
     ]
-    
+
     mock_response = mock_litellm_multi_tool_response(tool_calls=tool_calls)
 
     # Should raise CompletionRetryError as all tools are invalid
@@ -215,9 +208,7 @@ async def test_validate_completion_all_invalid_tools(
 
 @pytest.mark.asyncio
 @patch("litellm.acompletion", new_callable=AsyncMock)
-async def test_validate_invalid_wrapper_format(
-    mock_completion, test_schemas, test_messages
-):
+async def test_validate_invalid_wrapper_format(mock_completion, test_schemas, test_messages):
     """Test validating an invalid wrapper format (missing tool_calls)"""
     model = MultiToolCallCompletionModel(
         model="test",
@@ -226,11 +217,9 @@ async def test_validate_invalid_wrapper_format(
 
     # Create a direct invalid wrapper response
     function = Function(name="MultiToolCall", arguments=json.dumps({"invalid_key": "value"}))
-    message_tool_calls = [
-        ChatCompletionMessageToolCall(function=function, id="invalid-wrapper", type="function")
-    ]
+    message_tool_calls = [ChatCompletionMessageToolCall(function=function, id="invalid-wrapper", type="function")]
     message = Message(content="Test response", tool_calls=message_tool_calls, role="assistant")
-    
+
     mock_response = ModelResponse(
         id="test_id",
         created=1234567890,
@@ -242,7 +231,7 @@ async def test_validate_invalid_wrapper_format(
     # Should raise CompletionRetryError for invalid wrapper format
     with pytest.raises(CompletionRetryError) as excinfo:
         await model._validate_completion(completion_response=mock_response)
-    
+
     assert "MultiToolCall must contain a 'tool_calls' array" in str(excinfo.value)
 
 
@@ -259,14 +248,14 @@ async def test_end_to_end_completion(mock_completion, mock_litellm_multi_tool_re
     tool_calls = [
         {
             "name": "TestActionArgs",
-            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"}
+            "args": {"command": "test", "args": ["--flag"], "thoughts": "Testing command execution"},
         },
         {
             "name": "AnotherActionArgs",
-            "args": {"path": "/tmp/test", "recursive": True, "thoughts": "Testing path processing"}
-        }
+            "args": {"path": "/tmp/test", "recursive": True, "thoughts": "Testing path processing"},
+        },
     ]
-    
+
     mock_response = mock_litellm_multi_tool_response(tool_calls=tool_calls)
     mock_completion.return_value = mock_response
 
@@ -274,11 +263,11 @@ async def test_end_to_end_completion(mock_completion, mock_litellm_multi_tool_re
 
     assert result.structured_outputs
     assert len(result.structured_outputs) == 2
-    
+
     # Verify both tool calls are present in the result by checking instance types
     has_test_action = False
     has_another_action = False
-    
+
     for output in result.structured_outputs:
         if isinstance(output, TestActionArgs):
             has_test_action = True
@@ -288,7 +277,7 @@ async def test_end_to_end_completion(mock_completion, mock_litellm_multi_tool_re
             has_another_action = True
             assert output.path == "/tmp/test"
             assert output.recursive is True
-    
+
     assert has_test_action, "TestActionArgs not found in the outputs"
     assert has_another_action, "AnotherActionArgs not found in the outputs"
 
@@ -298,7 +287,7 @@ async def test_end_to_end_completion(mock_completion, mock_litellm_multi_tool_re
     assert "tools" in call_kwargs
     assert len(call_kwargs["tools"]) == 3  # All original tools plus wrapper
     assert call_kwargs["tools"][2]["function"]["name"] == "MultiToolCall"
-    assert len(call_kwargs["messages"]) == len(test_messages) + 1  # +1 for system prompt 
+    assert len(call_kwargs["messages"]) == len(test_messages) + 1  # +1 for system prompt
 
 
 @pytest.mark.asyncio
@@ -311,17 +300,12 @@ async def test_direct_tool_calls(mock_completion, test_schemas, test_messages):
     model.initialize(response_schema=test_schemas, system_prompt="Test prompt")
 
     # Create direct tool call without wrapper
-    function = Function(name="TestActionArgs", arguments=json.dumps({
-        "command": "test",
-        "args": ["--flag"]
-    }))
-    
-    message_tool_calls = [
-        ChatCompletionMessageToolCall(function=function, id="direct-call", type="function")
-    ]
-    
+    function = Function(name="TestActionArgs", arguments=json.dumps({"command": "test", "args": ["--flag"]}))
+
+    message_tool_calls = [ChatCompletionMessageToolCall(function=function, id="direct-call", type="function")]
+
     message = Message(content="Test response", tool_calls=message_tool_calls, role="assistant")
-    
+
     mock_response = ModelResponse(
         id="test_id",
         created=1234567890,
@@ -329,7 +313,7 @@ async def test_direct_tool_calls(mock_completion, test_schemas, test_messages):
         choices=[{"message": message, "finish_reason": "stop", "index": 0}],
         usage=Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
     )
-    
+
     mock_completion.return_value = mock_response
 
     # Process the direct tool call
@@ -339,7 +323,7 @@ async def test_direct_tool_calls(mock_completion, test_schemas, test_messages):
     assert len(result.structured_outputs) == 1
     assert isinstance(result.structured_outputs[0], TestActionArgs)
     assert result.structured_outputs[0].command == "test"
-    assert result.structured_outputs[0].args == ["--flag"] 
+    assert result.structured_outputs[0].args == ["--flag"]
 
 
 @pytest.mark.asyncio
@@ -354,25 +338,19 @@ async def test_multiple_direct_tool_calls(mock_completion, test_schemas, test_me
     # Create multiple direct tool calls
     message_tool_calls = [
         ChatCompletionMessageToolCall(
-            function=Function(name="TestActionArgs", arguments=json.dumps({
-                "command": "test",
-                "args": ["--flag"]
-            })),
-            id="direct-call-1", 
-            type="function"
+            function=Function(name="TestActionArgs", arguments=json.dumps({"command": "test", "args": ["--flag"]})),
+            id="direct-call-1",
+            type="function",
         ),
         ChatCompletionMessageToolCall(
-            function=Function(name="AnotherActionArgs", arguments=json.dumps({
-                "path": "/tmp/test",
-                "recursive": True
-            })),
-            id="direct-call-2", 
-            type="function"
-        )
+            function=Function(name="AnotherActionArgs", arguments=json.dumps({"path": "/tmp/test", "recursive": True})),
+            id="direct-call-2",
+            type="function",
+        ),
     ]
-    
+
     message = Message(content="Test response", tool_calls=message_tool_calls, role="assistant")
-    
+
     mock_response = ModelResponse(
         id="test_id",
         created=1234567890,
@@ -380,7 +358,7 @@ async def test_multiple_direct_tool_calls(mock_completion, test_schemas, test_me
         choices=[{"message": message, "finish_reason": "stop", "index": 0}],
         usage=Usage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
     )
-    
+
     mock_completion.return_value = mock_response
 
     # Process the direct tool calls
@@ -388,11 +366,11 @@ async def test_multiple_direct_tool_calls(mock_completion, test_schemas, test_me
 
     assert result.structured_outputs
     assert len(result.structured_outputs) == 2
-    
+
     # Verify both tool calls are present in the result by checking instance types
     has_test_action = False
     has_another_action = False
-    
+
     for output in result.structured_outputs:
         if isinstance(output, TestActionArgs):
             has_test_action = True
@@ -402,6 +380,6 @@ async def test_multiple_direct_tool_calls(mock_completion, test_schemas, test_me
             has_another_action = True
             assert output.path == "/tmp/test"
             assert output.recursive is True
-    
+
     assert has_test_action, "TestActionArgs not found in the outputs"
-    assert has_another_action, "AnotherActionArgs not found in the outputs" 
+    assert has_another_action, "AnotherActionArgs not found in the outputs"

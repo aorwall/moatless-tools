@@ -152,87 +152,91 @@ class Action(MoatlessComponent, ABC):
         """
         Get a generic reward scale for evaluating actions.
         This method can be overridden in subclasses to provide action-specific reward scales.
-        
+
         Args:
             trajectory_length: The length of the action trajectory so far.
                                Early actions may be evaluated differently than later ones.
-        
+
         Returns:
             A list of RewardScaleEntry objects defining the reward scale.
         """
         if trajectory_length is None or trajectory_length < 2:
             # Early in the trajectory, focus on exploration and initial steps
-            return cls.generate_reward_scale_entries([
-                (
-                    90,
-                    100,
-                    "The action is excellent, providing critical information or making significant progress toward understanding the problem space.",
-                ),
-                (
-                    75,
-                    89,
-                    "The action is very good, providing useful information or making good progress toward understanding the problem.",
-                ),
-                (
-                    50,
-                    74,
-                    "The action is adequate, providing somewhat useful information or making some progress.",
-                ),
-                (
-                    25,
-                    49,
-                    "The action provides minimal useful information or makes limited progress.",
-                ),
-                (
-                    0,
-                    24,
-                    "The action provides no useful information or makes no progress but doesn't cause setbacks.",
-                ),
-                (
-                    -49,
-                    -1,
-                    "The action is counterproductive, causing minor setbacks or confusion.",
-                ),
-            ])
+            return cls.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The action is excellent, providing critical information or making significant progress toward understanding the problem space.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The action is very good, providing useful information or making good progress toward understanding the problem.",
+                    ),
+                    (
+                        50,
+                        74,
+                        "The action is adequate, providing somewhat useful information or making some progress.",
+                    ),
+                    (
+                        25,
+                        49,
+                        "The action provides minimal useful information or makes limited progress.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The action provides no useful information or makes no progress but doesn't cause setbacks.",
+                    ),
+                    (
+                        -49,
+                        -1,
+                        "The action is counterproductive, causing minor setbacks or confusion.",
+                    ),
+                ]
+            )
         else:
             # Later in the trajectory, focus on solution quality and progress
-            return cls.generate_reward_scale_entries([
-                (
-                    90,
-                    100,
-                    "The action is excellent, making significant progress toward solving the problem with high-quality implementation.",
-                ),
-                (
-                    75,
-                    89,
-                    "The action is very good, making good progress toward solving the problem.",
-                ),
-                (
-                    50,
-                    74,
-                    "The action is adequate, making some progress toward solving the problem.",
-                ),
-                (
-                    25,
-                    49,
-                    "The action makes limited progress toward solving the problem.",
-                ),
-                (
-                    0,
-                    24,
-                    "The action makes minimal or no progress toward solving the problem.",
-                ),
-                (
-                    -49,
-                    -1,
-                    "The action is counterproductive, causing setbacks or repeating previous unsuccessful approaches.",
-                ),
-                (
-                    -100,
-                    -50,
-                    "The action is severely counterproductive, causing major setbacks or demonstrating a fundamental misunderstanding of the problem.",
-                ),
-            ])
+            return cls.generate_reward_scale_entries(
+                [
+                    (
+                        90,
+                        100,
+                        "The action is excellent, making significant progress toward solving the problem with high-quality implementation.",
+                    ),
+                    (
+                        75,
+                        89,
+                        "The action is very good, making good progress toward solving the problem.",
+                    ),
+                    (
+                        50,
+                        74,
+                        "The action is adequate, making some progress toward solving the problem.",
+                    ),
+                    (
+                        25,
+                        49,
+                        "The action makes limited progress toward solving the problem.",
+                    ),
+                    (
+                        0,
+                        24,
+                        "The action makes minimal or no progress toward solving the problem.",
+                    ),
+                    (
+                        -49,
+                        -1,
+                        "The action is counterproductive, causing setbacks or repeating previous unsuccessful approaches.",
+                    ),
+                    (
+                        -100,
+                        -50,
+                        "The action is severely counterproductive, causing major setbacks or demonstrating a fundamental misunderstanding of the problem.",
+                    ),
+                ]
+            )
 
     @staticmethod
     def generate_reward_scale_entries(

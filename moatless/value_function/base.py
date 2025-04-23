@@ -8,7 +8,7 @@ from moatless.component import MoatlessComponent
 from moatless.node import Node, Reward
 
 logger = logging.getLogger(__name__)
- 
+
 # TypeVar for ValueFunction types
 VF = TypeVar("VF", bound="BaseValueFunction")
 

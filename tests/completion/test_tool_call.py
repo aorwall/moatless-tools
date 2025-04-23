@@ -148,7 +148,9 @@ async def test_validate_completion_valid_tool(mock_completion, mock_litellm_tool
 
 @pytest.mark.asyncio
 @patch("litellm.acompletion", new_callable=AsyncMock)
-async def test_validate_completion_mixed_valid_invalid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+async def test_validate_completion_mixed_valid_invalid_toolcalls(
+    mock_completion, mock_litellm_tool_response, test_schema, test_messages
+):
     """Test that only valid toolcalls are returned and invalid ones are ignored (no retry if any valid)"""
     model = ToolCallCompletionModel(model="test")  # type: ignore
     model.initialize(response_schema=test_schema, system_prompt="Test prompt")
@@ -158,8 +160,8 @@ async def test_validate_completion_mixed_valid_invalid_toolcalls(mock_completion
     # One valid, one invalid tool name, one invalid args
     tool_calls = [
         {"name": "TestActionArgs", "args": json.dumps(valid_args)},  # valid
-        {"name": "invalid_tool", "args": json.dumps(valid_args)},    # invalid tool name
-        {"name": "TestActionArgs", "args": json.dumps(invalid_args)}, # invalid args
+        {"name": "invalid_tool", "args": json.dumps(valid_args)},  # invalid tool name
+        {"name": "TestActionArgs", "args": json.dumps(invalid_args)},  # invalid args
     ]
     mock_response = mock_litellm_tool_response(tool_calls=tool_calls)
 
@@ -173,9 +175,12 @@ async def test_validate_completion_mixed_valid_invalid_toolcalls(mock_completion
     assert text_response == "Test response"
     assert thought is None
 
+
 @pytest.mark.asyncio
 @patch("litellm.acompletion", new_callable=AsyncMock)
-async def test_validate_completion_all_invalid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+async def test_validate_completion_all_invalid_toolcalls(
+    mock_completion, mock_litellm_tool_response, test_schema, test_messages
+):
     """Test that retry is triggered if all toolcalls are invalid (invalid name or args)"""
     model = ToolCallCompletionModel(model="test")  # type: ignore
     model.initialize(response_schema=test_schema, system_prompt="Test prompt")
@@ -190,9 +195,12 @@ async def test_validate_completion_all_invalid_toolcalls(mock_completion, mock_l
     with pytest.raises(CompletionRetryError):
         await model._validate_completion(completion_response=mock_response)
 
+
 @pytest.mark.asyncio
 @patch("litellm.acompletion", new_callable=AsyncMock)
-async def test_validate_completion_all_valid_toolcalls(mock_completion, mock_litellm_tool_response, test_schema, test_messages):
+async def test_validate_completion_all_valid_toolcalls(
+    mock_completion, mock_litellm_tool_response, test_schema, test_messages
+):
     """Test that all valid toolcalls are returned if all are valid (no retry)"""
     model = ToolCallCompletionModel(model="test")  # type: ignore
     model.initialize(response_schema=test_schema, system_prompt="Test prompt")

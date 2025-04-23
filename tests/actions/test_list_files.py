@@ -15,21 +15,23 @@ from moatless.environment.local import LocalBashEnvironment, EnvironmentExecutio
 def init_git_repo(repo_path):
     """Initialize a git repository in the given path."""
     subprocess.run(["git", "init"], cwd=repo_path, check=True, capture_output=True)
-    
+
     # Create .gitignore file
     with open(os.path.join(repo_path, ".gitignore"), "w") as f:
         f.write("# Files to ignore\n")
         f.write("*.log\n")
         f.write("ignored_dir/\n")
         f.write("*_ignored.js\n")
-    
+
     # Configure git user for the test
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=repo_path, check=True, capture_output=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo_path, check=True, capture_output=True)
-    
+
     # Add .gitignore to git
     subprocess.run(["git", "add", ".gitignore"], cwd=repo_path, check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "Initial commit with .gitignore"], cwd=repo_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "Initial commit with .gitignore"], cwd=repo_path, check=True, capture_output=True
+    )
 
 
 @pytest.fixture
@@ -40,7 +42,7 @@ def temp_repo():
         os.makedirs(os.path.join(temp_dir, "src", "components"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "src", "utils"), exist_ok=True)
         os.makedirs(os.path.join(temp_dir, "tests"), exist_ok=True)
-        
+
         # Create a directory that should be ignored
         os.makedirs(os.path.join(temp_dir, "ignored_dir"), exist_ok=True)
 
@@ -50,7 +52,7 @@ def temp_repo():
 
         with open(os.path.join(temp_dir, "src", "components", "Card.js"), "w") as f:
             f.write("// Card component\n")
-            
+
         with open(os.path.join(temp_dir, "src", "components", "Card_ignored.js"), "w") as f:
             f.write("// Ignored card component\n")
 
@@ -64,11 +66,11 @@ def temp_repo():
         # Create test files
         with open(os.path.join(temp_dir, "tests", "Button.test.js"), "w") as f:
             f.write("// Button tests\n")
-            
+
         # Create log file that should be ignored
         with open(os.path.join(temp_dir, "debug.log"), "w") as f:
             f.write("Debug log\n")
-            
+
         # Create a file in the ignored directory
         with open(os.path.join(temp_dir, "ignored_dir", "ignored_file.txt"), "w") as f:
             f.write("This file should be ignored\n")
@@ -76,7 +78,7 @@ def temp_repo():
         # Initialize git repository
         try:
             init_git_repo(temp_dir)
-            
+
             # Add files to git
             subprocess.run(["git", "add", "src", "tests"], cwd=temp_dir, check=True, capture_output=True)
             subprocess.run(["git", "commit", "-m", "Add source files"], cwd=temp_dir, check=True, capture_output=True)
@@ -281,13 +283,13 @@ async def test_list_files_after_deletion(list_files_action, file_context, temp_r
     test_file_path = os.path.join(temp_repo, "temp_test_file.txt")
     with open(test_file_path, "w") as f:
         f.write("This is a test file")
-    
+
     # Add file to git to make it visible
     try:
         subprocess.run(["git", "add", "temp_test_file.txt"], cwd=temp_repo, check=True, capture_output=True)
     except Exception:
         pytest.skip("Could not add test file to git")
-    
+
     # Verify file is listed
     args = ListFilesArgs(directory="", recursive=False, thoughts="Checking file exists")
     result = await list_files_action.execute(args, file_context)
@@ -297,13 +299,13 @@ async def test_list_files_after_deletion(list_files_action, file_context, temp_r
 
     # Delete the file
     os.remove(test_file_path)
-    
+
     # Remove from git to update git's view
     try:
         subprocess.run(["git", "rm", "--cached", "temp_test_file.txt"], cwd=temp_repo, check=True, capture_output=True)
     except Exception:
         pass
-    
+
     # Verify file is no longer listed
     args = ListFilesArgs(directory="", recursive=False, thoughts="Checking file was deleted")
     result = await list_files_action.execute(args, file_context)
@@ -319,7 +321,7 @@ async def test_list_files_symlinks(list_files_action, file_context, temp_repo):
     external_file = os.path.join(external_dir, "external_file.txt")
     with open(external_file, "w") as f:
         f.write("This is an external file")
-    
+
     # Add to git to make it visible when respecting .gitignore
     try:
         subprocess.run(["git", "add", "external"], cwd=temp_repo, check=True, capture_output=True)
@@ -340,18 +342,15 @@ async def test_list_files_symlinks(list_files_action, file_context, temp_repo):
 
     # The external directory should be shown
     assert "external" in result.message
-    
+
     # When git is available, the file will be shown if it was committed
     git_available = "respecting .gitignore" in result.message
     if git_available:
         # Check if file was successfully committed to git
         git_ls_files = subprocess.run(
-            ["git", "ls-files", "external"], 
-            cwd=temp_repo, 
-            capture_output=True, 
-            text=True
+            ["git", "ls-files", "external"], cwd=temp_repo, capture_output=True, text=True
         ).stdout.strip()
-        
+
         if git_ls_files:
             assert "external_file.txt" in result.message
 
@@ -387,14 +386,14 @@ async def test_max_results_limit(list_files_action, file_context, temp_repo):
     for i in range(20):
         with open(os.path.join(temp_repo, f"file_{i}.txt"), "w") as f:
             f.write(f"Content {i}")
-    
+
     # Add files to git to make them visible
     try:
         subprocess.run(["git", "add", "file_*.txt"], cwd=temp_repo, check=True, capture_output=True)
     except Exception:
         # If we can't add to git, test will still run but may need to use non-git mode
         pass
-    
+
     # Execute with a limit of 5
     args = ListFilesArgs(directory="", recursive=False, max_results=5, thoughts="Testing max_results")
     result = await list_files_action.execute(args, file_context)
@@ -407,10 +406,10 @@ async def test_max_results_limit(list_files_action, file_context, temp_repo):
 
     # There should be max 5 items total
     assert total_items <= 5
-    
+
     # If git is available, files and directories in result may be limited to what's in git
     git_available = "respecting .gitignore" in result.message
     is_limited = len(result.properties.get("directories", [])) + len(result.properties.get("files", [])) >= 5
-    
+
     if is_limited:
         assert "Results limited to 5" in result.message

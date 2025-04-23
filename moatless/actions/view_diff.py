@@ -40,7 +40,6 @@ class ViewDiff(Action):
     args_schema = ViewDiffArgs
 
     async def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None) -> Observation:
-        
         if self.workspace.shadow_mode:
             if not file_context:
                 raise ValueError("File context is required to view diff")
@@ -62,15 +61,9 @@ class ViewDiff(Action):
                     diff = await env.execute("git diff", fail_on_error=True)
             except Exception as e:
                 logger.error(f"Failed to get git diff: {e}")
-                return Observation.create(
-                    message=f"Failed to get git diff: {str(e)}"
-                )
+                return Observation.create(message=f"Failed to get git diff: {str(e)}")
 
         if not diff:
-            return Observation.create(
-                message="No changes detected in the workspace."
-            )
+            return Observation.create(message="No changes detected in the workspace.")
 
-        return Observation.create(
-            message=f"Current changes in workspace:\n{diff}"
-        )
+        return Observation.create(message=f"Current changes in workspace:\n{diff}")

@@ -26,7 +26,7 @@ class InstanceStatus(str, Enum):
     PENDING = "pending"
     SETTING_UP = "setting_up"
     RUNNING = "running"
-    PAUSED = "paused" # TODO: Remove this
+    PAUSED = "paused"  # TODO: Remove this
     STOPPED = "stopped"
     COMPLETED = "completed"
     EVALUATING = "evaluating"
@@ -40,7 +40,7 @@ class InstanceStatus(str, Enum):
 class EvaluationStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
-    PAUSED = "paused" # TODO: Remove this
+    PAUSED = "paused"  # TODO: Remove this
     STOPPED = "stopped"
     COMPLETED = "completed"
     ERROR = "error"

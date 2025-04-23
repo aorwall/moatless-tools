@@ -16,7 +16,7 @@ class TestMavenParser(unittest.TestCase):
 
         # Path to test fixtures directory
         self.fixture_dir = Path(__file__).parent / "fixtures"
-        
+
         # Reference existing fixture files
         self.command_failure_fixture = self.fixture_dir / "command_failure.txt"
         self.compilation_error_fixture = self.fixture_dir / "compilation_error.txt"
@@ -24,7 +24,7 @@ class TestMavenParser(unittest.TestCase):
         self.success_fixture = self.fixture_dir / "success.txt"
         self.compilation_error_line_only_fixture = self.fixture_dir / "compilation_error_line_only.txt"
         self.spring_context_error_fixture = self.fixture_dir / "spring_context_error.txt"
-        
+
         # Ensure fixture directory exists but don't recreate files
         if not self.fixture_dir.exists():
             os.makedirs(self.fixture_dir, exist_ok=True)
@@ -158,7 +158,7 @@ class TestMavenParser(unittest.TestCase):
         # Verify error messages contain the class and method names
         error_names = [r.name for r in results]
         self.assertTrue(any("EntityIntegrationTest.getEntity_Success" in name for name in error_names))
-        
+
         # Verify error output contains the error type
         self.assertTrue(any("IllegalState" in (r.failure_output or "") for r in results))
 

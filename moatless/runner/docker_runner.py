@@ -7,7 +7,13 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional, Dict, Tuple, List, Deque, NamedTuple
 
-from moatless.runner.label_utils import create_job_args, sanitize_label, create_docker_label_args, create_labels, create_resource_id
+from moatless.runner.label_utils import (
+    create_job_args,
+    sanitize_label,
+    create_docker_label_args,
+    create_labels,
+    create_resource_id,
+)
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
@@ -33,7 +39,7 @@ class DockerRunner(BaseRunner):
         moatless_source_dir: Optional[str] = None,
         default_image_name: Optional[str] = None,
         update_on_start: bool = False,
-        update_branch: str = "docker"
+        update_branch: str = "docker",
     ):
         """Initialize the runner with Docker configuration.
 
@@ -82,9 +88,14 @@ class DockerRunner(BaseRunner):
             logger.info(f"  - Update on start: True (branch: {self.update_branch})")
 
     async def start_job(
-        self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None, 
-        image_name: Optional[str] = None, update_on_start: Optional[bool] = None,
-        update_branch: Optional[str] = None
+        self,
+        project_id: str,
+        trajectory_id: str,
+        job_func: Callable,
+        node_id: int | None = None,
+        image_name: Optional[str] = None,
+        update_on_start: Optional[bool] = None,
+        update_branch: Optional[str] = None,
     ) -> bool:
         """Start a job in a Docker container.
 
@@ -103,11 +114,11 @@ class DockerRunner(BaseRunner):
             True if the job was started successfully, False otherwise
         """
         self.logger.info(f"Starting job for {project_id}/{trajectory_id}")
-        
+
         # Get function info
         func_module = job_func.__module__
         func_name = job_func.__name__
-        
+
         # Check if the module name ends with the function name
         if func_module.endswith(f".{func_name}"):
             # Use the module path directly as the function is the module's name
@@ -115,7 +126,7 @@ class DockerRunner(BaseRunner):
         else:
             # Normal case: append the function name to the module path
             fully_qualified_name = f"{func_module}.{func_name}"
-        
+
         # Create container ID/name
         container_name = self._container_name(project_id, trajectory_id)
 
@@ -131,14 +142,12 @@ class DockerRunner(BaseRunner):
                 await self._cleanup_container(container_name)
 
             else:
-                self.logger.info(
-                    f"Container {container_name} already exists with status {container_status}, skipping"
-                )
+                self.logger.info(f"Container {container_name} already exists with status {container_status}, skipping")
                 return False
 
             self.logger.info(f"Container {container_name} already exists, not starting a new one")
             return False
-            
+
         # Use the specified image or default
         if not image_name:
             image_name = self._get_image_name(trajectory_id)
@@ -173,7 +182,12 @@ class DockerRunner(BaseRunner):
 
             # Add API key environment variables from current environment
             for key, value in os.environ.items():
-                if key.endswith("API_KEY") or key.startswith("AWS_") or key.startswith("GCP_") or key.startswith("AZURE_"):
+                if (
+                    key.endswith("API_KEY")
+                    or key.startswith("AWS_")
+                    or key.startswith("GCP_")
+                    or key.startswith("AZURE_")
+                ):
                     env_vars.append(f"{key}={value}")
 
             # Add OpenTelemetry context if available
@@ -213,21 +227,21 @@ class DockerRunner(BaseRunner):
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
             logger.info(f"Running command: {args}")
-            
+
             # Determine the command to run in the container
             run_command = ""
-            
+
             # Add update script if enabled
             should_update = self.update_on_start if update_on_start is None else update_on_start
             branch_to_use = self.update_branch if update_branch is None else update_branch
-            
+
             if should_update:
                 self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
                 run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
-                
+
             # Add the main job command
             run_command += f"uv run - <<EOF\n{args}\nEOF"
-            
+
             cmd.extend([image_name_to_use, "sh", "-c", run_command])
 
             logger.info(f"Running Docker command: {' '.join(cmd)}")
@@ -260,49 +274,55 @@ class DockerRunner(BaseRunner):
 
         try:
             # Build command to list containers
-            cmd = ["docker", "ps", "-a", "--format", "{{.Names}}|{{.Label \"project_id\"}}|{{.Label \"trajectory_id\"}}|{{.State}}|{{.CreatedAt}}"]
-            
+            cmd = [
+                "docker",
+                "ps",
+                "-a",
+                "--format",
+                '{{.Names}}|{{.Label "project_id"}}|{{.Label "trajectory_id"}}|{{.State}}|{{.CreatedAt}}',
+            ]
+
             # Add filter by project if specified
             if project_id:
                 sanitized_project_id = sanitize_label(project_id)
                 cmd.extend(["--filter", f"label=project_id={sanitized_project_id}"])
-                
+
             # Add filter for Moatless-managed containers
             cmd.extend(["--filter", "label=moatless.managed=true"])
-            
+
             # Execute command
             process = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await process.communicate()
-            
+
             if process.returncode != 0:
                 self.logger.error(f"Error listing containers: {stderr.decode()}")
                 return []
-                
+
             # Parse output
             output = stdout.decode().strip()
             if not output:
                 return []
-                
+
             for line in output.split("\n"):
                 parts = line.strip().split("|")
                 if len(parts) < 5:
                     self.logger.warning(f"Invalid container info format: {line}")
                     continue
-                    
+
                 container_name, container_project_id, container_trajectory_id, container_state, created_at = parts[:5]
-                
+
                 # Skip containers without proper project or trajectory ID
                 if not container_project_id or not container_trajectory_id:
                     continue
 
                 status = await self._get_container_status(container_name)
-                
+
                 # Skip containers with unknown status
                 if status is None:
                     continue
-                
+
                 # Parse timestamp
                 try:
                     created_datetime = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S %z")
@@ -315,7 +335,7 @@ class DockerRunner(BaseRunner):
                         created_datetime = datetime.now()
 
                 # TODO: Get trajectory id and project id from env vars
-                
+
                 # Create JobInfo object
                 job_info = JobInfo(
                     id=f"{container_project_id}:{container_trajectory_id}",
@@ -324,13 +344,15 @@ class DockerRunner(BaseRunner):
                     status=status,
                     enqueued_at=created_datetime,
                     started_at=created_datetime,
-                    ended_at=datetime.now() if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED] else None
+                    ended_at=datetime.now()
+                    if status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED]
+                    else None,
                 )
-                
+
                 result.append(job_info)
-                
+
             return result
-            
+
         except Exception as exc:
             self.logger.exception(f"Error getting jobs: {exc}")
             return []
@@ -345,7 +367,6 @@ class DockerRunner(BaseRunner):
             Exit code as an integer, or -1 if an error occurs
         """
         try:
-            
             output, return_code = await self._run_docker_command(
                 "docker", "inspect", "--format", "{{.State.ExitCode}}", container_name
             )
@@ -442,7 +463,13 @@ class DockerRunner(BaseRunner):
 
     async def _get_container_status(self, container_name: str) -> Optional[JobStatus]:
         try:
-            inspect_cmd = ["docker", "inspect", "--format", "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels \"project_id\"}},{{index .Config.Labels \"trajectory_id\"}}", container_name]
+            inspect_cmd = [
+                "docker",
+                "inspect",
+                "--format",
+                '{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels "project_id"}},{{index .Config.Labels "trajectory_id"}}',
+                container_name,
+            ]
             process = await asyncio.create_subprocess_exec(
                 *inspect_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
@@ -451,7 +478,9 @@ class DockerRunner(BaseRunner):
             if process.returncode == 0:
                 container_info = stdout.decode().strip().split(",")
                 if len(container_info) < 3:
-                    self.logger.warning(f"Unexpected output format from docker inspect command {' '.join(inspect_cmd)}: {stdout.decode()}")
+                    self.logger.warning(
+                        f"Unexpected output format from docker inspect command {' '.join(inspect_cmd)}: {stdout.decode()}"
+                    )
                     return None
 
                 status, running, exit_code = container_info[:3]
@@ -462,13 +491,15 @@ class DockerRunner(BaseRunner):
                     # Container doesn't exist, return None
                     return None
                 else:
-                    self.logger.warning(f"Error getting job status. Stderr: {stderr.decode()}. Stdout: {stdout.decode()}")
+                    self.logger.warning(
+                        f"Error getting job status. Stderr: {stderr.decode()}. Stdout: {stdout.decode()}"
+                    )
                     return None
 
         except Exception as exc:
             self.logger.exception(f"Error getting job status: {exc}")
             return None
-        
+
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the Docker runner.
 
@@ -484,10 +515,7 @@ class DockerRunner(BaseRunner):
                     runner_type="docker", status=RunnerStatus.ERROR, data={"error": "Docker is not accessible"}
                 )
 
-            return RunnerInfo(
-                runner_type="docker", 
-                status=RunnerStatus.RUNNING
-            )
+            return RunnerInfo(runner_type="docker", status=RunnerStatus.RUNNING)
 
         except Exception as exc:
             self.logger.exception(f"Error checking if runner is up: {exc}")
@@ -565,7 +593,7 @@ class DockerRunner(BaseRunner):
         # Use default image if specified
         if self.default_image_name:
             return self.default_image_name
-            
+
         # Otherwise, use the standard image name generation logic
         instance_id_split = trajectory_id.split("__")
         repo_name = instance_id_split[0]
@@ -589,12 +617,12 @@ class DockerRunner(BaseRunner):
 
     def _parse_container_status(self, status: str, running: str, exit_code: str) -> JobStatus:
         """Parse Docker container status into JobStatus enum.
-        
+
         Args:
             status: Container status string
             running: Whether container is running ("true" or "false")
             exit_code: Exit code as string
-            
+
         Returns:
             JobStatus enum value
         """
@@ -689,7 +717,7 @@ class DockerRunner(BaseRunner):
 
             # Get container status
             job_status = await self._get_container_status(container_name)
-            
+
             # If job status is None, return None
             if job_status is None:
                 return None
@@ -821,7 +849,7 @@ class DockerRunner(BaseRunner):
         try:
             cmd = ["docker", "ps", "-q", "--filter", "label=moatless.managed=true"]
             stdout, return_code = await self._run_docker_command(*cmd)
-            
+
             if return_code != 0:
                 self.logger.error(f"Failed to get running container count: {stdout}")
                 return 0

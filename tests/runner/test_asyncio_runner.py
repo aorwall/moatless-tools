@@ -281,6 +281,7 @@ async def test_get_job_status(asyncio_runner):
     status = await asyncio_runner.get_job_status("nonexistent", "nonexistent")
     assert status == JobStatus.PENDING
 
+
 @pytest.mark.asyncio
 async def test_get_runner_info(asyncio_runner):
     """Test getting runner information."""

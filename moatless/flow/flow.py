@@ -39,7 +39,7 @@ class AgenticFlow(MoatlessComponent):
 
     agent: Optional[ActionAgent] = Field(None, description="Agent for generating actions.")
     agent_id: Optional[str] = Field(None, description="The agent ID if read from config.")
-    
+
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
     max_cost: Optional[float] = Field(None, description="The maximum cost spent on tokens before finishing.")
@@ -101,7 +101,7 @@ class AgenticFlow(MoatlessComponent):
                 shadow_mode=shadow_mode,
                 max_expansions=max_expansions,
             )
-            
+
         instance = cls(
             trajectory_id=trajectory_id,
             project_id=project_id,
@@ -262,7 +262,6 @@ class AgenticFlow(MoatlessComponent):
         """Validate and reconstruct a system from a dictionary."""
         if isinstance(obj, dict):
             obj = obj.copy()
-            
 
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.from_dict(obj["agent"])
@@ -318,15 +317,15 @@ class AgenticFlow(MoatlessComponent):
         traj_dict = await storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
         if not traj_dict:
             raise ValueError("Trajectory not found")
-        
+
         try:
             flow_dict: dict | None = await storage.read_from_trajectory("flow.json", project_id, trajectory_id)  # type: ignore
         except Exception:
             flow_dict = await storage.read_from_project("flow.json", project_id)  # type: ignore
-            
+
         if not flow_dict:
             raise ValueError("Flow settings not found")
-            
+
         return cls.from_dicts(flow_dict, traj_dict)
 
     def get_trajectory_data(self) -> dict:
@@ -336,7 +335,6 @@ class AgenticFlow(MoatlessComponent):
             "project_id": self.project_id,
             "metadata": self.metadata,
             "nodes": self.root.dump_as_list(exclude_none=True, exclude_unset=True),
-            
         }
 
     def get_flow_settings(self) -> dict:

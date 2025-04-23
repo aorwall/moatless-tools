@@ -102,8 +102,6 @@ class RunMavenTests(Action):
         maven_version = await workspace.environment.execute(f"{self.maven_binary} --version", fail_on_error=True)
         if not maven_version:
             raise ValueError("Maven is not installed")
-        
-        
 
     async def execute(
         self,
@@ -129,9 +127,9 @@ class RunMavenTests(Action):
 
         if self._workspace.environment is None:
             raise ValueError("Environment is not set in workspace")
-        
+
         maven_parser = MavenParser()
-        
+
         # Check which test files exist
         non_existent_files = []
         directories = []
@@ -269,7 +267,7 @@ class RunMavenTests(Action):
                                 assertion_lines.append(line)
                             elif capture and (not line.strip() or line.startswith("[INFO]")):
                                 capture = False
-                        
+
                         # If we have failure messages but no proper test results, create one
                         if assertion_lines and not any(r.status == TestStatus.FAILED for r in file_results):
                             error_result = TestResult(
@@ -330,7 +328,7 @@ class RunMavenTests(Action):
 
         # Build response message
         response_msg = ""
-        
+
         # Add detailed error information to the response for any failures or errors
         for result in test_results:
             if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.failure_output:

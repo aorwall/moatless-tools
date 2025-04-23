@@ -137,12 +137,15 @@ class Reward(BaseModel):
                 obj["completion"] = CompletionInvocation.model_validate(obj["completion"])
         return super().model_validate(obj, **kwargs)
 
+
 class DiscriminatorResult(BaseModel):
     """Result from discriminator."""
 
     selected_node_id: Optional[int] = Field(None, description="The node ID of the selected node")
     trace: dict[str, Any] = Field(default_factory=dict, description="The trace of the discriminator")
-    completion: Optional[CompletionInvocation] = Field(None, description="Completion used to generate the discriminator result")
+    completion: Optional[CompletionInvocation] = Field(
+        None, description="Completion used to generate the discriminator result"
+    )
 
     @classmethod
     def model_validate(cls, obj: Any, **kwargs) -> "DiscriminatorResult":
@@ -160,6 +163,7 @@ class DiscriminatorResult(BaseModel):
             data["completion"] = self.completion.model_dump(**kwargs)
 
         return data
+
 
 class EvaluationResult(BaseModel):
     """Evaluation result for a node."""
@@ -222,9 +226,11 @@ class Node(BaseModel):
     agent_id: Optional[str] = Field(None, description="The agent ID associated with the node")
     feedback_data: Optional[FeedbackData] = Field(None, description="Structured feedback data for the node")
     timestamp: datetime = Field(default_factory=datetime.now, description="The timestamp of the node")
-    discriminator_result: Optional[DiscriminatorResult] = Field(None, description="The discriminator result of the node")
+    discriminator_result: Optional[DiscriminatorResult] = Field(
+        None, description="The discriminator result of the node"
+    )
     evaluation_result: Optional[EvaluationResult] = Field(None, description="The evaluation result of the node")
-    
+
     model_config = ConfigDict(ser_json_timedelta="iso8601", json_encoders={datetime: lambda dt: dt.isoformat()})
 
     @field_validator("timestamp", mode="before")
@@ -351,7 +357,6 @@ class Node(BaseModel):
             return True
 
         return False
-
 
     def get_expandable_descendants(self) -> list["Node"]:
         """Get all expandable descendants of this node, including self if expandable."""
@@ -594,7 +599,7 @@ class Node(BaseModel):
             node_data["file_context"] = FileContext.from_dict(
                 repo=repo, runtime=runtime, data=node_data["file_context"]
             )
-            
+
         if node_data.get("discriminator_result"):
             node_data["discriminator_result"] = DiscriminatorResult.model_validate(node_data["discriminator_result"])
 

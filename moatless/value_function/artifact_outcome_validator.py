@@ -7,6 +7,7 @@ from pydantic import Field
 from moatless.completion.schema import ResponseSchema, AllMessageValues
 
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,19 +225,18 @@ Evaluate whether this is expected or a sign of a problem. Remember:
             explanation=result.explanation, value=reward_value, tags=tags, completion=response.completion_invocation
         )
 
-
     @classmethod
     def model_validate(cls, data: Any, **kwargs) -> "ArtifactOutcomeValidator":
         """
         Validate the model configuration.
         """
-        
+
         if isinstance(data, dict):
             if "completion_model" in data:
                 data["completion_model"] = BaseCompletionModel.from_dict(data["completion_model"])
-                
+
         return super().model_validate(data, **kwargs)
-    
+
     def model_dump(self, **kwargs) -> dict:
         """
         Dump the model configuration.

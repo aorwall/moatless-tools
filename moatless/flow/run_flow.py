@@ -48,11 +48,11 @@ async def setup_flow(project_id: str, trajectory_id: str) -> AgenticFlow:
         )  # type: ignore
     except Exception:
         settings = await storage.read_from_project(path="flow.json", project_id=project_id)  # type: ignore
-        
+
         logger.info(f"Settings not found in trajectory, using project settings")
     else:
         logger.info(f"Settings found in trajectory")
-        
+
     trajectory_dict: dict | None = await storage.read_from_trajectory(
         path="trajectory.json", trajectory_id=trajectory_id, project_id=project_id
     )  # type: ignore
@@ -93,7 +93,7 @@ async def setup_swebench_runtime() -> RuntimeEnvironment:
 
 async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
     logger.info(f"setup_workspace(project_id: {project_id}, trajectory_id: {trajectory_id})")
-    
+
     storage = await get_storage()
     shadow_mode = False
     instance_path = os.environ.get("INSTANCE_PATH")
@@ -111,7 +111,7 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
         # TODO: Use Local bash environment
         runtime = None
         repo_path = os.environ.get("REPO_PATH")
-        
+
     logger.info(f"repo_path: {repo_path}")
 
     if repo_path:

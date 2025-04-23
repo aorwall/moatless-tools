@@ -52,13 +52,13 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
         repo_path = os.environ.get("REPO_PATH")
         if not repo_path:
-            raise ValueError("REPO_PATH is not set")        
+            raise ValueError("REPO_PATH is not set")
 
         repository = GitRepository(repo_path=repo_path)
         environment = LocalBashEnvironment(cwd=repo_path)
-        
+
         runtime = await setup_swebench_runtime()
-        
+
         index_store_dir = os.environ.get("INDEX_STORE_DIR")
         if not index_store_dir:
             raise ValueError("INDEX_STORE_DIR is not set")
@@ -109,7 +109,12 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
 
 
 async def evaluate_instance(
-    evaluation_name: str, instance_id: str, flow: AgenticFlow, selected_node: Node, runtime: RuntimeEnvironment, storage: BaseStorage
+    evaluation_name: str,
+    instance_id: str,
+    flow: AgenticFlow,
+    selected_node: Node,
+    runtime: RuntimeEnvironment,
+    storage: BaseStorage,
 ) -> None:
     """Evaluate an instance's results."""
 
@@ -119,13 +124,13 @@ async def evaluate_instance(
     await _emit_event(evaluation_name, instance_id, "evaluation", "started")
 
     resolved = None
-    
+
     for i, leaf_node in enumerate(leaf_nodes):
         logger.info(f"Evaluating node {leaf_node.node_id} ({i+1}/{len(leaf_nodes)})")
-        
+
         if not leaf_node.file_context:
             raise ValueError(f"No file context for node {leaf_node.node_id}")
-        
+
         if not leaf_node.evaluation_result:
             patch = leaf_node.file_context.generate_git_patch(ignore_tests=True)
             try:

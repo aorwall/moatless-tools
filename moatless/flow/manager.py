@@ -80,15 +80,15 @@ class FlowManager:
         if not flow.agent:
             if not flow.agent_id:
                 raise ValueError(f"Flow config {id} has no agent")
-            
+
             flow.agent = self._agent_manager.get_agent(agent_id=flow.agent_id)
             if not flow.agent:
                 raise ValueError(f"Agent {flow.agent_id} not found")
-            
+
         if not flow.agent.completion_model:
             if not model_id:
                 raise ValueError(f"Flow config {id} has no model")
-            
+
             flow.agent.completion_model = self._model_manager.create_completion_model(model_id)
 
         json_completion_model = JsonCompletionModel(
@@ -109,9 +109,13 @@ class FlowManager:
             if isinstance(action, CompletionModelMixin) and not action.completion_model:
                 action.completion_model = json_completion_model.clone()
 
-        if hasattr(flow, "value_function") and hasattr(flow.value_function, "completion_model") and not flow.value_function.completion_model:
+        if (
+            hasattr(flow, "value_function")
+            and hasattr(flow.value_function, "completion_model")
+            and not flow.value_function.completion_model
+        ):
             flow.value_function.completion_model = json_completion_model.clone()
-        
+
         return flow
 
     async def create_flow(
@@ -293,7 +297,7 @@ class FlowManager:
             }
 
             await self.save_project(project_id, project_settings)
-            
+
         await self.save_trajectory(project_id, trajectory_id, loop)
 
         return loop
@@ -373,7 +377,7 @@ class FlowManager:
 
     async def create_config(self, config: dict):
         """Create a new flow configuration."""
-        
+
         flow = AgenticFlow.from_dict(config)
         logger.debug(f"Creating flow config {flow.id}")
         if flow.id in self._configs:
@@ -381,15 +385,15 @@ class FlowManager:
 
         self._configs[flow.id] = flow.model_dump()
         await self._save_configs()
-        return self._configs[flow.id] 
+        return self._configs[flow.id]
 
     async def update_config(self, config: dict):
         """Update an existing flow configuration."""
         logger.debug(f"Updating flow config {config['id']}")
-        if config['id'] not in self._configs:
+        if config["id"] not in self._configs:
             raise ValueError(f"Flow config {config['id']} not found")
 
-        self._configs[config['id']] = config
+        self._configs[config["id"]] = config
         await self._save_configs()
 
     async def delete_config(self, id: str):
@@ -410,7 +414,7 @@ class FlowManager:
             settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
         except Exception:
             settings_data = await self._storage.read_from_project("flow.json", project_id)
-            
+
         return AgenticFlow.from_dicts(settings_data, trajectory_data)
 
     def get_trajectory_status(self, flow: AgenticFlow, job_status: JobStatus) -> FlowStatus:
@@ -433,12 +437,12 @@ class FlowManager:
 
         try:
             trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
-            
+
             try:
                 settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
             except Exception:
                 settings_data = await self._storage.read_from_project("flow.json", project_id)
-            
+
             flow = AgenticFlow.from_dicts(settings_data, trajectory_data)
 
             job_status = await self._runner.get_job_status(project_id=project_id, trajectory_id=trajectory_id)
@@ -826,22 +830,22 @@ class FlowManager:
 
     async def save_trajectory_settings(self, project_id: str, trajectory_id: str, settings: dict):
         """Save settings for a trajectory.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
             settings: The settings data to save
-            
+
         Raises:
             ValueError: If the trajectory does not exist
         """
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
-        
+
         # Check if the trajectory exists
         if not await self._storage.exists(f"{trajectory_path}/trajectory.json"):
             raise ValueError(f"Trajectory {trajectory_id} not found in project {project_id}")
-            
+
         # Save the settings
         await self._storage.write(f"{trajectory_path}/flow.json", settings)
-        
+
         return settings

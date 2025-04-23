@@ -24,11 +24,13 @@ class RunnerStatus(str, Enum):
 class RunnerInfo(BaseModel):
     runner_type: str
     status: RunnerStatus
-    data:  dict[str, Any] = Field(default_factory=dict)
+    data: dict[str, Any] = Field(default_factory=dict)
+
 
 class JobFunction(BaseModel):
     module: Optional[str]
     name: str
+
 
 class JobInfo(BaseModel):
     """Information about a job."""
@@ -117,7 +119,7 @@ class BaseRunner(ABC):
         self, project_id: str, trajectory_id: str, job_func: Callable, node_id: int | None = None
     ) -> bool:
         """Start a job.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -132,7 +134,7 @@ class BaseRunner(ABC):
     @abstractmethod
     async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
         """Get a list of jobs.
-        
+
         Args:
             project_id: The project ID, or None for all projects
 
@@ -144,7 +146,7 @@ class BaseRunner(ABC):
     @abstractmethod
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
         """Cancel a job or all jobs for a project.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID, or None for all jobs in the project
@@ -154,7 +156,7 @@ class BaseRunner(ABC):
     @abstractmethod
     async def job_exists(self, project_id: str, trajectory_id: str) -> bool:
         """Check if a job exists.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -167,7 +169,7 @@ class BaseRunner(ABC):
     @abstractmethod
     async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -180,7 +182,7 @@ class BaseRunner(ABC):
     @abstractmethod
     async def get_runner_info(self) -> RunnerInfo:
         """Get information about the runner.
-        
+
         Returns:
             RunnerInfo object with information about the runner
         """
@@ -188,7 +190,7 @@ class BaseRunner(ABC):
 
     async def get_job_status_summary(self) -> JobsStatusSummary:
         """Get a summary of job statuses for a project.
-        
+
         Args:
             project_id: The project ID
 
@@ -218,7 +220,7 @@ class BaseRunner(ABC):
 
     async def get_job_details(self, project_id: str, trajectory_id: str) -> Optional[JobDetails]:
         """Get detailed information about a job.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -231,7 +233,7 @@ class BaseRunner(ABC):
 
     async def get_job_logs(self, project_id: str, trajectory_id: str) -> Optional[str]:
         """Get logs for a job.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID
@@ -244,7 +246,7 @@ class BaseRunner(ABC):
 
     async def get_queue_size(self) -> int:
         """Get the current size of the job queue.
-        
+
         Returns:
             The number of jobs in the queue
         """
@@ -253,10 +255,10 @@ class BaseRunner(ABC):
 
     async def reset_jobs(self, project_id: str | None = None) -> bool:
         """Reset all jobs or jobs for a specific project.
-        
+
         Args:
             project_id: Optional project ID to reset jobs for
-            
+
         Returns:
             True if jobs were reset successfully, False otherwise
         """
@@ -265,7 +267,7 @@ class BaseRunner(ABC):
 
     async def cleanup_job(self, project_id: str, trajectory_id: str) -> None:
         """Clean up resources after a job completes.
-        
+
         Args:
             project_id: The project ID
             trajectory_id: The trajectory ID

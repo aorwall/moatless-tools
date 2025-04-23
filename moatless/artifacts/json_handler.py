@@ -54,12 +54,11 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         path = f"{self.type}.json"
 
         # If storage doesn't have our key, return empty
-        if  not await self._storage.exists_in_trajectory(path):
+        if not await self._storage.exists_in_trajectory(path):
             logger.info(f"No artifacts found for type {self.type}. Creating empty artifact store.")
             return
 
         try:
-            
             artifact_data = await self._storage.read_from_trajectory(path)
             artifact_class = self.get_artifact_class()
             logger.info(f"Loading artifacts for type {self.type} from {path}")
@@ -191,7 +190,7 @@ class JsonArtifactHandler(ArtifactHandler[T]):
         path = f"{self.type}.json"
         artifact_data = [artifact.model_dump() for artifact in self._artifacts.values()]
         artifacts_dict = {"artifacts": artifact_data}
-        
+
         try:
             logger.info(f"Saving {len(artifact_data)} artifacts of type {self.type} to {path}")
             await self._storage.write_to_trajectory(path, artifacts_dict)

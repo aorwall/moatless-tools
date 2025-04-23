@@ -48,7 +48,7 @@ class TestKubernetesRunner(KubernetesRunner):
         # Extract project_id and trajectory_id from job metadata
         if job.metadata.labels and "project_id" in job.metadata.labels:
             job_project_id = job.metadata.labels.get("project_id")
-            
+
             if job.metadata.labels.get("trajectory_id"):
                 job_trajectory_id = job.metadata.labels.get("trajectory_id")
             else:
@@ -57,7 +57,7 @@ class TestKubernetesRunner(KubernetesRunner):
                     parts = job_id.split("-")
                     if len(parts) >= 3:
                         job_trajectory_id = parts[2]
-                
+
         # Fallback to annotations
         elif job.metadata.annotations:
             if "moatless.ai/project-id" in job.metadata.annotations:
@@ -123,7 +123,7 @@ class TestKubernetesRunner(KubernetesRunner):
         otel_context: dict = None,
         node_id: int = None,
         update_on_start: bool = False,
-        update_branch: str = "docker"
+        update_branch: str = "docker",
     ) -> client.V1Job:
         """Create a mock kubernetes job object."""
         # Create a mock job with the minimum required fields
@@ -134,17 +134,17 @@ class TestKubernetesRunner(KubernetesRunner):
         job.metadata.labels = {
             "project_id": self._get_project_label(project_id),
             "trajectory_id": self._get_trajectory_label(trajectory_id),
-            "app": "moatless-worker"
+            "app": "moatless-worker",
         }
         job.metadata.annotations = {
             "moatless.ai/project-id": project_id,
             "moatless.ai/trajectory-id": trajectory_id,
         }
-        
+
         # Add node_id annotation if specified
         if node_id is not None:
             job.metadata.annotations["moatless.ai/node-id"] = str(node_id)
-        
+
         # Mock status
         job.status = MagicMock()
         job.status.active = 1
@@ -152,13 +152,13 @@ class TestKubernetesRunner(KubernetesRunner):
         job.status.failed = 0
         job.status.start_time = datetime.now(timezone.utc)
         job.status.completion_time = None
-        
+
         # Mock spec
         job.spec = MagicMock()
         job.spec.template = MagicMock()
         job.spec.template.spec = MagicMock()
         job.spec.template.spec.containers = [MagicMock()]
-        
+
         return job
 
     def _get_image_name(self, trajectory_id: str = None) -> str:
@@ -226,7 +226,7 @@ def create_mock_job(name, status="Running", succeeded=0, failed=0, active=1, nam
     # Extract project_id and trajectory_id from job name
     # Names follow pattern "run-{project_id}-{trajectory_id}"
     parts = name.split("-")
-    
+
     if len(parts) < 3 or parts[0] != "run":
         # If name doesn't follow the expected pattern, use defaults
         project_id = "unknown"
@@ -353,7 +353,7 @@ async def test_start_job_already_exists(kubernetes_runner):
     # Mock job_exists to return True
     with (
         patch.object(kubernetes_runner, "job_exists", AsyncMock(return_value=True)),
-        patch.object(kubernetes_runner, "get_job_status", AsyncMock(return_value=JobStatus.RUNNING))
+        patch.object(kubernetes_runner, "get_job_status", AsyncMock(return_value=JobStatus.RUNNING)),
     ):
         # Try to start the job
         result = await kubernetes_runner.start_job("test-project", "test-trajectory", "test_module.test_function")
@@ -474,7 +474,7 @@ async def test_job_exists(kubernetes_runner, mock_k8s_api):
     error_response = ApiException()
     error_response.status = 404
     batch_api.read_namespaced_job.side_effect = error_response
-    
+
     # Mock an empty pod list response for the pod check
     empty_pod_list = MagicMock()
     empty_pod_list.items = []
@@ -522,6 +522,7 @@ async def test_get_job_status(kubernetes_runner, mock_k8s_api):
 
     status = await kubernetes_runner.get_job_status("test-project", "nonexistent")
     assert status is None  # Job doesn't exist, returns None instead of PENDING
+
 
 @pytest.mark.asyncio
 async def test_get_runner_info(kubernetes_runner, mock_k8s_api):
@@ -695,7 +696,7 @@ async def test_create_job_object(kubernetes_runner):
     assert job_obj.metadata.annotations["moatless.ai/project-id"] == project_id
     assert job_obj.metadata.annotations["moatless.ai/trajectory-id"] == trajectory_id
 
-    # Verify the namespace is set correctly 
+    # Verify the namespace is set correctly
     assert job_obj.metadata.namespace == expected_namespace
 
     # Test with node_id
@@ -780,54 +781,52 @@ async def test_job_exists_with_pods_fallback(kubernetes_runner, mock_k8s_api):
     project_id = "test-project"
     trajectory_id = "test-trajectory"
     job_id = kubernetes_runner._job_id(project_id, trajectory_id)
-    
+
     batch_api = mock_k8s_api["batch_api"]
     core_api = mock_k8s_api["core_api"]
-    
+
     # Setup batch_api to raise a 404 when trying to get the job directly
     api_exception = client.ApiException(status=404, reason="Not Found")
     batch_api.read_namespaced_job.side_effect = api_exception
-    
+
     # First test with no pods - should return False
     pod_list_empty = MagicMock()
     pod_list_empty.items = []
     core_api.list_namespaced_pod.return_value = pod_list_empty
-    
+
     exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
     assert not exists
-    
+
     # Verify correct label selector was used
     core_api.list_namespaced_pod.assert_called_with(
-        namespace=kubernetes_runner.namespace,
-        label_selector=f"job-name={job_id}",
-        limit=1
+        namespace=kubernetes_runner.namespace, label_selector=f"job-name={job_id}", limit=1
     )
-    
+
     # Now test with a pod present - should return True
     pod = MagicMock(spec=V1Pod)
     pod.metadata = MagicMock()
     pod.metadata.name = f"pod-{job_id}"
     pod.status = MagicMock()
     pod.status.phase = "Running"
-    
+
     pod_list_with_pod = MagicMock()
     pod_list_with_pod.items = [pod]
     core_api.list_namespaced_pod.return_value = pod_list_with_pod
-    
+
     exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
     assert exists
-    
+
     # Test with server error
     api_exception_server = client.ApiException(status=500, reason="Internal Server Error")
     batch_api.read_namespaced_job.side_effect = api_exception_server
-    
+
     # Should assume job exists for safety
     exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
     assert exists
-    
+
     # Test with unexpected exception
     batch_api.read_namespaced_job.side_effect = Exception("Unexpected error")
-    
+
     # Should assume job exists for safety
     exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
     assert exists

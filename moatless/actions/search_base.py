@@ -202,7 +202,6 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
                     elif start_line:
                         response_str += f"Line: {start_line} - {end_line}\n"
                         matches += 1
-            
 
             if matches > 0:
                 response_str = f"\nFound {matches} matches in {len(search_result_context.files)} files.\n{response_str}"

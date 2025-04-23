@@ -171,7 +171,7 @@ class SearchTree(AgenticFlow):
                 logger.info,
                 f"Selected Node{self.root.discriminator_result.selected_node_id} as best node",
             )
-            
+
         if self.root.discriminator_result and self.root.discriminator_result.selected_node_id:
             selected_node = self.get_node_by_id(self.root.discriminator_result.selected_node_id)
             if selected_node:
@@ -186,7 +186,7 @@ class SearchTree(AgenticFlow):
         if not node.is_executed():
             self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping selection.")
             return node
-        
+
         # Find first unexecuted node if it exists
         for check_node in self.root.get_all_nodes():
             if not check_node.observation and not check_node.children:
@@ -229,16 +229,16 @@ class SearchTree(AgenticFlow):
         if not node.is_executed():
             self.log(logger.info, f"Node{node.node_id} has not been executed. Skipping expansion.")
             return node
-        
+
         if node.is_fully_expanded():
             return None
-        
+
         # Find first unexecuted child if it exists
         for child in node.children:
             if not child.observation:
                 logger.info(f"Found unexecuted child {child.node_id} for node {node.node_id}")
                 return child
-        
+
         child_node = await self.expander.expand(node)
         if not child_node:
             self.log(logger.warning, f"Returning Node{node.node_id} with no child node")
@@ -383,7 +383,7 @@ class SearchTree(AgenticFlow):
 
     def get_finished_nodes(self) -> list[Node]:
         """Get all finished nodes in the search tree by uniqe parent node."""
-        
+
         finished_nodes = []
         for node in self.root.get_all_nodes():
             # TODO: Pick finished node with highest/avg/lowest reward?
@@ -431,7 +431,7 @@ class SearchTree(AgenticFlow):
 
             if "selector" in obj and isinstance(obj["selector"], dict):
                 obj["selector"] = BaseSelector.from_dict(obj["selector"])
-                
+
             if "expander" in obj and isinstance(obj["expander"], dict):
                 obj["expander"] = Expander.model_validate(obj["expander"])
             else:

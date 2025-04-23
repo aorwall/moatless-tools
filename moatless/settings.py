@@ -145,7 +145,7 @@ async def get_runner():
     load_dotenv()
     if _runner is None:
         runner_type = os.environ.get("MOATLESS_RUNNER")
-        runner_impl: Type[BaseRunner] 
+        runner_impl: Type[BaseRunner]
         if runner_type == "kubernetes":
             from moatless.runner.kubernetes_runner import KubernetesRunner
 
@@ -157,7 +157,7 @@ async def get_runner():
         else:
             logger.info("Use Local Runner")
             runner_impl = AsyncioRunner
-            
+
         if os.environ.get("REDIS_URL"):
             _runner = SchedulerRunner(runner_impl, storage_type="redis", redis_url=os.environ.get("REDIS_URL"))
         else:

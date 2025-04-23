@@ -43,17 +43,17 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
 
 def create_resource_id(project_id: str, trajectory_id: str, prefix: str = "run") -> str:
     """Create a resource ID that's valid for both Kubernetes jobs and Docker containers.
-    
+
     This will generate an ID with the format: {prefix}-{proj_prefix}-{traj_suffix}-{hash}
-    
+
     Args:
         project_id: The project ID (required, must not be empty)
         trajectory_id: The trajectory ID (required, must not be empty)
         prefix: Prefix for the resource name ("run" for Kubernetes jobs, "moatless" for Docker containers)
-    
+
     Returns:
         A valid resource ID string
-        
+
     Raises:
         ValueError: If project_id or trajectory_id is empty
     """
@@ -62,55 +62,55 @@ def create_resource_id(project_id: str, trajectory_id: str, prefix: str = "run")
         raise ValueError("project_id must be provided and not empty")
     if not trajectory_id:
         raise ValueError("trajectory_id must be provided and not empty")
-    
+
     # Pre-process: convert to lowercase and handle non-ASCII characters
     project_lower = project_id.lower()
-    project_ascii = ''.join(c if c.isascii() else '-' for c in project_lower)
-    
+    project_ascii = "".join(c if c.isascii() else "-" for c in project_lower)
+
     traj_lower = trajectory_id.lower()
-    traj_ascii = ''.join(c if c.isascii() else '-' for c in traj_lower)
-    
+    traj_ascii = "".join(c if c.isascii() else "-" for c in traj_lower)
+
     # Use sanitize_label for remaining sanitization
     sanitized_project = sanitize_label(project_ascii)
     sanitized_traj = sanitize_label(traj_ascii)
-    
+
     # Replace underscores and dots with dashes (as sanitize_label keeps them)
-    sanitized_project = sanitized_project.replace('_', '-').replace('.', '-')
-    sanitized_traj = sanitized_traj.replace('_', '-').replace('.', '-')
-    
+    sanitized_project = sanitized_project.replace("_", "-").replace(".", "-")
+    sanitized_traj = sanitized_traj.replace("_", "-").replace(".", "-")
+
     # Create hash from original IDs
     hash_input = f"{project_id}:{trajectory_id}"
     hash_value = hashlib.md5(hash_input.encode()).hexdigest()[:8]
-    
+
     # Determine the parts of the ID
     proj_prefix = sanitized_project[:16]  # First 16 chars of project id
-    
+
     # Calculate remaining space
     # Format: prefix-proj_prefix-traj_suffix-hash
     # Count separators: 3 hyphens
     max_total_length = 63  # Maximum length for both Kubernetes and Docker
     remaining_space = max_total_length - len(prefix) - len(proj_prefix) - len(hash_value) - 3
-    
+
     # Determine how many chars we can use for trajectory suffix
     traj_chars = min(remaining_space, len(sanitized_traj))
     traj_suffix = sanitized_traj[:traj_chars]
-    
+
     # Construct the resource ID
     resource_id = f"{prefix}-{proj_prefix}-{traj_suffix}-{hash_value}"
-    
+
     # Clean up the resource ID
     # Handle potential double hyphens from concatenation
     resource_id = resource_id.replace("--", "-x-")
-    
+
     # Ensure it doesn't start or end with a dash
     if resource_id.startswith(f"{prefix}--"):
         resource_id = f"{prefix}-x{resource_id[len(prefix)+2:]}"
-    if resource_id.endswith('-'):
+    if resource_id.endswith("-"):
         resource_id = f"{resource_id[:-1]}x"
-    
+
     # Maximum length check (should already be handled by our calculations, but as a safeguard)
     resource_id = resource_id[:63]
-    
+
     return resource_id
 
 
@@ -127,8 +127,8 @@ def sanitize_label(value: str) -> str:
     clean_id = "".join(c if c.isalnum() or c in ["-", "_", "."] else "-" for c in value)
 
     # Normalize multiple dashes into a single dash
-    while '--' in clean_id:
-        clean_id = clean_id.replace('--', '-')
+    while "--" in clean_id:
+        clean_id = clean_id.replace("--", "-")
 
     # Ensure it starts and ends with alphanumeric character
     if clean_id and not clean_id[0].isalnum():

@@ -34,7 +34,7 @@ async def test_find_function_init_method():
         max_identify_prompt_tokens=4000,
         max_hits=10,
         add_extra_context=False,
-        use_identifier=True
+        use_identifier=True,
     )
     # Initialize the action with the workspace
     await action.initialize(workspace)
@@ -72,7 +72,7 @@ async def test_find_function():
         max_identify_prompt_tokens=4000,
         max_hits=10,
         add_extra_context=False,
-        use_identifier=True
+        use_identifier=True,
     )
     # Initialize the action with the workspace
     await action.initialize(workspace)
@@ -115,7 +115,7 @@ async def test_find_function_with_mocks():
         max_identify_prompt_tokens=4000,
         max_hits=10,
         add_extra_context=False,
-        use_identifier=True
+        use_identifier=True,
     )
     await action.initialize(workspace)
 

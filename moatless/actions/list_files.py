@@ -83,7 +83,7 @@ class ListFilesArgs(ActionArguments):
                     recursive=False,
                     max_results=10,
                 ),
-            )
+            ),
         ]
 
 
@@ -94,7 +94,7 @@ class ListFiles(Action):
         default_factory=lambda: DEFAULT_IGNORED_DIRS.copy(),
         description="Directories to ignore. Defaults to common dirs like .git, .cursor, etc.",
     )
-    
+
     async def execute(
         self,
         args: ListFilesArgs,
@@ -216,7 +216,10 @@ class ListFiles(Action):
                             rel_path = line
 
                         # Skip if the directory should be ignored (relative path)
-                        if any(rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs):
+                        if any(
+                            rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
+                            for ignored_dir in self.ignored_dirs
+                        ):
                             continue
 
                         # For recursive listing, filter out the target directory itself
@@ -228,18 +231,27 @@ class ListFiles(Action):
                                     dir_name = rel_path.replace(f"{dir_path}/", "")
                                     if dir_name:  # Skip if empty after replacement
                                         # Skip if the directory name should be ignored
-                                        if any(dir_name == ignored_dir or dir_name.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs):
+                                        if any(
+                                            dir_name == ignored_dir or dir_name.startswith(f"{ignored_dir}/")
+                                            for ignored_dir in self.ignored_dirs
+                                        ):
                                             continue
                                         directories.append(dir_name)
                                 else:
                                     # Skip if the directory name should be ignored
-                                    if any(rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs):
+                                    if any(
+                                        rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
+                                        for ignored_dir in self.ignored_dirs
+                                    ):
                                         continue
                                     directories.append(rel_path)
                             else:
                                 # For recursive, show full relative paths
                                 # Skip if the directory path should be ignored
-                                if any(rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs):
+                                if any(
+                                    rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
+                                    for ignored_dir in self.ignored_dirs
+                                ):
                                     continue
                                 directories.append(rel_path)
 
@@ -278,11 +290,11 @@ class ListFiles(Action):
                     total_items = len(directories) + len(files)
                     dir_ratio = len(directories) / total_items
                     file_ratio = len(files) / total_items
-                    
+
                     # Calculate how many results to allocate to each type
                     max_dirs = min(len(directories), max(1, int(total_results * dir_ratio)))
                     max_files = min(len(files), total_results - max_dirs)
-                    
+
                     directories = directories[:max_dirs]
                     files = files[:max_files]
 
@@ -304,21 +316,24 @@ class ListFiles(Action):
                 try:
                     if file_context._repo and hasattr(file_context._repo, "list_directory"):
                         raw_result = file_context._repo.list_directory(list_files_args.directory)
-                        
+
                         # Filter out ignored directories
-                        filtered_dirs = [d for d in raw_result.get("directories", []) 
-                                        if not any(d == ignored_dir or d.startswith(f"{ignored_dir}/") 
-                                                for ignored_dir in self.ignored_dirs)]
-                        
+                        filtered_dirs = [
+                            d
+                            for d in raw_result.get("directories", [])
+                            if not any(
+                                d == ignored_dir or d.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs
+                            )
+                        ]
+
                         # Filter out files in ignored directories
-                        filtered_files = [f for f in raw_result.get("files", [])
-                                        if not any(f"/{ignored_dir}/" in f"/{f}/"
-                                                for ignored_dir in self.ignored_dirs)]
-                        
-                        result = {
-                            "directories": filtered_dirs,
-                            "files": filtered_files
-                        }
+                        filtered_files = [
+                            f
+                            for f in raw_result.get("files", [])
+                            if not any(f"/{ignored_dir}/" in f"/{f}/" for ignored_dir in self.ignored_dirs)
+                        ]
+
+                        result = {"directories": filtered_dirs, "files": filtered_files}
                     else:
                         return Observation.create(
                             message=f"Error listing directory: {str(e)}",
@@ -332,8 +347,10 @@ class ListFiles(Action):
 
             recursive_str = " (recursive)" if list_files_args.recursive else ""
             gitignore_str = " (respecting .gitignore)" if git_available else ""
-            
-            message = f"Contents of directory '{list_files_args.directory or '(root)'}'{recursive_str}{gitignore_str}\n\n"
+
+            message = (
+                f"Contents of directory '{list_files_args.directory or '(root)'}'{recursive_str}{gitignore_str}\n\n"
+            )
 
             if result["directories"]:
                 message += "Directories:\n"
@@ -358,7 +375,9 @@ class ListFiles(Action):
                 if isinstance(total_files, list):
                     total_files = len(total_files)
                 total_found = total_dirs + total_files
-                message += f"\n\nNote: Results limited to {list_files_args.max_results} items. Total found: {total_found}."
+                message += (
+                    f"\n\nNote: Results limited to {list_files_args.max_results} items. Total found: {total_found}."
+                )
 
             return Observation.create(
                 message=message,

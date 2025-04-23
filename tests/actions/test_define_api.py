@@ -34,7 +34,7 @@ def api_args():
                 summary="List all items",
                 description="Returns a list of all items",
                 response="Array of item objects",
-                status_codes=["200: Success", "401: Unauthorized"]
+                status_codes=["200: Success", "401: Unauthorized"],
             ),
             APIEndpoint(
                 path="/items/{id}",
@@ -42,9 +42,9 @@ def api_args():
                 summary="Get a single item",
                 description="Returns a single item by its ID",
                 response="Item object",
-                status_codes=["200: Success", "404: Not found"]
-            )
-        ]
+                status_codes=["200: Success", "404: Not found"],
+            ),
+        ],
     )
 
 
@@ -57,7 +57,7 @@ async def test_define_api_basic(repository, workspace, file_context, api_args):
 
     # Check the observation message (returned API spec)
     content = observation.message
-    
+
     # Verify key elements are present
     assert "# Test API" in content
     assert "Version: 1.0.0" in content
@@ -75,22 +75,15 @@ async def test_define_api_no_base_path(repository, workspace, file_context):
         title="API Without Base Path",
         description="API specification without a base path",
         version="1.0.0",
-        endpoints=[
-            APIEndpoint(
-                path="/users",
-                method="GET",
-                summary="List users",
-                response="Array of user objects"
-            )
-        ]
+        endpoints=[APIEndpoint(path="/users", method="GET", summary="List users", response="Array of user objects")],
     )
-    
+
     action = DefineAPI()
     await action.initialize(workspace)
     observation = await action.execute(args, file_context)
-    
+
     content = observation.message
-    
+
     # Base path should not appear in content
     assert "Base Path:" not in content
     assert "API Without Base Path" in content
@@ -110,17 +103,17 @@ async def test_define_api_with_request_body(repository, workspace, file_context)
                 summary="Create user",
                 request_body="User object with name and email fields",
                 response="Created user object with ID",
-                status_codes=["201: Created", "400: Bad request"]
+                status_codes=["201: Created", "400: Bad request"],
             )
-        ]
+        ],
     )
-    
+
     action = DefineAPI()
     await action.initialize(workspace)
     observation = await action.execute(args, file_context)
-    
+
     content = observation.message
-    
+
     # Check for request body section
     assert "Request:" in content
-    assert "User object with name and email fields" in content 
+    assert "User object with name and email fields" in content

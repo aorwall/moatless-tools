@@ -353,7 +353,9 @@ java.lang.AssertionError: expected:<true> but was:<false>
         assert "errors" in result.message.lower()
         assert len(result.artifact_changes) == 1
         # Allow either 'errors' or 'failed' to be set, as the implementation may categorize differently
-        assert result.artifact_changes[0].properties["errors"] == 1 or result.artifact_changes[0].properties["failed"] == 1
+        assert (
+            result.artifact_changes[0].properties["errors"] == 1 or result.artifact_changes[0].properties["failed"] == 1
+        )
 
     @pytest.mark.asyncio
     async def test_run_test_with_errors(self, run_maven_tests_action, file_context):

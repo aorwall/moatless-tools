@@ -46,7 +46,7 @@ class KubernetesRunner(BaseRunner):
         kubernetes_provider: str | None = None,
         node_selector: dict | None = None,
         update_on_start: bool = False,
-        update_branch: str = "docker"
+        update_branch: str = "docker",
     ):
         """Initialize the runner with Kubernetes client configuration.
 
@@ -70,13 +70,13 @@ class KubernetesRunner(BaseRunner):
         self.update_on_start = update_on_start
         self.update_branch = update_branch
         logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
-        
+
         if node_selector:
             self.node_selector = node_selector
         else:
             node_selector_label = os.getenv("KUBERNETES_RUNNER_NODE_SELECTOR_LABEL", "testbeds")
             self.node_selector = {"node-purpose": node_selector_label}
-            
+
         self.logger = logging.getLogger(__name__)
 
         # Load the Kubernetes configuration
@@ -94,7 +94,7 @@ class KubernetesRunner(BaseRunner):
         # Initialize Kubernetes API clients
         self.batch_v1 = client.BatchV1Api()
         self.core_v1 = client.CoreV1Api()
-        
+
         # Log configuration details
         self.logger.info(f"Kubernetes runner initialized with namespace: {self.namespace}")
         if self.update_on_start:
@@ -102,8 +102,13 @@ class KubernetesRunner(BaseRunner):
 
     @tracer.start_as_current_span("KubernetesRunner.start_job")
     async def start_job(
-        self, project_id: str, trajectory_id: str, job_func: Callable | str, node_id: int | None = None,
-        update_on_start: Optional[bool] = None, update_branch: Optional[str] = None
+        self,
+        project_id: str,
+        trajectory_id: str,
+        job_func: Callable | str,
+        node_id: int | None = None,
+        update_on_start: Optional[bool] = None,
+        update_branch: Optional[str] = None,
     ) -> bool:
         """Start a job as a Kubernetes Job.
 
@@ -121,7 +126,7 @@ class KubernetesRunner(BaseRunner):
             True if the job was scheduled successfully, False otherwise
         """
         job_id = self._job_id(project_id, trajectory_id)
-        
+
         # Check if job already exists
         if await self.job_exists(project_id, trajectory_id):
             job_status = await self.get_job_status(project_id, trajectory_id)
@@ -136,11 +141,12 @@ class KubernetesRunner(BaseRunner):
                     await self.cancel_job(project_id, trajectory_id)
                     # Short wait to ensure job is deleted
                     import asyncio
+
                     await asyncio.sleep(1)
                 except Exception as e:
                     logger.warning(f"Error deleting job {job_id}: {e}")
                     return False
-        
+
         try:
             self.logger.info(f"Creating Kubernetes job for function: {job_func}")
 
@@ -159,7 +165,7 @@ class KubernetesRunner(BaseRunner):
                 otel_context=otel_context,
                 node_id=node_id,
                 update_on_start=should_update,
-                update_branch=branch_to_use
+                update_branch=branch_to_use,
             )
 
             # Create the job in the namespace
@@ -191,7 +197,7 @@ class KubernetesRunner(BaseRunner):
         """
         try:
             result = []
-            
+
             # List jobs in the namespace
             jobs = await self._list_jobs_in_namespace(self.namespace, project_id)
 
@@ -316,7 +322,7 @@ class KubernetesRunner(BaseRunner):
         """
         job_id = self._job_id(project_id, trajectory_id)
         self.logger.info(f"Checking if job {job_id} exists in namespace {self.namespace}")
-        
+
         # Try to get the job directly first
         try:
             self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
@@ -328,11 +334,11 @@ class KubernetesRunner(BaseRunner):
                 try:
                     # Check if there are any pods with this job-name label
                     pod_list = self.core_v1.list_namespaced_pod(
-                        namespace=self.namespace, 
+                        namespace=self.namespace,
                         label_selector=f"job-name={job_id}",
-                        limit=1  # We only need to know if any exist
+                        limit=1,  # We only need to know if any exist
                     )
-                    
+
                     # If we found any pods, the job still logically exists
                     if pod_list.items:
                         pod = pod_list.items[0]
@@ -341,22 +347,22 @@ class KubernetesRunner(BaseRunner):
                             f"in phase {pod.status.phase}"
                         )
                         return True
-                    
+
                     # No pods found either, job truly doesn't exist
                     return False
-                    
+
                 except ApiException as pod_e:
                     self.logger.warning(f"Error checking for pods for job {job_id}: {pod_e}")
                     # If we can't check pods either, fall back to "not found"
                     return False
-            
+
             # For other API errors, log but don't assume job doesn't exist
             self.logger.warning(f"Error checking if job {job_id} exists: {e}, status code: {e.status}")
             if e.status >= 500:
                 # For server errors, assume job might exist to prevent unnecessary job termination
                 self.logger.warning(f"Server error checking job {job_id}, assuming it might exist")
                 return True
-            
+
             return False
         except Exception as exc:
             # For unexpected errors, log and assume job might exist to be safe
@@ -374,7 +380,7 @@ class KubernetesRunner(BaseRunner):
         """
         # Check if job is still active
         self.logger.info(f"Job {job.metadata.name} status: {job.status}")
-        
+
         # Check if job completed successfully
         if job.status.succeeded:
             return JobStatus.COMPLETED
@@ -397,7 +403,7 @@ class KubernetesRunner(BaseRunner):
             The job status, or None if the job does not exist
         """
         job_id = self._job_id(project_id, trajectory_id)
-        
+
         try:
             # Get the Kubernetes Job resource
             job = self.batch_v1.read_namespaced_job(name=job_id, namespace=self.namespace)
@@ -705,7 +711,7 @@ class KubernetesRunner(BaseRunner):
         otel_context: dict = None,
         node_id: int | None = None,
         update_on_start: bool = False,
-        update_branch: str = "docker"
+        update_branch: str = "docker",
     ) -> client.V1Job:
         """Create a Kubernetes Job object.
 
@@ -727,21 +733,21 @@ class KubernetesRunner(BaseRunner):
             func_name = job_func
         else:
             func_name = job_func.__name__
-            
+
         env_vars = self._create_env_vars(project_id, trajectory_id, func_name, otel_context)
         volumes, volume_mounts = self._create_volumes_and_mounts()
         tolerations = self._create_tolerations()
 
         args = create_job_args(project_id, trajectory_id, job_func, node_id)
-        
+
         # Build the container command
         cmd = f"echo 'MOATLESS: Starting job for {project_id}/{trajectory_id}' && export PYTHONUNBUFFERED=1"
-        
+
         # Add update script if enabled
         if update_on_start:
             self.logger.info(f"Will run update-moatless.sh with branch {update_branch}")
             cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {update_branch}"
-            
+
         # Add the main job command
         cmd += f" && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF"
 
@@ -1136,10 +1142,10 @@ class KubernetesRunner(BaseRunner):
                         for env_var in container.env:
                             # Filter out sensitive data
                             if env_var.name and (
-                                    "API_KEY" in env_var.name
-                                    or "PASSWORD" in env_var.name
-                                    or "SECRET" in env_var.name
-                                    or "TOKEN" in env_var.name
+                                "API_KEY" in env_var.name
+                                or "PASSWORD" in env_var.name
+                                or "SECRET" in env_var.name
+                                or "TOKEN" in env_var.name
                             ):
                                 env_data[env_var.name] = "********"
                             else:

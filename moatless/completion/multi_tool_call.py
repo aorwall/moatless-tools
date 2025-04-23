@@ -12,22 +12,21 @@ logger = logging.getLogger(__name__)
 
 class MultiToolCallSchema(ResponseSchema):
     """A wrapper schema for multiple tool calls.
-    
+
     This schema wraps multiple tool calls in a single response, allowing models
     that can only return a single tool call to return multiple actions.
     """
-    
+
     tool_calls: List[Dict[str, Any]] = Field(
-        ..., 
-        description="List of tool calls to execute. Each must have 'name' and 'args' fields."
+        ..., description="List of tool calls to execute. Each must have 'name' and 'args' fields."
     )
-    
+
     model_config = {"title": "MultiToolCall"}
 
 
 class MultiToolCallCompletionModel(BaseCompletionModel):
     """Multi-tool call-specific implementation of the completion model.
-    
+
     This class is designed to handle multiple tool calls in a single response by:
     1. Processing a specialized schema format that wraps multiple tools
     2. Converting tool responses into a structured multi-tool format
@@ -71,20 +70,20 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                                     "args": {
                                         "type": "object",
                                         "description": "The arguments for the tool call",
-                                    }
+                                    },
                                 },
-                                "required": ["name", "args"]
-                            }
+                                "required": ["name", "args"],
+                            },
                         }
                     },
-                    "required": ["tool_calls"]
-                }
-            }
+                    "required": ["tool_calls"],
+                },
+            },
         }
-        
+
         tools = [s.tool_schema(thoughts_in_action=self.thoughts_in_action) for s in schema]
         tools.append(tools_schema)
-        
+
         return {
             "tools": tools,
             "tool_choice": "auto",
@@ -112,16 +111,16 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
             The modified system prompt with multi-tool call instructions
         """
         tool_descriptions = []
-        
+
         if isinstance(response_schema, list):
             schemas = response_schema
         else:
             schemas = [response_schema]
-            
+
         # Add descriptions of each tool
         for schema in schemas:
             tool_info = f"Tool: {schema.name}\nDescription: {schema.description()}\n"
-            
+
             # Get parameters from schema
             json_schema = schema.model_json_schema()
             if "properties" in json_schema:
@@ -132,9 +131,9 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                     description = param_info.get("description", "")
                     required = param_name in json_schema.get("required", [])
                     tool_info += f"  - {param_name}: {description} {'(required)' if required else '(optional)'}\n"
-            
+
             tool_descriptions.append(tool_info)
-        
+
         # Create the multi-tool instructions
         multi_tool_instructions = (
             "\n\nYou can execute multiple tools in a single response using the MultiToolCall format. "
@@ -142,7 +141,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
             "Format your response as a single MultiToolCall with an array of tool_calls inside it.\n\n"
             "Available tools:\n\n" + "\n".join(tool_descriptions)
         )
-        
+
         return system_prompt + multi_tool_instructions
 
     async def _validate_completion(
@@ -178,18 +177,20 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
 
         # Check if this is a MultiToolCall wrapper or direct tool calls
         is_wrapper = len(message.tool_calls) == 1 and message.tool_calls[0].function.name == "MultiToolCall"
-        
+
         if is_wrapper:
             # Handle MultiToolCall wrapper
             wrapper_tool_call = message.tool_calls[0]
-            
+
             # Parse the wrapper tool call
             try:
                 wrapper_args = json.loads(wrapper_tool_call.function.arguments)
             except json.JSONDecodeError as e:
                 raise CompletionRetryError(
                     message=f"Invalid JSON in MultiToolCall args: {e}",
-                    retry_message=self._create_retry_message(wrapper_tool_call, f"Invalid JSON in MultiToolCall args: {e}")
+                    retry_message=self._create_retry_message(
+                        wrapper_tool_call, f"Invalid JSON in MultiToolCall args: {e}"
+                    ),
                 )
 
             if not isinstance(wrapper_args, dict) or "tool_calls" not in wrapper_args:
@@ -197,7 +198,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                     message="MultiToolCall must contain a 'tool_calls' array.",
                     retry_message=self._create_retry_message(
                         wrapper_tool_call, "MultiToolCall must contain a 'tool_calls' array."
-                    )
+                    ),
                 )
 
             if not isinstance(wrapper_args["tool_calls"], list) or not wrapper_args["tool_calls"]:
@@ -205,7 +206,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                     message="MultiToolCall 'tool_calls' must be a non-empty array.",
                     retry_message=self._create_retry_message(
                         wrapper_tool_call, "MultiToolCall 'tool_calls' must be a non-empty array."
-                    )
+                    ),
                 )
 
             # Process each tool call in the wrapper
@@ -235,8 +236,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
 
                 if tool_name not in valid_names:
                     retry_message = self._create_retry_message(
-                        wrapper_tool_call, 
-                        f"Tool {tool_name} not found in {valid_names}"
+                        wrapper_tool_call, f"Tool {tool_name} not found in {valid_names}"
                     )
                     retry_messages.append(retry_message)
                     retry = True
@@ -251,10 +251,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                             break
 
                 if not schema:
-                    retry_message = self._create_retry_message(
-                        wrapper_tool_call, 
-                        f"Tool {tool_name} not found."
-                    )
+                    retry_message = self._create_retry_message(wrapper_tool_call, f"Tool {tool_name} not found.")
                     retry_messages.append(retry_message)
                     retry = True
                     continue
@@ -270,7 +267,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                         args_str = json.dumps(args)
                     else:
                         args_str = str(args)
-                        
+
                     # Parse JSON if it's a string
                     if isinstance(args_str, str):
                         try:
@@ -279,21 +276,19 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                             args_dict = {"value": args_str}
                     else:
                         args_dict = args
-                    
+
                     validated = schema.model_validate(args_dict)
                     structured_outputs.append(validated)
                 except ValidationError as e:
                     retry_message = self._create_retry_message(
-                        wrapper_tool_call, 
-                        f"Tool {tool_name} arguments are invalid: {e}"
+                        wrapper_tool_call, f"Tool {tool_name} arguments are invalid: {e}"
                     )
                     retry_messages.append(retry_message)
                     retry = True
                     continue
                 except Exception as e:
                     retry_message = self._create_retry_message(
-                        wrapper_tool_call, 
-                        f"Error processing tool {tool_name}: {str(e)}"
+                        wrapper_tool_call, f"Error processing tool {tool_name}: {str(e)}"
                     )
                     retry_messages.append(retry_message)
                     retry = True
@@ -305,16 +300,18 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
                     message="All tool calls in MultiToolCall failed validation.",
                     retry_messages=retry_messages,
                 )
-            
+
             # If some tool calls passed validation but others failed, we can still use the valid ones
             if retry and structured_outputs:
-                logger.warning(f"Some tool calls failed validation but {len(structured_outputs)} valid ones were found.")
+                logger.warning(
+                    f"Some tool calls failed validation but {len(structured_outputs)} valid ones were found."
+                )
 
             # Extract thoughts if not included in individual tool calls
             thought = wrapper_args.get("thoughts") if not self.thoughts_in_action else None
 
             return structured_outputs, content, thought
-        
+
         else:
             # Handle direct tool calls (similar to ToolCallCompletionModel)
             # Track seen arguments to detect duplicates
@@ -397,7 +394,7 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
         """
         if tool_name == "MultiToolCall":
             return MultiToolCallSchema
-            
+
         if self._response_schema:
             for r in self._response_schema:
                 if r.name == tool_name:
@@ -416,28 +413,31 @@ class MultiToolCallCompletionModel(BaseCompletionModel):
             # Create example with multiple tool calls
             example = "User: Run a command to list files and check disk space\n\nAssistant:"
             example += "\n```json\n"
-            example += json.dumps({
-                "tool_calls": [
-                    {
-                        "name": self._response_schema[0].name,
-                        "args": {
-                            "command": "ls", 
-                            "args": ["-la"],
-                            "thoughts": "Listing files with details"
-                        }
-                    },
-                    {
-                        "name": self._response_schema[0].name if len(self._response_schema) == 1 else self._response_schema[1].name,
-                        "args": {
-                            "command" if len(self._response_schema) == 1 else "path": "df",
-                            "args" if len(self._response_schema) == 1 else "recursive": ["-h"] if len(self._response_schema) == 1 else True,
-                            "thoughts": "Checking disk space"
-                        }
-                    }
-                ],
-                "thoughts": "Need to run two commands to fulfill the request"
-            }, indent=2)
+            example += json.dumps(
+                {
+                    "tool_calls": [
+                        {
+                            "name": self._response_schema[0].name,
+                            "args": {"command": "ls", "args": ["-la"], "thoughts": "Listing files with details"},
+                        },
+                        {
+                            "name": self._response_schema[0].name
+                            if len(self._response_schema) == 1
+                            else self._response_schema[1].name,
+                            "args": {
+                                "command" if len(self._response_schema) == 1 else "path": "df",
+                                "args" if len(self._response_schema) == 1 else "recursive": ["-h"]
+                                if len(self._response_schema) == 1
+                                else True,
+                                "thoughts": "Checking disk space",
+                            },
+                        },
+                    ],
+                    "thoughts": "Need to run two commands to fulfill the request",
+                },
+                indent=2,
+            )
             example += "\n```\n\n"
             few_shot_examples.append(example)
 
-        return base_prompt + "\n".join(few_shot_examples) 
+        return base_prompt + "\n".join(few_shot_examples)

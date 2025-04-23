@@ -95,12 +95,12 @@ class EvaluationManager:
                 for instance_id in instance_ids
             ],
         )
-        
+
         flow = await self._flow_manager.build_flow(
             id=evaluation.flow_id,
             model_id=evaluation.model_id,
         )
-        
+
         await self.storage.write_to_project(
             "flow.json",
             flow.model_dump(),
@@ -110,11 +110,9 @@ class EvaluationManager:
         for instance in evaluation.instances:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
             problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
-            
-            root_node = Node.create_root(
-                user_message=problem_statement
-            )
-            
+
+            root_node = Node.create_root(user_message=problem_statement)
+
             trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
             trajectory_data = {
                 "trajectory_id": instance.instance_id,
@@ -126,7 +124,7 @@ class EvaluationManager:
             }
 
             await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
-            
+
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
         return evaluation
@@ -217,7 +215,7 @@ class EvaluationManager:
             job_status = await self.runner.get_job_status(
                 project_id=evaluation_name, trajectory_id=instance.instance_id
             )
-            
+
             instance.job_status = job_status
 
             if job_status in [JobStatus.RUNNING]:
@@ -231,12 +229,12 @@ class EvaluationManager:
             evaluation.status = EvaluationStatus.RUNNING
 
         return evaluation
-    
+
     async def get_config(self, evaluation_name: str) -> dict:
         """Get the config for an evaluation."""
         config = await self.storage.read_from_project("flow.json", project_id=evaluation_name)
         return config
-    
+
     async def update_config(self, evaluation_name: str, config: dict):
         """Update the config for an evaluation."""
         await self.storage.write_to_project("flow.json", config, project_id=evaluation_name)
@@ -281,9 +279,11 @@ class EvaluationManager:
 
         await self._save_evaluation(evaluation)
 
-    async def _process_trajectory_results(self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = True):
+    async def _process_trajectory_results(
+        self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = True
+    ):
         """Process the results of a trajectory and update the instance with the results."""
-        
+
         if instance.status == InstanceStatus.COMPLETED and not force_update:
             return instance
 
@@ -313,27 +313,25 @@ class EvaluationManager:
             node = None
             if flow.root.discriminator_result and flow.root.discriminator_result.selected_node_id:
                 node = flow.get_node_by_id(flow.root.discriminator_result.selected_node_id)
-                
+
             if not node:
                 node = flow.root.get_last_node()
 
             if node.reward:
                 instance.reward = node.reward.value
-                            
+
             if node.evaluation_result:
                 instance.resolved = node.evaluation_result.resolved
                 instance.status = InstanceStatus.RESOLVED if node.evaluation_result.resolved else InstanceStatus.FAILED
-            
+
             if instance.status == InstanceStatus.RESOLVED:
                 return instance
-            
+
             for node in flow.root.get_leaf_nodes():
                 if node.evaluation_result:
                     if node.evaluation_result.resolved:
                         instance.status = InstanceStatus.PARTIALLY_RESOLVED
                         return instance
-            
-            
 
             if node.error:
                 instance.status = InstanceStatus.ERROR
@@ -343,7 +341,7 @@ class EvaluationManager:
         except Exception as e:
             logger.exception(f"Error processing trajectory results for instance {instance.instance_id}")
             return instance
-        
+
     async def cancel_evaluation(self, evaluation_name: str):
         """Cancel all running jobs for an evaluation."""
         evaluation = await self._load_evaluation(evaluation_name)
@@ -691,11 +689,11 @@ class EvaluationManager:
     async def _sync_event_timestamps(self, evaluation: Evaluation, instance: EvaluationInstance):
         if instance.started_at and instance.completed_at and instance.start_evaluating_at and instance.evaluated_at:
             return
-        
+
         events = await self.eventbus.read_events(
-                project_id=evaluation.evaluation_name,
-                trajectory_id=instance.instance_id,
-            )
+            project_id=evaluation.evaluation_name,
+            trajectory_id=instance.instance_id,
+        )
         logger.info(
             f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}"
         )
@@ -731,4 +729,3 @@ class EvaluationManager:
             )
             if event:
                 instance.evaluated_at = event.timestamp
-
