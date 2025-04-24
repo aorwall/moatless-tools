@@ -7,7 +7,7 @@ class AgentEvent(BaseEvent):
     """Base class for pure agent events"""
 
     scope: str = "agent"
-    agent_id: str
+    agent_id: Optional[str] = None
     node_id: int
 
 

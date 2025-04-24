@@ -77,7 +77,13 @@ class ActionAgent(MoatlessComponent):
             response_schemas = cast(list[type[ResponseSchema]], action_args)
             self.completion_model.initialize(response_schemas, self.system_prompt)
 
-    @tracer.start_as_current_span("ActionAgent._run")
+    async def run_simple(self, user_message: str) -> Observation | None:
+        node = Node.create(user_message)
+        child_node = node.create_child()
+        await self.run(child_node)
+        return child_node.observation
+
+    @tracer.start_as_current_span("ActionAgent.run")
     async def run(self, node: Node):
         """Run the agent on a node to generate and execute an action."""
         if not self.completion_model:
@@ -85,9 +91,6 @@ class ActionAgent(MoatlessComponent):
 
         if node.is_executed():
             raise RuntimeError("Node already executed")
-
-        if not self._workspace:
-            raise RuntimeError("Workspace not set")
 
         try:
             if not node.action_steps:

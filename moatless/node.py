@@ -271,6 +271,12 @@ class Node(BaseModel):
         return cls(node_id=0, user_message=user_message, file_context=file_context, **kwargs)
 
     @classmethod
+    def create(cls, user_message: str, **kwargs):
+        """Create a root node with a unique ID."""
+        return cls(node_id=0, user_message=user_message, **kwargs)
+
+
+    @classmethod
     def stub(cls, **kwargs):
         """Create a stub node with a unique ID."""
         # Get the highest existing node ID from the kwargs or use 0
@@ -302,6 +308,20 @@ class Node(BaseModel):
             return True
 
         return bool(self.action_steps and self.action_steps[-1].is_executed())
+    
+    def create_child(self, **kwargs):
+        child_node = Node(
+                node_id=len(self.get_root().get_all_nodes()) + 1,
+                parent=self,
+                file_context=self.file_context.clone() if self.file_context else None,
+                max_expansions=self.max_expansions,
+                agent_id=None,
+                **kwargs
+            )  # type: ignore
+
+        self.add_child(child_node)
+        return child_node
+
 
     def add_child(self, child_node: "Node"):
         """Add a child node to this node."""

@@ -93,9 +93,6 @@ class AgenticFlow(MoatlessComponent):
             agent = settings.agent_manager.get_agent(agent_id)
 
         if not root:
-            if not message:
-                raise ValueError("Either a root node or a message must be provided.")
-
             root = Node.create_root(
                 user_message=message,
                 shadow_mode=shadow_mode,
@@ -142,12 +139,10 @@ class AgenticFlow(MoatlessComponent):
 
         # TODO: Workaround to set repo on existing nodes
         for node in self.root.get_all_nodes():
-            if node.file_context and not node.file_context._repo:
+            if node.file_context and not node.file_context._repo and self.agent._workspace:
                 node.file_context.repository = self.agent.workspace.repository
                 node.file_context._runtime = self.agent.workspace.runtime
 
-        if not self.agent.workspace:
-            raise ValueError("Agent workspace is not set")
 
         try:
             current_trajectory_id.set(self.trajectory_id)

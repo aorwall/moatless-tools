@@ -102,7 +102,7 @@ class SearchBaseAction(Action, CompletionModelMixin, ABC):
         description="Whether to add extra context, like imports, to the search results.",
     )
     use_identifier: bool = Field(
-        True,
+        False,
         description="Whether to use an LLM to identify the relevant code sections.",
     )
 

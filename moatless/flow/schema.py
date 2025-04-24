@@ -110,7 +110,7 @@ class TrajectoryResponseDTO(BaseModel):
     trajectory_id: str
     project_id: str
     status: FlowStatus
-    job_status: JobStatus
+    job_status: Optional[JobStatus] = None
     resolved: Optional[bool] = None
     agent_id: Optional[str] = None
     model_id: Optional[str] = None

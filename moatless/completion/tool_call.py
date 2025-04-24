@@ -71,9 +71,12 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         # If no tool calls, return just the content
         if not hasattr(message, "tool_calls") or not message.tool_calls:
-            raise CompletionRetryError(
-                message="No tool calls found in response, respond with a valid tool call.",
-            )
+            if "SendMessage" in self._response_schema:
+                return [], content, None
+            else:
+                raise CompletionRetryError(
+                    message="No tool calls found in response, respond with a valid tool call.",
+                )
 
         # Track seen arguments to detect duplicates
         seen_arguments = set()

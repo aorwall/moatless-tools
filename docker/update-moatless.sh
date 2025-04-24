@@ -31,6 +31,6 @@ git pull origin $BRANCH
 
 # Update dependencies
 echo "📦 Updating dependencies..."
-uv sync --frozen --compile-bytecode
+uv sync --frozen --compile-bytecode --all-extras
 
 echo "✅ Update complete! Repository is now at: $(git rev-parse --short HEAD)" 
