@@ -98,7 +98,7 @@ fi
 
 # Build and push the base image first
 echo "Building base image: aorwall/moatless.swebench.base.x86_64"
-docker build --platform linux/amd64 -t aorwall/moatless.swebench.base.x86_64 -f docker/Dockerfile.base .
+docker build --platform linux/amd64 -t aorwall/moatless.swebench.base.x86_64 -f docker/Dockerfile.base --no-cache .
 
 if [ $? -ne 0 ]; then
     echo "Error: Failed to build base image"
@@ -183,9 +183,7 @@ RUN git config --global --add safe.directory /testbed
 # Create necessary directories
 RUN mkdir -p /testbed/.moatless
 
-# Set environment variables for UV to find the correct Python
 ENV VIRTUAL_ENV=""
-ENV UV_SYSTEM_PYTHON=$(which python3)
 
 # Copy instance specific files
 COPY instances/${INSTANCE_ID}.json /data/instance.json

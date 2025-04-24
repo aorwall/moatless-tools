@@ -21,11 +21,11 @@ You can install Moatless Tools either from PyPI or from source:
 # Install base package only
 pip install moatless
 
-# Install with streamlit visualization tools
-pip install "moatless[streamlit]"
+# Install with Kubernetes runner support
+pip install "moatless[kubernetes]"
 
-# Install with API server
-pip install "moatless[api]"
+# Install with Redis support
+pip install "moatless[redis]"
 
 # Install everything (including dev dependencies)
 pip install "moatless[all]"
@@ -33,7 +33,7 @@ pip install "moatless[all]"
 
 ### Install from source
 
-Clone the repository and install using Poetry:
+Clone the repository and install using Poetry
 
 ```bash
 # Clone the repository
