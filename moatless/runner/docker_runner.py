@@ -171,6 +171,7 @@ class DockerRunner(BaseRunner):
                 f"JOB_FUNC={fully_qualified_name}",
                 "MOATLESS_DIR=/data/moatless",
                 "MOATLESS_COMPONENTS_PATH=/opt/components",
+                "MOATLESS_SOURCE_DIR=/opt/moatless/moatless",
                 "NLTK_DATA=/data/nltk_data",
                 "INDEX_STORE_DIR=/data/index_store",
                 "REPO_DIR=/testbed",
@@ -187,6 +188,7 @@ class DockerRunner(BaseRunner):
                     or key.startswith("AWS_")
                     or key.startswith("GCP_")
                     or key.startswith("AZURE_")
+                    or key == "REDIS_URL"
                 ):
                     env_vars.append(f"{key}={value}")
 
@@ -221,9 +223,9 @@ class DockerRunner(BaseRunner):
 
             # Add volume mounts for source code
             if self.moatless_source_dir:
-                logger.info(f"Mount {self.moatless_source_dir}:/opt/moatless")
-                cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless"])
-                cmd.extend(["-e", "PYTHONPATH=/opt/moatless:$PYTHONPATH"])
+                logger.info(f"Mounting {self.moatless_source_dir}:/opt/moatless/moatless")
+                cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless/moatless"])
+                cmd.extend(["-e", "PYTHONPATH=/opt/moatless/moatless:$PYTHONPATH"])
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
             logger.info(f"Running command: {args}")
@@ -240,7 +242,7 @@ class DockerRunner(BaseRunner):
                 run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
 
             # Add the main job command
-            run_command += f"uv run - <<EOF\n{args}\nEOF"
+            run_command += f"date '+%Y-%m-%d %H:%M:%S' && echo 'Starting job at ' $(date '+%Y-%m-%d %H:%M:%S') && uv run - <<EOF\n{args}\nEOF"
 
             cmd.extend([image_name_to_use, "sh", "-c", run_command])
 

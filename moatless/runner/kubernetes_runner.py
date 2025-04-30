@@ -749,7 +749,7 @@ class KubernetesRunner(BaseRunner):
             cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {update_branch}"
 
         # Add the main job command
-        cmd += f" && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF"
+        cmd += f" && date '+%Y-%m-%d %H:%M:%S' && echo 'Starting job at ' $(date '+%Y-%m-%d %H:%M:%S') && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF"
 
         container = client.V1Container(
             name="worker",

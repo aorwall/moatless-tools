@@ -21,8 +21,10 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
     if is_async:
         return (
             f"import logging\n"
+            f"import datetime\n"
             f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
             f"logging.debug('Starting job execution')\n"
+            f"print(f'Job started at {{datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}}')\n"
             f"import asyncio\n"
             f"from {func_module} import {func_name}\n"
             f"logging.debug('Imports completed, starting execution')\n"
@@ -32,8 +34,10 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
     else:
         return (
             f"import logging\n"
+            f"import datetime\n"
             f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
             f"logging.debug('Starting job execution')\n"
+            f"print(f'Job started at {{datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}}')\n"
             f"from {func_module} import {func_name}\n"
             f"logging.debug('Imports completed, starting execution')\n"
             f"{func_name}{args}\n"
