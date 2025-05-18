@@ -11,8 +11,8 @@ This directory contains Docker configuration files to run the Moatless API in a 
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
-   cd moatless-api
+   git clone https://github.com/aorwall/moatless-tools.git
+   cd moatless-tools
    ```
 
 2. Set up environment variables:
