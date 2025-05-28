@@ -481,7 +481,7 @@ class DockerRunner(BaseRunner):
                 "docker",
                 "inspect",
                 "--format",
-                '{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{index .Config.Labels "project_id"}},{{index .Config.Labels "trajectory_id"}}',
+                '{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{.State.StartedAt}},{{.State.FinishedAt}}',
                 container_name,
             ]
             process = await asyncio.create_subprocess_exec(
@@ -491,13 +491,17 @@ class DockerRunner(BaseRunner):
 
             if process.returncode == 0:
                 container_info = stdout.decode().strip().split(",")
-                if len(container_info) < 3:
+                if len(container_info) < 5:
                     self.logger.warning(
                         f"Unexpected output format from docker inspect command {' '.join(inspect_cmd)}: {stdout.decode()}"
                     )
                     return None
 
-                status, running, exit_code = container_info[:3]
+                status, running, exit_code, started_at, finished_at = container_info[:5]
+
+                # If container has started but not finished, it's definitely running
+                if started_at != "0001-01-01T00:00:00Z" and finished_at == "0001-01-01T00:00:00Z":
+                    return JobStatus.RUNNING
 
                 return self._parse_container_status(status, running, exit_code)
             else:
@@ -640,11 +644,13 @@ class DockerRunner(BaseRunner):
         Returns:
             JobStatus enum value
         """
-        # Map Docker status to JobStatus
-        if running.lower() == "true":
+        # First check if container is running - either by status or running flag
+        if status == "running" or running.lower() == "true":
             return JobStatus.RUNNING
-        elif status == "created":
-            # Container is created but not yet started - this is PENDING, not RUNNING
+
+        # Handle non-running states
+        if status == "created":
+            # Container is created but not yet started
             return JobStatus.PENDING
         elif status == "exited":
             # Container has exited
@@ -652,9 +658,18 @@ class DockerRunner(BaseRunner):
                 return JobStatus.COMPLETED
             else:
                 return JobStatus.FAILED
-        else:
-            # Other statuses (paused, restarting, etc.) - map to appropriate JobStatus
+        elif status == "restarting":
+            # Container is restarting, consider it running
             return JobStatus.RUNNING
+        elif status == "paused":
+            # Container is paused but still exists, consider it running
+            return JobStatus.RUNNING
+        elif status == "removing":
+            # Container is being removed, consider it stopped
+            return JobStatus.STOPPED
+        else:
+            # For any other status, if running is false, consider it failed
+            return JobStatus.FAILED
 
     async def _cleanup_container(self, container_name: str) -> bool:
         """Stop and remove a container.

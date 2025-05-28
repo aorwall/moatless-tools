@@ -15,7 +15,9 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+from moatless.evaluation.schema import EvaluationStatus, InstanceStatus
 from moatless.runner.job_wrappers import run_evaluation_instance
+from moatless.runner.scheduler import SchedulerRunner
 
 # Add the project root to the path so we can import moatless
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
@@ -50,7 +52,7 @@ async def setup_environment():
     return storage, eventbus, flow_manager, base_dir
 
 
-async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id: str, flow_id: str, use_local_source: bool = False):
+async def run_docker_evaluation(evaluation_name: str, dataset_split: str, model_id: str, flow_id: str, use_local_source: bool = False, num_parallel_jobs: int = 1):
     """Run an evaluation with Docker."""
     # Set MOATLESS_DIR environment variable if not set
     if "MOATLESS_DIR" not in os.environ:
@@ -61,6 +63,8 @@ async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id
 
     if not evaluation_name:
         evaluation_name = f"docker-run-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        
+    logger.info(f"Running evaluation {evaluation_name} with dataset split {dataset_split} and model {model_id} and flow {flow_id}")
 
     # Create the Docker runner
     moatless_source_dir = None
@@ -69,7 +73,7 @@ async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id
         moatless_source_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
         logger.info(f"Using local moatless source code from: {moatless_source_dir}")
 
-    runner = DockerRunner(moatless_source_dir=moatless_source_dir)
+    runner = SchedulerRunner(runner_impl=DockerRunner, max_total_jobs=num_parallel_jobs)
 
     # Create evaluation manager with the runner
     eval_manager = EvaluationManager(
@@ -90,66 +94,38 @@ async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id
             evaluation_name=evaluation_name,
             flow_id=flow_id,
             model_id=model_id,
-            instance_ids=[instance_id],
-            dataset_name="instance_ids",
+            dataset_name=dataset_split,
         )
 
-        # Start the job
-        logger.info(f"Starting Docker job for {instance_id}")
-
-        success = await runner.start_job(
-            project_id=evaluation.evaluation_name,
-            trajectory_id=instance_id,
-            job_func=run_evaluation_instance,
-        )
-
-        if success:
-            logger.info("Docker job started successfully!")
-            container_name = runner._container_name(evaluation.evaluation_name, instance_id)
-
-            logger.info(f"Starting to tail logs for container: {container_name}")
-
-            # Start tailing the logs and wait for container to finish
-            process = await asyncio.create_subprocess_exec(
-                "docker",
-                "logs",
-                "-f",
-                container_name,
-                stdout=None,  # Use parent's stdout/stderr
-                stderr=None,
-            )
-
-            # Wait for container to finish
-            logger.info(f"Waiting for container {container_name} to complete...")
-
-            while True:
-                # Check if container is still running
-                check_process = await asyncio.create_subprocess_exec(
-                    "docker", "ps", "-q", "--filter", f"name={container_name}", stdout=asyncio.subprocess.PIPE
-                )
-                stdout, _ = await check_process.communicate()
-
-                if not stdout.strip():
-                    # Container is no longer running
-                    logger.info(f"Container {container_name} has finished")
-                    break
-
-                # Wait before checking again
-                await asyncio.sleep(5)
-
-            # Make sure the log process is terminated
-            try:
-                process.terminate()
-            except:
-                pass
-            
+        await eval_manager.start_evaluation(evaluation.evaluation_name)
+        logger.info(f"Evaluation {evaluation.evaluation_name} started")
+        
+        while True:
+            await asyncio.sleep(1)
             await eval_manager.process_evaluation_results(evaluation.evaluation_name)
+            evaluation = await eval_manager.get_evaluation(evaluation.evaluation_name)
+            # Count instances by status
+            status_counts: dict[InstanceStatus, int] = {}
+            for instance in evaluation.instances:
+                status = instance.status
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            # Print status summary
+            print("Instance status summary:", ", ".join(f"{status.value}: {count}" for status, count in status_counts.items()))
+                
+            if evaluation.status == EvaluationStatus.COMPLETED:
+                break
 
-            return True
-        else:
-            logger.error("Failed to start Docker job")
-            return False
-
+        print(f"Evaluation {evaluation.evaluation_name} completed with status {evaluation.status}")
+        
+        # Calculate resolution statistics
+        total_instances = len(evaluation.instances)
+        resolved_instances = sum(1 for i in evaluation.instances if i.status == InstanceStatus.RESOLVED)
+        resolution_percentage = (resolved_instances / total_instances * 100) if total_instances > 0 else 0
+        
+        print(f"Resolution rate: {resolution_percentage:.1f}% ({resolved_instances}/{total_instances} instances resolved)")
+        
+        return True
     except Exception as e:
         logger.exception(f"Error running Docker evaluation: {e}")
         return False
@@ -170,8 +146,8 @@ def main():
         help="Evaluation name",
     )
     parser.add_argument(
-        "--instance-id",
-        help="Instance ID",
+        "--dataset-split",
+        help="Dataset split to use",
         required=True,
     )
     parser.add_argument(
@@ -185,6 +161,12 @@ def main():
         default=True,
         help="Mount the local moatless source code to /opt/moatless in the container",
     )
+    parser.add_argument(
+        "--num-parallel-jobs",
+        type=int,
+        default=1,
+        help="Number of parallel jobs to run (default: 1)",
+    )
 
     args = parser.parse_args()
     
@@ -194,10 +176,11 @@ def main():
     asyncio.run(
         run_docker_evaluation(
             evaluation_name=args.evaluation_name,
-            instance_id=args.instance_id,
+            dataset_split=args.dataset_split,
             model_id=args.model,
             flow_id=args.flow,
             use_local_source=args.use_local,
+            num_parallel_jobs=args.num_parallel_jobs,
         )
     )
 

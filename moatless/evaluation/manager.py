@@ -109,7 +109,8 @@ class EvaluationManager:
 
         for instance in evaluation.instances:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
-            problem_statement = f"Solve the following issue:\n{swebench_instance['problem_statement']}"
+            repo_name = swebench_instance["repo"].split("/")[-1]
+            problem_statement = f"Solve the following issue in the {repo_name} repository:\n{swebench_instance['problem_statement']}"
 
             root_node = Node.create_root(user_message=problem_statement)
 
@@ -409,7 +410,7 @@ class EvaluationManager:
 
     def _is_evaluation_completed(self, evaluation: Evaluation) -> bool:
         """Check if all instances in an evaluation have been evaluated."""
-        return all(instance.status == InstanceStatus.COMPLETED for instance in evaluation.instances)
+        return all(instance.evaluated_at is not None for instance in evaluation.instances)
 
     def _set_evaluation_completed(self, evaluation: Evaluation):
         """Set the evaluation status to COMPLETED."""
@@ -423,7 +424,7 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
-        logger.info(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
+        logger.debug(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:
             await self._process_trajectory_results(evaluation, instance)
 
@@ -694,9 +695,7 @@ class EvaluationManager:
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
         )
-        logger.info(
-            f"Received {len(events)} events for instance {instance.instance_id}. Start evaluating at {instance.start_evaluating_at}"
-        )
+        
         # set timestamps
         if not instance.started_at:
             event = next(

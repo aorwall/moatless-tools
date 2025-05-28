@@ -130,24 +130,22 @@ When specifying just the `--model` argument, the following configurations are us
 
 ## Verify Setup
 
-Before running the full evaluation, you can verify your setup using the integration test script:
+Before running the full evaluation, you can verify your setup running a simple SWE-Bench instance.
 
 ```bash
-# Run a single model test
-python -m moatless.validation.validate_simple_code_flow --model claude-3-5-sonnet-20241022
+python3 scripts/docker_run.py  --model gpt-4o-mini-2024-07-18 --instance-id django__django-11099 --evaluation-name testing_setup
 ```
 
 The script will run the model against a sample SWE-Bench instance
 
-Results are saved in `test_results/integration_test_<timestamp>/` .
-
+Results are saved in `.moatless/projects/testing_setup`.
 
 ## Run evaluation
 
 The evaluation script supports various configuration options through command line arguments:
 
 ```bash
-python -m moatless.benchmark.run_evaluation [OPTIONS]
+ python3 scripts/docker_run.py --evaluation-name 
 ```
 
 Required arguments:

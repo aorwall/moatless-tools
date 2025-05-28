@@ -203,6 +203,7 @@ class Node(BaseModel):
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
 
     thoughts: Optional[Thoughts] = Field(default=None, description="The thoughts associated with the node")
+    thinking_blocks: Optional[list[dict]] = Field(default=None, description="The thinking blocks associated with the node")
 
     action_steps: list[ActionStep] = Field(
         default_factory=list,

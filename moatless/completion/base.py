@@ -5,9 +5,11 @@ from enum import Enum
 from typing import Any, List, Optional, Union
 
 import litellm
+
 import tenacity
 from litellm.exceptions import BadRequestError
 from litellm.files.main import RateLimitError
+from litellm.types.utils import ModelResponse as LitellmModelResponse
 from openai import APIConnectionError
 from opentelemetry import trace
 from pydantic import BaseModel, Field, PrivateAttr
@@ -60,6 +62,7 @@ class CompletionResponse(BaseModel):
     structured_outputs: list[ResponseSchema] = Field(default_factory=list)
     text_response: Optional[str] = Field(default=None)
     thought: Optional[str] = Field(default=None, description="Thought process from ReAct or similar models")
+    thinking_blocks: Optional[list[dict]] = Field(default=None, description="Thinking blocks used by models like Claude")
     completion_invocation: Optional[CompletionInvocation] = Field(
         default=None, description="The complete invocation data including all attempts"
     )
@@ -113,6 +116,10 @@ class BaseCompletionModel(MoatlessComponent, ABC):
     merge_same_role_messages: bool = Field(
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
+    )
+    use_reasoning_content: bool = Field(
+        default=False,
+        description="Whether to use reasoning content in messages",
     )
 
     _response_schema: Optional[list[type[ResponseSchema]]] = PrivateAttr(default=None)
@@ -188,7 +195,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
         if self.params:
             self._completion_params.update(self.params)
-
+            
         self._post_validation_fn = post_validation_fn
 
         if self.few_shot_examples:
@@ -196,6 +203,9 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
         if system_prompt:
             self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
+
+        if self.use_reasoning_content:
+            litellm.drop_params=True
 
         self._initialized = True
 
@@ -349,6 +359,13 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
                         if invocation.current_attempt:
                             invocation.current_attempt.success = True
+                            
+                        thinking_blocks = None
+                        if completion_response.choices and completion_response.choices[0].message:
+                            if completion_response.choices[0].message.reasoning_content and not thought:
+                                thought = completion_response.choices[0].message.reasoning_content
+                            if completion_response.choices[0].message.thinking_blocks:
+                                thinking_blocks = completion_response.choices[0].message.thinking_blocks
 
                     except CompletionRetryError as e:
                         if invocation.current_attempt:
@@ -383,6 +400,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     structured_outputs=structured_outputs or [],
                     text_response=text_response,
                     thought=thought,
+                    thinking_blocks=thinking_blocks,
                     completion_invocation=invocation,
                 )
                 return final_response
@@ -418,7 +436,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
             raise error from e
 
     @tracer.start_as_current_span("BaseCompletionModel._execute_completion")
-    async def _execute_completion(self, messages: list[dict[str, str]], invocation: CompletionInvocation) -> Any:
+    async def _execute_completion(self, messages: list[dict[str, str]], invocation: CompletionInvocation) -> LitellmModelResponse:
         """Execute a single completion attempt with LiteLLM.
 
         This method:
@@ -478,7 +496,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     if invocation.current_attempt:
                         invocation.current_attempt.failure_reason = f"BadRequestError: {str(e)}"
 
-                    if e.response:
+                    if hasattr(e, "response") and e.response:
                         response_text = e.response.text
                     else:
                         response_text = None

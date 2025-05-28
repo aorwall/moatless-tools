@@ -167,6 +167,8 @@ class MessageHistoryGenerator(BaseMemory):
                 # Then add tool responses
                 messages.extend(tool_msgs)
             tokens += asst_tokens
+            
+        
 
         return messages, tokens
 
@@ -287,8 +289,15 @@ class MessageHistoryGenerator(BaseMemory):
 
         # Add thoughts if available
         if node.thoughts:
-            assistant_content.extend(node.thoughts)
-
+            if not self.use_reasoning_content:
+                assistant_content.append(
+                    ChatCompletionTextObject(type="text", text=node.thoughts, cache_control=None)
+                )
+            else:
+                assistant_message["reasoning_content"] = node.thoughts
+                if node.thinking_blocks:
+                    assistant_message["thinking_blocks"] = node.thinking_blocks
+                
         # Add assistant message if available
         if node.assistant_message:
             assistant_content.append(

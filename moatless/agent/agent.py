@@ -145,6 +145,8 @@ class ActionAgent(MoatlessComponent):
             node.assistant_message = completion_response.text_response
             if not completion_response.structured_outputs:
                 raise RejectError("No action found")
+            
+            node.thinking_blocks = completion_response.thinking_blocks
 
             if completion_response.structured_outputs:
                 node.action_steps = [
