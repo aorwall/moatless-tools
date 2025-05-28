@@ -455,7 +455,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
             with invocation:
                 try:
-                    if "claude-3-" in self.model:
+                    if "claude" in self.model:
                         self._inject_prompt_caching(messages)
 
                     response = await litellm.acompletion(
