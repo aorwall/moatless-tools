@@ -206,7 +206,7 @@ class MoatlessComponent(BaseModel, ABC, Generic[T]):
             # Then check for custom components if MOATLESS_COMPONENTS_PATH is set
             custom_path = os.getenv("MOATLESS_COMPONENTS_PATH")
             if not custom_path:
-                logger.info(
+                logger.debug(
                     f"MOATLESS_COMPONENTS_PATH must be set to load custom components for [{cls.get_component_type()}]."
                 )
             elif not os.path.isdir(custom_path):
