@@ -20,7 +20,12 @@ This directory contains Docker configuration files to run the Moatless API in a 
    cp .env.example .env
    ```
    
-   Edit the `.env` file to set your API keys and other configuration options.
+   Edit the `.env` file to set your API keys and other configuration options, including the required `MOATLESS_DIR` variable:
+   ```
+   MOATLESS_DIR=/path/to/your/moatless/data
+   ```
+   
+   **Note**: `MOATLESS_DIR` specifies the directory where Moatless will store configuration files and trajectory data. This directory will be mounted as a volume in the Docker containers.
 
 3. Start the services:
    ```bash
@@ -51,7 +56,7 @@ This separation allows you to use different source code for the API and the spaw
 
 The following environment variables can be configured in the `.env` file:
 
-- `MOATLESS_DIR`: Directory for Moatless data (mounted as volume)
+- `MOATLESS_DIR`: **[REQUIRED]** Directory where Moatless stores configuration files and trajectory data (mounted as volume)
 - `MOATLESS_REPO_DIR`: Directory for repository data
 - `MOATLESS_SOURCE_DIR`: Path to moatless module code for API container
 - `MOATLESS_RUNNER`: Set to `docker` to use the Docker runner

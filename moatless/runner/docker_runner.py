@@ -40,6 +40,7 @@ class DockerRunner(BaseRunner):
         default_image_name: Optional[str] = None,
         update_on_start: bool = False,
         update_branch: str = "docker",
+        network_name: Optional[str] = None,
     ):
         """Initialize the runner with Docker configuration.
 
@@ -53,6 +54,8 @@ class DockerRunner(BaseRunner):
                               this overrides the standard image name generation.
             update_on_start: Whether to run the update-moatless.sh script when starting containers.
             update_branch: Git branch to use when running update-moatless.sh.
+            network_name: Docker network name to connect containers to. If None, defaults to 
+                         'moatless-network' or can be set via MOATLESS_DOCKER_NETWORK env var.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
@@ -60,6 +63,13 @@ class DockerRunner(BaseRunner):
         self.default_image_name = default_image_name
         self.update_on_start = update_on_start
         self.update_branch = update_branch
+
+        # Set network name - priority: parameter > env var > default
+        self.network_name = (
+            network_name 
+            or os.environ.get("MOATLESS_DOCKER_NETWORK") 
+            or "moatless-network"
+        )
 
         # Get source directory - prefer explicitly passed parameter over environment variable
         self.moatless_source_dir = (
@@ -83,6 +93,7 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Source dir: {self.moatless_source_dir}")
         logger.info(f"  - Components path: {self.components_path}")
         logger.info(f"  - Moatless dir: {self.moatless_dir}")
+        logger.info(f"  - Network: {self.network_name}")
         logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
         if self.update_on_start:
             logger.info(f"  - Update on start: True (branch: {self.update_branch})")
@@ -132,21 +143,17 @@ class DockerRunner(BaseRunner):
 
         # Check if container already exists
         if await self._container_exists(container_name):
-            # Check if the container is completed or failed
+            # Check if the container is completed, failed, or pending (created but not started)
             container_status = await self._get_container_status(container_name)
-            if container_status in [JobStatus.COMPLETED, JobStatus.FAILED]:
+            if container_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.PENDING]:
                 # Remove the existing container first
                 self.logger.info(
                     f"Container {container_name} exists with status {container_status}, removing and restarting"
                 )
                 await self._cleanup_container(container_name)
-
             else:
                 self.logger.info(f"Container {container_name} already exists with status {container_status}, skipping")
                 return False
-
-            self.logger.info(f"Container {container_name} already exists, not starting a new one")
-            return False
 
         # Use the specified image or default
         if not image_name:
@@ -170,7 +177,6 @@ class DockerRunner(BaseRunner):
                 f"TRAJECTORY_ID={trajectory_id}",
                 f"JOB_FUNC={fully_qualified_name}",
                 "MOATLESS_DIR=/data/moatless",
-                "MOATLESS_COMPONENTS_PATH=/opt/components",
                 "MOATLESS_SOURCE_DIR=/opt/moatless/moatless",
                 "NLTK_DATA=/data/nltk_data",
                 "INDEX_STORE_DIR=/data/index_store",
@@ -180,6 +186,10 @@ class DockerRunner(BaseRunner):
                 "VIRTUAL_ENV=",  # Empty value tells UV to ignore virtual environments
                 "UV_NO_VENV=1",  # Tell UV explicitly not to use venv
             ]
+
+            # Add components path environment variable only if components are configured
+            if self.components_path:
+                env_vars.append("MOATLESS_COMPONENTS_PATH=/opt/components")
 
             # Add API key environment variables from current environment
             for key, value in os.environ.items():
@@ -200,6 +210,9 @@ class DockerRunner(BaseRunner):
             # Create command to run Docker container
             cmd = ["docker", "run", "--name", container_name, "-d"]
 
+            # Add network to connect to docker-compose services (like Redis)
+            cmd.extend(["--network", self.network_name])
+
             # Add platform flag if running on ARM64 architecture
             if self.is_arm64:
                 cmd.extend(["--platform=linux/amd64"])
@@ -219,7 +232,6 @@ class DockerRunner(BaseRunner):
             # Add volume mounts for components
             if self.components_path:
                 cmd.extend(["-v", f"{self.components_path}:/opt/components"])
-                cmd.extend(["-e", "MOATLESS_COMPONENTS_PATH=/opt/components"])
 
             # Add volume mounts for source code
             if self.moatless_source_dir:
@@ -632,8 +644,8 @@ class DockerRunner(BaseRunner):
         if running.lower() == "true":
             return JobStatus.RUNNING
         elif status == "created":
-            # Container is created but not yet started - consider it RUNNING
-            return JobStatus.RUNNING
+            # Container is created but not yet started - this is PENDING, not RUNNING
+            return JobStatus.PENDING
         elif status == "exited":
             # Container has exited
             if exit_code == "0":
