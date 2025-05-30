@@ -287,17 +287,17 @@ class MessageHistoryGenerator(BaseMemory):
         assistant_message: dict[str, Any] = {"role": "assistant"}
         assistant_content = []
 
-        # Add thoughts if available
-        if node.thoughts:
-            if not self.use_reasoning_content:
-                assistant_content.append(
-                    ChatCompletionTextObject(type="text", text=node.thoughts, cache_control=None)
-                )
-            else:
-                assistant_message["reasoning_content"] = node.thoughts
-                if node.thinking_blocks:
-                    assistant_message["thinking_blocks"] = node.thinking_blocks
-                
+        # Add thoughts if available (Claude specific)
+        if node.thinking_blocks:
+            assistant_message["thinking_blocks"] = node.thinking_blocks
+        elif node.thoughts:
+            assistant_content.extend(node.thoughts)
+        else:
+            assistant_content.append(
+                ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None)
+            )
+
+            
         # Add assistant message if available
         if node.assistant_message:
             assistant_content.append(
