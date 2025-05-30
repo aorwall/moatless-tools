@@ -472,11 +472,11 @@ class AsyncioRunner(BaseRunner):
             JobStatus enum representing the current status, or JobStatus.PENDING if the job does not exist
         """
         job_id = self._job_id(project_id, trajectory_id)
-        
+
         # Check if the job exists in metadata
         if job_id in self.job_metadata:
             return cast(JobStatus, self.job_metadata[job_id]["status"])
-        
+
         # If job doesn't exist, return PENDING as default status
         return JobStatus.PENDING
 

@@ -167,8 +167,6 @@ class MessageHistoryGenerator(BaseMemory):
                 # Then add tool responses
                 messages.extend(tool_msgs)
             tokens += asst_tokens
-            
-        
 
         return messages, tokens
 
@@ -297,7 +295,6 @@ class MessageHistoryGenerator(BaseMemory):
                 ChatCompletionTextObject(type="text", text=node.assistant_message, cache_control=None)
             )
 
-            
         # Add assistant message if available
         if node.assistant_message:
             assistant_content.append(

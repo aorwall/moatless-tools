@@ -36,7 +36,11 @@ from moatless.api.trajectory.schema import TrajectoryDTO
 from moatless.api.websocket import handle_event, websocket_endpoint
 from moatless.artifacts.artifact import ArtifactListItem
 from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus, JobDetails
-from moatless.settings import get_storage as settings_get_storage, get_event_bus as settings_get_event_bus, get_runner as settings_get_runner
+from moatless.settings import (
+    get_storage as settings_get_storage,
+    get_event_bus as settings_get_event_bus,
+    get_runner as settings_get_runner,
+)
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
@@ -44,7 +48,16 @@ from moatless.flow.manager import FlowManager
 from moatless.evaluation.manager import EvaluationManager
 from moatless.agent.manager import AgentConfigManager
 from moatless.completion.manager import ModelConfigManager
-from moatless.api.dependencies import get_event_bus, get_runner, get_storage, get_model_manager, get_flow_manager, get_evaluation_manager, get_agent_manager, cleanup_resources
+from moatless.api.dependencies import (
+    get_event_bus,
+    get_runner,
+    get_storage,
+    get_model_manager,
+    get_flow_manager,
+    get_evaluation_manager,
+    get_agent_manager,
+    cleanup_resources,
+)
 
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
@@ -53,8 +66,8 @@ filter_external_warnings()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logging.getLogger("azure").setLevel(logging.WARNING)
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
 security = HTTPBasic()
 
 
@@ -177,31 +190,6 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     # Use the websocket endpoint from the websocket module
     router.websocket("/ws")(websocket_endpoint)
 
-    if workspace is not None:
-
-        @router.get("/artifacts", response_model=list[ArtifactListItem])
-        async def list_all_artifacts():
-            """Get all artifacts across all types"""
-            return workspace.get_all_artifacts()
-
-        @router.get("/artifacts/{type}", response_model=list[ArtifactListItem])
-        async def list_artifacts(type: str):
-            try:
-                return workspace.get_artifacts_by_type(type)
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
-
-        @router.get("/artifacts/{type}/{id}", response_model=dict[str, Any])
-        async def get_artifact(type: str, id: str):
-            try:
-                artifact = workspace.get_artifact(type, id)
-                if not artifact:
-                    raise HTTPException(status_code=404, detail=f"Artifact {id} not found")
-                return artifact.to_ui_representation()
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
-
-
     @router.get("/runner", response_model=RunnerResponseDTO)
     async def get_runner_info(
         runner: BaseRunner = Depends(get_runner),
@@ -224,12 +212,12 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         # Get active workers from runner info
         active_workers = runner_info.data.get("ready_nodes", 0)
         total_workers = runner_info.data.get("nodes", 0)
-        
+
         # Get queue size if the runner supports it
         queue_size = 0
         if hasattr(runner, "get_queue_size"):
             queue_size = await runner.get_queue_size()
-            
+
         return RunnerStatsDTO(
             runner_type=runner_info.runner_type,
             status=runner_info.status,
@@ -275,16 +263,13 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         return {"status": "success", "message": "Job(s) canceled successfully"}
 
     @router.post("/runner/jobs/reset")
-    async def reset_jobs(
-        request: Request, 
-        runner: BaseRunner = Depends(get_runner)
-    ):
+    async def reset_jobs(request: Request, runner: BaseRunner = Depends(get_runner)):
         """Reset all jobs or jobs for a specific project.
-        
+
         This endpoint will:
         1. Cancel all running jobs
         2. Clear all job history
-        
+
         Accepts an optional project_id in the request body to reset jobs only for that project.
         """
         data = (
@@ -294,9 +279,12 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
         )
         project_id = data.get("project_id") if data else None
         success = await runner.reset_jobs(project_id)
-        
+
         if success:
-            return {"status": "success", "message": f"Jobs reset successfully{f' for project {project_id}' if project_id else ''}"}
+            return {
+                "status": "success",
+                "message": f"Jobs reset successfully{f' for project {project_id}' if project_id else ''}",
+            }
         else:
             raise HTTPException(
                 status_code=400,
@@ -343,12 +331,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     if cors_origins_env:
         origins = cors_origins_env.split(",")
     else:
-        origins = [
-            "http://localhost:5173",  # Development frontend
-            "http://127.0.0.1:5173",
-            "http://localhost:8000",  # API server
-            "http://127.0.0.1:8000",
-        ]
+        origins = ["http://localhost:5173"]
 
     logger.info(f"CORS allowed origins: {origins}")
 
@@ -363,3 +346,37 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     return api
 
+
+# Create the app instance for gunicorn
+app = create_api()
+
+
+def main():
+    """Main entry point for running the API server."""
+    import uvicorn
+
+    # Load environment variables from .env file
+    load_dotenv()
+
+    # Get configuration from environment variables
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
+    reload = os.environ.get("RELOAD", "false").lower() == "true"
+    log_level = os.environ.get("LOG_LEVEL", "info")
+
+    logger.info(f"Starting Moatless API server on {host}:{port}")
+    logger.info(f"Reload: {reload}, Log level: {log_level}")
+
+    # Run the server
+    uvicorn.run(
+        "moatless.api.api:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level=log_level,
+        access_log=True,
+    )
+
+
+if __name__ == "__main__":
+    main()

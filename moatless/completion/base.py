@@ -62,7 +62,9 @@ class CompletionResponse(BaseModel):
     structured_outputs: list[ResponseSchema] = Field(default_factory=list)
     text_response: Optional[str] = Field(default=None)
     thought: Optional[str] = Field(default=None, description="Thought process from ReAct or similar models")
-    thinking_blocks: Optional[list[dict]] = Field(default=None, description="Thinking blocks used by models like Claude")
+    thinking_blocks: Optional[list[dict]] = Field(
+        default=None, description="Thinking blocks used by models like Claude"
+    )
     completion_invocation: Optional[CompletionInvocation] = Field(
         default=None, description="The complete invocation data including all attempts"
     )
@@ -195,7 +197,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
         if self.params:
             self._completion_params.update(self.params)
-            
+
         self._post_validation_fn = post_validation_fn
 
         if self.few_shot_examples:
@@ -204,7 +206,6 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         if system_prompt:
             self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
 
-        
         self._initialized = True
 
     @property
@@ -357,12 +358,18 @@ class BaseCompletionModel(MoatlessComponent, ABC):
 
                         if invocation.current_attempt:
                             invocation.current_attempt.success = True
-                            
+
                         thinking_blocks = None
                         if completion_response.choices and completion_response.choices[0].message:
-                            if hasattr(completion_response.choices[0].message, "reasoning_content") and completion_response.choices[0].message.reasoning_content:
+                            if (
+                                hasattr(completion_response.choices[0].message, "reasoning_content")
+                                and completion_response.choices[0].message.reasoning_content
+                            ):
                                 thought = completion_response.choices[0].message.reasoning_content
-                            if hasattr(completion_response.choices[0].message, "thinking_blocks") and completion_response.choices[0].message.thinking_blocks:
+                            if (
+                                hasattr(completion_response.choices[0].message, "thinking_blocks")
+                                and completion_response.choices[0].message.thinking_blocks
+                            ):
                                 thinking_blocks = completion_response.choices[0].message.thinking_blocks
 
                     except CompletionRetryError as e:
@@ -434,7 +441,9 @@ class BaseCompletionModel(MoatlessComponent, ABC):
             raise error from e
 
     @tracer.start_as_current_span("BaseCompletionModel._execute_completion")
-    async def _execute_completion(self, messages: list[dict[str, str]], invocation: CompletionInvocation) -> LitellmModelResponse:
+    async def _execute_completion(
+        self, messages: list[dict[str, str]], invocation: CompletionInvocation
+    ) -> LitellmModelResponse:
         """Execute a single completion attempt with LiteLLM.
 
         This method:

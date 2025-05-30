@@ -32,9 +32,7 @@ async def list_flow_configs(flow_manager: FlowManager = Depends(get_flow_manager
 
 
 @router.post("/flows")
-async def create_flow_config_api(
-    config: dict, flow_manager: FlowManager = Depends(get_flow_manager)
-):
+async def create_flow_config_api(config: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
     """
     Create a new flow configuration.
     """
@@ -53,18 +51,16 @@ async def read_flow_config(config_id: str, flow_manager: FlowManager = Depends(g
     logger.info(f"Getting flow config for {config_id}")
     flow = flow_manager.get_flow_config(config_id)
     return flow.model_dump(exclude_none=True)
-    
+
 
 @router.put("/flows/{config_id}")
-async def update_flow_config_api(
-    config_id: str, update: dict, flow_manager: FlowManager = Depends(get_flow_manager)
-):
+async def update_flow_config_api(config_id: str, update: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
     """
     Update a flow configuration.
     """
     try:
         # Ensure the ID in the URL matches the ID in the request body
-        if config_id != update['id']:
+        if config_id != update["id"]:
             raise ValueError(f"ID in URL ({config_id}) doesn't match ID in request body ({update['id']})")
 
         logger.info(f"Updating flow config {config_id} with {update}")
@@ -192,10 +188,10 @@ async def get_all_components():
         "completion_model": BaseCompletionModel,
         "expanders": Expander,
     }
-    
+
     result = {}
     for component_type, base_class in component_map.items():
         components = base_class.get_available_components()
         result[component_type] = {name: comp.model_json_schema() for name, comp in components.items()}
-    
+
     return result

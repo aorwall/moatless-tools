@@ -203,7 +203,9 @@ class Node(BaseModel):
     assistant_message: Optional[str] = Field(None, description="The assistant response for this node")
 
     thoughts: Optional[Thoughts] = Field(default=None, description="The thoughts associated with the node")
-    thinking_blocks: Optional[list[dict]] = Field(default=None, description="The thinking blocks associated with the node")
+    thinking_blocks: Optional[list[dict]] = Field(
+        default=None, description="The thinking blocks associated with the node"
+    )
 
     action_steps: list[ActionStep] = Field(
         default_factory=list,
@@ -276,7 +278,6 @@ class Node(BaseModel):
         """Create a root node with a unique ID."""
         return cls(node_id=0, user_message=user_message, **kwargs)
 
-
     @classmethod
     def stub(cls, **kwargs):
         """Create a stub node with a unique ID."""
@@ -309,20 +310,19 @@ class Node(BaseModel):
             return True
 
         return bool(self.action_steps and self.action_steps[-1].is_executed())
-    
+
     def create_child(self, **kwargs):
         child_node = Node(
-                node_id=len(self.get_root().get_all_nodes()) + 1,
-                parent=self,
-                file_context=self.file_context.clone() if self.file_context else None,
-                max_expansions=self.max_expansions,
-                agent_id=None,
-                **kwargs
-            )  # type: ignore
+            node_id=len(self.get_root().get_all_nodes()) + 1,
+            parent=self,
+            file_context=self.file_context.clone() if self.file_context else None,
+            max_expansions=self.max_expansions,
+            agent_id=None,
+            **kwargs,
+        )  # type: ignore
 
         self.add_child(child_node)
         return child_node
-
 
     def add_child(self, child_node: "Node"):
         """Add a child node to this node."""

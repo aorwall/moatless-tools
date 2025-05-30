@@ -163,6 +163,8 @@ async def get_runner():
         else:
             _runner = runner_impl()
 
+        logger.info(f"Runner initialized: {_runner.__class__.__name__}")
+
     return _runner
 
 

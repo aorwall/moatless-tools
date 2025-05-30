@@ -189,6 +189,9 @@ class SchedulerRunner(BaseRunner):
         job = await self.storage.get_job(project_id, trajectory_id)
         if job is None:
             return None
+        if job.status != JobStatus.COMPLETED:
+            await self._sync_job(job)
+            return job.status
         return job.status
 
     async def get_runner_info(self) -> RunnerInfo:
@@ -538,24 +541,30 @@ class SchedulerRunner(BaseRunner):
 
             # For each active job, directly check its status
             for job in active_jobs:
-                # Check if job exists in runner
-                job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
-
-                if job_status is None and job.status == JobStatus.RUNNING:
-                    self.logger.warning(
-                        f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED"
-                    )
-                    job.status = JobStatus.STOPPED
-                    job.ended_at = datetime.now()
-                    job.metadata["error"] = "Job disappeared from the underlying runner while RUNNING"
-                    await self.storage.update_job(job)
-                elif job_status != job.status and job_status is not None:
-                    self.logger.info(f"Job {job.id} status changed from {job.status} to {job_status}")
-                    await self._update_job_status(job)
+                await self._sync_job(job)
 
             self.logger.info("Job sync completed")
         except Exception as e:
             self.logger.exception(f"Error syncing jobs with runner: {e}")
+
+    async def _sync_job(self, job: JobInfo) -> None:
+        """Synchronize the status of a job with the underlying runner.
+
+        Args:
+            project_id: The project ID
+            trajectory_id: The trajectory ID
+        """
+        job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
+
+        if job_status is None and job.status == JobStatus.RUNNING:
+            self.logger.warning(f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED")
+            job.status = JobStatus.STOPPED
+            job.ended_at = datetime.now()
+            job.metadata["error"] = "Job disappeared from the underlying runner while RUNNING"
+            await self.storage.update_job(job)
+        elif job_status != job.status and job_status is not None:
+            self.logger.info(f"Job {job.id} status changed from {job.status} to {job_status}")
+            await self._update_job_status(job)
 
     async def _cancel_job(self, project_id: str, trajectory_id: str) -> None:
         """Cancel a specific job.

@@ -6,7 +6,9 @@ from typing import Callable
 from typing import Dict, List, Optional
 
 
-def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, node_id: Optional[int] = None):
+def create_job_args(
+    project_id: str, trajectory_id: str, job_func: Callable, node_id: Optional[int] = None, log_level: str = "INFO"
+):
     func_module = job_func.__module__
     func_name = job_func.__name__
 
@@ -17,32 +19,29 @@ def create_job_args(project_id: str, trajectory_id: str, job_func: Callable, nod
 
     is_async = asyncio.iscoroutinefunction(job_func)
 
-    # Create the appropriate Python code for uv run
+    # Common setup code
+    setup_code = (
+        f"import logging\n"
+        f"import datetime\n"
+        f"logging.basicConfig(level=logging.{log_level.upper()}, format='%(asctime)s - %(levelname)s - %(message)s')\n"
+        f"logging.debug('Starting job execution')\n"
+        f"print(f'Job started at {{datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}}')\n"
+    )
+
+    # Import and execution setup
+    import_code = f"from {func_module} import {func_name}\n" f"logging.debug('Imports completed, starting execution')\n"
+
+    # Execution code (differs between async and sync)
     if is_async:
-        return (
-            f"import logging\n"
-            f"import datetime\n"
-            f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
-            f"logging.debug('Starting job execution')\n"
-            f"print(f'Job started at {{datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}}')\n"
-            f"import asyncio\n"
-            f"from {func_module} import {func_name}\n"
-            f"logging.debug('Imports completed, starting execution')\n"
-            f"asyncio.run({func_name}{args})\n"
-            f"logging.debug('Job execution completed')"
-        )
+        execution_code = f"import asyncio\n" f"{import_code}" f"asyncio.run({func_name}{args})\n"
     else:
-        return (
-            f"import logging\n"
-            f"import datetime\n"
-            f"logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')\n"
-            f"logging.debug('Starting job execution')\n"
-            f"print(f'Job started at {{datetime.datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}}')\n"
-            f"from {func_module} import {func_name}\n"
-            f"logging.debug('Imports completed, starting execution')\n"
-            f"{func_name}{args}\n"
-            f"logging.debug('Job execution completed')"
-        )
+        execution_code = f"{import_code}" f"{func_name}{args}\n"
+
+    # Completion code
+    completion_code = "logging.debug('Job execution completed')"
+
+    # Combine all parts
+    return setup_code + execution_code + completion_code
 
 
 def create_resource_id(project_id: str, trajectory_id: str, prefix: str = "run") -> str:

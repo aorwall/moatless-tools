@@ -1,5 +1,6 @@
 import pytest
-from moatless.runner.label_utils import create_resource_id
+from moatless.runner.label_utils import create_resource_id, create_job_args
+import asyncio
 
 
 def test_create_resource_id_basic():
@@ -116,3 +117,54 @@ def test_resource_id_hash_uniqueness():
     assert hash1 != hash2
     assert hash1 != hash3
     assert hash2 != hash3
+
+
+def test_create_job_args_sync():
+    """Test create_job_args with a synchronous function."""
+
+    def test_function(project_id, trajectory_id):
+        return "test"
+
+    args = create_job_args("test-project", "test-trajectory", test_function)
+
+    # Check for required components
+    assert "import logging" in args
+    assert "import datetime" in args
+    assert "logging.basicConfig" in args
+    assert "print(f'Job started at {datetime.datetime.now().strftime" in args
+    assert "from tests.runner.test_label_utils import test_function" in args
+    assert "test_function(project_id='test-project', trajectory_id='test-trajectory')" in args
+    assert "logging.debug('Job execution completed')" in args
+
+
+def test_create_job_args_async():
+    """Test create_job_args with an asynchronous function."""
+
+    async def test_async_function(project_id, trajectory_id):
+        return "test"
+
+    args = create_job_args("test-project", "test-trajectory", test_async_function)
+
+    # Check for required components
+    assert "import logging" in args
+    assert "import datetime" in args
+    assert "import asyncio" in args
+    assert "logging.basicConfig" in args
+    assert "print(f'Job started at {datetime.datetime.now().strftime" in args
+    assert "from tests.runner.test_label_utils import test_async_function" in args
+    assert "asyncio.run(test_async_function(project_id='test-project', trajectory_id='test-trajectory'))" in args
+    assert "logging.debug('Job execution completed')" in args
+
+
+def test_create_job_args_with_node_id():
+    """Test create_job_args with a node_id parameter."""
+
+    def test_function(project_id, trajectory_id, node_id):
+        return "test"
+
+    args = create_job_args("test-project", "test-trajectory", test_function, node_id=123)
+
+    # Check that node_id is included in the function call
+    assert "test_function(project_id='test-project', trajectory_id='test-trajectory', node_id=123)" in args
+    assert "import datetime" in args
+    assert "print(f'Job started at {datetime.datetime.now().strftime" in args

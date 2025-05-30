@@ -674,9 +674,7 @@ class FlowManager:
 
         log_dir_path = f"projects/{project_id}/trajs/{trajectory_id}/logs"
 
-        logger.info(f"Listing log files for {self._storage}")
         log_files = await self._storage.list_paths(log_dir_path)
-        logger.info(f"Log files: {log_files}")
         if not log_files:
             return {"logs": "", "files": [], "current_file": None}
 

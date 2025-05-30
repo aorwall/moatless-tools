@@ -117,6 +117,7 @@ async def get_completions(
 ):
     return await flow_manager.get_completions(project_id, trajectory_id, node_id, item_id)
 
+
 @router.post("/{project_id}/{trajectory_id}/start")
 async def start_trajectory(
     project_id: str,
@@ -171,6 +172,7 @@ async def resume_trajectory(
         logger.exception(f"Error resuming trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/{project_id}/{trajectory_id}/execute")
 async def execute_node(
     project_id: str,
@@ -207,6 +209,7 @@ async def get_node(
 ):
     return await flow_manager.get_node(project_id, trajectory_id, node_id)
 
+
 @router.post("/{project_id}/{trajectory_id}/node/{node_id}/reset")
 async def reset_node(
     project_id: str,
@@ -215,6 +218,7 @@ async def reset_node(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     return await flow_manager.reset_node(project_id, trajectory_id, node_id)
+
 
 @router.get("/{project_id}/{trajectory_id}/node/{node_id}/evaluation")
 async def get_node_evaluation_files(
@@ -250,14 +254,15 @@ async def get_chat_messages(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Get formatted chat messages for display in the UI.
-    
+
     Args:
         project_id: The project ID
         trajectory_id: The trajectory ID
-        
+
     Returns:
         A list of formatted chat messages
     """
+
     def format_action_args(action_name, action_dict):
         """Format action arguments based on action type for UI display"""
         formatted_args = None
@@ -274,116 +279,128 @@ async def get_chat_messages(
                             "title": task.get("title", ""),
                             "instructions": task.get("instructions", ""),
                             "priority": task.get("priority", 0),
-                            "related_files": task.get("related_files", [])
+                            "related_files": task.get("related_files", []),
                         }
                         for task in action_dict.get("tasks", [])
-                    ]
+                    ],
                 }
-        
+
         # Add more action type formatters here as needed
-        
+
         return formatted_args
 
     try:
         # Read the trajectory node from storage
         root_node = await flow_manager.read_trajectory_node(project_id, trajectory_id)
-        
+
         # Extract relevant chat messages from nodes in the entire trajectory
         chat_messages = []
-        
+
         # Process all nodes in the tree
         for node in root_node.get_all_nodes():
             node_messages = []
-            
+
             # 1. User message (if present)
             if node.user_message:
-                node_messages.append({
-                    "type": "user_message",
-                    "content": {"message": node.user_message},
-                    "node_id": node.node_id,
-                    "id": f"{node.node_id}-user_message",
-                    "trajectory_id": trajectory_id,
-                    "timestamp": node.timestamp.isoformat() if node.timestamp else None,
-                })
-            
+                node_messages.append(
+                    {
+                        "type": "user_message",
+                        "content": {"message": node.user_message},
+                        "node_id": node.node_id,
+                        "id": f"{node.node_id}-user_message",
+                        "trajectory_id": trajectory_id,
+                        "timestamp": node.timestamp.isoformat() if node.timestamp else None,
+                    }
+                )
+
             # 2. Assistant response combines: assistant message, thoughts, and actions+observations
             assistant_content = {}
-            
+
             # Assistant message
             if node.assistant_message:
                 assistant_content["message"] = node.assistant_message
-            
+
             # Thoughts
             if node.thoughts:
                 assistant_content["thought"] = node.thoughts.text
-            
+
             # Actions and observations
             if node.action_steps:
                 assistant_content["actions"] = []
-                
+
                 for i, step in enumerate(node.action_steps):
                     if step.action:
                         # Create action details
                         action_properties = step.action.model_dump()
                         action_name = step.action.name
-                        
+
                         # Extract most relevant information for each action type using dict access
                         action_dict = action_properties
                         short_summary = ""
                         if action_dict.get("thought"):
-                            short_summary = action_dict["thought"][:100] + ("..." if len(action_dict["thought"]) > 100 else "")
+                            short_summary = action_dict["thought"][:100] + (
+                                "..." if len(action_dict["thought"]) > 100 else ""
+                            )
                         elif action_dict.get("query"):
-                            short_summary = action_dict["query"][:100] + ("..." if len(action_dict["query"]) > 100 else "")
+                            short_summary = action_dict["query"][:100] + (
+                                "..." if len(action_dict["query"]) > 100 else ""
+                            )
                         elif action_dict.get("command"):
                             short_summary = f"$ {action_dict['command']}"
                         elif action_dict.get("file_path"):
                             short_summary = action_dict["file_path"]
                             if action_dict.get("content"):
                                 short_summary += f" (modified)"
-                        
+
                         # Format action arguments based on action type for UI display
                         formatted_args = format_action_args(action_name, action_dict)
-                        
+
                         # Create action entry with its observation
                         action_entry = {
                             "name": action_name,
                             "shortSummary": short_summary,
                             "properties": action_properties,
                             "formattedArgs": formatted_args,
-                            "observation": None
+                            "observation": None,
                         }
-                        
+
                         # Add observation if available
                         if step.observation:
-                            observation_properties = step.observation.model_dump() if hasattr(step.observation, "model_dump") else {}
+                            observation_properties = (
+                                step.observation.model_dump() if hasattr(step.observation, "model_dump") else {}
+                            )
                             action_entry["observation"] = {
-                                "message": step.observation.message if hasattr(step.observation, "message") else str(step.observation),
+                                "message": step.observation.message
+                                if hasattr(step.observation, "message")
+                                else str(step.observation),
                                 "summary": step.observation.summary if hasattr(step.observation, "summary") else None,
-                                "properties": observation_properties
+                                "properties": observation_properties,
                             }
-                        
+
                         assistant_content["actions"].append(action_entry)
-            
+
             # Add artifact changes
             if node.artifact_changes:
                 assistant_content["artifacts"] = []
                 for artifact in node.artifact_changes:
                     assistant_content["artifacts"].append(artifact.model_dump())
-            
+
             # Only add assistant message if there's any content
             if assistant_content:
-                node_messages.append({
-                    "type": "assistant_response",
-                    "content": assistant_content,
-                    "node_id": node.node_id,
-                    "id": f"{node.node_id}-assistant_response",
-                    "trajectory_id": trajectory_id,
-                    "timestamp": node.timestamp.isoformat() if node.timestamp else None,
-                })
-            
+                node_messages.append(
+                    {
+                        "type": "assistant_response",
+                        "content": assistant_content,
+                        "node_id": node.node_id,
+                        "id": f"{node.node_id}-assistant_response",
+                        "trajectory_id": trajectory_id,
+                        "timestamp": node.timestamp.isoformat() if node.timestamp else None,
+                    }
+                )
+
             # Add all node messages to the chat
             chat_messages.extend(node_messages)
-        
+
         return {"messages": chat_messages}
     except ValueError as e:
         logger.exception(f"Error getting chat messages: {str(e)}")
@@ -391,6 +408,7 @@ async def get_chat_messages(
     except Exception as e:
         logger.exception(f"Error getting chat messages: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/{project_id}/{trajectory_id}/settings")
 async def save_trajectory_settings(
@@ -400,12 +418,12 @@ async def save_trajectory_settings(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Save settings for a specific trajectory.
-    
+
     Args:
         project_id: The project ID
         trajectory_id: The trajectory ID
         settings: The settings data to save
-        
+
     Returns:
         A success response
     """

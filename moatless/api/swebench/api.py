@@ -31,6 +31,7 @@ from .schema import (
     FullSWEBenchInstanceDTO,
     SWEBenchValidationRequestDTO,
     SWEBenchValidationResponseDTO,
+    EvaluationStatsResponseDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,14 @@ async def clone_evaluation(
     return map_to_evaluation_response(evaluation, model_manager, flow_manager)
 
 
+@router.get("/evaluations/{evaluation_name}/stats", response_model=EvaluationStatsResponseDTO)
+async def get_evaluation_stats(
+    evaluation_name: str, evaluation_manager: EvaluationManager = Depends(get_evaluation_manager)
+):
+    """Get comprehensive statistics for an evaluation."""
+    stats = await evaluation_manager.get_evaluation_stats(evaluation_name)
+    return stats
+
 
 @router.get("/evaluations/{evaluation_name}/config")
 async def get_evaluation_config(
@@ -146,15 +155,7 @@ async def process_evaluation_results(
     evaluation_manager: EvaluationManager = Depends(get_evaluation_manager),
 ):
     """Process all instances in an evaluation to ensure results are in sync."""
-    try:
-        evaluation = await evaluation_manager.process_evaluation_results(evaluation_name=evaluation_name)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-        logger.exception(f"Failed to process evaluation results: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+    evaluation = await evaluation_manager.process_evaluation_results(evaluation_name=evaluation_name)
     return map_to_evaluation_response(evaluation, model_manager, flow_manager)
 
 
@@ -209,7 +210,6 @@ async def cancel_evaluation_jobs(
 ):
     """Cancel all jobs for an evaluation."""
     try:
-
         await evaluation_manager.cancel_evaluation(evaluation_name)
 
     except Exception as e:

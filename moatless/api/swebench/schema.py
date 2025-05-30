@@ -151,7 +151,7 @@ class EvaluationRequestDTO(BaseModel):
     num_concurrent_instances: int = 1
     dataset: Optional[str] = None
     instance_ids: Optional[list[str]] = None
-    
+
 
 class DatasetDTO(BaseModel):
     """DTO for dataset information"""
@@ -207,3 +207,47 @@ class CancelJobsResponseDTO(BaseModel):
     canceled_queued_jobs: int | None = None
     canceled_running_jobs: int | None = None
     message: str
+
+
+class EvaluationStatsResponseDTO(BaseModel):
+    """Comprehensive statistics for an evaluation"""
+
+    # Overall metrics
+    success_rate: float = Field(description="Success rate as percentage")
+    avg_iterations: float = Field(description="Average number of iterations")
+    avg_cost: float = Field(description="Average cost per instance")
+    avg_tokens: int = Field(description="Average total tokens per instance")
+    solved_instances_per_dollar: float = Field(description="Number of solved instances per dollar")
+    solved_percentage_per_dollar: float = Field(description="Solved percentage per dollar")
+
+    # Counts and totals
+    total_instances: int = Field(description="Total number of finished instances")
+    resolved_instances: int = Field(description="Number of resolved instances")
+    failed_instances: int = Field(description="Number of failed instances")
+
+    # Token breakdown
+    total_cost: float = Field(description="Total cost for all instances")
+    total_prompt_tokens: int = Field(description="Total prompt tokens")
+    total_completion_tokens: int = Field(description="Total completion tokens")
+    total_cache_read_tokens: int = Field(description="Total cache read tokens")
+
+    # Iteration ranges
+    iteration_range_min: int = Field(description="Minimum iterations")
+    iteration_range_max: int = Field(description="Maximum iterations")
+
+    # Distribution data
+    success_distribution: dict[str, int] = Field(description="Distribution of success vs failure")
+    iterations_distribution: dict[str, int] = Field(description="Distribution of iterations by ranges")
+
+    # Per-repo statistics
+    repo_stats: list["RepoStatsDTO"] = Field(description="Statistics per repository")
+
+
+class RepoStatsDTO(BaseModel):
+    """Statistics for a specific repository"""
+
+    repo: str = Field(description="Repository name")
+    total_instances: int = Field(description="Total instances for this repo")
+    resolved_instances: int = Field(description="Number of resolved instances")
+    failed_instances: int = Field(description="Number of failed instances")
+    solve_rate: float = Field(description="Solve rate as percentage")

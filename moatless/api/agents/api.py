@@ -47,6 +47,7 @@ async def list_agent_configs(agent_manager: AgentConfigManager = Depends(get_age
         configs.append(_convert_to_dto(agent.agent_id, agent))
     return AgentConfigsResponseDTO(configs=configs)
 
+
 @router.get("/{agent_id}")
 async def read_agent_config(agent_id: str, agent_manager: AgentConfigManager = Depends(get_agent_manager)):
     """Get configuration for a specific agent"""

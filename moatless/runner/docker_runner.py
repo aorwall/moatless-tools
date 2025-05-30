@@ -38,9 +38,11 @@ class DockerRunner(BaseRunner):
         timeout_seconds: int = 3600,
         moatless_source_dir: Optional[str] = None,
         default_image_name: Optional[str] = None,
-        update_on_start: bool = False,
+        update_on_start: bool = True,
         update_branch: str = "docker",
         network_name: Optional[str] = None,
+        memory_limit: Optional[str] = None,
+        memory_swap_limit: Optional[str] = None,
     ):
         """Initialize the runner with Docker configuration.
 
@@ -54,8 +56,11 @@ class DockerRunner(BaseRunner):
                               this overrides the standard image name generation.
             update_on_start: Whether to run the update-moatless.sh script when starting containers.
             update_branch: Git branch to use when running update-moatless.sh.
-            network_name: Docker network name to connect containers to. If None, defaults to 
+            network_name: Docker network name to connect containers to. If None, defaults to
                          'moatless-network' or can be set via MOATLESS_DOCKER_NETWORK env var.
+            memory_limit: Memory limit for containers (e.g., '4g', '2048m'). If None, uses Docker default.
+            memory_swap_limit: Memory + swap limit for containers (e.g., '8g', '4096m').
+                              If None, defaults to twice the memory limit.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
@@ -63,13 +68,11 @@ class DockerRunner(BaseRunner):
         self.default_image_name = default_image_name
         self.update_on_start = update_on_start
         self.update_branch = update_branch
+        self.memory_limit = memory_limit or os.environ.get("DOCKER_MEMORY_LIMIT")
+        self.memory_swap_limit = memory_swap_limit or os.environ.get("DOCKER_MEMORY_SWAP_LIMIT")
 
         # Set network name - priority: parameter > env var > default
-        self.network_name = (
-            network_name 
-            or os.environ.get("MOATLESS_DOCKER_NETWORK") 
-            or "moatless-network"
-        )
+        self.network_name = network_name or os.environ.get("MOATLESS_DOCKER_NETWORK") or "moatless-network"
 
         # Get source directory - prefer explicitly passed parameter over environment variable
         self.moatless_source_dir = (
@@ -95,6 +98,10 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Moatless dir: {self.moatless_dir}")
         logger.info(f"  - Network: {self.network_name}")
         logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
+        if self.memory_limit:
+            logger.info(f"  - Memory limit: {self.memory_limit}")
+        if self.memory_swap_limit:
+            logger.info(f"  - Memory + swap limit: {self.memory_swap_limit}")
         if self.update_on_start:
             logger.info(f"  - Update on start: True (branch: {self.update_branch})")
 
@@ -107,6 +114,8 @@ class DockerRunner(BaseRunner):
         image_name: Optional[str] = None,
         update_on_start: Optional[bool] = None,
         update_branch: Optional[str] = None,
+        memory_limit: Optional[str] = None,
+        memory_swap_limit: Optional[str] = None,
     ) -> bool:
         """Start a job in a Docker container.
 
@@ -120,6 +129,10 @@ class DockerRunner(BaseRunner):
                              If None, uses the runner's default setting.
             update_branch: Git branch to use with update-moatless.sh script.
                            If None, uses the runner's default branch.
+            memory_limit: Memory limit for this specific job (e.g., '4g', '2048m').
+                         If None, uses the runner's default memory limit.
+            memory_swap_limit: Memory + swap limit for this specific job (e.g., '8g', '4096m').
+                              If None, uses the runner's default memory swap limit.
 
         Returns:
             True if the job was started successfully, False otherwise
@@ -216,6 +229,19 @@ class DockerRunner(BaseRunner):
             # Add platform flag if running on ARM64 architecture
             if self.is_arm64:
                 cmd.extend(["--platform=linux/amd64"])
+
+            # Add memory limits if specified
+            effective_memory_limit = memory_limit or self.memory_limit
+            effective_memory_swap_limit = memory_swap_limit or self.memory_swap_limit
+
+            if effective_memory_limit:
+                cmd.extend(["--memory", effective_memory_limit])
+
+            if effective_memory_swap_limit:
+                cmd.extend(["--memory-swap", effective_memory_swap_limit])
+            elif effective_memory_limit:
+                # If memory limit is set but swap limit is not, default to twice the memory limit
+                cmd.extend(["--memory-swap", effective_memory_limit])
 
             # Add Docker labels for easier container identification and querying
             job_labels = create_labels(project_id, trajectory_id)
@@ -481,7 +507,7 @@ class DockerRunner(BaseRunner):
                 "docker",
                 "inspect",
                 "--format",
-                '{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{.State.StartedAt}},{{.State.FinishedAt}}',
+                "{{.State.Status}},{{.State.Running}},{{.State.ExitCode}},{{.State.StartedAt}},{{.State.FinishedAt}}",
                 container_name,
             ]
             process = await asyncio.create_subprocess_exec(
@@ -644,6 +670,7 @@ class DockerRunner(BaseRunner):
         Returns:
             JobStatus enum value
         """
+        self.logger.info(f"Parsing container status: {status}, {running}, {exit_code}")
         # First check if container is running - either by status or running flag
         if status == "running" or running.lower() == "true":
             return JobStatus.RUNNING

@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from moatless.evaluation.run_golden_patch import evaluate_golden_patch
 from moatless.evaluation.run_instance import run_swebench_instance
@@ -22,6 +22,9 @@ from moatless.node import Node
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
 from opentelemetry import trace
+
+if TYPE_CHECKING:
+    from moatless.api.swebench.schema import EvaluationStatsResponseDTO, RepoStatsDTO
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")
@@ -110,7 +113,9 @@ class EvaluationManager:
         for instance in evaluation.instances:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
             repo_name = swebench_instance["repo"].split("/")[-1]
-            problem_statement = f"Solve the following issue in the {repo_name} repository:\n{swebench_instance['problem_statement']}"
+            problem_statement = (
+                f"Solve the following issue in the {repo_name} repository:\n{swebench_instance['problem_statement']}"
+            )
 
             root_node = Node.create_root(user_message=problem_statement)
 
@@ -234,7 +239,16 @@ class EvaluationManager:
     async def get_config(self, evaluation_name: str) -> dict:
         """Get the config for an evaluation."""
         config = await self.storage.read_from_project("flow.json", project_id=evaluation_name)
-        return config
+
+        # Handle different return types from storage.read_from_project
+        if isinstance(config, dict):
+            return config
+        elif isinstance(config, str):
+            return json.loads(config)
+        elif isinstance(config, list) and len(config) > 0 and isinstance(config[0], dict):
+            return config[0]
+        else:
+            return {}
 
     async def update_config(self, evaluation_name: str, config: dict):
         """Update the config for an evaluation."""
@@ -695,7 +709,7 @@ class EvaluationManager:
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
         )
-        
+
         # set timestamps
         if not instance.started_at:
             event = next(
@@ -728,3 +742,127 @@ class EvaluationManager:
             )
             if event:
                 instance.evaluated_at = event.timestamp
+
+    async def get_evaluation_stats(self, evaluation_name: str) -> "EvaluationStatsResponseDTO":
+        """Get comprehensive statistics for an evaluation, including only finished instances."""
+        from moatless.api.swebench.schema import EvaluationStatsResponseDTO, RepoStatsDTO
+
+        evaluation = await self.get_evaluation(evaluation_name)
+        if not evaluation:
+            raise ValueError(f"Evaluation {evaluation_name} not found")
+
+        # Filter to only finished instances (those with evaluated_at set)
+        finished_instances = [instance for instance in evaluation.instances if instance.evaluated_at is not None]
+
+        if not finished_instances:
+            raise ValueError(f"No finished instances found in evaluation {evaluation_name}")
+
+        # Calculate basic metrics
+        total_instances = len(finished_instances)
+        resolved_instances = sum(1 for instance in finished_instances if instance.resolved is True)
+        failed_instances = sum(1 for instance in finished_instances if instance.resolved is False)
+        success_rate = (resolved_instances / total_instances) * 100 if total_instances > 0 else 0
+
+        # Calculate cost and token metrics
+        total_cost = 0
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        total_cache_read_tokens = 0
+        total_iterations = 0
+        iteration_values = []
+
+        for instance in finished_instances:
+            if instance.usage:
+                total_cost += instance.usage.completion_cost or 0
+                total_prompt_tokens += instance.usage.prompt_tokens or 0
+                total_completion_tokens += instance.usage.completion_tokens or 0
+                total_cache_read_tokens += instance.usage.cache_read_tokens or 0
+
+            if instance.iterations:
+                total_iterations += instance.iterations
+                iteration_values.append(instance.iterations)
+
+        avg_iterations = total_iterations / total_instances if total_instances > 0 else 0
+        avg_cost = total_cost / total_instances if total_instances > 0 else 0
+        avg_tokens = (total_prompt_tokens + total_completion_tokens) / total_instances if total_instances > 0 else 0
+
+        # Cost efficiency metrics
+        solved_instances_per_dollar = resolved_instances / total_cost if total_cost > 0 else 0
+        solved_percentage_per_dollar = success_rate / total_cost if total_cost > 0 else 0
+
+        # Iteration distribution with improved ranges
+        iteration_ranges = ["1-20", "20-40", "40-60", "60-80", "80-100", "100+"]
+        iterations_distribution = {range_name: 0 for range_name in iteration_ranges}
+
+        for iterations in iteration_values:
+            if iterations <= 20:
+                iterations_distribution["1-20"] += 1
+            elif iterations <= 40:
+                iterations_distribution["20-40"] += 1
+            elif iterations <= 60:
+                iterations_distribution["40-60"] += 1
+            elif iterations <= 80:
+                iterations_distribution["60-80"] += 1
+            elif iterations <= 100:
+                iterations_distribution["80-100"] += 1
+            else:
+                iterations_distribution["100+"] += 1
+
+        # Success distribution
+        success_distribution = {"resolved": resolved_instances, "failed": failed_instances}
+
+        # Per-repo statistics
+        repo_data = {}
+        for instance in finished_instances:
+            try:
+                swebench_instance = get_swebench_instance(instance.instance_id)
+                repo = swebench_instance["repo"]
+
+                if repo not in repo_data:
+                    repo_data[repo] = {"total": 0, "resolved": 0, "failed": 0}
+
+                repo_data[repo]["total"] += 1
+                if instance.resolved is True:
+                    repo_data[repo]["resolved"] += 1
+                elif instance.resolved is False:
+                    repo_data[repo]["failed"] += 1
+            except Exception as e:
+                logger.warning(f"Could not get repo for instance {instance.instance_id}: {e}")
+                continue
+
+        repo_stats = []
+        for repo, data in repo_data.items():
+            solve_rate = (data["resolved"] / data["total"]) * 100 if data["total"] > 0 else 0
+            repo_stats.append(
+                RepoStatsDTO(
+                    repo=repo,
+                    total_instances=data["total"],
+                    resolved_instances=data["resolved"],
+                    failed_instances=data["failed"],
+                    solve_rate=solve_rate,
+                )
+            )
+
+        # Sort repo stats by solve rate descending
+        repo_stats.sort(key=lambda x: x.solve_rate, reverse=True)
+
+        return EvaluationStatsResponseDTO(
+            success_rate=success_rate,
+            avg_iterations=avg_iterations,
+            avg_cost=avg_cost,
+            avg_tokens=int(avg_tokens),
+            solved_instances_per_dollar=solved_instances_per_dollar,
+            solved_percentage_per_dollar=solved_percentage_per_dollar,
+            total_instances=total_instances,
+            resolved_instances=resolved_instances,
+            failed_instances=failed_instances,
+            total_cost=total_cost,
+            total_prompt_tokens=total_prompt_tokens,
+            total_completion_tokens=total_completion_tokens,
+            total_cache_read_tokens=total_cache_read_tokens,
+            iteration_range_min=min(iteration_values) if iteration_values else 0,
+            iteration_range_max=max(iteration_values) if iteration_values else 0,
+            success_distribution=success_distribution,
+            iterations_distribution=iterations_distribution,
+            repo_stats=repo_stats,
+        )

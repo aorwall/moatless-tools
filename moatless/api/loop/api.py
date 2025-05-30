@@ -31,9 +31,7 @@ class LoopRequest(BaseModel):
     attachments: Optional[list[AttachmentData]] = Field(
         default=None, description="List of attachments with filename and base64 data"
     )
-    repository_path: str = Field(
-        description="The path to the repository to use for the loop"
-    )
+    repository_path: str = Field(description="The path to the repository to use for the loop")
 
 
 @router.post("", response_model=LoopResponseDTO)
@@ -52,7 +50,7 @@ async def start_loop(
             message=request.message,
             repository_path=request.repository_path,
         )
-        
+
         return LoopResponseDTO(
             trajectory_id=run_id,
             project_id=f"{request.agent_id}_{request.model_id}",

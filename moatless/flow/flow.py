@@ -143,7 +143,6 @@ class AgenticFlow(MoatlessComponent):
                 node.file_context.repository = self.agent.workspace.repository
                 node.file_context._runtime = self.agent.workspace.runtime
 
-
         try:
             current_trajectory_id.set(self.trajectory_id)
             current_project_id.set(self.project_id)

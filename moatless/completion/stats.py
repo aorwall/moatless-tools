@@ -144,7 +144,7 @@ class Usage(BaseModel):
             self.cache_read_tokens = usage["prompt_tokens_details"]["cached_tokens"]
         else:
             self.cache_read_tokens = 0
-            
+
         if usage.get("completion_tokens_details") and usage["completion_tokens_details"].get("reasoning_tokens"):
             self.reasoning_tokens = usage["completion_tokens_details"]["reasoning_tokens"]
 
@@ -236,7 +236,7 @@ class CompletionAttempt(BaseModel):
     def cache_write_tokens(self) -> int:
         """Get the cache write tokens from the usage."""
         return self.usage.cache_write_tokens
-    
+
     @property
     def reasoning_tokens(self) -> int:
         """Get the reasoning tokens from the usage."""
