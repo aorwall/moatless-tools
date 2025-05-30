@@ -66,6 +66,10 @@ class Usage(BaseModel):
         default=0,
         description="Number of tokens written to cache, included in prompt_tokens",
     )
+    reasoning_tokens: int = Field(
+        default=0,
+        description="Number of tokens in the reasoning content",
+    )
 
     def __add__(self, other: "Usage") -> "Usage":
         """Add two Usage objects together."""
@@ -78,6 +82,7 @@ class Usage(BaseModel):
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
             cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
         )
 
     @staticmethod
@@ -139,6 +144,9 @@ class Usage(BaseModel):
             self.cache_read_tokens = usage["prompt_tokens_details"]["cached_tokens"]
         else:
             self.cache_read_tokens = 0
+            
+        if usage.get("completion_tokens_details") and usage["completion_tokens_details"].get("reasoning_tokens"):
+            self.reasoning_tokens = usage["completion_tokens_details"]["reasoning_tokens"]
 
         self.cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
 
@@ -228,6 +236,11 @@ class CompletionAttempt(BaseModel):
     def cache_write_tokens(self) -> int:
         """Get the cache write tokens from the usage."""
         return self.usage.cache_write_tokens
+    
+    @property
+    def reasoning_tokens(self) -> int:
+        """Get the reasoning tokens from the usage."""
+        return self.usage.reasoning_tokens
 
     def get_total_prompt_tokens(self, model: str) -> int:
         """Get total prompt tokens based on model's token counting behavior."""

@@ -204,9 +204,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         if system_prompt:
             self._system_prompt = self._prepare_system_prompt(system_prompt, self._response_schema)
 
-        if self.use_reasoning_content:
-            litellm.drop_params=True
-
+        
         self._initialized = True
 
     @property
@@ -362,9 +360,9 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                             
                         thinking_blocks = None
                         if completion_response.choices and completion_response.choices[0].message:
-                            if completion_response.choices[0].message.reasoning_content and not thought:
+                            if hasattr(completion_response.choices[0].message, "reasoning_content") and completion_response.choices[0].message.reasoning_content:
                                 thought = completion_response.choices[0].message.reasoning_content
-                            if completion_response.choices[0].message.thinking_blocks:
+                            if hasattr(completion_response.choices[0].message, "thinking_blocks") and completion_response.choices[0].message.thinking_blocks:
                                 thinking_blocks = completion_response.choices[0].message.thinking_blocks
 
                     except CompletionRetryError as e:
