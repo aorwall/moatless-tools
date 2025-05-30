@@ -15,7 +15,7 @@ from llama_index.core.vector_stores import VectorStoreQuery
 
 from moatless.benchmark.swebench import setup_swebench_repo, get_repo_dir_name
 from moatless.benchmark.swebench.utils import create_repository
-from moatless.benchmark.utils import calculate_estimated_context_window, get_moatless_instance, get_moatless_instances
+from moatless.evaluation.utils import calculate_estimated_context_window, get_moatless_instance, get_moatless_instances
 from moatless.index import IndexSettings, CodeIndex
 from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.epic_split import EpicSplitter

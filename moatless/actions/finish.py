@@ -1,29 +1,25 @@
-from typing import ClassVar, List, Type
+from typing import ClassVar
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
     RewardScaleEntry,
-    FewShotExample,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.workspace import Workspace
 
 
 class FinishArgs(ActionArguments):
     """Indicate that the task is fully completed."""
 
-    thoughts: str = Field(
-        ...,
-        description="Your reasoning about why the task is complete.",
-    )
     finish_reason: str = Field(
         ...,
         description="Explain why the task is complete.",
     )
+    is_terminal: bool = Field(default=True, description="Whether the action will finish the flow")
 
     model_config = ConfigDict(title="Finish")
 
@@ -33,40 +29,19 @@ class FinishArgs(ActionArguments):
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, FinishArgs)
 
+    @classmethod
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
+        return []
+
 
 class Finish(Action):
-    args_schema: ClassVar[Type[ActionArguments]] = FinishArgs
+    args_schema: ClassVar[type[ActionArguments]] = FinishArgs
 
-    enforce_patch: bool = Field(
-        default=False,
-        description="Whether to enforce that the file context has a patch",
-    )
-    enforce_test_patch: bool = Field(
-        default=False,
-        description="Whether to enforce that the file context has a test patch",
-    )
-
-    def execute(
-        self,
-        args: FinishArgs,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ):
-        if self.enforce_patch and not file_context.has_patch():
-            return Observation(
-                message="No files was updated, you cannot finish unless you have made changes to the files",
-                terminal=False,
-            )
-        if self.enforce_test_patch and not file_context.has_test_patch():
-            return Observation(
-                message="No test files was updated, you cannot finish unless you have updated existing tests or added new tests",
-                terminal=False,
-            )
-
-        return Observation(message=args.finish_reason, terminal=True)
+    async def execute(self, args: FinishArgs, file_context: FileContext | None = None):
+        return Observation.create(message="Finished", terminal=True)
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         return [
             "**Full Trajectory Review:** Evaluate the complete sequence of actions taken by the agent leading to this finish action. Assess whether the trajectory represents an efficient and logical path to the solution.",
             "**Solution Correctness and Quality:** Verify that all changes made throughout the trajectory logically address the problem statement. Ensure the changes fit contextually within the existing codebase without introducing new issues. Confirm syntactic correctness and that there are no syntax errors or typos.",
@@ -79,7 +54,7 @@ class Finish(Action):
         ]
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return cls.generate_reward_scale_entries(
             [
                 (
@@ -123,7 +98,3 @@ class Finish(Action):
     @classmethod
     def get_value_function_prompt(cls) -> str:
         return """Your role is to evaluate the executed action of the search tree that our AI agents are traversing, with the goal of ensuring that a complete and verified solution is in place. The agent believes that it has finished solving the programming issue."""
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return []

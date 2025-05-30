@@ -1,14 +1,14 @@
-from typing import ClassVar, List, Type
+from typing import ClassVar
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
     Observation,
     RewardScaleEntry,
-    FewShotExample,
 )
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 from moatless.workspace import Workspace
 
@@ -16,10 +16,6 @@ from moatless.workspace import Workspace
 class VerifiedFinishArgs(ActionArguments):
     """Indicate that the task is fully completed and verified with new or modified tests."""
 
-    thoughts: str = Field(
-        ...,
-        description="Your reasoning about why the task is complete and verified with tests.",
-    )
     finish_reason: str = Field(..., description="Explain why the task is complete.")
     test_verification: str = Field(
         ...,
@@ -29,25 +25,62 @@ class VerifiedFinishArgs(ActionArguments):
     model_config = ConfigDict(title="Finish")
 
     def to_prompt(self):
-        return f"Finish with reason: {self.finish_reason}\n" f"Test verification: {self.test_verification}\n"
+        return f"Finish with reason: {self.finish_reason}\n" f"Test verification: {self.test_verification}"
 
     def equals(self, other: "ActionArguments") -> bool:
         return isinstance(other, VerifiedFinishArgs)
 
+    @classmethod
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Add input validation to the process_order function",
+                action=VerifiedFinishArgs(
+                    thoughts="I've added input validation and comprehensive tests to verify all validation cases",
+                    finish_reason="Added robust input validation to process_order function with proper error handling",
+                    test_verification=(
+                        "Added new test file test_order_validation.py with comprehensive test cases:\n"
+                        "1. test_valid_order: Verifies successful order processing with valid input\n"
+                        "2. test_invalid_quantity: Tests rejection of negative and zero quantities\n"
+                        "3. test_invalid_price: Verifies handling of invalid price formats\n"
+                        "4. test_missing_fields: Ensures proper error messages for missing required fields\n"
+                        "All tests pass and cover both success and error scenarios."
+                    ),
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Fix the bug in the date parsing logic",
+                action=VerifiedFinishArgs(
+                    thoughts="I've fixed the date parsing bug and added tests to prevent regression",
+                    finish_reason="Fixed date parsing bug that was incorrectly handling timezone conversions",
+                    test_verification=(
+                        "Modified tests/test_date_utils.py to add new test cases:\n"
+                        "1. Added test_timezone_conversion to verify correct timezone handling\n"
+                        "2. Extended test_parse_date with edge cases:\n"
+                        "   - Dates crossing DST boundaries\n"
+                        "   - Various timezone formats (UTC, GMT, named zones)\n"
+                        "   - Invalid date formats\n"
+                        "3. Added test_date_validation for boundary conditions\n"
+                        "All tests pass, confirming the bug is fixed and won't regress."
+                    ),
+                ),
+            ),
+        ]
+
 
 class VerifiedFinish(Action):
-    args_schema: ClassVar[Type[ActionArguments]] = VerifiedFinishArgs
+    args_schema: ClassVar[type[ActionArguments]] = VerifiedFinishArgs
 
-    def execute(
+    async def execute(
         self,
         args: VerifiedFinishArgs,
         file_context: FileContext | None = None,
         workspace: Workspace | None = None,
     ):
-        return Observation(message=args.finish_reason, terminal=True)
+        return Observation.create(message=args.finish_reason, terminal=True)
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         return [
             "**Full Trajectory Review:** Evaluate the complete sequence of actions taken by the agent leading to this finish action. Assess whether the trajectory represents an efficient and logical path to the solution.",
             "**Solution Correctness and Quality:** Verify that all changes made throughout the trajectory logically address the problem statement. Ensure the changes fit contextually within the existing codebase without introducing new issues.",
@@ -61,7 +94,7 @@ class VerifiedFinish(Action):
         ]
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return cls.generate_reward_scale_entries(
             [
                 (
@@ -101,40 +134,3 @@ class VerifiedFinish(Action):
                 ),
             ]
         )
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Add input validation to the process_order function",
-                action=VerifiedFinishArgs(
-                    thoughts="I've added input validation and comprehensive tests to verify all validation cases",
-                    finish_reason="Added robust input validation to process_order function with proper error handling",
-                    test_verification=(
-                        "Added new test file test_order_validation.py with comprehensive test cases:\n"
-                        "1. test_valid_order: Verifies successful order processing with valid input\n"
-                        "2. test_invalid_quantity: Tests rejection of negative and zero quantities\n"
-                        "3. test_invalid_price: Verifies handling of invalid price formats\n"
-                        "4. test_missing_fields: Ensures proper error messages for missing required fields\n"
-                        "All tests pass and cover both success and error scenarios."
-                    ),
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Fix the bug in the date parsing logic",
-                action=VerifiedFinishArgs(
-                    thoughts="I've fixed the date parsing bug and added tests to prevent regression",
-                    finish_reason="Fixed date parsing bug that was incorrectly handling timezone conversions",
-                    test_verification=(
-                        "Modified tests/test_date_utils.py to add new test cases:\n"
-                        "1. Added test_timezone_conversion to verify correct timezone handling\n"
-                        "2. Extended test_parse_date with edge cases:\n"
-                        "   - Dates crossing DST boundaries\n"
-                        "   - Various timezone formats (UTC, GMT, named zones)\n"
-                        "   - Invalid date formats\n"
-                        "3. Added test_date_validation for boundary conditions\n"
-                        "All tests pass, confirming the bug is fixed and won't regress."
-                    ),
-                ),
-            ),
-        ]

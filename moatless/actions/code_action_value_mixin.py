@@ -1,5 +1,3 @@
-from typing import List
-
 from moatless.actions.action import Action, RewardScaleEntry
 from moatless.actions.run_tests import RunTests
 
@@ -11,7 +9,7 @@ class CodeActionValueMixin:
     """
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int) -> list[str]:
         base_criteria = Action.get_evaluation_criteria(trajectory_length)
         test_criteria = RunTests.get_evaluation_criteria(trajectory_length)
 
@@ -26,8 +24,8 @@ class CodeActionValueMixin:
         return base_criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length: int) -> List[RewardScaleEntry]:
-        return cls.generate_reward_scale_entries(
+    def get_reward_scale(cls, trajectory_length: int) -> list[RewardScaleEntry]:
+        return Action.generate_reward_scale_entries(
             [
                 (
                     90,

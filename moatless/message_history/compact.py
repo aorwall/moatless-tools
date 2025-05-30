@@ -1,20 +1,21 @@
 import logging
+from dataclasses import dataclass
 from typing import List, Optional
-
-from pydantic import BaseModel, Field
 
 from moatless.actions.run_tests import RunTestsArgs
 from moatless.actions.schema import ActionArguments
-from moatless.actions.view_code import ViewCodeArgs, CodeSpan
+from moatless.actions.view_code import CodeSpan, ViewCodeArgs
 from moatless.actions.view_diff import ViewDiffArgs
 from moatless.completion.schema import (
+    AllMessageValues,
     ChatCompletionAssistantMessage,
     ChatCompletionToolMessage,
-    AllMessageValues,
 )
 from moatless.message_history.message_history import MessageHistoryGenerator
 from moatless.node import Node
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -22,45 +23,56 @@ logger = logging.getLogger(__name__)
 class NodeMessage(BaseModel):
     user_message: Optional[str] = Field(default=None, description="The user message")
     assistant_message: Optional[str] = Field(default=None, description="The assistant message")
-    action: Optional[ActionArguments] = Field(default=None, description="The action")
-    observation: Optional[str] = Field(default=None, description="The observation")
+    actions: list[ActionArguments] = Field(default_factory=list, description="The actions")
+    observations: list[str] = Field(default_factory=list, description="The observations")
 
 
 class CompactMessageHistoryGenerator(MessageHistoryGenerator):
     message_cache: bool = Field(default=False, description="Cache the message history if the LLM supports it")
 
-    def generate_messages(self, node: Node) -> List[AllMessageValues]:
+    async def generate_messages(self, node: Node, workspace: Workspace) -> list[AllMessageValues]:
         messages = []
 
-        node_messages = self.get_node_messages(node)
+        node_messages = await self.get_node_messages(node)
 
         tool_idx = 0
         tokens = 0
 
-        for action, observation in node_messages:
+        for node_message in node_messages:
             tool_calls = []
-            tool_idx += 1
-            tool_call_id = f"tool_{tool_idx}"
+            tool_responses = []
 
-            exclude = None
-            content = None
+            for action, observation in zip(node_message.actions, node_message.observations, strict=True):
+                tool_idx += 1
+                tool_call_id = f"tool_{tool_idx}"
 
-            if not self.thoughts_in_action:
-                exclude = {"thoughts"}
-                content = action.thoughts
+                exclude = None
+                content = None
 
-            tool_call = {
-                "id": tool_call_id,
-                "type": "function",
-                "function": {
-                    "name": action.name,
-                    "arguments": action.model_dump_json(exclude=exclude),
-                },
-            }
+                if not self.thoughts_in_action:
+                    exclude = {"thoughts"}
+                    content = action.thoughts
 
-            tool_calls.append(tool_call)
+                tool_call = {
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": action.name,
+                        "arguments": action.model_dump_json(exclude=exclude),
+                    },
+                }
 
-            tokens += count_tokens(action.model_dump_json(exclude=exclude))
+                tool_calls.append(tool_call)
+
+                tool_responses.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": observation,
+                    }
+                )
+
+                tokens += count_tokens(action.model_dump_json(exclude=exclude))
 
             messages.append(ChatCompletionAssistantMessage(role="assistant", tool_calls=tool_calls, content=content))
             messages.append(
@@ -73,11 +85,11 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
             tokens += count_tokens(observation)
 
-        logger.info(f"Generated {len(messages)} messages with {tokens} tokens")
+        logger.debug(f"Generated {len(messages)} messages with {tokens} tokens")
 
         return messages
 
-    def get_node_messages(self, node: "Node") -> List[NodeMessage]:
+    async def get_node_messages(self, node: Node) -> list[NodeMessage]:
         """
         Creates a list of (action, observation) tuples from the node's trajectory.
         Respects token limits while preserving ViewCode context.
@@ -88,19 +100,19 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
             - Observation summary string
         """
         previous_nodes = node.get_trajectory()
-        logger.info(f"Previous nodes: {len(previous_nodes)}")
+        logger.debug(f"Previous nodes: {len(previous_nodes)}")
         if not previous_nodes:
             return []
 
         # Calculate initial token count
-        total_tokens = node.file_context.context_size()
-        total_tokens += count_tokens(node.get_root().message)
+        total_tokens = node.file_context.context_size() if node.file_context else 0
+        total_tokens += count_tokens(node.get_root().message or "")
 
         # Pre-calculate test output tokens if there's a patch
         test_output_tokens = 0
         test_output = None
         run_tests_args = None
-        if node.file_context.has_runtime and node.file_context.has_patch():
+        if node.file_context and node.file_context.has_runtime and node.file_context.has_patch():
             if node.file_context.has_test_patch():
                 thoughts = "Run the updated tests to verify the changes."
             else:
@@ -125,7 +137,7 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
         last_test_status = None  # Track the last test status
 
         for i, previous_node in enumerate(reversed(previous_nodes)):
-            current_messages: List[NodeMessage] = []
+            current_messages: list[NodeMessage] = []
 
             user_message = previous_node.user_message
             assistant_message = previous_node.assistant_message
@@ -138,7 +150,12 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
             if previous_node.action_steps:
                 for i, action_step in enumerate(previous_node.action_steps):
-                    if action_step.action.name == "ViewCode":
+                    if not action_step.observation:
+                        continue
+
+                    actions = []
+                    observations = []
+                    if isinstance(action_step.action, ViewCodeArgs):
                         # Always include ViewCode actions
                         file_path = action_step.action.files[0].file_path
 
@@ -155,18 +172,22 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                                 )
                             else:
                                 observation = action_step.observation.message
-                            current_messages.append(NodeMessage(action=action_step.action, observation=observation))
+                            actions.append(action_step.action)
+                            observations.append(observation)
                     else:
                         # Count tokens for non-ViewCode actions
-                        observation_str = (
-                            action_step.observation.summary
-                            if self.include_file_context
+                        observation_str = ""
+
+                        if (
+                            self.include_file_context
                             and hasattr(action_step.observation, "summary")
                             and action_step.observation.summary
-                            else action_step.observation.message
-                            if action_step.observation
-                            else "No output found."
-                        )
+                        ):
+                            observation_str = action_step.observation.summary
+                        elif action_step.observation.message:
+                            observation_str = action_step.observation.message
+                        else:
+                            observation_str = "No output found."
 
                         # Calculate tokens for this message pair
                         action_tokens = count_tokens(action_step.action.model_dump_json())
@@ -174,18 +195,26 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                         message_tokens = action_tokens + observation_tokens
 
                         # Only add if within token limit
-                        if total_tokens + message_tokens <= self.max_tokens:
+                        if self.max_tokens is None or total_tokens + message_tokens <= self.max_tokens:
                             total_tokens += message_tokens
-                            current_messages.append(NodeMessage(action=action_step.action, observation=observation_str))
+                            actions.append(action_step.action)
+                            observations.append(observation_str)
                         else:
                             # Skip remaining non-ViewCode messages if we're over the limit
                             continue
 
+                current_messages.append(NodeMessage(actions=actions, observations=observations))
+
                 # Handle file context for non-ViewCode actions
-                if self.include_file_context and previous_node.action.name != "ViewCode":
+                if (
+                    self.include_file_context
+                    and not isinstance(previous_node.action, ViewCodeArgs)
+                    and previous_node.file_context
+                ):
                     files_to_show = set()
                     has_edits = False
-                    for context_file in previous_node.file_context.get_context_files():
+                    context_files = previous_node.file_context.get_context_files()
+                    for context_file in context_files:
                         if (
                             context_file.was_edited or context_file.was_viewed
                         ) and context_file.file_path not in shown_files:
@@ -202,9 +231,9 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
                         for file_path in files_to_show:
                             context_file = previous_node.file_context.get_context_file(file_path)
-                            if context_file.show_all_spans:
+                            if context_file and context_file.show_all_spans:
                                 code_spans.append(CodeSpan(file_path=file_path))
-                            elif context_file.span_ids:
+                            elif context_file and context_file.span_ids:
                                 code_spans.append(
                                     CodeSpan(
                                         file_path=file_path,
@@ -214,45 +243,40 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
                             else:
                                 continue
 
-                            observations.append(
-                                context_file.to_prompt(
-                                    show_span_ids=False,
-                                    show_line_numbers=True,
-                                    exclude_comments=False,
-                                    show_outcommented_code=True,
-                                    outcomment_code_comment="... rest of the code",
-                                )
+                            prompt = context_file.to_prompt(
+                                show_span_ids=False,
+                                show_line_numbers=True,
+                                exclude_comments=False,
+                                show_outcommented_code=True,
+                                outcomment_code_comment="... rest of the code",
                             )
+                            observations.append(prompt)
 
                         if code_spans:
-                            thought = f"Let's view the content in the updated files"
+                            thought = "Let's view the content in the updated files"
                             args = ViewCodeArgs(files=code_spans, thoughts=thought)
-                            current_messages.append(NodeMessage(action=args, observation="\n\n".join(observations)))
+                            current_messages.append(NodeMessage(actions=[args], observations=observations))
 
                     # Show ViewDiff on first edit
-                    if has_edits and self.include_git_patch and not shown_diff:
+                    if has_edits and self.include_git_patch and not shown_diff and node.file_context:
                         patch = node.file_context.generate_git_patch()
                         if patch:
                             view_diff_args = ViewDiffArgs(
                                 thoughts="Let's review the changes made to ensure we've properly implemented everything required for the task. I'll check the git diff to verify the modifications."
                             )
                             diff_tokens = count_tokens(patch) + count_tokens(view_diff_args.model_dump_json())
-                            if total_tokens + diff_tokens <= self.max_tokens:
+                            if self.max_tokens is None or total_tokens + diff_tokens <= self.max_tokens:
                                 total_tokens += diff_tokens
                                 current_messages.append(
                                     NodeMessage(
-                                        action=view_diff_args,
-                                        observation=f"Current changes in workspace:\n```diff\n{patch}\n```",
+                                        actions=[view_diff_args],
+                                        observations=[f"Current changes in workspace:\n```diff\n{patch}\n```"],
                                     )
                                 )
                                 shown_diff = True
 
                     # Add test results only if status changed or first occurrence
-                    if (
-                        node.file_context.has_runtime
-                        and previous_node.observation
-                        and previous_node.observation.properties.get("diff")
-                    ):
+                    if node.file_context and node.file_context.has_runtime and node.file_context.has_patch():
                         current_test_status = node.file_context.get_test_status()
                         if last_test_status is None or current_test_status != last_test_status:
                             if node.file_context.has_test_patch():
@@ -278,12 +302,14 @@ class CompactMessageHistoryGenerator(MessageHistoryGenerator):
 
                             # Calculate and check token limits
                             test_tokens = count_tokens(test_output) + count_tokens(run_tests_args.model_dump_json())
-                            if total_tokens + test_tokens <= self.max_tokens:
+                            if self.max_tokens is None or total_tokens + test_tokens <= self.max_tokens:
                                 total_tokens += test_tokens
-                                current_messages.append(NodeMessage(action=run_tests_args, observation=test_output))
+                                current_messages.append(
+                                    NodeMessage(actions=[run_tests_args], observations=[test_output])
+                                )
                                 last_test_status = current_test_status
 
             node_messages = current_messages + node_messages
 
-        logger.info(f"Generated message history with {total_tokens} tokens")
+        logger.debug(f"Generated message history with {total_tokens} tokens")
         return node_messages

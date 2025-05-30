@@ -1,6 +1,6 @@
 import logging
-from dataclasses import field, dataclass
-from typing import Optional, Dict
+from dataclasses import dataclass, field
+from typing import Optional
 
 from networkx import DiGraph
 
@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 class Module(CodeBlock):
     file_path: Optional[str] = None
     content: str = ""
-    spans_by_id: Dict[str, BlockSpan] = field(default_factory=dict)
+    spans_by_id: dict[str, BlockSpan] = field(default_factory=dict)
     language: Optional[str] = None
     code_block: CodeBlock = field(default_factory=lambda: CodeBlock(content="", type=CodeBlockType.MODULE))
     _graph: DiGraph = field(default_factory=DiGraph, init=False)  # TODO: Move to central CodeGraph
 
     def __post_init__(self):
-        if not self.code_block.type == CodeBlockType.MODULE:
+        if self.code_block.type != CodeBlockType.MODULE:
             self.code_block.type = CodeBlockType.MODULE
 
     # Delegate other methods to self.code_block as needed

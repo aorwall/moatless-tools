@@ -1,21 +1,18 @@
 import logging
-from typing import List, Optional
+from typing import Optional
 
-from pydantic import Field, BaseModel, PrivateAttr, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.identify_mixin import IdentifyMixin
 from moatless.actions.schema import (
     ActionArguments,
-    FewShotExample,
     Observation,
     RewardScaleEntry,
 )
 from moatless.codeblocks import CodeBlockType
-from moatless.completion import BaseCompletionModel
-from moatless.file_context import FileContext, ContextFile
-from moatless.repository.repository import Repository
-from moatless.workspace import Workspace
+from moatless.completion.schema import FewShotExample
+from moatless.file_context import ContextFile, FileContext
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +42,7 @@ class CodeSpan(BaseModel):
 class ViewCodeArgs(ActionArguments):
     """View the code in a file or a specific code span."""
 
-    thoughts: str = Field(..., description="Your thoughts on the code change.")
-    files: List[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
+    files: list[CodeSpan] = Field(..., description="The code that should be provided in the file context.")
 
     model_config = ConfigDict(title="ViewCode")
 
@@ -58,7 +54,7 @@ class ViewCodeArgs(ActionArguments):
             logs = []
             for i, file in enumerate(self.files):
                 logs.append(f"{i}=[{file.log_name}]")
-            return f"ViewCode(" + ", ".join(logs) + ")"
+            return "ViewCode(" + ", ".join(logs) + ")"
 
     def to_prompt(self):
         prompt = "Show the following code:\n"
@@ -77,32 +73,47 @@ class ViewCodeArgs(ActionArguments):
         param_str = ", ".join(param_strs)
         return f"{self.name}({param_str})"
 
+    @classmethod
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
+                action=ViewCodeArgs(
+                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
+                    files=[
+                        CodeSpan(
+                            file_path="auth/service.py",
+                            start_line=None,
+                            end_line=None,
+                            span_ids=["AuthenticationService.authenticate"],
+                        )
+                    ],
+                ),
+            ),
+            FewShotExample.create(
+                user_input="Show me lines 50-75 of the database configuration file",
+                action=ViewCodeArgs(
+                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
+                    files=[CodeSpan(file_path="config/database.py", start_line=50, end_line=75)],
+                ),
+            ),
+        ]
+
 
 class ViewCode(Action, IdentifyMixin):
     args_schema = ViewCodeArgs
-
-    _repository: Repository = PrivateAttr()
-
-    def __init__(
-        self,
-        repository: Repository = None,
-        completion_model: BaseCompletionModel | None = None,
-        **data,
-    ):
-        super().__init__(completion_model=completion_model, **data)
-        self._repository = repository
 
     max_tokens: int = Field(
         3000,
         description="The maximum number of tokens in the requested code.",
     )
 
-    def execute(
-        self,
-        args: ViewCodeArgs,
-        file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
-    ) -> Observation:
+    show_code_blocks: bool = Field(
+        False,
+        description="Whether to show the parsed code blocks in the response or just the line span.",
+    )
+
+    async def execute(self, args: ViewCodeArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:
             raise ValueError("File context must be provided to execute the view action.")
 
@@ -118,18 +129,18 @@ class ViewCode(Action, IdentifyMixin):
 
         # Validate all file spans before processing
         for file_path, file_span in grouped_files.items():
-            logger.info(f"Processing file {file_path} with span_ids {file_span.span_ids}")
+            logger.debug(f"Processing file {file_path} with span_ids {file_span.span_ids}")
             file = file_context.get_file(file_path)
 
             if not file:
                 message = f"The requested file {file_path} is not found in the file repository. Use the search functions to search for the code if you are unsure of the file path."
-                properties["fail_reason"] = "file_not_found"
-                return Observation(message=message, properties=properties, expect_correction=False)
+                properties = {"fail_reason": "file_not_found"}
+                return Observation.create(message=message, properties=properties)
 
             if self._repository.is_directory(file_path):
                 message = f"The requested file {file_path} is a directory and not a file. Use the search functions to search for the code if you are unsure of the file path."
-                properties["fail_reason"] = "is_directory"
-                return Observation(message=message, properties=properties, expect_correction=False)
+                properties = {"fail_reason": "is_directory"}
+                return Observation.create(message=message, properties=properties)
 
         view_context = FileContext(repo=self._repository)
         completion = None
@@ -140,41 +151,54 @@ class ViewCode(Action, IdentifyMixin):
             if file_span.span_ids:
                 missing_span_ids = set()
                 found_span_ids = set()
-                if file_span.span_ids and not file.module:
-                    logger.warning(f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path}.")
-                    message = self.create_retry_message(file, f"No span ids found. Is it empty?")
-                    properties["fail_reason"] = "invalid_file"
-                    return Observation(
-                        message=message,
-                        properties=properties,
-                        expect_correction=True,
+                if file_span.span_ids and not file or not file.module:
+                    logger.warning(
+                        f"Tried to add span ids {file_span.span_ids} to not parsed file {file.file_path if file else file_path}."
                     )
+                    message = (
+                        self.create_retry_message(file, "No span ids found. Is it empty?")
+                        if file
+                        else f"No span ids found in {file_path}. Is it empty?"
+                    )
+                    properties = {"fail_reason": "invalid_file"}
+                    return Observation.create(message=message, properties=properties)
 
                 for span_id in file_span.span_ids:
-                    block_span = file.module.find_span_by_id(span_id)
+                    block_span = file.module.find_span_by_id(span_id) if file and file.module else None
                     if not block_span:
                         # Try to find the relevant code block by code block identifier
                         block_identifier = span_id.split(".")[-1]
-                        blocks = file.module.find_blocks_with_identifier(block_identifier)
+                        blocks = (
+                            file.module.find_blocks_with_identifier(block_identifier) if file and file.module else []
+                        )
 
                         if not blocks:
                             missing_span_ids.add(span_id)
 
                         for block in blocks:
-                            view_context.add_span_to_context(
-                                file_path,
-                                block.belongs_to_span.span_id,
-                                add_extra=False,
-                            )
+                            if block and block.belongs_to_span and block.belongs_to_span.span_id:
+                                view_context.add_span_to_context(
+                                    file_path,
+                                    block.belongs_to_span.span_id,
+                                    add_extra=False,
+                                )
 
-                    elif block_span.initiating_block.type == CodeBlockType.CLASS:
+                    elif block_span.initiating_block and block_span.initiating_block.type == CodeBlockType.CLASS:
                         class_block = block_span.initiating_block
                         found_span_ids.add(block_span.span_id)
-                        view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
+                        if class_block and hasattr(class_block, "get_all_span_ids"):
+                            view_context.add_spans_to_context(file_path, class_block.get_all_span_ids())
                     else:
                         view_context.add_span_to_context(file_path, block_span.span_id, add_extra=False)
 
-            if file_span.start_line:
+            if file_span.start_line is not None:
+                # count lines of file.content
+                lines = file.content.split("\n")
+                if file_span.start_line > len(lines):
+                    message = f"The requested start line {file_span.start_line} is greater than the number of lines in the file {len(lines)}."
+                    properties = {"fail_reason": "start_line_greater_than_file_length"}
+                    return Observation.create(message=message, properties=properties)
+
                 view_context.add_line_span_to_context(
                     file_path, file_span.start_line, file_span.end_line, add_extra=False
                 )
@@ -182,24 +206,19 @@ class ViewCode(Action, IdentifyMixin):
             if not file_span.start_line and not file_span.span_ids:
                 view_context.add_file(file_path, show_all_spans=True)
 
-            if file.patch:
+            if file and file.patch:
                 view_file = view_context.get_file(file_path)
                 if view_file:
                     view_file.set_patch(file.patch)
 
-            if view_context.context_size() > self.max_tokens:
-                view_context, completion = self._identify_code(args, view_context, self.max_tokens)
+        if view_context.context_size() > self.max_tokens:
+            view_context, completion = await self._identify_code(args, view_context, self.max_tokens)
 
-            new_span_ids = file_context.add_file_context(view_context)
-            properties["files"][file_path] = {
-                "new_span_ids": list(new_span_ids),
-            }
-
-        added_new_spans = any(len(file["new_span_ids"]) > 0 for file in properties["files"].values())
+        added_new_spans = file_context.add_file_context(view_context)
 
         if view_context.is_empty():
-            message = f"\nThe specified code spans wasn't found."
-            properties["fail_reason"] = "no_spans_found"
+            message = "\nThe specified code spans wasn't found."
+            properties = {"fail_reason": "no_spans_found"}
             summary = "The specified code spans wasn't found."
         else:
             message = "Here's the contents of the file where the not requested code spans have been commented out:\n"
@@ -212,14 +231,18 @@ class ViewCode(Action, IdentifyMixin):
             )
 
             if added_new_spans:
-                summary = f"Showed the following code spans:\n" + view_context.create_summary()
+                summary = "Showed the following code spans:\n" + view_context.create_summary()
             else:
                 summary = "The specified code spans has already been viewed in a previous action."
 
         if not added_new_spans:
-            properties["flags"] = ["no_spans_added"]
+            if "flags" not in properties:
+                properties = properties or {}
+                properties["flags"] = ["no_spans_added"]
+            else:
+                properties["flags"].append("no_spans_added")
 
-        return Observation(
+        return Observation.create(
             message=message,
             summary=summary,
             properties=properties,
@@ -231,30 +254,6 @@ class ViewCode(Action, IdentifyMixin):
 
     def _select_span_instructions(self, search_result) -> str:
         return "The requested code is too large. You must identify the most relevant code sections to view."
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return [
-            FewShotExample.create(
-                user_input="Show me the implementation of the authenticate method in the AuthenticationService class",
-                action=ViewCodeArgs(
-                    thoughts="To understand the authentication implementation, we need to examine the authenticate method within the AuthenticationService class.",
-                    files=[
-                        CodeSpan(
-                            file_path="auth/service.py",
-                            span_ids=["AuthenticationService.authenticate"],
-                        )
-                    ],
-                ),
-            ),
-            FewShotExample.create(
-                user_input="Show me lines 50-75 of the database configuration file",
-                action=ViewCodeArgs(
-                    thoughts="To examine the database configuration settings, we'll look at the specified line range in the config file.",
-                    files=[CodeSpan(file_path="config/database.py", start_line=50, end_line=75)],
-                ),
-            ),
-        ]
 
     def create_retry_message(self, file: ContextFile, message: str):
         retry_message = f"\n\nProblems when trying to find spans in {file.file_path}. "
@@ -293,7 +292,7 @@ class ViewCode(Action, IdentifyMixin):
         return list_str
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
         criteria = [
             "Relevance of Requested Context: Ensure that the requested context is directly related to the problem and necessary for making progress.",
             "Avoiding Hallucinations: Verify that the agent is requesting context for code that actually exists in the codebase.",
@@ -303,7 +302,7 @@ class ViewCode(Action, IdentifyMixin):
         return criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return [
             RewardScaleEntry(
                 min_value=75,

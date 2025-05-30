@@ -1,7 +1,7 @@
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Set
+from typing import Optional
 
 from typing_extensions import deprecated
 
@@ -87,26 +87,7 @@ class CodeBlockType(Enum):
         if not tag.startswith("definition"):
             return None
 
-        tag_to_block_type = {
-            "definition.assignment": cls.ASSIGNMENT,
-            "definition.block_delimiter": cls.BLOCK_DELIMITER,
-            "definition.call": cls.CALL,
-            "definition.class": cls.CLASS,
-            "definition.code": cls.CODE,
-            "definition.comment": cls.COMMENT,
-            "definition.compound": cls.COMPOUND,
-            "definition.constructor": cls.CONSTRUCTOR,
-            "definition.dependent_clause": cls.DEPENDENT_CLAUSE,
-            "definition.error": cls.ERROR,
-            "definition.export": cls.EXPORT,
-            "definition.function": cls.FUNCTION,
-            "definition.import": cls.IMPORT,
-            "definition.module": cls.MODULE,
-            "definition.statement": cls.STATEMENT,
-            "definition.test_suite": cls.TEST_SUITE,
-            "definition.test_case": cls.TEST_CASE,
-        }
-        return tag_to_block_type.get(tag)
+        return TAG_TO_BLOCK_TYPE.get(tag)
 
 
 NON_CODE_BLOCKS = [
@@ -118,6 +99,26 @@ NON_CODE_BLOCKS = [
     CodeBlockType.ERROR,
     CodeBlockType.SPACE,
 ]
+
+TAG_TO_BLOCK_TYPE = {
+    "definition.assignment": CodeBlockType.ASSIGNMENT,
+    "definition.block_delimiter": CodeBlockType.BLOCK_DELIMITER,
+    "definition.call": CodeBlockType.CALL,
+    "definition.class": CodeBlockType.CLASS,
+    "definition.code": CodeBlockType.CODE,
+    "definition.comment": CodeBlockType.COMMENT,
+    "definition.compound": CodeBlockType.COMPOUND,
+    "definition.constructor": CodeBlockType.CONSTRUCTOR,
+    "definition.dependent_clause": CodeBlockType.DEPENDENT_CLAUSE,
+    "definition.error": CodeBlockType.ERROR,
+    "definition.export": CodeBlockType.EXPORT,
+    "definition.function": CodeBlockType.FUNCTION,
+    "definition.import": CodeBlockType.IMPORT,
+    "definition.module": CodeBlockType.MODULE,
+    "definition.statement": CodeBlockType.STATEMENT,
+    "definition.test_suite": CodeBlockType.TEST_SUITE,
+    "definition.test_case": CodeBlockType.TEST_CASE,
+}
 
 INDEXED_BLOCKS = [
     CodeBlockType.FUNCTION,
@@ -287,25 +288,25 @@ class CodeBlock:
     type: CodeBlockType
     content: str
     identifier: Optional[str] = None
-    parameters: List["Parameter"] = field(default_factory=list)
-    relationships: List["Relationship"] = field(default_factory=list)
-    span_ids: Set[str] = field(default_factory=set)
+    parameters: list["Parameter"] = field(default_factory=list)
+    relationships: list["Relationship"] = field(default_factory=list)
+    span_ids: set[str] = field(default_factory=set)
     belongs_to_span: Optional["BlockSpan"] = None
     has_error: bool = False
     start_line: int = 0
     end_line: int = 0
-    properties: Dict = field(default_factory=dict)
+    properties: dict = field(default_factory=dict)
     pre_code: str = ""
     pre_lines: int = 0
     indentation: str = ""
     tokens: int = 0
-    children: List["CodeBlock"] = field(default_factory=list)
-    validation_errors: List[str] = field(default_factory=list)
+    children: list["CodeBlock"] = field(default_factory=list)
+    validation_errors: list[str] = field(default_factory=list)
     parent: Optional["CodeBlock"] = None
     previous: Optional["CodeBlock"] = None
     next: Optional["CodeBlock"] = None
 
-    _content_lines: Optional[List[str]] = field(default=None, init=False)
+    _content_lines: Optional[list[str]] = field(default=None, init=False)
 
     def __post_init__(self):
         self._content_lines = None
@@ -1113,13 +1114,11 @@ class CodeBlock:
         start_line: int,
         end_line: int | None = None,
         include_parents: bool = False,
-    ) -> List["CodeBlock"]:
+    ) -> list["CodeBlock"]:
         blocks = []
         block = self
         while block.next and (end_line is None or block.start_line <= end_line):
-            if include_parents and block.has_lines(start_line, end_line):
-                blocks.append(block)
-            elif block.start_line >= start_line:
+            if include_parents and block.has_lines(start_line, end_line) or block.start_line >= start_line:
                 blocks.append(block)
             block = block.next
 

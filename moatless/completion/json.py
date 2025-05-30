@@ -1,13 +1,12 @@
 import json
 import logging
 from textwrap import dedent
-from typing import List, Any, Type, Optional
-
-from pydantic import ValidationError
+from typing import Any, Optional
 
 from moatless.completion import BaseCompletionModel
 from moatless.completion.base import CompletionRetryError
 from moatless.completion.schema import ChatCompletionUserMessage, ResponseSchema
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,18 @@ class JsonCompletionModel(BaseCompletionModel):
     3. Validating and parsing JSON responses
     """
 
-    def _prepare_system_prompt(self, system_prompt: str, response_schema: List[Type[ResponseSchema]]) -> str:
+    @property
+    def response_schema(self) -> list[type[ResponseSchema]]:
+        """Get the response schema."""
+        return self._response_schema if self._response_schema else []
+
+    def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Any]:
+        """Get the completion parameters for JSON completion."""
+        return {"response_format": {"type": "json_object"}}
+
+    def _prepare_system_prompt(
+        self, system_prompt: str, response_schema: list[type[ResponseSchema]] | type[ResponseSchema]
+    ) -> str:
         """Add JSON schema instructions to system prompt.
 
         This method appends the JSON schema and format instructions
@@ -34,19 +44,22 @@ class JsonCompletionModel(BaseCompletionModel):
         Returns:
             System prompt with JSON format instructions
         """
+        schemas = [response_schema] if not isinstance(response_schema, list) else response_schema
 
-        if len(response_schema) > 1:
+        if len(schemas) > 1:
             raise ValueError("JSON Completion Model only handles one response schema")
 
         system_prompt += dedent(f"""\n# Response format
 You must respond with only a JSON object that match the following json_schema:\n
 
-{json.dumps(response_schema[0].model_json_schema(), indent=2, ensure_ascii=False)}
+{json.dumps(schemas[0].model_json_schema(), indent=2, ensure_ascii=False)}
 
 Make sure to return an instance of the JSON, not the schema itself.""")
         return system_prompt
 
-    def _validate_completion(self, completion_response: Any) -> tuple[List[ResponseSchema], Optional[str], List[str]]:
+    async def _validate_completion(
+        self, completion_response: Any
+    ) -> tuple[list[ResponseSchema], Optional[str], Optional[str]]:
         """Validate and parse JSON completion response.
 
         This method:
@@ -62,27 +75,24 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             Tuple of:
             - List of validated ResponseSchema instances
             - Optional text response string
-            - List of flags indicating any special conditions
+            - Optional thought string (always None for JSON model)
 
         Raises:
-            CompletionRejectError: For invalid JSON that should be retried
+            CompletionRetryError: For invalid JSON that should be retried
         """
 
-        if len(self.response_schema) > 1:
+        if not self._response_schema:
+            raise ValueError("No response schema provided")
+
+        if len(self._response_schema) > 1:
             raise ValueError("JSON Completion Model only handles one response schema")
 
         try:
             assistant_message = completion_response.choices[0].message.content
-
-            response = self.response_schema[0].model_validate_json(assistant_message)
-            return [response], None, []
+            response = self._response_schema[0].model_validate_json(assistant_message)
+            logger.info(f"JSON response: {response}")
+            return [response], None, None
 
         except (ValidationError, json.JSONDecodeError) as e:
             logger.warning(f"JSON validation failed with error: {e}")
-            retry_message = ChatCompletionUserMessage(
-                role="user", content=f"The response was invalid. Fix these errors:\n{e}"
-            )
-            raise CompletionRetryError(
-                message=str(e),
-                retry_messages=[retry_message],
-            ) from e
+            raise CompletionRetryError(f"The response was invalid. Fix these errors:\n{e}") from e

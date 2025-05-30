@@ -2,21 +2,22 @@ import importlib
 import logging
 import pkgutil
 from abc import ABC
-from typing import Dict, Type, Any, Optional
+from typing import Any, Optional
 
-from pydantic import Field, BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
-from moatless.completion.model import Completion
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.completion.schema import ResponseSchema
+from moatless.completion.stats import CompletionInvocation
 
 logger = logging.getLogger(__name__)
 
 
-_action_args: Dict[str, Type["ActionArguments"]] = {}
+_action_args: dict[str, type["ActionArguments"]] = {}
 
 
 class ActionArguments(ResponseSchema, ABC):
-    thoughts: str = Field(..., description="Your reasoning for the action.")
+    thoughts: Optional[str] = Field(None, description="Your reasoning for the action.")
 
     def format_for_llm(self) -> str:
         """Format the action name for LLM consumption"""
@@ -25,7 +26,7 @@ class ActionArguments(ResponseSchema, ABC):
     @classmethod
     def format_name_for_llm(cls) -> str:
         """Format the class name for LLM consumption"""
-        return str(cls.get_name())
+        return str(cls.name)
 
     @classmethod
     def from_tool_call(cls, tool_args: dict[str, Any], tool_name: str | None = None):
@@ -40,21 +41,7 @@ class ActionArguments(ResponseSchema, ABC):
         return prompt
 
     def short_summary(self) -> str:
-        return f"{self.name}()"
-
-    @model_validator(mode="before")
-    @classmethod
-    def fix_thoughts(cls, data: Any) -> Any:
-        """Allow thoughts to be null."""
-        if isinstance(data, dict):
-            if "scratch_pad" in data:
-                data["thoughts"] = data["scratch_pad"]
-                del data["scratch_pad"]
-
-            if not data.get("thoughts"):
-                data["thoughts"] = ""
-
-        return data
+        return ""
 
     @model_validator(mode="before")
     @classmethod
@@ -68,7 +55,7 @@ class ActionArguments(ResponseSchema, ABC):
         return data
 
     @classmethod
-    def get_action_args(cls, action_name: str) -> Type["ActionArguments"]:
+    def get_action_args(cls, action_name: str) -> type["ActionArguments"]:
         """
         Dynamically import and return the appropriate ActionArguments class for the given action.
         """
@@ -99,12 +86,6 @@ class ActionArguments(ResponseSchema, ABC):
             action_args_class_path = obj.pop("action_args_class", None)
 
             if action_args_class_path:
-                if action_args_class_path == "moatless.actions.request_context.RequestMoreContextArgs":
-                    action_args_class_path = "moatless.actions.view_code.ViewCodeArgs"
-
-                if action_args_class_path.startswith("moatless.actions.edit"):
-                    action_args_class_path = "moatless.actions.claude_text_editor.EditActionArguments"
-
                 module_name, class_name = action_args_class_path.rsplit(".", 1)
                 module = importlib.import_module(module_name)
                 action_args_class = getattr(module, class_name)
@@ -122,16 +103,54 @@ class Observation(BaseModel):
         description="Summary of the observation, will be displayed in summarised message history.",
     )
     terminal: bool = Field(False, description="Indicates if this action results in a terminal state")
-    expect_correction: bool = Field(
-        False,
-        description="Indicates that a the action arguments was inccorect and we expect a correction",
+    error: Optional[str] = Field(None, description="Error message if the action fails")
+    properties: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
+    execution_completion: Optional[CompletionInvocation] = Field(
+        None, description="Completion created when executing the action"
     )
-    properties: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional properties")
-    execution_completion: Optional[Completion] = Field(None, description="Completion created when executing the action")
+    artifact_changes: list[ArtifactChange] = Field(
+        default_factory=list,
+        description="Artifact changes created when executing the action",
+    )
 
     @classmethod
-    def create(cls, message: str, terminal: bool = False):
-        return cls(message=message, terminal=terminal)
+    def create(
+        cls,
+        message: str,
+        summary: Optional[str] = None,
+        terminal: bool = False,
+        properties: Optional[dict[str, Any]] = None,
+        execution_completion: Optional[CompletionInvocation] = None,
+        artifact_changes: Optional[list[ArtifactChange]] = None,
+    ):
+        return cls(
+            message=message,
+            terminal=terminal,
+            summary=summary,
+            properties=properties,
+            execution_completion=execution_completion,
+            artifact_changes=artifact_changes or [],
+        )
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data["artifact_changes"] = [change.model_dump() for change in self.artifact_changes]
+        if self.execution_completion:
+            data["execution_completion"] = self.execution_completion.model_dump()
+        else:
+            data["execution_completion"] = None
+        return data
+
+    @classmethod
+    def model_validate(cls, obj: Any):
+        if isinstance(obj, dict):
+            obj = obj.copy()
+            obj["artifact_changes"] = [
+                ArtifactChange.model_validate(change) for change in obj.get("artifact_changes", [])
+            ]
+            if obj.get("execution_completion"):
+                obj["execution_completion"] = CompletionInvocation.model_validate(obj["execution_completion"])
+        return super().model_validate(obj)
 
 
 class RewardScaleEntry(BaseModel):
@@ -140,10 +159,16 @@ class RewardScaleEntry(BaseModel):
     description: str
 
 
-class FewShotExample(BaseModel):
-    user_input: str = Field(..., description="The user's input/question")
-    action: ActionArguments = Field(..., description="The expected response as ActionArguments")
+class ActionProperty(BaseModel):
+    type: str
+    title: str
+    description: str
+    default: Optional[Any] = None
 
-    @classmethod
-    def create(cls, user_input: str, action: ActionArguments) -> "FewShotExample":
-        return cls(user_input=user_input, action=action)
+
+class ActionSchema(BaseModel):
+    title: str
+    description: str
+    type: str = "object"
+    action_class: str
+    properties: dict[str, ActionProperty]

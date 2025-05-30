@@ -12,6 +12,7 @@ def test_extract_single_json_codeblock():
     assert len(all_jsons) == 1
     assert all_jsons[0] == {"key": "value"}
 
+
 def test_extract_multiple_json_codeblocks():
     message = """
     ```json
@@ -26,11 +27,13 @@ def test_extract_multiple_json_codeblocks():
     assert len(all_jsons) == 2
     assert {"second": "block"} in all_jsons
 
+
 def test_extract_raw_json():
     message = 'Some text {"key": "value"} more text'
     json_obj, all_jsons = extract_json_from_message(message)
     assert json_obj == {"key": "value"}
     assert len(all_jsons) == 1
+
 
 def test_extract_multiple_raw_jsons():
     message = 'First {"key1": "value1"} second {"key2": "value2"}'
@@ -39,11 +42,13 @@ def test_extract_multiple_raw_jsons():
     assert len(all_jsons) == 2
     assert {"key2": "value2"} in all_jsons
 
+
 def test_no_json_found():
     message = "Just some plain text without JSON"
     result, all_jsons = extract_json_from_message(message)
     assert result == message
     assert len(all_jsons) == 0
+
 
 def test_invalid_json():
     message = """
@@ -53,6 +58,7 @@ def test_invalid_json():
     result, all_jsons = extract_json_from_message(message)
     assert result == message
     assert len(all_jsons) == 0
+
 
 def test_nested_json():
     message = """
@@ -64,12 +70,9 @@ def test_nested_json():
     }
     ```"""
     json_obj, all_jsons = extract_json_from_message(message)
-    assert json_obj == {
-        "outer": {
-            "inner": {"nested": "value"}
-        }
-    }
+    assert json_obj == {"outer": {"inner": {"nested": "value"}}}
     assert len(all_jsons) == 1
+
 
 def test_real_world_example():
     message = """<thoughts>
@@ -244,13 +247,14 @@ Based on the search results, the relevant code spans that use `reverse` to gener
         "identified_spans": [
             {
                 "file_path": "django/contrib/admin/options.py",
-                "span_ids": ["ModelAdmin.response_add", "ModelAdmin.response_change", "ModelAdmin.response_delete"]
+                "span_ids": ["ModelAdmin.response_add", "ModelAdmin.response_change", "ModelAdmin.response_delete"],
             }
-        ]
+        ],
     }
     assert len(all_jsons) == 1
     assert all_jsons[0] == json_obj
-    
+
+
 def test_json_with_comments():
     message = """{
         "key1": "value1",  // This is a comment
@@ -259,15 +263,11 @@ def test_json_with_comments():
         }
     }"""
     json_obj, all_jsons = extract_json_from_message(message)
-    assert json_obj == {
-        "key1": "value1",
-        "key2": {
-            "nested": "value2"
-        }
-    }
+    assert json_obj == {"key1": "value1", "key2": {"nested": "value2"}}
     assert len(all_jsons) == 1
 
+
 def test_real_world_example_with_comments():
-    message = "```json\n{\n  \"action\": {\n    \"scratch_pad\": \"Instead of overriding the _get_FIELD_display method, we should use the existing get_FOO_display method provided by Django for fields with choices. If custom display logic is needed, we extend this method in our model. We will add this custom logic to the existing model file or create a new model file if it does not exist.\",\n    \"path\": \"your_app/models.py\",\n    \"file_text\": \"from django.db import models\\nfrom django.utils.translation import gettext_lazy as _\\n\\nclass FooBar(models.Model):\\n    foo_bar = models.CharField(_(\"foo\"), choices=[(1, 'foo'), (2, 'bar')])\\n\\n    def __str__(self):\\n        return self.get_foo_bar_display()\\n\\n    def get_foo_bar_display(self):\\n        value = super().get_foo_bar_display()\\n        if value == 'foo':\\n            return \\\"something\\\"\\n        return value\"\n  },\n  \"action_type\": \"CreateFile\"\n}\n```"
+    message = '```json\n{\n  "action": {\n    "scratch_pad": "Instead of overriding the _get_FIELD_display method, we should use the existing get_FOO_display method provided by Django for fields with choices. If custom display logic is needed, we extend this method in our model. We will add this custom logic to the existing model file or create a new model file if it does not exist.",\n    "path": "your_app/models.py",\n    "file_text": "from django.db import models\\nfrom django.utils.translation import gettext_lazy as _\\n\\nclass FooBar(models.Model):\\n    foo_bar = models.CharField(_("foo"), choices=[(1, \'foo\'), (2, \'bar\')])\\n\\n    def __str__(self):\\n        return self.get_foo_bar_display()\\n\\n    def get_foo_bar_display(self):\\n        value = super().get_foo_bar_display()\\n        if value == \'foo\':\\n            return \\"something\\"\\n        return value"\n  },\n  "action_type": "CreateFile"\n}\n```'
     json_obj, all_jsons = extract_json_from_message(message)
     print(json_obj)

@@ -1,41 +1,25 @@
-import importlib
 import logging
-from abc import ABC
-from typing import Any, List
+from abc import abstractmethod
 
-from pydantic import BaseModel
-
-from moatless.node import Node
+from moatless.component import MoatlessComponent
+from moatless.node import Node, Selection
 
 logger = logging.getLogger(__name__)
 
 
-class BaseSelector(BaseModel, ABC):
-    def select(self, expandable_nodes: List[Node]) -> Node | None:
-        if not expandable_nodes:
-            return None
-
-        return expandable_nodes[0]
+class BaseSelector(MoatlessComponent):
+    @abstractmethod
+    async def select(self, expandable_nodes: list[Node]) -> Selection:
+        pass
 
     @classmethod
-    def model_validate(cls, obj: Any):
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            selector_class_path = obj.pop("selector_class", None)
+    def get_component_type(cls) -> str:
+        return "selector"
 
-            if selector_class_path:
-                module_name, class_name = selector_class_path.rsplit(".", 1)
-                module = importlib.import_module(module_name)
-                selector_class = getattr(module, class_name)
-                instance = selector_class(**obj)
-            else:
-                instance = cls(**obj)
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.selector"
 
-            return instance
-
-        return super().model_validate(obj)
-
-    def model_dump(self, *args, **kwargs):
-        data = super().model_dump(*args, **kwargs)
-        data["selector_class"] = self.__class__.__module__ + "." + self.__class__.__name__
-        return data
+    @classmethod
+    def _get_base_class(cls) -> type:
+        return BaseSelector

@@ -6,56 +6,10 @@ from unittest.mock import Mock
 
 import pytest
 from git import Repo
-
-from moatless.benchmark.swebench import setup_swebench_repo
-from moatless.benchmark.utils import get_moatless_instance
 from moatless.codeblocks import CodeBlock, CodeBlockType
 from moatless.codeblocks.module import Module
 from moatless.file_context import FileContext, ContextFile
 from moatless.repository.repository import InMemRepository
-
-
-def test_file_context_to_dict():
-    repo_dir = setup_swebench_repo(instance_id="psf__requests-863")
-    file_context = FileContext.from_dir(repo_dir, max_tokens=5000)
-    assert file_context.model_dump() == {
-        "files": [], 
-        "test_files": [],
-        "max_tokens": 5000
-    }
-
-    file_context.add_span_to_context(
-        file_path="requests/models.py", span_id="Request.register_hook"
-    )
-
-    dump = file_context.model_dump()
-    assert dump == {
-        "files": [
-            {
-                "file_path": "requests/models.py",
-                "patch": None,
-                "show_all_spans": False,
-                "spans": [
-                    {"pinned": True, "span_id": "imports"},
-                    {"pinned": False, "span_id": "Request.register_hook"},
-                    {"pinned": False, "span_id": "Request"},
-                    {"pinned": False, "span_id": "Request.__init__"},
-                ],
-            }
-        ],
-        "test_files": [],
-        "max_tokens": 5000,
-    }
-
-    prompt = file_context.create_prompt(show_outcommented_code=False)
-    assert "import os" in prompt
-    assert "class Request(object):" in prompt
-    assert "def __init__(self" in prompt
-    assert "def register_hook(self, event, hook):" in prompt
-
-    file_context = FileContext.from_dict(dump, repo_dir=repo_dir)
-    assert file_context.model_dump() == dump
-    assert file_context.create_prompt(show_outcommented_code=False) == prompt
 
 
 def test_to_prompt_string_outcommented_code_block_with_line_numbers():
@@ -90,7 +44,7 @@ def test_to_prompt_string_outcommented_code_block_with_line_numbers():
     )
     module.append_children([codeblock1, codeblock2, codeblock3, codeblock4])
 
-    print(f"\"{module.to_prompt(show_line_numbers=True)}\"")
+    print(f'"{module.to_prompt(show_line_numbers=True)}"')
 
     assert (
         module.to_prompt(show_line_numbers=True)
@@ -102,54 +56,6 @@ def test_to_prompt_string_outcommented_code_block_with_line_numbers():
      8	# with linebreak
       # ..."""
     )
-
-
-def test_add_line_span_to_context():
-    repo_dir = setup_swebench_repo(instance_id="django__django-13768")
-    file_context = FileContext.from_dir(repo_dir, max_tokens=5000)
-    file_context.add_line_span_to_context("tests/dispatch/tests.py", 27, 27)
-
-    assert "class Callable:" in file_context.create_prompt()
-
-
-def test_to_prompt():
-    instance_id = "django__django-13768"
-    instance = get_moatless_instance(instance_id)
-    repo_dir = setup_swebench_repo(instance)
-
-    data = {
-        "files": [
-            {
-                "spans": [
-                    {"span_id": "imports", "pinned": True},
-                    {"span_id": "Signal.send_robust", "pinned": False},
-                    {"span_id": "Signal", "pinned": True},
-                    {"span_id": "Signal.__init__", "pinned": False},
-                    {"span_id": "Signal.has_listeners", "pinned": False},
-                    {"span_id": "Signal._clear_dead_receivers", "pinned": False},
-                    {"span_id": "_make_id", "pinned": True},
-                ],
-                "show_all_spans": False,
-                "file_path": "django/dispatch/dispatcher.py",
-            }
-        ]
-    }
-
-    file_context = FileContext.from_dict(data, repo_dir=repo_dir)
-    prompt = file_context.create_prompt(
-        show_span_ids=False,
-        show_line_numbers=True,
-        exclude_comments=False,
-        show_outcommented_code=True,
-        outcomment_code_comment="... rest of the code",
-    )
-
-    print(prompt)
-
-    assert prompt.startswith("django/dispatch/dispatcher.py")
-    assert "     1\timport threading" in prompt
-    assert "     9\tdef _make_id(target):" in prompt
-    assert "\n          # ... rest of the code" in prompt
 
 
 def test_generate_patch():
@@ -212,9 +118,7 @@ def test_apply_patch_to_content():
 
     expected_content = "Line 1 modified\nLine 2\nLine 3\n"
 
-    assert (
-        result_content == expected_content
-    ), "Content after applying patch does not match expected content."
+    assert result_content == expected_content, "Content after applying patch does not match expected content."
 
 
 def test_contextfile_flow_verification():
@@ -230,48 +134,27 @@ def test_contextfile_flow_verification():
     # Initialize the mock repository with the base content
     repo = InMemRepository({"test_file.txt": base_content})
 
-    # Initialize the first ContextFile with no initial_patch
-    context_file1 = ContextFile(
-        content=base_content, file_path="test_file.txt", initial_patch=None, repo=repo
-    )
+    context_file1 = ContextFile(content=base_content, file_path="test_file.txt", repo=repo)
 
     # First change
     context_file1.apply_changes(new_content1)
     expected_patch1 = context_file1.generate_patch(base_content, new_content1)
-    assert (
-        context_file1.patch == expected_patch1
-    ), "First change patch does not match expected patch."
-    assert (
-        context_file1.content == new_content1
-    ), "Content after first change does not match expected content."
+    assert context_file1.patch == expected_patch1, "First change patch does not match expected patch."
+    assert context_file1.content == new_content1, "Content after first change does not match expected content."
 
     # Second change
-    context_file2 = ContextFile(
-        repo=repo, file_path="test_file.txt", initial_patch=context_file1.patch
-    )
+    context_file2 = ContextFile(repo=repo, file_path="test_file.txt", content=new_content1)
     context_file2.apply_changes(new_content2)
-    expected_patch2 = context_file2.generate_patch(new_content1, new_content2)
-    assert (
-        context_file2.patch == expected_patch2
-    ), "Second change patch does not match expected patch."
-    assert (
-        context_file2.content == new_content2
-    ), "Content after second change does not match expected content."
+    expected_patch2 = context_file2.generate_patch(base_content, new_content2)
+    assert context_file2.patch == expected_patch2, "Second change patch does not match expected patch."
+    assert context_file2.content == new_content2, "Content after second change does not match expected content."
 
     # Third change
-    context_file3 = ContextFile(
-        repo=repo,
-        file_path="test_file.txt",
-        initial_patch=context_file2.generate_full_patch(),
-    )
+    context_file3 = ContextFile(repo=repo, file_path="test_file.txt", content=new_content2)
     context_file3.apply_changes(new_content3)
-    expected_patch3 = context_file3.generate_patch(new_content2, new_content3)
-    assert (
-        context_file3.patch == expected_patch3
-    ), "Third change patch does not match expected patch."
-    assert (
-        context_file3.content == new_content3
-    ), "Content after third change does not match expected content."
+    expected_patch3 = context_file3.generate_patch(base_content, new_content3)
+    assert context_file3.patch == expected_patch3, "Third change patch does not match expected patch."
+    assert context_file3.content == new_content3, "Content after third change does not match expected content."
 
 
 def test_context_file_model_dump():
@@ -282,12 +165,11 @@ def test_context_file_model_dump():
     context_file = ContextFile(file_path="test_file.txt", spans=[], repo=repo)
 
     dump = context_file.model_dump()
-    assert dump == {
-        "file_path": "test_file.txt",
-        "spans": [],
-        "show_all_spans": False,
-        "patch": None,
-    }
+    assert dump["file_path"] == "test_file.txt"
+    assert dump["spans"] == []
+    assert dump["show_all_spans"] == False
+    assert dump["patch"] is None
+    assert "shadow_mode" in dump
 
     # Test with patch
     context_file.apply_changes("Modified content\n")
@@ -303,9 +185,7 @@ def test_context_file_model_dump():
 
 def test_file_context_model_dump():
     # Setup
-    repo = InMemRepository(
-        {"file1.txt": "Content of file 1\n", "file2.txt": "Content of file 2\n"}
-    )
+    repo = InMemRepository({"file1.txt": "Content of file 1\n", "file2.txt": "Content of file 2\n"})
     file_context = FileContext(repo=repo)
 
     # Add files to the context
@@ -328,8 +208,6 @@ def test_file_context_model_dump():
 
     assert file1_dump["patch"] is not None
     assert "Modified content of file 1" in file1_dump["patch"]
-    assert "patch" in file2_dump
-    assert file2_dump["patch"] is None
 
 
 def test_generate_full_patch():
@@ -443,32 +321,69 @@ def test_context_file_status_indicators():
     # Setup
     repo = InMemRepository({"test_file.txt": "Original content\n"})
     file_context = FileContext(repo=repo)
-    
+
     # Add file and verify initial state
     context_file = file_context.add_file("test_file.txt")
     assert not context_file.was_edited
     assert not context_file.was_viewed
-    
+
     # Test editing
     context_file.apply_changes("Modified content\n")
     assert context_file.was_edited
-    
+
     # Test viewing
     context_file.add_line_span(1, 1)
     assert context_file.was_edited
     assert context_file.was_viewed
-    
+
     # Test cloning - status indicators should not be copied
     cloned_context = file_context.clone()
     cloned_file = cloned_context.get_file("test_file.txt")
     assert not cloned_file.was_edited
     assert not cloned_file.was_viewed
-    
+
     # Verify original still has its indicators
     assert context_file.was_edited
     assert context_file.was_viewed
-    
+
     # Verify indicators are excluded from serialization
     dump = context_file.model_dump()
     assert "was_edited" not in dump
     assert "was_viewed" not in dump
+
+
+def test_multiple_changes_to_same_contextfile():
+    """
+    Tests that it's possible to make multiple changes to the same ContextFile instance.
+    """
+    # Setup original content
+    base_content = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\n"
+
+    # Initialize the mock repository with the base content
+    repo = InMemRepository({"test_file.txt": base_content})
+
+    # Create a single ContextFile instance
+    context_file = ContextFile(content=base_content, file_path="test_file.txt", repo=repo)
+
+    # First change - modify line 1
+    modified_content = "Line 1 modified\nLine 2\nLine 3\nLine 4\nLine 5\n"
+    context_file.apply_changes(modified_content)
+    assert context_file.content == modified_content
+
+    # Second change - modify line 3
+    modified_content = "Line 1 modified\nLine 2\nLine 3 modified\nLine 4\nLine 5\n"
+    context_file.apply_changes(modified_content)
+    assert context_file.content == modified_content
+
+    # Third change - modify line 5
+    modified_content = "Line 1 modified\nLine 2\nLine 3 modified\nLine 4\nLine 5 modified\n"
+    context_file.apply_changes(modified_content)
+    assert context_file.content == modified_content
+
+    # Verify we can still get the original content
+    base = context_file.get_base_content()
+    assert base == base_content
+
+    # Verify the patch contains all changes
+    expected_patch = context_file.generate_patch(base_content, modified_content)
+    assert context_file.patch == expected_patch

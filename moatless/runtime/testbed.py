@@ -7,17 +7,20 @@ import string
 from datetime import datetime
 from typing import List
 
-from moatless.exceptions import RuntimeError
-from moatless.repository import GitRepository
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.runtime.runtime import TestResult, TestStatus
-from moatless.schema import RankedFileSpan
+from opentelemetry import trace
 from testbeds.schema import EvaluationResult, TraceItem
 from testbeds.sdk import TestbedSDK
 from testbeds.sdk.exceptions import TestbedError
 
+from moatless.exceptions import RuntimeError
+from moatless.repository import GitRepository
+from moatless.repository.repository import Repository
+from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.schema import RankedFileSpan
+from moatless.testing.schema import TestResult, TestStatus
+
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 
 class TestbedEnvironment(RuntimeEnvironment):
@@ -26,23 +29,188 @@ class TestbedEnvironment(RuntimeEnvironment):
         repository: Repository,
         testbed_sdk: TestbedSDK | None = None,
         instance: dict | None = None,
+        instance_id: str | None = None,
         log_dir: str | None = None,
         enable_cache: bool = False,
         run_id: str | None = None,
+        rerun_failing_tests: bool = False,
+        include_relevant_files: bool = False,
     ):
+        # Add diagnostic logging
+        logger.info(f"Creating TestbedEnvironment instance. ID: {instance_id}, Run ID: {run_id}")
+
         self.testbed_sdk = testbed_sdk or TestbedSDK(enable_cache=enable_cache)
         self.repository = repository
         self.instance = instance
+        if instance_id:
+            self.instance_id = instance_id
+        else:
+            self.instance_id = instance["instance_id"] if instance else None
+
+        if not self.instance_id:
+            raise RuntimeError("No instance ID or testbed ID provided")
+
         self.tests_to_ignore = []
         self.log_dir = log_dir
         self._test_cache = {} if enable_cache else None
         self.run_id = run_id or "".join(random.choices(string.ascii_lowercase, k=6))
+        self._client = None
+        self.rerun_failing_tests = rerun_failing_tests
+        self.include_relevant_files = include_relevant_files
+        self.testbed_id = None
 
     @classmethod
     def from_instance(cls, instance: dict, repository: GitRepository, **kwargs):
         return cls(testbed_sdk=TestbedSDK(), repository=repository, instance=instance, **kwargs)
 
-    def _generate_cache_key(self, test_files: List[str] | None, patch: str | None = None) -> str:
+    @tracer.start_as_current_span("TestbedEnvironment.__aenter__")
+    async def __aenter__(self):
+        """Enter the async context manager."""
+        logger.info(f"Setting up testbed environment for instance {self.instance_id}")
+
+        if self.testbed_id:
+            logger.info(f"Using existing testbed ID: {self.testbed_id}")
+        else:
+            client = await self.testbed_sdk.create_async_client(
+                instance_id=self.instance_id, log_dir=self.log_dir, run_id=self.run_id
+            )
+
+            try:
+                testbed = await client.get_or_create_testbed_async()
+                self.testbed_id = testbed.testbed_id
+                logger.info(f"Created new testbed with ID: {self.testbed_id}")
+
+            finally:
+                # Don't destroy the client here since we're just getting the testbed ID
+                # and not performing other operations
+                pass
+
+        return self
+
+    @tracer.start_as_current_span("TestbedEnvironment.__aexit__")
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit the async context manager."""
+        if self.testbed_id:
+            logger.info(f"Destroying testbed with ID: {self.testbed_id}")
+            client = await self.testbed_sdk.create_async_client(
+                instance_id=self.instance_id, testbed_id=self.testbed_id, log_dir=self.log_dir, run_id=self.run_id
+            )
+            try:
+                await client.destroy()
+                logger.info(f"Testbed {self.testbed_id} destroyed")
+            except Exception as e:
+                logger.error(f"Error destroying testbed {self.testbed_id}: {e}")
+
+    @tracer.start_as_current_span("TestbedEnvironment.run_tests")
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
+        async with await self.testbed_sdk.create_async_client(
+            instance_id=self.instance_id,
+            testbed_id=self.testbed_id,
+            log_dir=self.log_dir,
+            run_id=self.run_id,
+        ) as client:
+            logger.info(f"Starting test run for instance {self.instance_id} with run_id {self.run_id}.")
+            response = await client.run_tests(test_files=test_files, patch=patch, timeout=600)
+            logger.info(f"Test run response test results: {len(response.test_results)}")
+        log_content = ""
+
+        if response.output:
+            log_content = "# Test Run\n\n"
+            log_content += f"Files: {test_files}"
+            if patch:
+                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+            log_content += f"\n\n## Log:\n{response.output}\n"
+
+        if response.test_results:
+            log_content += "\n\n## Testbed test results:"
+            test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
+            log_content += f"```json\n{test_results_json}\n```"
+
+        # Filter using cached tests first
+        test_results = self._filter_failing_tests(response.test_results, patch=patch)
+
+        # Now check for failures only in the filtered results
+        if (
+            self.rerun_failing_tests
+            and patch
+            and any(test.status in [TestStatus.ERROR, TestStatus.FAILED] for test in test_results)
+        ):
+            # Only run baseline tests if we haven't cached any failing tests yet
+            if not self.tests_to_ignore:
+                # Get list of failing test files
+                failing_test_files = {
+                    test.file_path for test in test_results if test.status in [TestStatus.ERROR, TestStatus.FAILED]
+                }
+
+                async with await self.testbed_sdk.create_async_client(
+                    instance_id=self.instance_id,
+                    testbed_id=self.testbed_id,
+                    log_dir=self.log_dir,
+                    run_id=self.run_id,
+                ) as client:
+                    baseline_response = await client.run_tests(
+                        test_files=list(failing_test_files), patch=None, timeout=600
+                    )
+                    logger.info(f"Baseline response test results: {len(baseline_response.test_results)}")
+
+                self._filter_failing_tests(baseline_response.test_results, patch=None)
+                # Re-filter the results with any newly cached tests
+                test_results = self._filter_failing_tests(response.test_results, patch=patch)
+
+        mapped_results = await self._map_test_results_to_issues(test_results)
+
+        # Cache results if caching is enabled
+        if self._test_cache is not None:
+            cache_key = self._generate_cache_key(test_files, patch)
+            self._test_cache[cache_key] = mapped_results
+
+        return mapped_results
+
+    @tracer.start_as_current_span("TestbedEnvironment.evaluate")
+    async def evaluate(self, patch: str) -> EvaluationResult | None:
+        async with await self.testbed_sdk.create_async_client(
+            instance_id=self.instance_id,
+            testbed_id=self.testbed_id,
+            log_dir=self.log_dir,
+            run_id=self.run_id,
+        ) as client:
+            logger.info(f"Starting evaluation for instance {self.instance_id} with run_id {self.run_id}.")
+
+            log_content = ""
+            try:
+                if not patch.endswith("\n"):
+                    patch += "\n"
+
+                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
+
+                evaluation_result = await client.run_evaluation(patch=patch)
+
+                if evaluation_result.output:
+                    log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
+
+                log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
+
+                return evaluation_result
+
+            except TestbedError as e:
+                logger.error(f"Error running evaluation. Cause: {e}")
+                log_content += f"\n\n## Error:\n{e}"
+            except Exception as e:
+                logger.exception("Error running evaluation")
+                log_content += f"\n\n## Error:\n{e}"
+                import traceback
+
+                traceback = traceback.format_exc()
+                log_content += f"\n\n# Traceback:\n{traceback}"
+            finally:
+                if self.log_dir:
+                    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    with open(f"{self.log_dir}/{datetime_str}_evaluation.md", "w") as f:
+                        f.write(log_content)
+
+        return None
+
+    def _generate_cache_key(self, test_files: list[str] | None, patch: str | None = None) -> str:
         """Generate a unique cache key based on test files and patch content"""
         key_parts = []
         if test_files:
@@ -55,7 +223,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         combined = "|".join(key_parts)
         return hashlib.sha256(combined.encode()).hexdigest()
 
-    def _filter_failing_tests(self, test_results: List[TestResult], patch: str | None = None) -> List[TestResult]:
+    def _filter_failing_tests(self, test_results: list[TestResult], patch: str | None = None) -> list[TestResult]:
         """
         Filter out tests that fail without any changes to isolate patch-specific failures.
 
@@ -97,159 +265,27 @@ class TestbedEnvironment(RuntimeEnvironment):
 
         return filtered_results
 
-    def run_tests(self, patch: str | None = None, test_files: List[str] | None = None) -> List[TestResult]:
-        if patch and not patch.endswith("\n"):
-            patch += "\n"
-
-        # Check cache if enabled
-        if self._test_cache is not None and patch:
-            cache_key = self._generate_cache_key(test_files, patch)
-            cached_results = self._test_cache.get(cache_key)
-            if cached_results:
-                return cached_results
-
-        log_content = "# Test Run\n\n"
-        log_content += f"Files: {test_files}"
-        if patch:
-            log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
-
-        try:
-            with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"],
-                log_dir=self.log_dir,
-                run_id=self.run_id,
-            ) as testbed:
-                response = testbed.run_tests(test_files=test_files, patch=patch, timeout=600)
-
-                if response.output:
-                    log_content += f"\n\n## Log:\n{response.output}\n"
-
-                if response.test_results:
-                    log_content += f"\n\n## Testbed test results:"
-                    test_results_json = response.model_dump_json(exclude={"output"}, indent=2)
-                    log_content += f"```json\n{test_results_json}\n```"
-
-            # Filter using cached tests first
-            test_results = self._filter_failing_tests(response.test_results, patch=patch)
-
-            # Now check for failures only in the filtered results
-            if patch and any(test.status in [TestStatus.ERROR, TestStatus.FAILED] for test in test_results):
-                # Only run baseline tests if we haven't cached any failing tests yet
-                if not self.tests_to_ignore:
-                    # Get list of failing test files
-                    failing_test_files = {
-                        test.file_path for test in test_results if test.status in [TestStatus.ERROR, TestStatus.FAILED]
-                    }
-
-                    with self.testbed_sdk.create_client(
-                        instance_id=self.instance["instance_id"],
-                        log_dir=self.log_dir,
-                        run_id=self.run_id,
-                    ) as testbed:
-                        baseline_response = testbed.run_tests(
-                            test_files=list(failing_test_files), patch=None, timeout=600
-                        )
-                        self._filter_failing_tests(baseline_response.test_results, patch=None)
-                        # Re-filter the results with any newly cached tests
-                        test_results = self._filter_failing_tests(response.test_results, patch=patch)
-
-            mapped_results = self._map_test_results_to_issues(test_results)
-
-            # Cache results if caching is enabled
-            if self._test_cache is not None:
-                cache_key = self._generate_cache_key(test_files, patch)
-                self._test_cache[cache_key] = mapped_results
-
-            return mapped_results
-
-        except Exception as e:
-            logger.exception(f"Error running tests {test_files}")
-            log_content += f"\n\n## Error:\n{e}"
-            import traceback
-
-            traceback = traceback.format_exc()
-            log_content += f"\n\n# Traceback:\n{traceback}"
-
-            if isinstance(e, TimeoutError):
-                logger.warning(
-                    f"Timeout running tests for instance {self.instance['instance_id']} and files {test_files}"
-                )
-                return []
-
-            raise RuntimeError(
-                f"Error running tests for instance {self.instance['instance_id']} and files {test_files}"
-            ) from e
-        finally:
-            if self.log_dir:
-                datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                with open(f"{self.log_dir}/{datetime_str}_test_run.md", "w") as f:
-                    f.write(log_content)
-
-    def evaluate(self, patch: str) -> EvaluationResult | None:
-        if not self.instance:
-            logger.warning("No instance provided for evaluation")
-            return None
-
-        logger.info(f"Running evaluation for instance {self.instance['instance_id']}. Run ID: {self.run_id}")
-
-        test_patch_files = self.instance.get("test_file_spans", {}).keys()
-
-        log_content = "# Evaluation\n\n"
-        log_content += f"Test files: {test_patch_files}"
-
-        try:
-            with self.testbed_sdk.create_client(
-                instance_id=self.instance["instance_id"],
-                log_dir=self.log_dir,
-                run_id=self.run_id,
-            ) as testbed:
-                if not patch.endswith("\n"):
-                    patch += "\n"
-
-                log_content += f"\n\n# Patch:\n```diff\n{patch}\n```"
-
-                evaluation_result = testbed.run_evaluation(patch=patch)
-
-                if evaluation_result.output:
-                    log_content += f"\n\n## Log:\n```\n{evaluation_result.output}\n```\n"
-
-                log_content += f"\n\n## Evaluation result:\n```json\n{evaluation_result.model_dump_json(indent=2)}\n```"
-                return evaluation_result
-        except TestbedError as e:
-            logger.error(f"Error running evaluation. Cause: {e}")
-            log_content += f"\n\n## Error:\n{e}"
-        except Exception as e:
-            logger.exception("Error running evaluation")
-            log_content += f"\n\n## Error:\n{e}"
-            import traceback
-
-            traceback = traceback.format_exc()
-            log_content += f"\n\n# Traceback:\n{traceback}"
-        finally:
-            if self.log_dir:
-                datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                with open(f"{self.log_dir}/{datetime_str}_evaluation.md", "w") as f:
-                    f.write(log_content)
-
-        return None
-
-    def _get_code_block(self, file_path: str, line_number: int):
+    async def _get_code_block(self, file_path: str, line_number: int):
         file = self.repository.get_file(file_path)
-        if not file or not file.module:
+        if not file:
             return None
 
-        block = file.module.find_first_by_start_line(line_number)
+        module = await file.async_module()
+        if not module:
+            return None
+
+        block = module.find_first_by_start_line(line_number)
         if not block or not block.belongs_to_span:
             return None
 
         return block
 
-    def _relevant_files_from_trace(self, trace_items: List[TraceItem]) -> List[RankedFileSpan]:
+    async def _relevant_files_from_trace(self, trace_items: list[TraceItem]) -> list[RankedFileSpan]:
         ranked_file_spans = []
         seen_spans = set()
 
         for i, trace_item in enumerate(trace_items):
-            block = self._get_code_block(trace_item.file_path, trace_item.line_number)
+            block = await self._get_code_block(trace_item.file_path, trace_item.line_number)
 
             if not block:
                 continue
@@ -285,7 +321,7 @@ class TestbedEnvironment(RuntimeEnvironment):
         filtered_out_lines = [line for line in lines if line.startswith("E ") or line.startswith("> ")]
         return hashlib.sha256("\n".join(filtered_out_lines).encode()).hexdigest()
 
-    def _map_test_results_to_issues(self, test_results: List) -> List[TestResult]:
+    async def _map_test_results_to_issues(self, test_results: list) -> list[TestResult]:
         file_cache = {}
 
         def get_cached_file(file_path: str):
@@ -337,8 +373,6 @@ class TestbedEnvironment(RuntimeEnvironment):
                 logger.info(f"Skipping test {test_result.method} in {test_result.file_path} with no failure output")
                 test_output = None
             else:
-                # Add log to see failure output
-                logger.info(f"Test failure output for {test_result.file_path}: {test_result.failure_output[:200]}...")
                 failure_sections = test_result.failure_output.split(
                     "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
                 )
@@ -360,7 +394,9 @@ class TestbedEnvironment(RuntimeEnvironment):
                     else:
                         test_output = test_result.failure_output
 
-            relevant_files = self._relevant_files_from_trace(trace_items)
+            relevant_files = []
+            if self.include_relevant_files:
+                relevant_files = await self._relevant_files_from_trace(trace_items)
 
             if test_result.method:
                 method = test_result.method

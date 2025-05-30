@@ -10,7 +10,7 @@ from llama_index.core.node_parser.node_utils import logger
 from llama_index.core.schema import BaseNode, TextNode
 from llama_index.core.utils import get_tokenizer, get_tqdm_iterable
 
-from moatless.codeblocks import create_parser, CodeParser
+from moatless.codeblocks import CodeParser, create_parser
 from moatless.codeblocks.codeblocks import CodeBlock, CodeBlockType, PathTree
 from moatless.index.code_node import CodeNode
 from moatless.index.settings import CommentStrategy
@@ -137,7 +137,7 @@ class EpicSplitter(NodeParser):
                 if parse_time > 1e9:
                     logger.warning(f"Parsing file {file_path} took {parse_time / 1e9:.2f} seconds.")
 
-            except Exception as e:
+            except Exception:
                 logger.exception(f"Failed to use epic splitter to split {file_path}. Fallback to treesitter_split().")
                 # TODO: Fall back to treesitter or text split
                 continue

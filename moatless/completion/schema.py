@@ -1,10 +1,23 @@
 import json
-from typing import ClassVar, Any, Self, Union, TypedDict, Literal, Iterable, Required, Optional, List
+import logging
+from collections.abc import Iterable
+from typing import (
+    ClassVar,
+    List,
+    Literal,
+    Optional,
+    TypeVar,
+    TypedDict,
+    Union,
+)
 
 from docstring_parser import parse
-from pydantic import BaseModel, ValidationError, ConfigDict
+from pydantic import BaseModel, Field, ValidationError
 
-from moatless.completion.model import logger
+logger = logging.getLogger(__name__)
+
+# Define a type variable as a replacement for Self in Python 3.10
+T = TypeVar("T")
 
 
 class ChatCompletionCachedContent(TypedDict):
@@ -12,25 +25,32 @@ class ChatCompletionCachedContent(TypedDict):
 
 
 class ChatCompletionToolParamFunctionChunk(TypedDict, total=False):
-    name: Required[str]
+    name: str
     description: str
     parameters: dict
 
 
 class ChatCompletionToolParam(TypedDict, total=False):
-    cache_control: ChatCompletionCachedContent
     type: Union[Literal["function"], str]
     function: ChatCompletionToolParamFunctionChunk
+    cache_control: Optional[ChatCompletionCachedContent]
 
 
 class ChatCompletionTextObject(TypedDict):
     type: Literal["text"]
     text: str
-    cache_control: ChatCompletionCachedContent
+    cache_control: Optional[ChatCompletionCachedContent]
+
+
+class ChatCompletionThinkingObject(TypedDict):
+    type: Literal["thinking"]
+    thinking: Optional[str]
+    signature: Optional[str]
+    data: Optional[str]
 
 
 class ChatCompletionImageUrlObject(TypedDict, total=False):
-    url: Required[str]
+    url: str
     detail: str
 
 
@@ -71,13 +91,14 @@ class ChatCompletionAssistantToolCall(TypedDict):
 
 
 class ChatCompletionMessage(TypedDict, total=False):
-    role: Required[Literal["assistant", "user", "tool"]]
-    content: Optional[Union[str, Iterable[ChatCompletionTextObject]]]
+    role: Literal["assistant", "user", "tool"]
+    content: Optional[MessageContent]
 
 
 class ChatCompletionAssistantMessage(ChatCompletionMessage, total=False):
     name: Optional[str]
-    tool_calls: Optional[List[ChatCompletionAssistantToolCall]]
+    content: Optional[MessageContent]
+    tool_calls: Optional[list[ChatCompletionAssistantToolCall]]
     function_call: Optional[ChatCompletionToolCallFunctionChunk]
     cache_control: Optional[ChatCompletionCachedContent]
 
@@ -87,10 +108,10 @@ class ChatCompletionToolMessage(ChatCompletionMessage):
 
 
 class ChatCompletionSystemMessage(TypedDict, total=False):
-    role: Required[Literal["system"]]
-    content: Required[Union[str, List]]
+    role: Literal["system"]
+    content: Union[str, list]
     name: str
-    cache_control: ChatCompletionCachedContent
+    cache_control: Optional[ChatCompletionCachedContent]
 
 
 AllMessageValues = Union[
@@ -103,6 +124,8 @@ AllMessageValues = Union[
 
 class NameDescriptor:
     def __get__(self, obj, cls=None) -> str:
+        if cls is None:
+            return "Unknown"
         if hasattr(cls, "model_config") and "title" in cls.model_config:
             return cls.model_config["title"]
         return cls.__name__
@@ -113,6 +136,19 @@ class ResponseSchema(BaseModel):
 
     @classmethod
     def description(cls):
+        """
+        Return the description of the schema.
+        First tries to get from docstring, then falls back to schema description.
+        """
+        # Direct docstring extraction
+        if cls.__doc__:
+            # Clean the docstring by removing leading/trailing whitespace and splitting by lines
+            doc_lines = [line.strip() for line in cls.__doc__.strip().split("\n") if line.strip()]
+            if doc_lines:
+                # Return the first non-empty line as the short description
+                return doc_lines[0]
+
+        # Fall back to schema description if docstring extraction fails
         return cls.model_json_schema().get("description", "")
 
     @classmethod
@@ -157,14 +193,20 @@ class ResponseSchema(BaseModel):
                 if k == "items" and isinstance(v, dict) and "$ref" in v:
                     # Handle array items that use $ref
                     ref_path = v["$ref"]
-                    if ref_path.startswith("#/$defs/"):
+                    if isinstance(ref_path, str) and ref_path.startswith("#/$defs/"):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
-                            result[k] = defs[ref_name].copy()
+                            # Create a new dict with resolved reference
+                            resolved = defs[ref_name].copy()
+                            # Copy over any other properties from the original item object
+                            for k2, v2 in v.items():
+                                if k2 != "$ref":
+                                    resolved[k2] = v2
+                            result[k] = resolve_refs(resolved, defs)  # Recursively resolve any nested refs
                             continue
                 elif k == "$ref":
                     ref_path = v
-                    if ref_path.startswith("#/$defs/"):
+                    if isinstance(ref_path, str) and ref_path.startswith("#/$defs/"):
                         ref_name = ref_path.split("/")[-1]
                         if ref_name in defs:
                             # Create a new dict with all properties except $ref
@@ -232,7 +274,7 @@ class ResponseSchema(BaseModel):
         }
 
     @classmethod
-    def model_validate_xml(cls, xml_text: str) -> Self:
+    def model_validate_xml(cls, xml_text: str) -> T:
         """Parse XML format into model fields."""
         parsed_input = {}
         # Get fields from the class's schema
@@ -267,7 +309,7 @@ class ResponseSchema(BaseModel):
         cls,
         json_data: str | bytes | bytearray,
         **kwarg,
-    ) -> Self:
+    ) -> T:
         if not json_data:
             raise ValidationError("Message is empty")
 
@@ -287,22 +329,35 @@ class ResponseSchema(BaseModel):
             cleaned_json = json.dumps(cleaned_data)
             return super().model_validate_json(cleaned_json, **kwarg)
 
-        except (json.JSONDecodeError, ValidationError) as e:
+        except (json.JSONDecodeError, ValidationError):
             # If direct parsing fails, try more aggressive cleanup
-            logger.warning(f"Initial JSON parse failed, attempting alternate cleanup")
+            logger.warning("Initial JSON parse failed, attempting alternate cleanup")
 
             message = json_data
 
-            cleaned_message = "".join(char for char in message if ord(char) >= 32 or char in "\n\r\t")
-            if cleaned_message != message:
-                logger.info(f"parse_json() Cleaned control chars: {repr(message)} -> {repr(cleaned_message)}")
-            message = cleaned_message
+            # Ensure message is a string
+            if not isinstance(message, str):
+                message_str = message.decode("utf-8") if isinstance(message, (bytes, bytearray)) else str(message)
+            else:
+                message_str = message
+
+            # Clean control characters
+            cleaned_chars = []
+            for char in message_str:
+                # Only keep printable characters and specific whitespace
+                if ord(char) >= 32 or char in "\n\r\t":
+                    cleaned_chars.append(char)
+            cleaned_message = "".join(cleaned_chars)
+
+            if cleaned_message != message_str:
+                logger.info(f"parse_json() Cleaned control chars: {repr(message_str)} -> {repr(cleaned_message)}")
+            message_str = cleaned_message
 
             # Replace None with null
-            message = message.replace(": None", ": null").replace(":None", ":null")
+            message_str = message_str.replace(": None", ": null").replace(":None", ":null")
 
             # Extract JSON and try parsing again
-            message, all_jsons = extract_json_from_message(message)
+            message, all_jsons = extract_json_from_message(message_str)
             if all_jsons:
                 if len(all_jsons) > 1:
                     logger.warning(f"Found multiple JSON objects, using the first one. All found: {all_jsons}")
@@ -311,8 +366,6 @@ class ResponseSchema(BaseModel):
             # Normalize line endings
             if isinstance(message, str):
                 message = message.replace("\r\n", "\n").replace("\r", "\n")
-
-            logger.info(f"Final message to validate: {repr(message)}")
 
             return super().model_validate_json(message if isinstance(message, str) else json.dumps(message), **kwarg)
 
@@ -353,7 +406,7 @@ class ResponseSchema(BaseModel):
         Args:
             xml_fields: Dictionary mapping field names to their descriptions
         """
-        schema = [f"Requires the following XML format:"]
+        schema = ["Requires the following XML format:"]
 
         # Build example XML structure
         example = []
@@ -361,6 +414,23 @@ class ResponseSchema(BaseModel):
             example.append(f"<{field_name}>{field_desc}</{field_name}>")
 
         return "\n".join(schema + example)
+
+    @classmethod
+    def get_few_shot_examples(cls) -> list["FewShotExample"]:
+        """
+        Returns a list of few-shot examples specific to this action.
+        Override this method in subclasses to provide custom examples.
+        """
+        return []
+
+
+class FewShotExample(BaseModel):
+    user_input: str = Field(..., description="The user's input/question")
+    action: ResponseSchema = Field(..., description="The expected response")
+
+    @classmethod
+    def create(cls, user_input: str, action: ResponseSchema) -> "FewShotExample":
+        return cls(user_input=user_input, action=action)
 
 
 def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:

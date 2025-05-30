@@ -4,11 +4,13 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Set, Tuple
+from typing import List, Optional, Literal, Any
+from unittest import TestResult
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 from unidiff import PatchSet
 
+from moatless.artifacts.artifact import ArtifactChange
 from moatless.codeblocks import CodeBlockType, get_parser_by_path
 from moatless.codeblocks.codeblocks import (
     BlockSpan,
@@ -19,12 +21,14 @@ from moatless.codeblocks.codeblocks import (
 )
 from moatless.codeblocks.module import Module
 from moatless.repository import FileRepository
+from moatless.repository.git import GitRepository
 from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment, TestResult
-from moatless.runtime.runtime import TestStatus
+from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.schema import FileWithSpans
+from moatless.testing.schema import TestFile
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
+from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +56,6 @@ class ContextFile(BaseModel):
 
     Attributes:
         file_path (str): The path to the file within the repository.
-        accumulated_patch (Optional[str]): A Git-formatted patch representing all changes from the original content.
         patch (Optional[str]): A Git-formatted patch representing the latest changes applied in this ContextFile.
         spans (List[ContextSpan]): A list of spans associated with this file.
         show_all_spans (bool): A flag to indicate whether to display all spans.
@@ -63,31 +66,28 @@ class ContextFile(BaseModel):
         None,
         description="Git-formatted patch representing the latest changes applied in this ContextFile.",
     )
-    spans: List[ContextSpan] = Field(
+
+    spans: list[ContextSpan] = Field(
         default_factory=list,
         description="List of context spans associated with this file.",
     )
     show_all_spans: bool = Field(False, description="Flag to indicate whether to display all context spans.")
+    shadow_mode: bool = Field(default=True)
+
     was_edited: bool = Field(default=False, exclude=True)
     was_viewed: bool = Field(default=False, exclude=True)
 
-    # Private attributes
-    _initial_patch: Optional[str] = PrivateAttr(None)
     _cached_base_content: Optional[str] = PrivateAttr(None)
     _cached_content: Optional[str] = PrivateAttr(None)
     _cached_module: Optional[Module] = PrivateAttr(None)
 
     _repo: Repository = PrivateAttr()
 
-    _cache_valid: bool = PrivateAttr(False)
-
     _is_new: bool = PrivateAttr(False)
 
     def __init__(
         self,
         repo: Optional[Repository],
-        file_path: str,
-        initial_patch: Optional[str] = None,
         **data,
     ):
         """
@@ -95,14 +95,11 @@ class ContextFile(BaseModel):
 
         Args:
             repo (Optional[Repository]): The repository instance, can be None when reconstructing from dict
-            file_path (str): The path to the file within the repository
-            initial_patch (Optional[str]): A Git-formatted patch representing accumulated changes
-            **data: Additional keyword arguments
         """
-        super().__init__(file_path=file_path, **data)
+        super().__init__(**data)
         self._repo = repo
-        self._initial_patch = initial_patch
-        self._is_new = False if repo is None else not repo.file_exists(file_path)
+        self._is_new = False if repo is None else not repo.file_exists(self.file_path)
+        self._cached_content = data.get("content", None)  # Store initial content if provided
 
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
@@ -114,17 +111,17 @@ class ContextFile(BaseModel):
 
     def get_base_content(self) -> str:
         """
-        Retrieves the base content of the file by applying the initial_patch to the original content.
+        Retrieves the base content of the file.
 
         Returns:
             str: The base content of the file.
 
         Raises:
             FileNotFoundError: If the file does not exist in the repository.
-            Exception: If applying the initial_patch fails.
         """
         if not self._repo:
-            return None
+            logger.warning("No repo set")
+            raise RuntimeError("No repository set on file context")
 
         if self._cached_base_content is not None:
             return self._cached_base_content
@@ -134,13 +131,11 @@ class ContextFile(BaseModel):
         else:
             original_content = self._repo.get_file_content(self.file_path)
 
-        if self._initial_patch:
-            try:
-                self._cached_base_content = self.apply_patch_to_content(original_content, self._initial_patch)
-            except Exception as e:
-                raise Exception(f"Failed to apply initial patch: {e}")
-        else:
-            self._cached_base_content = original_content
+        # Ensure original_content is a string, not None
+        if original_content is None:
+            original_content = ""
+
+        self._cached_base_content = original_content
 
         return self._cached_base_content
 
@@ -170,7 +165,7 @@ class ContextFile(BaseModel):
             return self._cached_content
 
         base_content = self.get_base_content()
-        if self.patch:
+        if self.patch and self.shadow_mode:
             try:
                 self._cached_content = self.apply_patch_to_content(base_content, self.patch)
             except Exception as e:
@@ -193,35 +188,71 @@ class ContextFile(BaseModel):
         """
         self.was_edited = True
 
-        base_content = self.get_base_content()
-        new_patch = self.generate_patch(base_content, updated_content)
-        self.patch = new_patch
+        if not self.shadow_mode:
+            logger.info(f"Saving file {self.file_path} to disk")
+            self._repo.save_file(self.file_path, updated_content)
+            self._cached_content = None
+
+            if isinstance(self._repo, GitRepository):
+                self.patch = self._repo.file_diff(self.file_path)
+
+        else:
+            base_content = self.get_base_content()
+            self.patch = self.generate_patch(base_content, updated_content)
 
         new_span_ids = set()
 
-        # Track modified lines from patch
-        patch_set = PatchSet(io.StringIO(new_patch))
-        for patched_file in patch_set:
-            for hunk in patched_file:
-                # Get the line range for this hunk's changes
-                modified_start = None
-                modified_end = None
+        # If no patch was generated (content identical), return empty set
+        if not self.patch:
+            return new_span_ids
 
-                for line in hunk:
-                    if line.is_added or line.is_removed:
-                        # Convert to 0-based line numbers
-                        current_line = line.target_line_no if line.is_added else line.source_line_no
-                        if current_line is not None:
-                            if modified_start is None:
-                                modified_start = current_line
-                            modified_end = current_line
+        try:
+            # Track modified lines from patch
+            patch_set = PatchSet(io.StringIO(self.patch))
+            for patched_file in patch_set:
+                for hunk in patched_file:
+                    # Get the line range for this hunk's changes
+                    modified_start = None
+                    modified_end = None
 
-                if modified_start is not None:
-                    # Add the modified line span to context
-                    span_ids = self.add_line_span(modified_start, modified_end)
-                    new_span_ids.update(span_ids)
+                    for line in hunk:
+                        if line.is_added or line.is_removed:
+                            # Convert to 0-based line numbers
+                            current_line = line.target_line_no if line.is_added else line.source_line_no
+                            if current_line is not None:
+                                if modified_start is None:
+                                    modified_start = current_line
+                                modified_end = current_line
 
-        # Invalidate cached content
+                    if modified_start is not None:
+                        # Add the modified line span to context
+                        span_ids = self.add_line_span(modified_start, modified_end)
+                        new_span_ids.update(span_ids)
+        except Exception as e:
+            # If parsing still fails despite our improved patch generation,
+            # fall back to a simple line-by-line comparison to identify changes
+            logger.warning(f"Failed to parse patch for {self.file_path}: {e}")
+
+            # Directly compare old and new content to find changed lines
+            if base_content and updated_content:
+                old_lines = base_content.splitlines()
+                new_lines = updated_content.splitlines()
+
+                # Find line numbers where content differs
+                for i, (old_line, new_line) in enumerate(zip(old_lines, new_lines)):
+                    if old_line != new_line:
+                        # Add 1 to convert to 1-based line numbers
+                        line_num = i + 1
+                        span_ids = self.add_line_span(line_num)
+                        new_span_ids.update(span_ids)
+
+                # Handle case where file was lengthened
+                if len(new_lines) > len(old_lines):
+                    for i in range(len(old_lines), len(new_lines)):
+                        line_num = i + 1
+                        span_ids = self.add_line_span(line_num)
+                        new_span_ids.update(span_ids)
+
         self._cached_content = None
         self._cached_module = None
 
@@ -241,23 +272,31 @@ class ContextFile(BaseModel):
         Raises:
             Exception: If the patch does not contain changes for the specified file or if a context mismatch occurs.
         """
-        patch_set = PatchSet(io.StringIO(patch))
-        patched_content = content
+        if not patch.strip():
+            return content
 
-        for patched_file in patch_set:
-            patched_file_path = patched_file.path
-            # Correctly strip 'a/' or 'b/' prefixes
-            if patched_file_path.startswith("a/"):
-                patched_file_path = patched_file_path[2:]
-            elif patched_file_path.startswith("b/"):
-                patched_file_path = patched_file_path[2:]
-            if os.path.normpath(patched_file_path) == os.path.normpath(self.file_path):
-                patched_content = self._apply_patched_file(patched_content, patched_file)
-                break
-        else:
-            raise Exception(f"Patch does not contain changes for file {self.file_path}")
+        try:
+            # Try using the unidiff library first
+            patch_set = PatchSet(io.StringIO(patch))
+            patched_content = content
 
-        return patched_content
+            for patched_file in patch_set:
+                patched_file_path = patched_file.path
+                # Correctly strip 'a/' or 'b/' prefixes
+                if patched_file_path.startswith("a/") or patched_file_path.startswith("b/"):
+                    patched_file_path = patched_file_path[2:]
+                if os.path.normpath(patched_file_path) == os.path.normpath(self.file_path):
+                    patched_content = self._apply_patched_file(patched_content, patched_file)
+                    break
+            else:
+                raise Exception(f"Patch does not contain changes for file {self.file_path}")
+
+            return patched_content
+
+        except Exception as e:
+            logger.warning(f"Failed to apply patch using unidiff: {e}")
+            # Fallback to a simple manual patch application
+            return self._apply_patch_manually(content, patch)
 
     def _apply_patched_file(self, content: str, patched_file) -> str:
         """
@@ -317,6 +356,131 @@ class ContextFile(BaseModel):
 
         return "".join(new_content_lines)
 
+    def _apply_patch_manually(self, content: str, patch: str) -> str:
+        """
+        Apply a patch manually when unidiff fails.
+        This is a fallback mechanism for problematic patches.
+        """
+        # If the patch doesn't look like a valid diff, return original content
+        if not patch.startswith("---") or "+++" not in patch or "@@" not in patch:
+            logger.warning("Patch doesn't look like a valid diff, returning original content")
+            return content
+
+        content_lines = content.splitlines()
+        result_lines = content_lines.copy()
+
+        # Find all hunks in the patch
+        hunks = []
+        current_hunk = None
+        hunk_start_line = 0
+        target_lines = []
+
+        for line in patch.splitlines():
+            if line.startswith("@@"):
+                # Parse the hunk header to extract line numbers
+                try:
+                    # Parse something like "@@ -27,11 +27,11 @@"
+                    hunk_header = line.split("@@")[1].strip()
+                    old_range = hunk_header.split(" ")[0]
+                    hunk_start_line = int(old_range.split(",")[0].lstrip("-"))
+
+                    # Start a new hunk
+                    if current_hunk:
+                        hunks.append((hunk_start_line, current_hunk))
+                    current_hunk = []
+                    target_lines = []
+                except Exception as e:
+                    logger.warning(f"Failed to parse hunk header: {e}")
+                    continue
+            elif current_hunk is not None:
+                if line.startswith("+"):
+                    # Added line
+                    target_lines.append(line[1:])
+                elif line.startswith("-"):
+                    # Removed line - keep track for context matching
+                    current_hunk.append(line[1:])
+                elif not line.startswith("\\"):
+                    # Context line - should match in both versions
+                    current_hunk.append(line)
+                    target_lines.append(line)
+
+        # Add the last hunk
+        if current_hunk:
+            hunks.append((hunk_start_line, current_hunk))
+
+        # Apply hunks in reverse order to avoid line number shifting
+        for start_line, hunk_lines in sorted(hunks, reverse=True):
+            # Find the best match for this hunk in the content
+            best_match_idx = self._find_best_match_for_hunk(content_lines, hunk_lines, start_line - 1)
+
+            if best_match_idx >= 0:
+                # Replace content at the matched position
+                hunk_target_idx = hunks.index((start_line, hunk_lines))
+                target_content = target_lines[hunk_target_idx]
+
+                # Delete old lines
+                del result_lines[best_match_idx : best_match_idx + len(hunk_lines)]
+
+                # Insert new content
+                for i, line in enumerate(target_content):
+                    result_lines.insert(best_match_idx + i, line)
+            else:
+                logger.warning(f"Could not find match for hunk at line {start_line}")
+
+        return "\n".join(result_lines)
+
+    def _find_best_match_for_hunk(self, content_lines, hunk_lines, expected_line_idx):
+        """
+        Find the best position in content_lines that matches the hunk lines.
+        Uses both the expected line index and a fuzzy matching approach.
+        """
+        if not hunk_lines:
+            return -1
+
+        # First try exact match at the expected position
+        if expected_line_idx < len(content_lines):
+            # Check if hunk can be applied at expected position
+            if all(
+                i + expected_line_idx < len(content_lines)
+                and (
+                    hl == content_lines[i + expected_line_idx]
+                    or hl.strip() == content_lines[i + expected_line_idx].strip()
+                )
+                for i, hl in enumerate(hunk_lines)
+            ):
+                return expected_line_idx
+
+        # If exact match failed, try fuzzy matching
+        # Look for the first line of the hunk
+        if not hunk_lines[0].strip():
+            # Skip empty lines for matching
+            first_line = next((line for line in hunk_lines if line.strip()), "")
+        else:
+            first_line = hunk_lines[0]
+
+        if not first_line:
+            return -1
+
+        # Try to find this line in the content
+        for i, line in enumerate(content_lines):
+            if first_line == line or first_line.strip() == line.strip():
+                # Check if subsequent lines also match
+                matches = True
+                for j, hunk_line in enumerate(hunk_lines):
+                    if i + j >= len(content_lines):
+                        matches = False
+                        break
+                    content_line = content_lines[i + j]
+                    if hunk_line != content_line and hunk_line.strip() != content_line.strip():
+                        matches = False
+                        break
+
+                if matches:
+                    return i
+
+        # If no good match found, return -1
+        return -1
+
     def generate_full_patch(self) -> str:
         """
         Generates a full Git-formatted patch from the original content to the current content.
@@ -341,35 +505,208 @@ class ContextFile(BaseModel):
         Returns:
             str: The generated patch as a string.
         """
+        # Handle empty content cases
+        if old_content is None:
+            old_content = ""
+        if new_content is None:
+            new_content = ""
 
-        old_lines = old_content.splitlines(keepends=True)
-        new_lines = new_content.splitlines(keepends=True)
+        # If content is identical, return empty patch
+        if old_content == new_content:
+            return ""
 
-        # Ensure that new content end with a newline
-        if new_lines and not new_lines[-1].endswith("\n"):
-            new_lines[-1] += "\n"
+        # Pre-process both strings to ensure consistent line endings
+        # Split by line but don't keep the line endings - we'll normalize them
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
 
+        # Generate the unified diff with 3 lines of context (standard for git)
         diff_lines = list(
             difflib.unified_diff(
                 old_lines,
                 new_lines,
                 fromfile="a/" + self.file_path,
                 tofile="b/" + self.file_path,
-                # lineterm=''
+                lineterm="",
+                n=3,
             )
         )
 
-        return "".join(diff_lines)
+        # Early return if no differences
+        if not diff_lines:
+            return ""
 
-    def model_dump(self, **kwargs):
-        data = super().model_dump(**kwargs)
-        # Ensure these fields are excluded even if exclude=True is not in kwargs
-        data.pop("was_edited", None)
-        data.pop("was_viewed", None)
-        # Ensure 'patch' is always included, even if it's None
-        if "patch" not in data:
-            data["patch"] = None
-        return data
+        # Join with newlines and add a final newline
+        patch = "\n".join(diff_lines) + "\n"
+
+        try:
+            # Validate by test-parsing the patch
+            PatchSet(io.StringIO(patch))
+
+            # If we got here, the patch is valid
+            return patch
+        except Exception as e:
+            logger.debug(f"Failed to generate valid patch with simplified method: {e}")
+
+            # Fallback to the original method with context size variation
+            return self._generate_fallback_patch(old_content, new_content)
+
+    def _generate_fallback_patch(self, old_content: str, new_content: str) -> str:
+        """Fallback method for patch generation when the simple approach fails."""
+        # Pre-process both strings to ensure consistent line endings
+        old_lines = old_content.splitlines(keepends=True)
+        new_lines = new_content.splitlines(keepends=True)
+
+        # Ensure both old and new content end with a newline to prevent issues
+        if old_lines and not old_lines[-1].endswith("\n"):
+            old_lines[-1] += "\n"
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines[-1] += "\n"
+
+        # Try progressively larger context sizes if needed
+        for context_lines in [3, 5, 7]:
+            try:
+                # Generate the unified diff with specified context lines
+                diff_lines = list(
+                    difflib.unified_diff(
+                        old_lines,
+                        new_lines,
+                        fromfile="a/" + self.file_path,
+                        tofile="b/" + self.file_path,
+                        lineterm="",  # We'll add newlines manually
+                        n=context_lines,
+                    )
+                )
+
+                # Early return if no differences
+                if not diff_lines:
+                    return ""
+
+                # Process the diff to ensure consistent formatting for unidiff
+                processed_diff = self._process_diff_for_unidiff(diff_lines)
+
+                # Validate by test-parsing the patch
+                PatchSet(io.StringIO(processed_diff))
+
+                # If we got here, the patch is valid
+                return processed_diff
+
+            except Exception as e:
+                logger.debug(f"Failed to generate valid patch with context={context_lines}: {e}")
+                continue
+
+        # If all attempts failed, try with a very large context to capture all content
+        try:
+            # Use a manual approach as a fallback
+            return self._generate_manual_patch(old_content, new_content)
+        except Exception as e:
+            logger.warning(f"All patch generation methods failed: {e}. Using raw diff.")
+            # Last resort: just use the raw diff with newlines and hope for the best
+            diff_text = (
+                "\n".join(
+                    difflib.unified_diff(
+                        old_content.splitlines(),
+                        new_content.splitlines(),
+                        fromfile="a/" + self.file_path,
+                        tofile="b/" + self.file_path,
+                        lineterm="",
+                        n=3,
+                    )
+                )
+                + "\n"
+            )
+            return diff_text
+
+    def _process_diff_for_unidiff(self, diff_lines):
+        """
+        Process diff lines to ensure they're properly formatted for unidiff parsing.
+        Especially handles cases with consecutive blank lines.
+        """
+        if not diff_lines:
+            return ""
+
+        # Join with newlines and add a final newline
+        diff_text = "\n".join(diff_lines) + "\n"
+
+        # Fix hunk headers to match the actual content
+        # This is critical for handling consecutive blank lines correctly
+        fixed_lines = []
+        current_hunk_start = None
+        hunk_old_count = 0
+        hunk_new_count = 0
+        actual_old_count = 0
+        actual_new_count = 0
+
+        for i, line in enumerate(diff_text.splitlines()):
+            # Detect hunk headers
+            if line.startswith("@@"):
+                # If we were processing a hunk, fix its header before starting a new one
+                if current_hunk_start is not None:
+                    # Fix the previous hunk header
+                    header_parts = fixed_lines[current_hunk_start].split()
+                    header_parts[1] = f"-{hunk_old_count},{actual_old_count}"
+                    header_parts[2] = f"+{hunk_new_count},{actual_new_count}"
+                    fixed_lines[current_hunk_start] = " ".join(header_parts)
+
+                # Start tracking a new hunk
+                current_hunk_start = len(fixed_lines)
+                fixed_lines.append(line)  # Add the header as a placeholder to be fixed later
+
+                # Parse the hunk header to get expected counts
+                try:
+                    old_range = line.split()[1]
+                    new_range = line.split()[2]
+                    hunk_old_count = int(old_range.split(",")[0].lstrip("-"))
+                    hunk_new_count = int(new_range.split(",")[0].lstrip("+"))
+                    actual_old_count = 0
+                    actual_new_count = 0
+                except (IndexError, ValueError):
+                    # If parsing fails, use default values
+                    hunk_old_count = 0
+                    hunk_new_count = 0
+
+            else:
+                fixed_lines.append(line)
+
+                # Count lines
+                if current_hunk_start is not None:
+                    if line.startswith("+"):
+                        actual_new_count += 1
+                    elif line.startswith("-"):
+                        actual_old_count += 1
+                    elif not line.startswith("\\"):  # Ignore "No newline" markers
+                        # Context lines count for both old and new
+                        actual_old_count += 1
+                        actual_new_count += 1
+
+        # Fix the last hunk header if there was one
+        if current_hunk_start is not None:
+            header_parts = fixed_lines[current_hunk_start].split()
+            header_parts[1] = f"-{hunk_old_count},{actual_old_count}"
+            header_parts[2] = f"+{hunk_new_count},{actual_new_count}"
+            fixed_lines[current_hunk_start] = " ".join(header_parts)
+
+        return "\n".join(fixed_lines) + "\n"
+
+    def _generate_manual_patch(self, old_content, new_content):
+        """
+        Generate a manual patch as a fallback when diff doesn't work.
+        This creates a single hunk that replaces the entire file.
+        """
+        old_lines = old_content.splitlines()
+        new_lines = new_content.splitlines()
+
+        # Create a header for the entire file
+        header = f"--- a/{self.file_path}\n+++ b/{self.file_path}\n@@ -1,{len(old_lines)} +1,{len(new_lines)} @@\n"
+
+        # Create the content lines
+        content = []
+        for line in old_lines:
+            content.append(f"-{line}")
+        for line in new_lines:
+            content.append(f"+{line}")
+
+        return header + "\n".join(content) + "\n"
 
     @property
     def span_ids(self):
@@ -483,7 +820,7 @@ class ContextFile(BaseModel):
             # Check if adding this block would exceed max_tokens
             if max_tokens:
                 if current_tokens + child.tokens > max_tokens:
-                    logger.debug(f"Stopping at child block as it would exceed max_tokens")
+                    logger.debug("Stopping at child block as it would exceed max_tokens")
                     break
 
             show_new_span_id = False
@@ -602,12 +939,36 @@ class ContextFile(BaseModel):
         else:
             return 0  # TODO: Support context size...
 
+    def count_line_changes(self, old_content: Optional[str] = None) -> dict[str, Any]:
+        """
+        Count the number of added and removed lines between the current file content and old content.
+
+        Args:
+            old_content: The previous content of the file. If None, will compare with base content.
+
+        Returns:
+            dict: A dictionary with keys 'added_lines', 'removed_lines', and 'token_count'
+        """
+        if old_content is None:
+            old_content = self.get_base_content()
+
+        current_content = self.content
+
+        patch = self.generate_patch(old_content, current_content)
+        if patch:
+            patch_lines = patch.split("\n")
+            additions = sum(1 for line in patch_lines if line.startswith("+") and not line.startswith("+++"))
+            deletions = sum(1 for line in patch_lines if line.startswith("-") and not line.startswith("---"))
+            return {"added_lines": additions, "removed_lines": deletions, "diff": patch}
+        else:
+            return {"added_lines": 0, "removed_lines": 0}
+
     def has_span(self, span_id: str):
         return span_id in self.span_ids
 
     def add_spans(
         self,
-        span_ids: Set[str],
+        span_ids: set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -736,7 +1097,7 @@ class ContextFile(BaseModel):
     def remove_all_spans(self):
         self.spans = [span for span in self.spans if span.pinned]
 
-    def get_spans(self) -> List[BlockSpan]:
+    def get_spans(self) -> list[BlockSpan]:
         block_spans = []
         for span in self.spans:
             if not self.module:
@@ -747,29 +1108,11 @@ class ContextFile(BaseModel):
                 block_spans.append(block_span)
         return block_spans
 
-    def get_block_span(self, span_id: str) -> Optional[BlockSpan]:
-        if not self.module:
-            return None
-        for span in self.spans:
-            if span.span_id == span_id:
-                block_span = self.module.find_span_by_id(span_id)
-                if block_span:
-                    return block_span
-                else:
-                    logger.warning(f"Could not find span with id {span_id} in file {self.file_path}")
-        return None
-
     def get_span(self, span_id: str) -> Optional[ContextSpan]:
         for span in self.spans:
             if span.span_id == span_id:
                 return span
         return None
-
-    def get_patches(self) -> List[str]:
-        """
-        Get all patches associated with this ContextFile.
-        """
-        return self.patches
 
     @property
     def is_new(self) -> bool:
@@ -782,24 +1125,24 @@ class ContextFile(BaseModel):
         return self._is_new
 
 
-class TestFile(BaseModel):
-    file_path: str = Field(..., description="The path to the test file.")
-    test_results: List[TestResult] = Field(default_factory=list, description="List of test results.")
-
-
 class FileContext(BaseModel):
+    shadow_mode: bool = Field(default=True, description="Set to true to not write changes to disk.")
+    show_code_blocks: bool = Field(
+        False,
+        description="Whether to show the parsed code blocks in the response or just the line span.",
+    )
     _repo: Repository | None = PrivateAttr(None)
-    _runtime: RuntimeEnvironment = PrivateAttr(None)
+    _runtime: RuntimeEnvironment | None = PrivateAttr(None)
 
-    _files: Dict[str, ContextFile] = PrivateAttr(default_factory=dict)
-    _test_files: Dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
+    _files: dict[str, ContextFile] = PrivateAttr(default_factory=dict)
+    _test_files: dict[str, TestFile] = PrivateAttr(default_factory=dict)  # Changed to Dict
     _max_tokens: int = PrivateAttr(default=8000)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def __init__(
         self,
-        repo: Repository | None,
+        repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
         **data,
     ):
@@ -840,14 +1183,19 @@ class FileContext(BaseModel):
     @classmethod
     def from_dict(
         cls,
-        data: Dict,
+        data: dict,
         repo_dir: str | None = None,
         repo: Repository | None = None,
         runtime: RuntimeEnvironment | None = None,
     ):
         if not repo and repo_dir:
             repo = FileRepository(repo_path=repo_dir)
-        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo, runtime=runtime)
+        instance = cls(
+            max_tokens=data.get("max_tokens", 8000),
+            repo=repo,
+            runtime=runtime,
+            shadow_mode=data.get("shadow_mode", True),
+        )
         instance.load_files_from_dict(data.get("files", []), test_files=data.get("test_files", []))
         return instance
 
@@ -871,6 +1219,7 @@ class FileContext(BaseModel):
                 show_all_spans=show_all_spans,
                 patch=file_data.get("patch"),
                 repo=self._repo,
+                shadow_mode=self.shadow_mode,
             )
 
         # Load test files
@@ -893,24 +1242,36 @@ class FileContext(BaseModel):
             "max_tokens": self.__dict__["_max_tokens"],
             "files": files,
             "test_files": test_files,
+            "shadow_mode": self.shadow_mode,
         }
 
-    def snapshot(self):
-        dict = self.model_dump()
-        del dict["max_tokens"]
-        return dict
+    @property
+    def repository(self) -> Repository:
+        if not self._repo:
+            raise ValueError("Repository is not set")
+        return self._repo
 
-    def restore_from_snapshot(self, snapshot: dict):
-        self._files.clear()
-        self._test_files.clear()
-        self.load_files_from_dict(snapshot.get("files", []))
+    @repository.setter
+    def repository(self, repo: Repository):
+        self._repo = repo
+        for file in self._files.values():
+            file._repo = repo
 
-    def to_files_with_spans(self) -> List[FileWithSpans]:
+    @property
+    def workspace(self):
+        raise AttributeError("workspace property is write-only")
+
+    @workspace.setter
+    def workspace(self, workspace: Workspace):
+        self.repository = workspace.repository
+        self._runtime = workspace.runtime
+
+    def to_files_with_spans(self) -> list[FileWithSpans]:
         return [
             FileWithSpans(file_path=file_path, span_ids=list(file.span_ids)) for file_path, file in self._files.items()
         ]
 
-    def add_files_with_spans(self, files_with_spans: List[FileWithSpans]):
+    def add_files_with_spans(self, files_with_spans: list[FileWithSpans]):
         for file_with_spans in files_with_spans:
             self.add_spans_to_context(file_with_spans.file_path, set(file_with_spans.span_ids))
 
@@ -921,6 +1282,7 @@ class FileContext(BaseModel):
                 spans=[],
                 show_all_spans=show_all_spans,
                 repo=self._repo,
+                shadow_mode=self.shadow_mode,
             )
             if add_extra:
                 self._files[file_path]._add_import_span()
@@ -950,13 +1312,17 @@ class FileContext(BaseModel):
         return list(self._files.values())
 
     @property
+    def file_paths(self):
+        return list(self._files.keys())
+
+    @property
     def test_files(self):
         return list(self._test_files.values())
 
     def add_spans_to_context(
         self,
         file_path: str,
-        span_ids: Set[str],
+        span_ids: set[str],
         tokens: Optional[int] = None,
         pinned: bool = False,
         add_extra: bool = True,
@@ -980,7 +1346,7 @@ class FileContext(BaseModel):
         add_extra: bool = True,
     ) -> bool:
         if not self.has_file(file_path):
-            context_file = self.add_file(file_path)
+            context_file = self.add_file(file_path, add_extra=add_extra)
         else:
             context_file = self.get_context_file(file_path)
 
@@ -996,7 +1362,7 @@ class FileContext(BaseModel):
         start_line: int,
         end_line: int | None = None,
         add_extra: bool = True,
-    ) -> List[str]:
+    ) -> list[str]:
         if not self.has_file(file_path):
             context_file = self.add_file(file_path, add_extra=add_extra)
         else:
@@ -1008,77 +1374,33 @@ class FileContext(BaseModel):
             logger.warning(f"Could not find file {file_path} in the repository")
             return []
 
-    def remove_span_from_context(self, file_path: str, span_id: str, remove_file: bool = False):
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            context_file.remove_span(span_id)
-
-            if not context_file.spans and remove_file:
-                self.remove_file(file_path)
-
-    def remove_spans_from_context(self, file_path: str, span_ids: List[str], remove_file: bool = False):
-        for span_id in span_ids:
-            self.remove_span_from_context(file_path, span_id, remove_file)
-
-    def get_spans(self, file_path: str) -> List[BlockSpan]:
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return context_file.get_spans()
-        return []
-
-    def get_span(self, file_path: str, span_id: str) -> Optional[BlockSpan]:
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return context_file.get_block_span(span_id)
-        return None
-
-    def has_span(self, file_path: str, span_id: str):
-        context_file = self.get_context_file(file_path)
-        if context_file:
-            return span_id in context_file.span_ids
-        return False
-
-    def apply(self, file_context: "FileContext"):
-        """
-        Apply a list of FileContext instances, collecting their ContextFiles.
-        """
-        for context_file in file_context.files:
-            file_path = context_file.file_path
-            if file_path not in self.files:
-                self._files[file_path] = ContextFile(
-                    file_path=file_path,
-                    repo=self.repo,
-                    initial_patch=file_context.generate_full_patch(),
-                )
-
-            self._files[file_path].spans.extend(context_file.spans)
-            self._files[file_path].show_all_spans = context_file.show_all_spans
-
     def has_file(self, file_path: str):
-        return file_path in self._files and (self._files[file_path].spans or self._files[file_path].show_all_spans)
+        return file_path in self._files and (
+            self._files[file_path].spans or self._files[file_path].show_all_spans or not self._files[file_path].content
+        )
 
     def get_file(self, file_path: str) -> Optional[ContextFile]:
         return self.get_context_file(file_path)
 
     def file_exists(self, file_path: str):
         context_file = self._files.get(file_path)
-        return context_file or self._repo.file_exists(file_path)
+        return context_file or self.repository.file_exists(file_path)
 
     def is_directory(self, file_path: str):
-        return self._repo.is_directory(file_path)
+        return self.repository.is_directory(file_path)
 
     def get_context_file(self, file_path: str, add_extra: bool = False) -> Optional[ContextFile]:
         if self._repo and hasattr(self._repo, "get_relative_path"):
-            file_path = self._repo.get_relative_path(file_path)
+            file_path = self.repository.get_relative_path(file_path)
 
         context_file = self._files.get(file_path)
 
         if not context_file:
-            if not self._repo.file_exists(file_path):
+            if not self.repository.file_exists(file_path):
                 logger.info(f"get_context_file({file_path}) File not found")
                 return None
 
-            if self._repo.is_directory(file_path):
+            if self.repository.is_directory(file_path):
                 logger.info(f"get_context_file({file_path}) File is a directory")
                 return None
 
@@ -1087,10 +1409,20 @@ class FileContext(BaseModel):
 
         return context_file
 
-    def get_context_files(self) -> List[ContextFile]:
+    def get_context_files(self) -> list[ContextFile]:
+        """
+        Returns all context files that exist in the repository.
+
+        Returns:
+            list[ContextFile]: A list of all context files
+        """
         file_paths = list(self._files.keys())
+        result = []
         for file_path in file_paths:
-            yield self.get_context_file(file_path)
+            context_file = self.get_context_file(file_path)
+            if context_file is not None:
+                result.append(context_file)
+        return result
 
     def context_size(self):
         if self._repo:
@@ -1111,11 +1443,11 @@ class FileContext(BaseModel):
         return self._max_tokens - self.context_size()
 
     def save_file(self, file_path: str, updated_content: Optional[str] = None):
-        self._repo.save_file(file_path, updated_content)
+        if updated_content:
+            self.repository.save_file(file_path, updated_content)
 
     def reset(self):
         self._files = {}
-        self._test_files = {}
 
     def is_empty(self):
         return not self._files
@@ -1163,11 +1495,20 @@ class FileContext(BaseModel):
 
     def clone(self):
         dump = self.model_dump(exclude={"files": {"__all__": {"was_edited", "was_viewed"}}})
-        cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
+        cloned_context = FileContext(repo=self._repo, runtime=self._runtime, shadow_mode=self.shadow_mode)
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
     def has_patch(self, ignore_tests: bool = False):
+        """
+        Checks if any files in the context have patches.
+
+        Args:
+            ignore_tests: Whether to ignore test files when checking for patches
+
+        Returns:
+            bool: True if any file has a patch, False otherwise
+        """
         return any(file.patch for file in self._files.values() if not ignore_tests or not is_test(file.file_path))
 
     def has_test_patch(self):
@@ -1177,6 +1518,9 @@ class FileContext(BaseModel):
         """
         Generates a full patch for all files with changes in the FileContext.
         The patch is formatted like a git diff.
+
+        Args:
+            ignore_tests: Whether to ignore test files when generating the patch
 
         Returns:
             str: A git-diff-like patch string containing all file changes.
@@ -1197,6 +1541,7 @@ class FileContext(BaseModel):
 
         Args:
             old_context: The previous FileContext to compare against
+            include_patches: Whether to include files with different content (patches)
 
         Returns:
             set[str]: Set of file paths that have different content or spans between the two contexts
@@ -1224,6 +1569,84 @@ class FileContext(BaseModel):
 
         return updated_files
 
+    def get_artifact_changes(
+        self, old_context: "FileContext", actor: Literal["user", "assistant"] = "assistant"
+    ) -> list[ArtifactChange]:
+        """
+        Compares this FileContext with an older one and returns a list of ArtifactChange objects for files
+        that have been added, updated, or removed.
+
+        Args:
+            old_context: The previous FileContext to compare against
+            actor: Who made the changes, either "user" or "assistant"
+
+        Returns:
+            list[ArtifactChange]: List of ArtifactChange objects representing the changes between contexts
+        """
+        artifact_changes = []
+
+        # Check files in current context for added or updated files
+        for file_path, current_file in self._files.items():
+            old_file = old_context._files.get(file_path)
+
+            if old_file is None:
+                properties = {
+                    "token_count": current_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="added",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+            elif current_file.patch != old_file.patch:
+                properties = current_file.count_line_changes(old_file.content)
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="updated",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+            elif current_file.span_ids != old_file.span_ids:
+                properties = {
+                    "token_count": current_file.context_size() - old_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="added",
+                        properties=properties,
+                        actor=actor,
+                    )
+                )
+
+        for file_path, old_file in old_context._files.items():
+            if file_path not in self._files:
+                change_stats = {
+                    "token_count": -old_file.context_size(),
+                }
+
+                artifact_changes.append(
+                    ArtifactChange(
+                        artifact_id=file_path,
+                        artifact_type="file",
+                        change_type="removed",
+                        properties=change_stats,
+                        actor=actor,
+                    )
+                )
+
+        return artifact_changes
+
     def get_context_diff(self, old_context: "FileContext") -> "FileContext":
         diff_context = FileContext(repo=self._repo)
 
@@ -1241,6 +1664,7 @@ class FileContext(BaseModel):
                     diff_context._files[file_path] = ContextFile(
                         file_path=file_path,
                         repo=self._repo,
+                        shadow_mode=self.shadow_mode,
                     )
                     diff_context._files[file_path].spans.extend(
                         [span for span in current_file.spans if span.span_id in new_spans]
@@ -1289,9 +1713,10 @@ class FileContext(BaseModel):
 
         return "\n".join(summary)
 
-    def add_file_context(self, other_context: "FileContext") -> List[str]:
+    def add_file_context(self, other_context: "FileContext") -> bool:
         """
         Adds spans from another FileContext to the current one and returns newly added span IDs.
+        Also copies over cached content and module if they exist.
 
         Args:
             other_context: The FileContext to merge into this one
@@ -1299,7 +1724,7 @@ class FileContext(BaseModel):
         Returns:
             List[str]: List of newly added span IDs
         """
-        new_span_ids = []
+        added_new_spans = False
 
         for other_file in other_context.files:
             file_path = other_file.file_path
@@ -1310,15 +1735,17 @@ class FileContext(BaseModel):
             else:
                 context_file = self.get_context_file(file_path)
 
-            # Add spans that don't already exist
-            for span in other_file.spans:
-                if context_file.add_span(span.span_id):
-                    new_span_ids.append(span.span_id)
+            if context_file:
+                # Copy show_all_spans flag if either context has it enabled
+                if not context_file.show_all_spans and other_file.show_all_spans:
+                    added_new_spans = True
+                    context_file.show_all_spans = other_file.show_all_spans
+                else:
+                    for span in other_file.spans:
+                        if context_file.add_span(span.span_id):
+                            added_new_spans = True
 
-            # Copy show_all_spans flag if either context has it enabled
-            context_file.show_all_spans = context_file.show_all_spans or other_file.show_all_spans
-
-        return new_span_ids
+        return added_new_spans
 
     def span_count(self) -> int:
         """
@@ -1332,207 +1759,29 @@ class FileContext(BaseModel):
             span_ids.extend(file.span_ids)
         return len(span_ids)
 
-    def get_test_counts(self) -> Tuple[int, int, int]:
-        """
-        Returns counts of passed, failed, and errored tests.
-
-        Returns:
-            Tuple[int, int, int]: A tuple containing (passed_count, failure_count, error_count)
-        """
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
-
-        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
-        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
-        passed_count = len(all_results) - failure_count - error_count
-
-        return (passed_count, failure_count, error_count)
-
-    def run_tests(self, test_files: List[str] | None = None) -> List[TestFile]:
-        """
-        Runs tests using the runtime environment and groups results by file.
-        Preserves all test files in context, even those without results.
-
-        Args:
-            test_files (List[str] | None): Optional list of test files to run.
-                                         If provided, adds these files to context before running.
-
-        Returns:
-            List[TestFile]: List of test results grouped by file
-        """
-
-        if not self._runtime:
-            logger.error("Runtime environment not set for FileContext to run tests")
-            return []
-
-        if test_files:
-            for test_file in test_files:
-                self.add_test_file(test_file)
-                if not self.has_file(test_file):
-                    logger.info(f"Adding test file: {test_file} to context")
-                    self.add_file(test_file, add_extra=False)
-        elif self._test_files:
-            test_files = list(self._test_files.keys())
+    def add_test_file(self, file_path: str, test_results: list[TestResult]) -> TestFile:
+        if file_path in self._test_files.keys():
+            self._test_files[file_path].test_results = test_results
         else:
-            logger.warning("No test files in context to run tests")
-            return []
+            self._test_files[file_path] = TestFile(file_path=file_path, test_results=test_results)
 
-        patch = self.generate_git_patch()
+        return self._test_files[file_path]
 
-        # If specific test files provided, only run those
-        if test_files:
-            test_results = self._runtime.run_tests(patch=patch, test_files=test_files)
-        else:
-            test_results = self._runtime.run_tests(patch=patch)
-
-        # Group results by file
-        results_by_file = {}
-        for result in test_results:
-            if result.file_path:
-                if result.file_path not in results_by_file:
-                    results_by_file[result.file_path] = []
-                results_by_file[result.file_path].append(result)
-            else:
-                logger.warning(f"Test result missing file path: {result}")
-
-        # Update test results for existing test files
-        for test_file in self._test_files.values():
-            test_file.test_results = results_by_file.get(test_file.file_path, [])
-
-        # Add summary log
-        test_summary = []
-        for test_file in self._test_files.values():
-            status_counts = {}
-            for result in test_file.test_results:
-                if result.status not in status_counts:
-                    status_counts[result.status] = 0
-                status_counts[result.status] += 1
-            test_summary.append(f" - {test_file.file_path}: {len(test_file.test_results)} tests. {status_counts}")
-
-        logger.info(f"Test summary by file:{chr(10)}{chr(10).join(test_summary)}")
-
-        return list(self._test_files.values())
-
-    def add_test_file(self, file_path: str) -> TestFile:
-        """Test summary
-        Adds a new test file path to the context if it doesn't already exist.
-
-        Args:
-            file_path (str): Path to the test file
-
-        Returns:
-            TestFile: The new or existing TestFile object
-        """
-        if file_path in self._test_files:
-            return self._test_files[file_path]
-
-        test_file = TestFile(file_path=file_path, test_results=[])
-        self._test_files[file_path] = test_file
-        logger.debug(f"Added test file: {file_path}")
-
-        return test_file
-
-    def get_updated_test_results(self, previous_context: "FileContext") -> Set[str]:
-        """
-        Gets test files that have different results from the previous context.
-
-        Args:
-            previous_context: The previous FileContext to compare against
-
-        Returns:
-            Set[str]: Set of file paths that have updated test results
-        """
-        updated_files = set()
-
-        for file_path, test_file in self._test_files.items():
-            prev_test_file = previous_context._test_files.get(file_path)
-            if not prev_test_file or test_file.test_results != prev_test_file.test_results:
-                updated_files.add(file_path)
-
-        return updated_files
+    def add_test_files(self, test_files: list[TestFile]):
+        for test_file in test_files:
+            self.add_test_file(test_file.file_path, test_file.test_results)
 
     def get_test_summary(self) -> str:
-        """
-        Returns a summary of all test results in the format "X passed. Y failed. Z errors."
+        return TestFile.get_test_summary(self._test_files.values())
 
-        Returns:
-            str: Summary string of test results
-        """
-        from testbeds.schema import TestStatus
-
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
-
-        failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
-        error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
-        passed_count = len(all_results) - failure_count - error_count
-
-        return f"{passed_count} passed. {failure_count} failed. {error_count} errors."
+    def get_test_counts(self) -> tuple[int, int, int]:
+        return TestFile.get_test_counts(self._test_files.values())
 
     def get_test_failure_details(self, max_tokens: int = 8000, max_chars_per_test: int = 2000) -> str:
-        """
-        Returns detailed output for each failed or errored test result.
+        return TestFile.get_test_failure_details(self._test_files.values(), max_tokens, max_chars_per_test)
 
-        Returns:
-            str: Formatted string containing details of failed tests
-        """
-        from testbeds.schema import TestStatus
-
-        sum_tokens = 0
-        test_result_strings = []
-        for test_file in self._test_files.values():
-            for result in test_file.test_results:
-                if result.status in [TestStatus.FAILED, TestStatus.ERROR] and result.message:
-                    attributes = ""
-                    if result.file_path:
-                        attributes += f"{result.file_path}"
-                        if result.span_id:
-                            attributes += f" {result.span_id}"
-                        if result.line:
-                            attributes += f", line: {result.line}"
-
-                    if len(result.message) > max_chars_per_test:
-                        truncated_message = result.message[:max_chars_per_test]
-                        truncated_message += "\n...truncated"
-                    else:
-                        truncated_message = result.message
-
-                    test_result_str = f"* {result.status.value} {attributes}>\n```\n{truncated_message}\n```\n"
-                    test_result_tokens = count_tokens(test_result_str)
-                    if sum_tokens + test_result_tokens > max_tokens:
-                        break
-
-                    sum_tokens += test_result_tokens
-                    test_result_strings.append(test_result_str)
-
-        return "\n".join(test_result_strings) if test_result_strings else ""
-
-    def get_test_status(self) -> Optional["TestStatus"]:
-        """
-        Returns the overall test status based on all test results.
-        Returns ERROR if any test has error status,
-        FAILED if any test has failed status,
-        PASSED if all tests passed,
-        or None if no test results exist.
-
-        Returns:
-            Optional[TestStatus]: The overall test status
-        """
-        all_results = []
-        for test_file in self._test_files.values():
-            all_results.extend(test_file.test_results)
-
-        if not all_results:
-            return None
-
-        if any(r.status == TestStatus.ERROR for r in all_results):
-            return TestStatus.ERROR
-        elif any(r.status == TestStatus.FAILED for r in all_results):
-            return TestStatus.FAILED
-        else:
-            return TestStatus.PASSED
+    def get_test_status(self):
+        return TestFile.get_test_status(self._test_files.values())
 
     def was_edited(self) -> bool:
         """
@@ -1543,7 +1792,7 @@ class FileContext(BaseModel):
         """
         return any(file.was_edited for file in self._files.values())
 
-    def get_edited_files(self) -> List[str]:
+    def get_edited_files(self) -> list[str]:
         """
         Returns a list of file paths that have been edited in the context.
         A file is considered edited if it has changes (patch) but is not new.
@@ -1553,7 +1802,7 @@ class FileContext(BaseModel):
         """
         return [file_path for file_path, file in self._files.items() if file.was_edited and not file.is_new]
 
-    def get_created_files(self) -> List[str]:
+    def get_created_files(self) -> list[str]:
         """
         Returns a list of file paths that have been newly created in the context.
 
@@ -1561,3 +1810,9 @@ class FileContext(BaseModel):
             List[str]: List of created file paths
         """
         return [file_path for file_path, file in self._files.items() if file.is_new]
+
+    def persist(self):
+        """Persist all files in the context by saving them to the repository"""
+        for file_path, file in self._files.items():
+            if file.patch:
+                self.repository.save_file(file_path, file.content)

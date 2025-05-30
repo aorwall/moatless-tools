@@ -1,16 +1,27 @@
-import json
+import asyncio
 import logging
 import mimetypes
 import os
 import shutil
 import tempfile
-from typing import Optional, TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
-import requests
+import aiofiles
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.embeddings import BaseEmbedding
+from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
+from llama_index.core.storage.docstore import DocumentStore, SimpleDocumentStore
+from llama_index.core.vector_stores.types import BasePydanticVectorStore
+from opentelemetry import trace
 from rapidfuzz import fuzz
 
-from moatless.codeblocks import CodeBlock, CodeBlockType
+from moatless.codeblocks import CodeBlock, CodeBlockType, get_parser_by_path
+from moatless.codeblocks.module import Module
+from moatless.index.code_block_index import CodeBlockIndex
+from moatless.index.embed_model import get_embed_model
 from moatless.index.settings import IndexSettings
+from moatless.index.simple_faiss import SimpleFaissVectorStore
 from moatless.index.types import (
     CodeSnippet,
     SearchCodeHit,
@@ -18,16 +29,12 @@ from moatless.index.types import (
 )
 from moatless.repository import FileRepository
 from moatless.repository.repository import Repository
-from moatless.schema import FileWithSpans
 from moatless.utils.file import is_test
 from moatless.utils.tokenizer import count_tokens
 
-if TYPE_CHECKING:
-    from llama_index.core import SimpleDirectoryReader
-    from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
-    from llama_index.core.storage.docstore import SimpleDocumentStore
-
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer(__name__)
 
 # Add constant for persist filename outside TYPE_CHECKING
 DEFAULT_PERSIST_FNAME = "docstore.json"
@@ -52,12 +59,11 @@ class CodeIndex:
         self,
         file_repo: Repository | None = None,
         index_name: Optional[str] = None,
-        vector_store: "BasePydanticVectorStore | None" = None,
-        docstore: "DocumentStore | None" = None,
-        embed_model: "BaseEmbedding | None" = None,
-        blocks_by_class_name: Optional[dict] = None,
-        blocks_by_function_name: Optional[dict] = None,
-        settings: IndexSettings | None = None,
+        vector_store: Optional[BasePydanticVectorStore] = None,
+        docstore: Optional[DocumentStore] = None,
+        embed_model: Optional[BaseEmbedding] = None,
+        code_block_index: Optional[CodeBlockIndex] = None,
+        settings: Optional[IndexSettings] = None,
         max_results: int = 25,
         max_hits_without_exact_match: int = 100,
         max_exact_results: int = 5,
@@ -71,72 +77,131 @@ class CodeIndex:
 
         self._file_repo = file_repo
 
-        self._blocks_by_class_name = blocks_by_class_name or {}
-        self._blocks_by_function_name = blocks_by_function_name or {}
-
-        from moatless.index.embed_model import get_embed_model
-        from llama_index.core.storage.docstore import SimpleDocumentStore
+        self._code_block_index = code_block_index
 
         self._embed_model = embed_model or get_embed_model(self._settings.embed_model)
         self._vector_store = vector_store or default_vector_store(self._settings)
         self._docstore = docstore or SimpleDocumentStore()
 
-        logger.info(
-            f"Initiated CodeIndex {self._index_name} with:\n"
-            f" * {len(self._blocks_by_class_name)} classes\n"
-            f" * {len(self._blocks_by_function_name)} functions\n"
-            f" * {len(self._docstore.docs)} vectors\n"
-            f"Using file repository at {self._file_repo.repo_dir if self._file_repo else 'None'}\n"
-        )
+        self._thread_pool = ThreadPoolExecutor(max_workers=5)
+
+    async def matching_files(self, file_pattern: str) -> list[str]:
+        """
+        Returns a list of files matching the given pattern within the repository.
+        Uses inverted indexes instead of filesystem operations.
+
+        Parameters:
+            file_pattern (str): The glob pattern to match files.
+
+        Returns:
+            List[str]: A list of relative file paths matching the pattern.
+        """
+        try:
+            # If absolute path, log warning and remove first slash
+            if file_pattern.startswith("/"):
+                logger.warning(f"Converting absolute path {file_pattern} to relative path")
+                file_pattern = file_pattern[1:]
+
+            matched_files = sorted(await self._code_block_index.match_glob_pattern(file_pattern))
+            return matched_files
+
+        except Exception:
+            logger.exception(f"Error finding files for pattern {file_pattern}:")
+            return []
+
+    async def find_by_pattern(self, patterns: list[str]) -> list[str]:
+        """
+        Returns a list of files matching the given patterns within the repository.
+        Uses inverted indexes instead of filesystem operations.
+        """
+        matched_files = set()
+        for pattern in patterns:
+            matches = await self._code_block_index.match_glob_pattern(f"**/{pattern}")
+            matched_files.update(matches)
+
+        return sorted(matched_files)
 
     @classmethod
     def from_persist_dir(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
-        from moatless.index.simple_faiss import SimpleFaissVectorStore
-        from llama_index.core.storage.docstore import SimpleDocumentStore
+        """Synchronous version of from_persist_dir"""
 
         vector_store = SimpleFaissVectorStore.from_persist_dir(persist_dir)
-        docstore = SimpleDocumentStore.from_persist_dir(persist_dir)
 
-        settings = IndexSettings.from_persist_dir(persist_dir)
+        docstore, settings = (
+            SimpleDocumentStore.from_persist_dir(persist_dir),
+            IndexSettings.from_persist_dir(persist_dir),
+        )
 
-        if os.path.exists(os.path.join(persist_dir, "blocks_by_class_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_class_name.json")) as f:
-                blocks_by_class_name = json.load(f)
-        else:
-            blocks_by_class_name = {}
-
-        if os.path.exists(os.path.join(persist_dir, "blocks_by_function_name.json")):
-            with open(os.path.join(persist_dir, "blocks_by_function_name.json")) as f:
-                blocks_by_function_name = json.load(f)
-        else:
-            blocks_by_function_name = {}
+        code_block_index = CodeBlockIndex.from_persist_dir(persist_dir)
 
         return cls(
             file_repo=file_repo,
             vector_store=vector_store,
             docstore=docstore,
             settings=settings,
-            blocks_by_class_name=blocks_by_class_name,
-            blocks_by_function_name=blocks_by_function_name,
+            code_block_index=code_block_index,
             **kwargs,
         )
 
     @classmethod
-    def from_url(cls, url: str, persist_dir: str, file_repo: FileRepository):
+    async def from_persist_dir_async(cls, persist_dir: str, file_repo: Repository | None = None, **kwargs):
+        """Asynchronous version of from_persist_dir"""
+        # Run CPU-intensive synchronous operations in a thread pool
+        loop = asyncio.get_event_loop()
+
+        # Use the async version of SimpleFaissVectorStore.from_persist_dir
+        vector_store = await SimpleFaissVectorStore.from_persist_dir_async(persist_dir)
+
+        from llama_index.core.storage.docstore import SimpleDocumentStore
+
+        # These are still synchronous operations
+        docstore, settings = await asyncio.gather(
+            loop.run_in_executor(None, SimpleDocumentStore.from_persist_dir, persist_dir),
+            loop.run_in_executor(None, IndexSettings.from_persist_dir, persist_dir),
+        )
+
+        inverted_index = await CodeBlockIndex.from_persist_dir_async(persist_dir)
+
+        return cls(
+            file_repo=file_repo,
+            vector_store=vector_store,
+            docstore=docstore,
+            settings=settings,
+            code_block_index=inverted_index,
+            **kwargs,
+        )
+
+    @classmethod
+    async def from_url_async(cls, url: str, persist_dir: str, file_repo: FileRepository):
+        """Asynchronous version of from_url"""
+        import asyncio
+
+        import aiohttp
+        import ssl
+
+        # Create a custom SSL context that doesn't verify certificates
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
         try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, ssl=ssl_context) as response:
+                    response.raise_for_status()
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_zip_file = os.path.join(temp_dir, url.split("/")[-1])
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        temp_zip_file = os.path.join(temp_dir, url.split("/")[-1])
 
-                with open(temp_zip_file, "wb") as data:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        data.write(chunk)
+                        # Download file in chunks
+                        async with aiofiles.open(temp_zip_file, "wb") as data:
+                            async for chunk in response.content.iter_chunked(8192):
+                                await data.write(chunk)
 
-                shutil.unpack_archive(temp_zip_file, persist_dir)
+                        # Run unpack_archive in thread pool since it's synchronous
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(None, shutil.unpack_archive, temp_zip_file, persist_dir)
 
-        except requests.exceptions.HTTPError as e:
+        except aiohttp.ClientError as e:
             logger.exception(f"HTTP Error while fetching {url}")
             raise e
         except Exception as e:
@@ -144,22 +209,23 @@ class CodeIndex:
             raise e
 
         logger.info(f"Downloaded existing index from {url}.")
-        return cls.from_persist_dir(persist_dir, file_repo)
+        return await cls.from_persist_dir_async(persist_dir, file_repo)
 
     @classmethod
-    def from_index_name(
+    async def from_index_name_async(
         cls,
         index_name: str,
         file_repo: Repository,
         index_store_dir: Optional[str] = None,
     ):
+        """Asynchronous version of from_index_name"""
         if not index_store_dir:
             index_store_dir = os.getenv("INDEX_STORE_DIR")
 
         persist_dir = os.path.join(index_store_dir, index_name)
         if os.path.exists(persist_dir):
             logger.info(f"Loading existing index {index_name} from {persist_dir}.")
-            return cls.from_persist_dir(persist_dir, file_repo=file_repo)
+            return await cls.from_persist_dir_async(persist_dir, file_repo=file_repo)
         else:
             logger.info(f"No existing index found at {persist_dir}.")
 
@@ -170,12 +236,20 @@ class CodeIndex:
 
         store_url = os.path.join(index_store_url, f"{index_name}.zip")
         logger.info(f"Downloading existing index {index_name} from {store_url}.")
-        return cls.from_url(store_url, persist_dir, file_repo)
+        return await cls.from_url_async(store_url, persist_dir, file_repo)
 
     def dict(self):
         return {"index_name": self._index_name}
 
-    def semantic_search(
+    async def get_module(self, file_path: str, content: str) -> Module | None:
+        parser = get_parser_by_path(file_path)
+        if parser:
+            module = parser.pars(content)
+            return module
+        return None
+
+    @tracer.start_as_current_span("semantic_search")
+    async def semantic_search(
         self,
         query: Optional[str] = None,
         code_snippet: Optional[str] = None,
@@ -193,15 +267,10 @@ class CodeIndex:
 
         message = ""
         if file_pattern:
-            if category and category != "test":
-                exclude_files = self._file_repo.matching_files("**/test*/**")
-            else:
-                exclude_files = []
-
             try:
-                matching_files = self._file_repo.matching_files(file_pattern)
-                matching_files = [file for file in matching_files if file not in exclude_files]
-            except Exception as e:
+                matching_files = await self.matching_files(file_pattern)
+                matching_files = [file for file in matching_files if not is_test(file)]
+            except Exception:
                 return SearchCodeResponse(
                     message=f"The file pattern {file_pattern} is invalid.",
                     hits=[],
@@ -219,7 +288,7 @@ class CodeIndex:
                         hits=[],
                     )
 
-        search_results = self._vector_search(
+        search_results = await self._vector_search(
             query,
             file_pattern=file_pattern,
             exact_content_match=code_snippet,
@@ -326,23 +395,25 @@ class CodeIndex:
 
         return SearchCodeResponse(message=message, hits=list(files_with_spans.values()))
 
-    def find_class(self, class_name: str, file_pattern: Optional[str] = None):
-        return self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
+    @tracer.start_as_current_span("find_class")
+    async def find_class(self, class_name: str, file_pattern: Optional[str] = None):
+        return await self.find_by_name(class_name=class_name, file_pattern=file_pattern, strict=True)
 
-    def find_function(
+    @tracer.start_as_current_span("find_function")
+    async def find_function(
         self,
         function_name: str,
         class_name: Optional[str] = None,
         file_pattern: Optional[str] = None,
     ):
-        return self.find_by_name(
+        return await self.find_by_name(
             function_name=function_name,
             class_name=class_name,
             file_pattern=file_pattern,
             strict=True,
         )
 
-    def find_by_name(
+    async def find_by_name(
         self,
         class_name: str = None,
         function_name: str = None,
@@ -358,14 +429,16 @@ class CodeIndex:
 
         # If class name is provided only find the clasees and then filter on function name if necessary
         if class_name:
-            paths = self._blocks_by_class_name.get(class_name, [])
+            paths = await self._code_block_index.get_blocks_by_class(class_name)
         elif function_name:
-            paths = self._blocks_by_function_name.get(function_name, [])
+            paths = await self._code_block_index.get_blocks_by_function(function_name)
         else:
             raise ValueError("At least one of class_name or function_name must be provided.")
 
+        logger.info(f"find_by_name() Found {len(paths)} paths.")
+
         if file_pattern:
-            include_files = self._file_repo.matching_files(file_pattern)
+            include_files = await self.matching_files(file_pattern)
 
             if include_files:
                 filtered_paths = []
@@ -403,11 +476,9 @@ class CodeIndex:
         invalid_blocks = 0
 
         if category and category != "test":
-            exclude_files = self._file_repo.matching_files("**/test*/**")
-
             filtered_paths = []
             for file_path, block_path in paths:
-                if file_path not in exclude_files:
+                if not is_test(file_path):
                     filtered_paths.append((file_path, block_path))
 
             filtered_out_test_files = len(paths) - len(filtered_paths)
@@ -491,126 +562,24 @@ class CodeIndex:
 
         file_paths = [file.file_path for file in files_with_spans.values()]
         if file_pattern:
+            file_paths = await self.matching_files(file_pattern)
             file_paths = _rerank_files(file_paths, file_pattern)
 
         search_hits = []
         for rank, file_path in enumerate(file_paths):
-            file = files_with_spans[file_path]
-            for span in file.spans:
-                span.rank = rank
-            search_hits.append(file)
+            file = files_with_spans.get(file_path)
+            if file:
+                for span in file.spans:
+                    span.rank = rank
+                search_hits.append(file)
 
         return SearchCodeResponse(
             message=message,
             hits=search_hits,
         )
 
-    def find_test_files(
-        self,
-        file_path: str,
-        span_id: str | None = None,
-        query: str | None = None,
-        max_results: int = 5,
-        max_tokens: int | None = None,
-        max_method_tokens: int = 500,
-        max_spans: int | None = None,
-    ) -> list[FileWithSpans]:
-        if span_id:
-            query = f"{file_path} {span_id}"
-        elif query:
-            query = f"{file_path} {query}"
-        else:
-            query = file_path
-
-        search_results = self._vector_search(query, category="test")
-
-        sum_tokens = 0
-        files = []
-        matching_file = self._find_by_test_pattern(file_path)
-        if matching_file:
-            files.append(FileWithSpans(file_path=matching_file, span_ids=[]))
-        elif span_id or query and max_results > 1:
-            # Try to find the most similar test file by file name if no exact match on file name
-            files = self.find_test_files(file_path, max_results=1, max_spans=max_spans)
-
-        for result in search_results:
-            file_with_spans = next((f for f in files if f.file_path == result.file_path), None)
-
-            if not file_with_spans:
-                file_with_spans = FileWithSpans(file_path=result.file_path, span_ids=[])
-                files.append(file_with_spans)
-
-            file = self._file_repo.get_file(result.file_path)
-            if not file:
-                logger.warning(f"run_tests() File not found {result.file_path}")
-                continue
-
-            # expect to find methods with the name test in the span id if there are any
-            has_test_names = any(span_id for span_id in file.module.span_ids if "test" in span_id.lower())
-
-            for span_id in result.span_ids:
-                span = file.module.find_span_by_id(span_id)
-                if (
-                    span
-                    and span.initiating_block.type in [CodeBlockType.FUNCTION, CodeBlockType.TEST_CASE]
-                    and span.tokens <= max_method_tokens
-                    and (not max_tokens or sum_tokens + span.tokens <= max_tokens)
-                    and (not has_test_names or "test" in span_id.lower())
-                    and span_id not in file_with_spans.span_ids
-                    and (not max_spans or len(file_with_spans.span_ids) < max_spans)
-                ):
-                    file_with_spans.span_ids.append(span_id)
-                    sum_tokens += span.tokens
-
-            if max_spans and len([f for f in files if len(f.span_ids) >= max_spans]) >= max_results:
-                break
-
-            if not max_spans and len(files) >= max_results:
-                break
-
-        if max_spans:
-            files = [f for f in files if len(f.span_ids) > 0]
-
-        return files
-
-    def _find_by_test_pattern(self, file_path: str) -> str | None:
-        """
-        Find the test file related to the provided file path.
-
-        Test files should match the pattern "test_[filename].py" or "[filename]_test.py".
-        If there are multiple matches, the one with the most similar directory path is picked.
-        """
-        filename = os.path.basename(file_path)
-        dirname = os.path.dirname(file_path)
-        test_patterns = [f"test_{filename}", f"{filename}_test.py"]
-
-        matched_files = self._file_repo.find_by_pattern(test_patterns)
-        if not matched_files:
-            return None
-
-        if len(matched_files) == 1:
-            return matched_files[0]
-
-        # Find the test file with the most similar directory path
-        best_match = None
-        best_match_score = float("inf")
-        for test_file in matched_files:
-            test_dirname = os.path.dirname(test_file)
-            common_prefix = os.path.commonprefix([dirname, test_dirname])
-            score = len(dirname) - len(common_prefix)
-            if score < best_match_score:
-                best_match = test_file
-                best_match_score = score
-
-        return best_match
-
-    def _create_search_hit(self, file: FileWithSpans, rank: int = 0):
-        file_hit = SearchCodeHit(file_path=file.file_path)
-        for span_id in file.span_ids:
-            file_hit.add_span(span_id, rank)
-        return file_hit
-
-    def _vector_search(
+    @tracer.start_as_current_span("vector_search")
+    async def _vector_search(
         self,
         query: str = "",
         exact_query_match: bool = False,
@@ -633,6 +602,7 @@ class CodeIndex:
 
         logger.debug(f"vector_search() Searching for query [{query[:50]}...] and file pattern [{file_pattern}].")
 
+        # TODO: Make this async
         query_embedding = self._embed_model.get_query_embedding(query)
 
         # FIXME: Filters can't be used ATM. Category isn't set in some instance vector stores
@@ -656,17 +626,12 @@ class CodeIndex:
         sum_tokens_per_file = {}
 
         if file_pattern:
-            include_files = self._file_repo.matching_files(file_pattern)
+            include_files = await self.matching_files(file_pattern)
             if len(include_files) == 0:
                 logger.info(f"vector_search() No files found for file pattern {file_pattern}, return empty result...")
                 return []
         else:
             include_files = []
-
-        if category and category != "test":
-            exclude_files = self._file_repo.find_files(["**/tests/**", "tests*", "*_test.py", "test_*.py"])
-        else:
-            exclude_files = set()
 
         search_results = []
 
@@ -677,7 +642,8 @@ class CodeIndex:
                 # TODO: Retry to get top_k results
                 continue
 
-            if exclude_files and node_doc.metadata["file_path"] in exclude_files:
+            is_test_file = is_test(node_doc.metadata["file_path"])
+            if category and category != "test" and is_test_file:
                 filtered_out_snippets += 1
                 continue
 
@@ -685,7 +651,6 @@ class CodeIndex:
                 filtered_out_snippets += 1
                 continue
 
-            is_test_file = is_test(node_doc.metadata["file_path"])
             if category == "implementation" and is_test_file:
                 filtered_out_snippets += 1
                 continue
@@ -738,8 +703,6 @@ class CodeIndex:
         num_workers: Optional[int] = None,
     ):
         # Import llama_index components only when needed
-        from llama_index.core import SimpleDirectoryReader
-        from llama_index.core.ingestion import DocstoreStrategy, IngestionPipeline
 
         repo_path = repo_path or self._file_repo.path
 
@@ -828,8 +791,7 @@ class CodeIndex:
         embedded_tokens = sum([count_tokens(node.get_content(), self._settings.embed_model) for node in embedded_nodes])
         logger.info(f"Embedded {len(embedded_nodes)} vectors with {embedded_tokens} tokens")
 
-        self._blocks_by_class_name = blocks_by_class_name
-        self._blocks_by_function_name = blocks_by_function_name
+        self._code_block_index = CodeBlockIndex(blocks_by_class_name, blocks_by_function_name)
 
         return len(embedded_nodes), embedded_tokens
 
@@ -837,12 +799,7 @@ class CodeIndex:
         self._vector_store.persist(persist_dir)
         self._docstore.persist(os.path.join(persist_dir, DEFAULT_PERSIST_FNAME))
         self._settings.persist(persist_dir)
-
-        with open(os.path.join(persist_dir, "blocks_by_class_name.json"), "w") as f:
-            f.write(json.dumps(self._blocks_by_class_name, indent=2))
-
-        with open(os.path.join(persist_dir, "blocks_by_function_name.json"), "w") as f:
-            f.write(json.dumps(self._blocks_by_function_name, indent=2))
+        self._code_block_index.persist(persist_dir)
 
 
 def _rerank_files(file_paths: list[str], file_pattern: str):

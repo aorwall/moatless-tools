@@ -1,18 +1,14 @@
 import re
-from typing import List
 
-from pydantic import Field, ConfigDict
+from pydantic import ConfigDict, Field
 
-from moatless.actions.action import Action, FewShotExample
+from moatless.actions.action import Action
 from moatless.actions.code_action_value_mixin import CodeActionValueMixin
 from moatless.actions.code_modification_mixin import CodeModificationMixin
 from moatless.actions.schema import ActionArguments, Observation
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.index.code_index import CodeIndex
 from moatless.repository.file import do_diff
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
-from moatless.workspace import Workspace
 
 
 class AppendStringArgs(ActionArguments):
@@ -36,7 +32,7 @@ class AppendStringArgs(ActionArguments):
         return cls.format_xml_schema({"path": "file/path.py", "new_str": "\ncontent to append at end of file\n"})
 
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Add a new helper function at the end of the utilities file",
@@ -62,25 +58,14 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
     args_schema = AppendStringArgs
 
-    def __init__(
-        self,
-        runtime: RuntimeEnvironment | None = None,
-        code_index: CodeIndex | None = None,
-        repository: Repository | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        # Initialize mixin attributes directly
-        object.__setattr__(self, "_runtime", runtime)
-        object.__setattr__(self, "_code_index", code_index)
-        object.__setattr__(self, "_repository", repository)
-
-    def execute(
+    async def execute(
         self,
         args: AppendStringArgs,
         file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
     ) -> Observation:
+        if not file_context:
+            raise RuntimeError("File context is not set")
+
         path_str = self.normalize_path(args.path)
         path, error = self.validate_file_access(path_str, file_context)
         if error:
@@ -88,7 +73,7 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
 
         context_file = file_context.get_context_file(str(path))
         if not context_file:
-            return Observation(
+            return Observation.create(
                 message=f"Could not get context for file: {path}",
                 properties={"fail_reason": "context_error"},
             )
@@ -100,13 +85,12 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
         looks_like_import = bool(re.match(r"^(import|from)\s+\w+", new_str.lstrip()))
 
         if looks_like_import:
-            return Observation(
+            return Observation.create(
                 message=(
                     "It looks like you're trying to add imports or other top-of-file content. "
                     "Please use StringReplace action to add content at the beginning of files."
                 ),
                 properties={"fail_reason": "wrong_action_for_imports"},
-                expect_correction=True,
             )
 
         # Normal append logic
@@ -127,14 +111,8 @@ class AppendString(Action, CodeActionValueMixin, CodeModificationMixin):
             "Edit the file again if necessary."
         )
 
-        observation = Observation(
+        return Observation.create(
             message=message,
+            summary=message,
             properties={"diff": diff, "success": True},
         )
-
-        self.run_tests(
-            file_path=str(path),
-            file_context=file_context,
-        )
-
-        return observation

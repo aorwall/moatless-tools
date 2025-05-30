@@ -1,9 +1,10 @@
-from typing import Optional, List, Type, ClassVar
+from typing import ClassVar, Optional
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import ConfigDict, Field, model_validator
 
-from moatless.actions.schema import ActionArguments, FewShotExample
+from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.completion.schema import FewShotExample
 from moatless.index.types import SearchCodeResponse
 
 
@@ -49,41 +50,8 @@ class SemanticSearchArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
-
-class SemanticSearch(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = SemanticSearchArgs
-
-    def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
-        return self._code_index.semantic_search(
-            args.query,
-            file_pattern=args.file_pattern,
-            max_results=self.max_hits,
-            category=args.category,
-        )
-
-    def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
-        if args.file_pattern:
-            return self._code_index.semantic_search(
-                args.query,
-                max_results=self.max_hits,
-                category=args.category,
-            )
-
-        return SearchCodeResponse()
-
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> List[str]:
-        criteria = super().get_evaluation_criteria(trajectory_length)
-        criteria.extend(
-            [
-                "Query Relevance: Evaluate if the search query is well-defined and likely to find relevant code.",
-                "Category Appropriateness: Assess if the category (implementation or test) aligns with the search intent.",
-            ]
-        )
-        return criteria
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="Find all implementations of database connection pooling in our codebase",
@@ -103,3 +71,36 @@ class SemanticSearch(SearchBaseAction):
                 ),
             ),
         ]
+
+
+class SemanticSearch(SearchBaseAction):
+    args_schema: ClassVar[type[ActionArguments]] = SemanticSearchArgs
+
+    async def _search(self, args: SemanticSearchArgs) -> SearchCodeResponse:
+        return await self.code_index.semantic_search(
+            args.query,
+            file_pattern=args.file_pattern,
+            max_results=self.max_hits,
+            category=args.category,
+        )
+
+    async def _search_for_alternative_suggestion(self, args: SemanticSearchArgs) -> SearchCodeResponse:
+        if args.file_pattern:
+            return await self.code_index.semantic_search(
+                args.query,
+                max_results=self.max_hits,
+                category=args.category,
+            )
+
+        return SearchCodeResponse()
+
+    @classmethod
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
+        criteria = super().get_evaluation_criteria(trajectory_length)
+        criteria.extend(
+            [
+                "Query Relevance: Evaluate if the search query is well-defined and likely to find relevant code.",
+                "Category Appropriateness: Assess if the category (implementation or test) aligns with the search intent.",
+            ]
+        )
+        return criteria

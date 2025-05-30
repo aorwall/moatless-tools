@@ -1,9 +1,10 @@
 import os
+from typing import Optional
 
-from moatless.index.retry_voyage_embedding import VoyageEmbeddingWithRetry
+from llama_index.core.embeddings import BaseEmbedding
 
 
-def get_embed_model(model_name: str) -> "BaseEmbedding":
+def get_embed_model(model_name: str) -> Optional[BaseEmbedding]:
     if model_name.startswith("voyage"):
         try:
             from llama_index.embeddings.voyageai import VoyageEmbedding
@@ -15,7 +16,7 @@ def get_embed_model(model_name: str) -> "BaseEmbedding":
         if "VOYAGE_API_KEY" not in os.environ:
             raise ValueError("VOYAGE_API_KEY environment variable is not set. Please set it to your Voyage API key.")
 
-        return VoyageEmbeddingWithRetry(
+        return VoyageEmbedding(
             model_name=model_name,
             voyage_api_key=os.environ.get("VOYAGE_API_KEY"),
             truncation=True,

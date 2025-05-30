@@ -1,18 +1,19 @@
 import logging
-from typing import List, Any
+import time
 
-from pydantic import Field, PrivateAttr, ConfigDict
+from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
     ActionArguments,
-    FewShotExample,
     Observation,
     RewardScaleEntry,
 )
+from moatless.artifacts.artifact import ArtifactChange
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.repository.repository import Repository
-from moatless.runtime.runtime import RuntimeEnvironment
+from moatless.testing.schema import TestFile
+from moatless.testing.schema import TestResult, TestStatus
 from moatless.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -20,11 +21,17 @@ logger = logging.getLogger(__name__)
 
 class RunTestsArgs(ActionArguments):
     """
-    Run the specified unit tests on the codebase.
+    Run the specified unit tests in the codebase.
+
+    Note: This action requires explicit paths to test files.
+    - Only full test file paths are supported (e.g., "tests/auth/test_login.py")
+    - Directory paths, file patterns (e.g., "tests/*.py"), and individual test methods are NOT supported
+    - Non-existent test files will be reported as errors
     """
 
-    thoughts: str = Field(..., description="Your reasoning on what tests to run.")
-    test_files: List[str] = Field(..., description="The list of test files to run")
+    test_files: list[str] = Field(
+        ..., description="The list of explicit test file paths to run (must be file paths, not directories or patterns)"
+    )
 
     model_config = ConfigDict(title="RunTests")
 
@@ -33,10 +40,39 @@ class RunTestsArgs(ActionArguments):
         return f"RunTests({', '.join(self.test_files)})"
 
     def to_prompt(self):
-        return f"Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
+        return "Running tests for the following files:\n" + "\n".join(f"* {file}" for file in self.test_files)
+
+    @classmethod
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
+        return [
+            FewShotExample.create(
+                user_input="Run the tests for our user authentication module",
+                action=RunTestsArgs(
+                    thoughts="Running authentication tests to verify the login functionality works as expected",
+                    test_files=["tests/auth/test_authentication.py", "tests/auth/test_login.py"],
+                ),
+            ),
+            FewShotExample.create(
+                user_input="After fixing the data validation bug, I need to make sure the validation tests pass",
+                action=RunTestsArgs(
+                    thoughts="Running validation tests to confirm that the bug fix resolved the issues with input validation",
+                    test_files=["tests/validation/test_input_validator.py"],
+                ),
+            ),
+        ]
 
 
 class RunTests(Action):
+    """
+    Runs specified test files in the codebase.
+
+    Important requirements:
+    - Only accepts explicit, complete file paths to test files
+    - Does not support directories, file patterns, or individual test methods
+    - Will validate that test files exist before attempting to run them
+    - Will report errors for non-existent files or if directories are specified
+    """
+
     args_schema = RunTestsArgs
 
     max_output_tokens: int = Field(
@@ -44,24 +80,15 @@ class RunTests(Action):
         description="The maximum number of tokens in the test result output message",
     )
 
-    _repository: Repository = PrivateAttr()
-    _runtime: RuntimeEnvironment = PrivateAttr()
+    async def initialize(self, workspace: Workspace):
+        await super().initialize(workspace)
+        if not workspace.runtime:
+            raise ValueError("Runtime is not available for RunTests action")
 
-    def __init__(
-        self,
-        repository: Repository | None = None,
-        runtime: RuntimeEnvironment | None = None,
-        **data,
-    ):
-        super().__init__(**data)
-        self._repository = repository
-        self._runtime = runtime
-
-    def execute(
+    async def execute(
         self,
         args: RunTestsArgs,
         file_context: FileContext | None = None,
-        workspace: Workspace | None = None,
     ) -> Observation:
         """
         Run all tests found in file context or provided in args.
@@ -69,51 +96,144 @@ class RunTests(Action):
         if file_context is None:
             raise ValueError("File context must be provided to execute the run tests action.")
 
-        # Separate non-existent files and directories from valid test files
+        # Ensure workspace is set on file_context if needed
+        if not hasattr(file_context, "workspace") or file_context.workspace is None:
+            if self._workspace:
+                file_context.workspace = self._workspace
+
         non_existent_files = []
         directories = []
         test_files = []
 
         for test_file in args.test_files:
-            if not file_context.file_exists(test_file):
+            test_file = test_file.split("::")[0]
+            if not self._repository.file_exists(test_file) and not file_context.file_exists(test_file):
+                logger.warning(f"File {test_file} does not exist in repository")
                 non_existent_files.append(test_file)
-            elif file_context.is_directory(test_file):
+            elif self._repository.is_directory(test_file):
+                logger.warning(
+                    f"Directory {test_file} provided instead of file, please use ListFiles to get the list of files in the directory and specify which files to run tests on"
+                )
                 directories.append(test_file)
             else:
                 test_files.append(test_file)
 
-        if not test_files:
-            error_details = []
-            if non_existent_files:
-                error_details.append(f"Files not found: {', '.join(non_existent_files)}")
-            if directories:
-                error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
+        error_details = []
+        if non_existent_files:
+            error_details.append(f"Files not found: {', '.join(non_existent_files)}")
+        if directories:
+            error_details.append(f"Directories provided instead of files: {', '.join(directories)}")
 
-            return Observation(
+        if not test_files:
+            return Observation.create(
                 message="Unable to run tests: " + "; ".join(error_details),
                 properties={"test_results": [], "fail_reason": "no_test_files"},
             )
 
-        test_files = file_context.run_tests(test_files)
+        patch = file_context.generate_git_patch()
+        start_time = time.time()
+        test_results = await self._workspace.runtime.run_tests(test_files=test_files, patch=patch)
 
-        response_msg = f"Running tests for the following files:\n"
-        for test_file in test_files:
-            response_msg += f"* {test_file.file_path}\n"
+        end_time = time.time()
+        test_duration = end_time - start_time
+        logger.info(f"Tests completed in {test_duration:.2f} seconds")
 
-        failure_details = file_context.get_test_failure_details()
+        test_file_objects = self.create_test_files(test_file_paths=test_files, test_results=test_results)
+
+        file_context.add_test_files(test_file_objects)
+
+        response_msg = ""
+
+        failure_details = TestFile.get_test_failure_details(test_file_objects)
         if failure_details:
             response_msg += f"\n{failure_details}"
 
-        summary = f"\n{file_context.get_test_summary()}"
+        summary = f"\n{TestFile.get_test_summary(test_file_objects)}"
         response_msg += summary
 
-        return Observation(
-            message=response_msg,
-            summary=summary,
-        )
+        artifact_changes = []
+
+        logger.info(f"Running tests for {len(args.test_files)} files")
+        for test_file in test_file_objects:
+            if test_file.file_path not in args.test_files:
+                continue
+
+            # Calculate test counts for this file
+            passed_count = sum(1 for r in test_file.test_results if r.status == TestStatus.PASSED)
+            failed_count = sum(1 for r in test_file.test_results if r.status == TestStatus.FAILED)
+            error_count = sum(1 for r in test_file.test_results if r.status == TestStatus.ERROR)
+            skipped_count = sum(1 for r in test_file.test_results if r.status == TestStatus.SKIPPED)
+
+            artifact_changes.append(
+                ArtifactChange(
+                    artifact_id=test_file.file_path,
+                    artifact_type="test",
+                    change_type="updated",
+                    properties={
+                        "passed": passed_count,
+                        "failed": failed_count,
+                        "errors": error_count,
+                        "skipped": skipped_count,
+                        "total": len(test_file.test_results),
+                    },
+                    actor="assistant",
+                )
+            )
+
+        if error_details:
+            response_msg += f"\n{error_details}"
+
+        return Observation(message=response_msg, summary=summary, artifact_changes=artifact_changes)  # type: ignore
+
+    def create_test_files(self, test_file_paths: list[str], test_results: list[TestResult]) -> list[TestFile]:
+        results_by_file: dict[str | None, list[TestResult]] = {}
+        for result in test_results:
+            results_by_file.setdefault(result.file_path, []).append(result)
+
+        test_files = []
+
+        # Create TestFile objects for all groups of results with a valid file_path
+        for file_path, file_test_results in results_by_file.items():
+            if file_path is None:
+                # Handle results with no file path separately
+                num_results_no_path = len(file_test_results)
+                if num_results_no_path > 0:
+                    logger.warning(
+                        f"Received {num_results_no_path} test results with no associated file path. These cannot be added to the TestFile list."
+                    )
+                continue
+
+            # Create TestFile for results with a valid file_path
+            test_file = TestFile(file_path=file_path, test_results=file_test_results)
+
+            if file_test_results:
+                # Log counts for this group
+                logger.info(
+                    f"Test results for {file_path}: "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.PASSED)} passed, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.FAILED)} failed, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.ERROR)} errors, "
+                    f"{sum(1 for r in file_test_results if r.status == TestStatus.SKIPPED)} skipped"
+                )
+
+                # Log a warning if these results were not for an explicitly requested file
+                if file_path not in test_file_paths:
+                    logger.warning(f"Received unexpected test results for {file_path}")
+
+            test_files.append(test_file)
+
+        # Ensure TestFile objects exist for requested paths even if they had no results
+        processed_paths = {tf.file_path for tf in test_files}
+        for test_file_path in test_file_paths:
+            if test_file_path not in processed_paths:
+                logger.warning(f"No test results found for requested file {test_file_path}")
+                test_file = TestFile(file_path=test_file_path, test_results=[])
+                test_files.append(test_file)
+
+        return test_files
 
     @classmethod
-    def get_evaluation_criteria(cls, trajectory_length) -> List[str]:
+    def get_evaluation_criteria(cls, trajectory_length) -> list[str]:
         criteria = [
             "Test Result Evaluation: Analyze test results in conjunction with the proposed code changes.",
             "Test Failures Categorization: Differentiate between minor, foreseeable, and unforeseeable failures.",
@@ -127,7 +247,7 @@ class RunTests(Action):
         return criteria
 
     @classmethod
-    def get_reward_scale(cls, trajectory_length) -> List[RewardScaleEntry]:
+    def get_reward_scale(cls, trajectory_length) -> list[RewardScaleEntry]:
         return [
             RewardScaleEntry(
                 min_value=90,
@@ -165,25 +285,3 @@ class RunTests(Action):
                 description="The action is counterproductive, demonstrating misunderstanding or causing setbacks, test failures are severe and could have been anticipated.",
             ),
         ]
-
-    @classmethod
-    def model_validate(cls, obj: Any) -> "RunTests":
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            repository = obj.pop("repository")
-            if "code_index" in obj:
-                code_index = obj.pop("code_index")
-            else:
-                code_index = None
-
-            if "runtime" in obj:
-                runtime = obj.pop("runtime")
-            else:
-                runtime = None
-
-            return cls(code_index=code_index, repository=repository, runtime=runtime, **obj)
-        return super().model_validate(obj)
-
-    @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
-        return []

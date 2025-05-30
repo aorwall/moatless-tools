@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import Optional, Literal, List
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -30,28 +30,6 @@ class MessageHistoryType(Enum):
         return self.value
 
 
-class CompletionModelSettings(BaseModel):
-    model: str = Field(..., description="The model to use for completion")
-    temperature: Optional[float] = Field(0.0, description="The temperature to use for completion")
-    max_tokens: int = Field(2000, description="The maximum number of tokens to generate")
-    timeout: float = Field(120.0, description="The timeout in seconds for completion requests")
-    model_base_url: Optional[str] = Field(default=None, description="The base URL for the model API")
-    model_api_key: Optional[str] = Field(default=None, description="The API key for the model", exclude=True)
-    response_format: str = Field(..., description="The response format expected from the LLM")
-    thoughts_in_action: bool = Field(
-        default=False,
-        description="Whether to include thoughts in the action or in the message",
-    )
-    disable_thoughts: bool = Field(
-        default=False,
-        description="Whether to disable to use thoughts at all.",
-    )
-    merge_same_role_messages: bool = Field(
-        default=False,
-        description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
-    )
-
-
 class FileWithSpans(BaseModel):
     file_path: str = Field(description="The file path where the relevant code is found.")
     span_ids: list[str] = Field(
@@ -62,10 +40,6 @@ class FileWithSpans(BaseModel):
     def add_span_id(self, span_id):
         if span_id not in self.span_ids:
             self.span_ids.append(span_id)
-
-    def add_span_ids(self, span_ids: list[str]):
-        for span_id in span_ids:
-            self.add_span_id(span_id)
 
     def __eq__(self, other: "FileWithSpans"):
         return self.file_path == other.file_path and self.span_ids == other.span_ids
@@ -97,7 +71,7 @@ class Message(BaseModel):
 
 class UserMessage(Message):
     role: Literal["user"] = Field(default="user", description="Role is always 'user' for user messages")
-    artifact_ids: Optional[List[str]] = Field(
+    artifact_ids: Optional[list[str]] = Field(
         default=None, description="List of artifact ids associated with the message"
     )
 
@@ -107,4 +81,4 @@ class AssistantMessage(Message):
         default="assistant",
         description="Role is always 'assistant' for assistant messages",
     )
-    actions: Optional[List[ActionView]] = Field(default=None, description="List of actions performed by the assistant")
+    actions: Optional[list[ActionView]] = Field(default=None, description="List of actions performed by the assistant")

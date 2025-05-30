@@ -1,47 +1,35 @@
 import importlib
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Tuple, Type, TypeVar, cast
 
-from pydantic import BaseModel
-
-from moatless.completion.base import BaseCompletionModel
-from moatless.completion.model import Completion
+from moatless.completion.stats import CompletionInvocation
+from moatless.component import MoatlessComponent
 from moatless.node import Node, Reward
 
 logger = logging.getLogger(__name__)
 
+# TypeVar for ValueFunction types
+VF = TypeVar("VF", bound="BaseValueFunction")
 
-class BaseValueFunction(BaseModel, ABC):
+
+class BaseValueFunction(MoatlessComponent[VF]):
+    model_config = {
+        "from_attributes": True,
+    }
+
     @abstractmethod
-    def get_reward(self, node: Node) -> Tuple[Reward, Optional[Completion]]:
+    async def get_reward(self, node: Node) -> Optional[Reward]:
         raise NotImplementedError("get_reward method must be implemented")
 
     @classmethod
-    def model_validate(cls, obj: Any):
-        if isinstance(obj, dict):
-            obj = obj.copy()
-            value_function_class_path = obj.pop("value_function_class", None)
+    def get_component_type(cls) -> str:
+        return "value_function"
 
-            if value_function_class_path:
-                module_name, class_name = value_function_class_path.rsplit(".", 1)
-                module = importlib.import_module(module_name)
-                value_function_class = getattr(module, class_name)
-                logger.info(f"Value function class: {value_function_class}")
+    @classmethod
+    def _get_package(cls) -> str:
+        return "moatless.value_function"
 
-                if "completion_model" in obj:
-                    obj["completion_model"] = BaseCompletionModel.model_validate(obj["completion_model"])
-
-                instance = value_function_class.model_validate(obj)
-            else:
-                return None
-                # raise ValueError("value_function_class is required in {obj}")
-
-            return instance
-
-        return super().model_validate(obj)
-
-    def model_dump(self, *args, **kwargs):
-        data = super().model_dump(*args, **kwargs)
-        data["value_function_class"] = self.__class__.__module__ + "." + self.__class__.__name__
-        return data
+    @classmethod
+    def _get_base_class(cls) -> type["BaseValueFunction"]:
+        return BaseValueFunction

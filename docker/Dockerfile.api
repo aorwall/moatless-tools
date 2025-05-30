@@ -1,0 +1,61 @@
+FROM python:3.11-slim
+
+# Install system dependencies and Docker CLI in a single layer for better caching
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    unzip \
+    apt-transport-https \
+    ca-certificates \
+    gnupg-agent \
+    software-properties-common \
+    procps \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Ensure the installed binary is on the `PATH`
+ENV PATH="/root/.local/bin/:$PATH"
+
+WORKDIR /app
+
+# Copy only dependency files first to leverage layer caching
+COPY pyproject.toml uv.lock ./
+COPY README.md ./
+
+# Install dependencies
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --frozen --no-install-project --all-extras
+
+# Copy the moatless code directory
+COPY moatless ./moatless/
+
+# Sync the project
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen
+
+# Create directories for mounted volumes and set proper permissions
+RUN mkdir -p /data/moatless && \
+    chmod -R 777 /data
+
+# Set environment variables
+ENV PYTHONPATH=/app
+
+# Set the moatless directory where config and trajectories are stored
+ENV MOATLESS_DIR=/data/moatless
+
+# Expose the API port
+EXPOSE 8000
+
+# Copy and set up entrypoint script
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

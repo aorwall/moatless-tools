@@ -46,10 +46,6 @@ class SearchCodeHit(BaseModel):
     def contains_span(self, span_id: str) -> bool:
         return span_id in [span.span_id for span in self.spans]
 
-    def add_spans(self, span_ids: list[str], rank: int = 0):
-        for span_id in span_ids:
-            self.add_span(span_id, rank)
-
     def __str__(self):
         return f"{self.file_path}: {', '.join([span.span_id for span in self.spans])}"
 

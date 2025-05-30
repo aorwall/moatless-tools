@@ -1,12 +1,13 @@
 import logging
+import os
 from fnmatch import fnmatch
-from typing import List, Optional, Tuple, Type, ClassVar
+from typing import ClassVar, Optional
 
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import Field, model_validator
 
-from moatless.actions.action import FewShotExample
 from moatless.actions.schema import ActionArguments
 from moatless.actions.search_base import SearchBaseAction, SearchBaseArgs
+from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
 
 logger = logging.getLogger(__name__)
@@ -32,22 +33,13 @@ class FindCodeSnippetArgs(SearchBaseArgs):
         description="A glob pattern to filter search results to specific file types or directories. ",
     )
 
-    model_config = ConfigDict(title="FindCodeSnippet")
+    model_config = {"title": "FindCodeSnippet"}
 
     @model_validator(mode="after")
-    def validate_snippet(self) -> "FindCodeSnippetArgs":
+    def validate_snippet(self):
         if not self.code_snippet.strip():
             raise ValueError("code_snippet cannot be empty")
         return self
-
-    @classmethod
-    def format_schema_for_llm(cls) -> str:
-        return cls.format_xml_schema(
-            {
-                "code_snippet": "The exact code snippet to find",
-                "file_pattern": "A glob pattern to filter search results to specific file types or directories.",
-            }
-        )
 
     def to_prompt(self):
         prompt = f"Searching for code snippet: {self.code_snippet}"
@@ -61,42 +53,8 @@ class FindCodeSnippetArgs(SearchBaseArgs):
             param_str += f", file_pattern={self.file_pattern}"
         return f"{self.name}({param_str})"
 
-    def format_args_for_llm(self) -> str:
-        return f"""<code_snippet>
-{self.code_snippet}
-</code_snippet>
-<file_pattern>{self.file_pattern if self.file_pattern else ''}</file_pattern>"""
-
-
-class FindCodeSnippet(SearchBaseAction):
-    args_schema: ClassVar[Type[ActionArguments]] = FindCodeSnippetArgs
-
-    max_hits: int = Field(
-        10,
-        description="The maximum number of search results to return. Default is 10.",
-    )
-
-    def _search_for_context(self, args: FindCodeSnippetArgs) -> Tuple[FileContext, bool]:
-        logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
-
-        matches = self._repository.find_exact_matches(search_text=args.code_snippet, file_pattern=args.file_pattern)
-
-        if args.file_pattern and len(matches) > 1:
-            matches = [
-                (file_path, line_num) for file_path, line_num in matches if fnmatch(file_path, args.file_pattern)
-            ]
-
-        search_result_context = FileContext(repo=self._repository)
-        for file_path, start_line in matches[: self.max_hits]:
-            num_lines = len(args.code_snippet.splitlines())
-            end_line = start_line + num_lines - 1
-
-            search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
-
-        return search_result_context, False
-
     @classmethod
-    def get_few_shot_examples(cls) -> List[FewShotExample]:
+    def get_few_shot_examples(cls) -> list[FewShotExample]:
         return [
             FewShotExample.create(
                 user_input="I need to understand how the User class is structured in our authentication system. Let me find its definition.",
@@ -122,3 +80,39 @@ class FindCodeSnippet(SearchBaseAction):
                 ),
             ),
         ]
+
+
+class FindCodeSnippet(SearchBaseAction):
+    args_schema: ClassVar[type[ActionArguments]] = FindCodeSnippetArgs
+
+    max_hits: int = Field(
+        10,
+        description="The maximum number of search results to return. Default is 10.",
+    )
+
+    async def _search_for_context(self, args: FindCodeSnippetArgs) -> tuple[FileContext, bool]:
+        logger.info(f"{self.name}: {args.code_snippet} (file_pattern: {args.file_pattern})")
+
+        matches = await self._repository.find_exact_matches(
+            search_text=args.code_snippet, file_pattern=args.file_pattern
+        )
+        logger.info(f"Found {len(matches)} matches")
+
+        if args.file_pattern:
+            # Normalize the pattern to handle both **/*.py and *.py cases
+            pattern = args.file_pattern.replace("**/", "*")
+            matches = [
+                (file_path, line_num)
+                for file_path, line_num in matches
+                if fnmatch(os.path.basename(file_path), pattern) or fnmatch(file_path, args.file_pattern)
+            ]
+            logger.info(f"Filtered {len(matches)} matches to {len(matches)} matches")
+
+        search_result_context = FileContext(repo=self._repository)
+        for file_path, start_line in matches[: self.max_hits]:
+            num_lines = len(args.code_snippet.splitlines())
+            end_line = start_line + num_lines - 1
+
+            search_result_context.add_line_span_to_context(file_path, start_line, end_line, add_extra=False)
+
+        return search_result_context, False
