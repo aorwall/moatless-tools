@@ -2,7 +2,7 @@
 set -e
 
 # Default values
-BRANCH="docker"
+BRANCH="main"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
