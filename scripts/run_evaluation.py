@@ -155,13 +155,6 @@ def main():
     )
     parser.add_argument("--flow", "-f", default="simple_coding", help="Flow ID to use (default: simple_coding)")
     parser.add_argument(
-        "--use-local",
-        "-l",
-        action="store_true",
-        default=True,
-        help="Mount the local moatless source code to /opt/moatless in the container",
-    )
-    parser.add_argument(
         "--num-parallel-jobs",
         type=int,
         default=1,
