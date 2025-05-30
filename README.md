@@ -121,10 +121,20 @@ python3 scripts/run_evaluation.py  --model gpt-4o-mini-2024-07-18 --dataset-spli
 
 Required arguments:
 - `--model`: Model to use for evaluation (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4o')
+- `--flow`: Flow to use for evaluation (defaults to "tool_coding")
 - `--dataset-split`: Dataset split to use
 - `--evaluation-name`: Name of the evaluation
 - `--num-paralllel-jobs`: Number of parallell jobs
 
+
+## Flows 
+Available flows that can be specified with the `--flow` argument:
+
+| Flow ID | Description | Best Suited For |
+|---------|-------------|-----------------|
+| tool_coding | Flow using tool calls to the LLM | Models with native support for tool calls |
+| react_coding | Flow using ReACT format instead of tool calls | Open source models without native support for tool calls |
+| tool_thinking_blocks | Flow using tool calls with adjusted prompt for reasoning | Reasoning models |
 
 ## Verified Models
 

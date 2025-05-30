@@ -119,10 +119,6 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
-    use_reasoning_content: bool = Field(
-        default=False,
-        description="Whether to use reasoning content in messages",
-    )
 
     _response_schema: Optional[list[type[ResponseSchema]]] = PrivateAttr(default=None)
     _system_prompt: Optional[str] = PrivateAttr(default=None)
