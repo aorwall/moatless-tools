@@ -38,7 +38,6 @@ class AgenticFlow(MoatlessComponent):
     trajectory_id: Optional[str] = Field(None, description="The trajectory ID.")
 
     agent: Optional[ActionAgent] = Field(None, description="Agent for generating actions.")
-    agent_id: Optional[str] = Field(None, description="The agent ID if read from config.")
 
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
     max_iterations: int = Field(10, description="The maximum number of iterations to run.")
@@ -78,7 +77,6 @@ class AgenticFlow(MoatlessComponent):
         max_iterations: int = 10,
         max_expansions: Optional[int] = None,
         max_cost: Optional[float] = None,
-        shadow_mode: bool = True,
         on_event: Optional[Callable[[BaseEvent], Awaitable[None]]] = None,
         **kwargs,
     ):
@@ -95,7 +93,6 @@ class AgenticFlow(MoatlessComponent):
         if not root:
             root = Node.create_root(
                 user_message=message,
-                shadow_mode=shadow_mode,
                 max_expansions=max_expansions,
             )
 
@@ -224,14 +221,17 @@ class AgenticFlow(MoatlessComponent):
     def is_finished(self) -> str | None:
         """Check if the loop should finish."""
         total_cost = self.total_usage().completion_cost
-        if self.max_cost and self.total_usage().completion_cost and total_cost >= self.max_cost:
+        if self.max_cost and total_cost and total_cost >= self.max_cost:
+            logger.info(f"Flow {self.trajectory_id} finished due to max cost {total_cost} >= {self.max_cost}")
             return "max_cost"
 
         nodes = self.root.get_all_nodes()
         if len(nodes) >= self.max_iterations:
+            logger.info(f"Flow {self.trajectory_id} finished due to max iterations {len(nodes)} >= {self.max_iterations}")
             return "max_iterations"
 
-        if nodes[-1].is_terminal():
+        if nodes[-1].action_steps and nodes[-1].action_steps[-1].observation and nodes[-1].action_steps[-1].observation.terminal:
+            logger.info(f"Flow {self.trajectory_id} finished due to terminal node {nodes[-1].node_id}")
             return "terminal"
 
         return None
@@ -337,7 +337,9 @@ class AgenticFlow(MoatlessComponent):
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """Generate a dictionary representation of the system."""
-        data = super().model_dump(exclude={"agent", "root"})
+        data = super().model_dump(exclude={"root"})
         if self.agent:
             data["agent"] = self.agent.model_dump(**kwargs)
+            
+        data["flow_class"] = self.get_class_name()
         return data

@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 
 
 class Repository(BaseModel, ABC):
+    
+    shadow_mode: bool = Field(default=False, description="Set to true to not write changes to disk.")
+    
     @abstractmethod
     def get_file_content(self, file_path: str) -> Optional[str]:
         pass

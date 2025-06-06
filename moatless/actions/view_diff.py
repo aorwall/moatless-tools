@@ -40,7 +40,7 @@ class ViewDiff(Action):
     args_schema = ViewDiffArgs
 
     async def execute(self, args: ViewDiffArgs, file_context: FileContext | None = None) -> Observation:
-        if self.workspace.shadow_mode:
+        if file_context.shadow_mode:
             if not file_context:
                 raise ValueError("File context is required to view diff")
 

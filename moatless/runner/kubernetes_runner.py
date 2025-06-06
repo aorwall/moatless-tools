@@ -45,8 +45,10 @@ class KubernetesRunner(BaseRunner):
         service_account: str | None = None,
         kubernetes_provider: str | None = None,
         node_selector: dict | None = None,
-        update_on_start: bool = False,
-        update_branch: str = "docker",
+        update_on_start: bool | None = None,
+        update_branch: str | None = None,
+        custom_requirements_configmap: str | None = None,
+        image_pull_secret: str | None = None,
     ):
         """Initialize the runner with Kubernetes client configuration.
 
@@ -60,6 +62,8 @@ class KubernetesRunner(BaseRunner):
             node_selector: Node selector labels for job pods (default: {"node-purpose": "testbeds"})
             update_on_start: Whether to run update-moatless.sh when starting containers
             update_branch: Git branch to use with update-moatless.sh script
+            custom_requirements_configmap: Name of the ConfigMap containing custom_requirements.txt
+            image_pull_secret: Name of the image pull secret for private registries
         """
         self.namespace = namespace or os.getenv("KUBERNETES_RUNNER_NAMESPACE", "moatless-tools")
         self.image = image
@@ -67,8 +71,10 @@ class KubernetesRunner(BaseRunner):
         self.timeout_seconds = timeout_seconds
         self.service_account = service_account
         self.kubernetes_provider = kubernetes_provider or os.getenv("KUBERNETES_RUNNER_PROVIDER", "in-cluster")
-        self.update_on_start = update_on_start
-        self.update_branch = update_branch
+        self.update_on_start = update_on_start or os.getenv("KUBERNETES_RUNNER_UPDATE_ON_START", "false") == "true"
+        self.update_branch = update_branch or os.getenv("KUBERNETES_RUNNER_UPDATE_BRANCH", "main")
+        self.custom_requirements_configmap = custom_requirements_configmap or os.getenv("KUBERNETES_RUNNER_CUSTOM_REQUIREMENTS_CONFIGMAP")
+        self.image_pull_secret = image_pull_secret or os.getenv("KUBERNETES_RUNNER_IMAGE_PULL_SECRET")
         logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
 
         if node_selector:
@@ -99,6 +105,10 @@ class KubernetesRunner(BaseRunner):
         self.logger.info(f"Kubernetes runner initialized with namespace: {self.namespace}")
         if self.update_on_start:
             self.logger.info(f"Update on start: enabled (branch: {self.update_branch})")
+        if self.custom_requirements_configmap:
+            self.logger.info(f"Custom requirements ConfigMap: {self.custom_requirements_configmap}")
+        if self.image_pull_secret:
+            self.logger.info(f"Image pull secret: {self.image_pull_secret}")
 
     @tracer.start_as_current_span("KubernetesRunner.start_job")
     async def start_job(
@@ -109,6 +119,7 @@ class KubernetesRunner(BaseRunner):
         node_id: int | None = None,
         update_on_start: Optional[bool] = None,
         update_branch: Optional[str] = None,
+        custom_requirements_configmap: Optional[str] = None,
     ) -> bool:
         """Start a job as a Kubernetes Job.
 
@@ -121,6 +132,8 @@ class KubernetesRunner(BaseRunner):
                              If None, uses the runner's default setting.
             update_branch: Git branch to use with update-moatless.sh script.
                            If None, uses the runner's default branch.
+            custom_requirements_configmap: Name of the ConfigMap containing custom_requirements.txt.
+                                           If None, uses the runner's default setting.
 
         Returns:
             True if the job was scheduled successfully, False otherwise
@@ -130,7 +143,7 @@ class KubernetesRunner(BaseRunner):
         # Check if job already exists
         if await self.job_exists(project_id, trajectory_id):
             job_status = await self.get_job_status(project_id, trajectory_id)
-            logger.info(f"Job {job_id} status: {job_status}")
+            logger.debug(f"Job {job_id} status: {job_status}")
 
             if job_status == JobStatus.RUNNING:
                 logger.info(f"Job {job_id} already exists with status {job_status}, skipping")
@@ -156,6 +169,9 @@ class KubernetesRunner(BaseRunner):
             # Determine if we should update and which branch to use
             should_update = self.update_on_start if update_on_start is None else update_on_start
             branch_to_use = self.update_branch if update_branch is None else update_branch
+            requirements_configmap_to_use = (
+                self.custom_requirements_configmap if custom_requirements_configmap is None else custom_requirements_configmap
+            )
 
             job = self._create_job_object(
                 job_id=job_id,
@@ -166,6 +182,7 @@ class KubernetesRunner(BaseRunner):
                 node_id=node_id,
                 update_on_start=should_update,
                 update_branch=branch_to_use,
+                custom_requirements_configmap=requirements_configmap_to_use,
             )
 
             # Create the job in the namespace
@@ -358,7 +375,7 @@ class KubernetesRunner(BaseRunner):
 
             # For other API errors, log but don't assume job doesn't exist
             self.logger.warning(f"Error checking if job {job_id} exists: {e}, status code: {e.status}")
-            if e.status >= 500:
+            if e.status and e.status >= 500:
                 # For server errors, assume job might exist to prevent unnecessary job termination
                 self.logger.warning(f"Server error checking job {job_id}, assuming it might exist")
                 return True
@@ -378,19 +395,145 @@ class KubernetesRunner(BaseRunner):
         Returns:
             The job status
         """
-        # Check if job is still active
-        self.logger.info(f"Job {job.metadata.name} status: {job.status}")
+        # Debug logging to understand the job status
+        self.logger.debug(
+            f"Job {job.metadata.name} status - succeeded: {job.status.succeeded}, "
+            f"failed: {job.status.failed}, active: {job.status.active}"
+        )
 
-        # Check if job completed successfully
-        if job.status.succeeded:
+        # Check if job completed successfully (succeeded can be None or a number)
+        if job.status.succeeded and job.status.succeeded > 0:
+            self.logger.debug(f"Job {job.metadata.name} completed successfully")
             return JobStatus.COMPLETED
 
-        # Check if job failed
-        if job.status.failed:
+        # Check if job failed (failed can be None or a number)
+        if job.status.failed and job.status.failed > 0:
+            self.logger.debug(f"Job {job.metadata.name} failed")
             return JobStatus.FAILED
 
-        # Consider the job has running if a job deployment exists and is not completed
-        return JobStatus.RUNNING
+        # Check if job is still active
+        if job.status.active and job.status.active > 0:
+            # Check pod status to see if pods are actually in a failed state
+            try:
+                pod_list = self.core_v1.list_namespaced_pod(
+                    namespace=self.namespace, 
+                    label_selector=f"job-name={job.metadata.name}"
+                )
+                
+                if pod_list.items:
+                    for pod in pod_list.items:
+                        pod_status = self._get_pod_failure_status(pod)
+                        if pod_status == JobStatus.FAILED:
+                            self.logger.info(f"Job {job.metadata.name} has failed pod {pod.metadata.name}, marking job as failed")
+                            return JobStatus.FAILED
+                        elif pod_status == JobStatus.RUNNING:
+                            self.logger.debug(f"Job {job.metadata.name} has running pod {pod.metadata.name}")
+                            return JobStatus.RUNNING
+                            
+            except Exception as e:
+                self.logger.warning(f"Error checking pod status for job {job.metadata.name}: {e}")
+            
+            self.logger.debug(f"Job {job.metadata.name} is running")
+            return JobStatus.RUNNING
+
+        # If none of the above, but job exists, it might be pending
+        self.logger.debug(f"Job {job.metadata.name} is pending")
+        return JobStatus.PENDING
+
+    def _get_pod_failure_status(self, pod) -> JobStatus:
+        """Check if a pod is in a failed state.
+
+        Args:
+            pod: Kubernetes pod object
+
+        Returns:
+            JobStatus.FAILED if pod is in a failed state, JobStatus.RUNNING if running, JobStatus.PENDING otherwise
+        """
+        # Check pod phase first
+        if pod.status.phase == "Failed":
+            self.logger.info(f"Pod {pod.metadata.name} is in Failed phase")
+            return JobStatus.FAILED
+        elif pod.status.phase == "Running":
+            return JobStatus.RUNNING
+        elif pod.status.phase == "Succeeded":
+            return JobStatus.COMPLETED
+
+        # Check container statuses for more detailed failure detection
+        if pod.status.container_statuses:
+            for container_status in pod.status.container_statuses:
+                # Check if container is in a waiting state with error reasons
+                if container_status.state.waiting:
+                    reason = container_status.state.waiting.reason
+                    message = container_status.state.waiting.message or ""
+                    
+                    # These are permanent failure conditions that should mark the job as failed
+                    permanent_failure_reasons = [
+                        "ErrImagePull",
+                        "ImagePullBackOff", 
+                        "CreateContainerConfigError",
+                        "CreateContainerError",
+                        "InvalidImageName",
+                        "ImageInspectError",
+                        "ErrImageNeverPull",
+                        "RegistryUnavailable",
+                    ]
+                    
+                    if reason in permanent_failure_reasons:
+                        self.logger.warning(f"Pod {pod.metadata.name} container in permanent failure state: {reason} - {message}")
+                        return JobStatus.FAILED
+                    elif reason == "CrashLoopBackOff":
+                        # CrashLoopBackOff might be temporary (e.g., startup issues) or permanent
+                        # Log detailed information but still mark as failed since it indicates the container is failing to start
+                        self.logger.warning(f"Pod {pod.metadata.name} container in CrashLoopBackOff: {message}")
+                        return JobStatus.FAILED
+                    elif reason in ["ContainerCreating", "PodInitializing"]:
+                        # These are normal startup states
+                        return JobStatus.PENDING
+                    else:
+                        # Log unknown waiting reasons for debugging
+                        self.logger.info(f"Pod {pod.metadata.name} container waiting with reason: {reason} - {message}")
+                        return JobStatus.PENDING
+                
+                # Check if container terminated with non-zero exit code
+                if container_status.state.terminated:
+                    exit_code = container_status.state.terminated.exit_code
+                    reason = container_status.state.terminated.reason or "Unknown"
+                    message = container_status.state.terminated.message or ""
+                    
+                    if exit_code != 0:
+                        self.logger.warning(f"Pod {pod.metadata.name} container terminated with exit code {exit_code}: {reason} - {message}")
+                        return JobStatus.FAILED
+                    else:
+                        self.logger.info(f"Pod {pod.metadata.name} container completed successfully")
+                        return JobStatus.COMPLETED
+                
+                # Check if container is running
+                if container_status.state.running:
+                    return JobStatus.RUNNING
+
+        # Check for conditions that might indicate scheduling issues (but don't mark as failed immediately)
+        if pod.status.conditions:
+            for condition in pod.status.conditions:
+                if condition.type == "PodScheduled" and condition.status == "False":
+                    reason = condition.reason or ""
+                    message = condition.message or ""
+                    
+                    if reason == "Unschedulable":
+                        # Log detailed scheduling failure information but don't mark as failed
+                        # Unschedulable is often temporary (waiting for nodes to scale, resource constraints)
+                        self.logger.info(f"Pod {pod.metadata.name} temporarily unschedulable: {message}. This may resolve when resources become available.")
+                        return JobStatus.PENDING
+                    elif reason == "SchedulerError":
+                        # SchedulerError might be more serious but could still be temporary
+                        self.logger.warning(f"Pod {pod.metadata.name} has scheduler error: {message}. Will retry scheduling.")
+                        return JobStatus.PENDING
+                    else:
+                        # Log unknown scheduling conditions
+                        self.logger.info(f"Pod {pod.metadata.name} scheduling condition: {reason} - {message}")
+                        return JobStatus.PENDING
+
+        # Default to pending if we can't determine the state
+        return JobStatus.PENDING
 
     async def get_job_status(self, project_id: str, trajectory_id: str) -> Optional[JobStatus]:
         """Get the status of a job.
@@ -410,7 +553,7 @@ class KubernetesRunner(BaseRunner):
             return self._get_job_status_from_k8s_job(job)
         except ApiException as e:
             if e.status == 404:
-                self.logger.info(f"Job {job_id} not found in namespace {self.namespace}")
+                self.logger.debug(f"Job {job_id} not found in namespace {self.namespace}")
                 return None
             self.logger.exception(f"Error getting job status for {job_id}: {e}")
             return None
@@ -637,9 +780,15 @@ class KubernetesRunner(BaseRunner):
             client.V1EnvVar(name="JOB_FUNC", value=func_name),
         ]
 
-        # Add API key environment variables
+        # Add API key environment variables from current environment
+        # TODO: Should be a shared secret
         for key, value in os.environ.items():
-            if key.startswith("MOATLESS_"):
+            if (
+                key.endswith("API_KEY")
+                or key.startswith("AWS_")
+                or key.startswith("GCP_")
+                or key.startswith("AZURE_")
+            ):
                 env_vars.append(client.V1EnvVar(name=key, value=value))
 
         # Add OpenTelemetry context if available
@@ -650,6 +799,7 @@ class KubernetesRunner(BaseRunner):
         env_vars.extend(
             [
                 client.V1EnvVar(name="MOATLESS_DIR", value="/data/moatless"),
+                client.V1EnvVar(name="MOATLESS_STORAGE", value=os.environ.get("MOATLESS_STORAGE")),
                 client.V1EnvVar(name="MOATLESS_COMPONENTS_PATH", value="/opt/components"),
                 client.V1EnvVar(name="NLTK_DATA", value="/data/nltk_data"),
                 client.V1EnvVar(name="INDEX_STORE_DIR", value="/data/index_store"),
@@ -662,8 +812,11 @@ class KubernetesRunner(BaseRunner):
 
         return env_vars
 
-    def _create_volumes_and_mounts(self) -> tuple:
+    def _create_volumes_and_mounts(self, custom_requirements_configmap: Optional[str] = None) -> tuple:
         """Create volumes and volume mounts for the pod.
+
+        Args:
+            custom_requirements_configmap: Name of the ConfigMap containing custom_requirements.txt
 
         Returns:
             Tuple of (volumes, volume_mounts)
@@ -678,6 +831,31 @@ class KubernetesRunner(BaseRunner):
             client.V1VolumeMount(name="moatless-components", mount_path="/opt/components"),
             client.V1VolumeMount(name="nltk-data", mount_path="/data/nltk_data"),
         ]
+
+        # Add custom requirements ConfigMap volume if specified
+        requirements_configmap = custom_requirements_configmap or self.custom_requirements_configmap
+        if requirements_configmap:
+            volumes.append(
+                client.V1Volume(
+                    name="custom-requirements",
+                    config_map=client.V1ConfigMapVolumeSource(
+                        name=requirements_configmap,
+                        items=[
+                            client.V1KeyToPath(
+                                key="custom_requirements.txt",
+                                path="custom_requirements.txt"
+                            )
+                        ]
+                    )
+                )
+            )
+            volume_mounts.append(
+                client.V1VolumeMount(
+                    name="custom-requirements",
+                    mount_path="/app",
+                    read_only=True
+                )
+            )
 
         return volumes, volume_mounts
 
@@ -712,6 +890,7 @@ class KubernetesRunner(BaseRunner):
         node_id: int | None = None,
         update_on_start: bool = False,
         update_branch: str = "docker",
+        custom_requirements_configmap: Optional[str] = None,
     ) -> client.V1Job:
         """Create a Kubernetes Job object.
 
@@ -724,6 +903,7 @@ class KubernetesRunner(BaseRunner):
             node_id: Optional node ID for job placement
             update_on_start: Whether to run update-moatless.sh when starting the container
             update_branch: Git branch to use with update-moatless.sh script
+            custom_requirements_configmap: Name of the ConfigMap containing custom_requirements.txt
 
         Returns:
             Kubernetes Job object
@@ -735,7 +915,7 @@ class KubernetesRunner(BaseRunner):
             func_name = job_func.__name__
 
         env_vars = self._create_env_vars(project_id, trajectory_id, func_name, otel_context)
-        volumes, volume_mounts = self._create_volumes_and_mounts()
+        volumes, volume_mounts = self._create_volumes_and_mounts(custom_requirements_configmap)
         tolerations = self._create_tolerations()
 
         args = create_job_args(project_id, trajectory_id, job_func, node_id)
@@ -744,9 +924,18 @@ class KubernetesRunner(BaseRunner):
         cmd = f"echo 'MOATLESS: Starting job for {project_id}/{trajectory_id}' && export PYTHONUNBUFFERED=1"
 
         # Add update script if enabled
-        if update_on_start:
-            self.logger.info(f"Will run update-moatless.sh with branch {update_branch}")
-            cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {update_branch}"
+        should_update = self.update_on_start if update_on_start is None else update_on_start
+        branch_to_use = self.update_branch if update_branch is None else update_branch
+
+        self.logger.info(f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}")
+        if should_update:
+            self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
+            cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {branch_to_use}"
+
+        # Add custom requirements installation if available
+        if custom_requirements_configmap:
+            self.logger.info(f"Will install custom requirements from ConfigMap {custom_requirements_configmap}")
+            cmd += " && if [ -f /app/custom_requirements.txt ]; then echo 'Installing custom dependencies from /app/custom_requirements.txt...' && uv pip install -r /app/custom_requirements.txt; fi"
 
         # Add the main job command
         cmd += f" && date '+%Y-%m-%d %H:%M:%S' && echo 'Starting job at ' $(date '+%Y-%m-%d %H:%M:%S') && uv run --no-sync -  <<EOF 2>&1\n{args}\nEOF"
@@ -773,7 +962,7 @@ class KubernetesRunner(BaseRunner):
             volume_mounts=volume_mounts,
             resources=client.V1ResourceRequirements(
                 requests={"cpu": "500m", "memory": "512Mi", "ephemeral-storage": "1Gi"},
-                limits={"cpu": "1000m", "memory": "2Gi", "ephemeral-storage": "5Gi"},
+                limits={"cpu": "2000m", "memory": "4Gi", "ephemeral-storage": "5Gi"},
             ),
             working_dir="/opt/moatless",
         )
@@ -793,6 +982,11 @@ class KubernetesRunner(BaseRunner):
         annotations["karpenter.sh/do-not-evict"] = "true"
         annotations["karpenter.sh/do-not-disrupt"] = "true"
 
+        # Create image pull secrets list if configured
+        image_pull_secrets = None
+        if self.image_pull_secret:
+            image_pull_secrets = [client.V1LocalObjectReference(name=self.image_pull_secret)]
+
         pod_template = client.V1PodTemplateSpec(
             metadata=client.V1ObjectMeta(
                 labels=labels,
@@ -806,6 +1000,7 @@ class KubernetesRunner(BaseRunner):
                 node_selector=self._get_node_selector(node_id),
                 tolerations=tolerations,
                 priority_class_name="system-node-critical",  # Add high priority to prevent eviction
+                image_pull_secrets=image_pull_secrets,
             ),
         )
 

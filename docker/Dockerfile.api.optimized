@@ -1,6 +1,7 @@
-FROM python:3.11-slim
+# Multi-stage build for better caching and smaller final image
+FROM python:3.11-slim as base
 
-# Install system dependencies and Docker CLI in a single layer for better caching
+# Install system dependencies and Docker CLI in a single layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     git \
@@ -19,27 +20,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Ensure the installed binary is on the `PATH`
-ENV PATH="/root/.local/bin/:$PATH"
+# Dependencies stage
+FROM base as dependencies
 
 WORKDIR /app
 
 # Copy only dependency files first to leverage layer caching
-COPY pyproject.toml uv.lock ./
-COPY README.md ./
+COPY pyproject.toml uv.lock README.md ./
 
 # Install dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --no-install-project --extra api --extra kubernetes --extra azure
+    uv sync --frozen --no-install-project --all-extras 
+
+# Final stage
+FROM dependencies as final
 
 # Copy the moatless code directory
 COPY moatless ./moatless/
 
 # Sync the project
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --extra api --extra kubernetes --extra azure
+    uv sync --frozen
 
 # Create directories for mounted volumes and set proper permissions
 RUN mkdir -p /data/moatless && \
@@ -47,8 +48,7 @@ RUN mkdir -p /data/moatless && \
 
 # Set environment variables
 ENV PYTHONPATH=/app
-
-# Set the moatless directory where config and trajectories are stored
+ENV PATH="/root/.local/bin/:$PATH"
 ENV MOATLESS_DIR=/data/moatless
 
 # Expose the API port
@@ -58,4 +58,4 @@ EXPOSE 8000
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"] 

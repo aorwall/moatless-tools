@@ -173,7 +173,7 @@ class ActionAgent(MoatlessComponent):
                 logger.exception(f"Node{node.node_id}: Build action failed with error ")
 
             if isinstance(e, CompletionRejectError):
-                node.error = f"Completion validation error: {e.message}"
+                node.error = f"Completion validation error: {str(e)}\n\n{traceback.format_exc()}"
                 await self._emit_event(
                     AgentErrorEvent(
                         agent_id=self.agent_id,
@@ -267,7 +267,7 @@ class ActionAgent(MoatlessComponent):
             node.terminal = True
 
             if isinstance(e, CompletionRejectError):
-                node.error = f"Completion validation error: {e.message}"  # TODO: Remove this when we got support in the UI to show action_step.error
+                node.error = f"Completion validation error: {str(e)}\n\n{traceback.format_exc()}"  # TODO: Remove this when we got support in the UI to show action_step.error
                 # action_step.observation.error = f"Completion validation error: {e.message}"
                 return
             else:

@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import platform
+import re
 import subprocess
 from collections.abc import Callable
 from datetime import datetime
@@ -39,10 +40,11 @@ class DockerRunner(BaseRunner):
         moatless_source_dir: Optional[str] = None,
         default_image_name: Optional[str] = None,
         update_on_start: bool = True,
-        update_branch: str = "docker",
+        update_branch: str = "main",
         network_name: Optional[str] = None,
         memory_limit: Optional[str] = None,
         memory_swap_limit: Optional[str] = None,
+        architecture: Optional[str] = None,
     ):
         """Initialize the runner with Docker configuration.
 
@@ -61,6 +63,8 @@ class DockerRunner(BaseRunner):
             memory_limit: Memory limit for containers (e.g., '4g', '2048m'). If None, uses Docker default.
             memory_swap_limit: Memory + swap limit for containers (e.g., '8g', '4096m').
                               If None, defaults to twice the memory limit.
+            architecture: Architecture string to use in image names (e.g., 'x86_64', 'arm64').
+                         If None, defaults to 'x86_64' or can be set via MOATLESS_DOCKER_ARCHITECTURE env var.
         """
         self.job_ttl_seconds = job_ttl_seconds
         self.timeout_seconds = timeout_seconds
@@ -70,6 +74,9 @@ class DockerRunner(BaseRunner):
         self.update_branch = update_branch
         self.memory_limit = memory_limit or os.environ.get("DOCKER_MEMORY_LIMIT")
         self.memory_swap_limit = memory_swap_limit or os.environ.get("DOCKER_MEMORY_SWAP_LIMIT")
+
+        # Set architecture - priority: parameter > env var > default
+        self.architecture = architecture or os.environ.get("MOATLESS_DOCKER_ARCHITECTURE") or "x86_64"
 
         # Set network name - priority: parameter > env var > default
         self.network_name = network_name or os.environ.get("MOATLESS_DOCKER_NETWORK") or "moatless-network"
@@ -97,7 +104,17 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Components path: {self.components_path}")
         logger.info(f"  - Moatless dir: {self.moatless_dir}")
         logger.info(f"  - Network: {self.network_name}")
-        logger.info(f"  - Architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
+        logger.info(f"  - Host architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
+        logger.info(f"  - Image architecture: {self.architecture}")
+        
+        # Log platform strategy
+        if self.is_arm64 and self.architecture == "x86_64":
+            logger.info(f"  - Platform strategy: Will use --platform=linux/amd64 for x86_64 images on ARM64 host")
+        elif self.architecture == "arm64":
+            logger.info(f"  - Platform strategy: Will use --platform=linux/arm64 for native ARM64 images")
+        else:
+            logger.info(f"  - Platform strategy: Will use Docker default platform")
+            
         if self.memory_limit:
             logger.info(f"  - Memory limit: {self.memory_limit}")
         if self.memory_swap_limit:
@@ -112,8 +129,6 @@ class DockerRunner(BaseRunner):
         job_func: Callable,
         node_id: int | None = None,
         image_name: Optional[str] = None,
-        update_on_start: Optional[bool] = None,
-        update_branch: Optional[str] = None,
         memory_limit: Optional[str] = None,
         memory_swap_limit: Optional[str] = None,
     ) -> bool:
@@ -198,11 +213,17 @@ class DockerRunner(BaseRunner):
                 "INSTANCE_PATH=/data/instance.json",
                 "VIRTUAL_ENV=",  # Empty value tells UV to ignore virtual environments
                 "UV_NO_VENV=1",  # Tell UV explicitly not to use venv
+                #"HTTPBIN_URL=http://httpbin.moatless.ai/", # This is to use a more stable httpbin server in psf/request instances
             ]
 
             # Add components path environment variable only if components are configured
             if self.components_path:
                 env_vars.append("MOATLESS_COMPONENTS_PATH=/opt/components")
+
+            # Add redis url environment variable only if redis url is configured
+            if os.environ.get("REDIS_URL"):
+                redis_url = self._convert_localhost_url(os.environ.get("REDIS_URL"))
+                env_vars.append(f"REDIS_URL={redis_url}")
 
             # Add API key environment variables from current environment
             for key, value in os.environ.items():
@@ -211,7 +232,6 @@ class DockerRunner(BaseRunner):
                     or key.startswith("AWS_")
                     or key.startswith("GCP_")
                     or key.startswith("AZURE_")
-                    or key == "REDIS_URL"
                 ):
                     env_vars.append(f"{key}={value}")
 
@@ -226,9 +246,18 @@ class DockerRunner(BaseRunner):
             # Add network to connect to docker-compose services (like Redis)
             cmd.extend(["--network", self.network_name])
 
-            # Add platform flag if running on ARM64 architecture
-            if self.is_arm64:
+            # Add platform flag based on architecture configuration
+            if self.is_arm64 and self.architecture == "x86_64":
+                # Force AMD64 platform when running x86_64 images on ARM64 host
                 cmd.extend(["--platform=linux/amd64"])
+                logger.info(f"Using AMD64 platform for x86_64 image on ARM64 host")
+            elif self.architecture == "arm64":
+                # Use ARM64 platform when specifically configured for ARM64 images
+                cmd.extend(["--platform=linux/arm64"])
+                logger.info(f"Using ARM64 platform for arm64 image")
+            else:
+                # No platform specified - let Docker use the default
+                logger.info(f"Using default platform (no --platform flag)")
 
             # Add memory limits if specified
             effective_memory_limit = memory_limit or self.memory_limit
@@ -272,9 +301,10 @@ class DockerRunner(BaseRunner):
             run_command = ""
 
             # Add update script if enabled
-            should_update = self.update_on_start if update_on_start is None else update_on_start
-            branch_to_use = self.update_branch if update_branch is None else update_branch
+            should_update = self.update_on_start and not self.moatless_source_dir
+            branch_to_use = self.update_branch
 
+            self.logger.info(f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}")
             if should_update:
                 self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
                 run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
@@ -642,7 +672,7 @@ class DockerRunner(BaseRunner):
         instance_id_split = trajectory_id.split("__")
         repo_name = instance_id_split[0]
         instance_id = instance_id_split[1]
-        return f"aorwall/sweb.eval.x86_64.{repo_name}_moatless_{instance_id}"
+        return f"aorwall/sweb.eval.{self.architecture}.{repo_name}_moatless_{instance_id}"
 
     async def _container_exists(self, container_name: str) -> bool:
         """Check if a container exists.
@@ -670,7 +700,8 @@ class DockerRunner(BaseRunner):
         Returns:
             JobStatus enum value
         """
-        self.logger.info(f"Parsing container status: {status}, {running}, {exit_code}")
+        self.logger.debug(f"Parsing container status: {status}, {running}, {exit_code}")
+        
         # First check if container is running - either by status or running flag
         if status == "running" or running.lower() == "true":
             return JobStatus.RUNNING
@@ -915,3 +946,33 @@ class DockerRunner(BaseRunner):
         except Exception as exc:
             self.logger.exception(f"Error getting running container count: {exc}")
             return 0
+
+    def _convert_localhost_url(self, url: str) -> str:
+        """Convert localhost URLs to be accessible from Docker containers.
+        
+        Args:
+            url: The URL to convert
+            
+        Returns:
+            Converted URL that can be accessed from within Docker containers
+        """
+        if not url:
+            return url
+            
+        # Pattern to match localhost or 127.0.0.1 in URLs
+        localhost_pattern = r'(redis://|http://|https://|)(?:localhost|127\.0\.0\.1)(:[\d]+)?(/.*)?'
+        
+        match = re.match(localhost_pattern, url, re.IGNORECASE)
+        if not match:
+            return url
+            
+        protocol, port, path = match.groups()
+        port = port or ""
+        path = path or ""
+        
+        # Use host.docker.internal which works on Docker Desktop and newer Docker versions
+        # This is the most portable solution across different platforms
+        converted_url = f"{protocol}host.docker.internal{port}{path}"
+        
+        logger.info(f"Converted localhost URL '{url}' to '{converted_url}' for Docker container access")
+        return converted_url

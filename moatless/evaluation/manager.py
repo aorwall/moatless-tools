@@ -9,22 +9,24 @@ from moatless.evaluation.run_instance import run_swebench_instance
 from moatless.evaluation.schema import (
     Evaluation,
     EvaluationInstance,
+    EvaluationStats,
     EvaluationStatus,
     InstanceStatus,
+    ExecutionStatus,
+    ResolutionStatus,
     EvaluationSummary,
+    RepoStats,
 )
 from moatless.evaluation.utils import get_swebench_instance
 from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import FlowManager
-from moatless.node import Node
+from moatless.node import EvaluationResult, Node
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
 from opentelemetry import trace
 
-if TYPE_CHECKING:
-    from moatless.api.swebench.schema import EvaluationStatsResponseDTO, RepoStatsDTO
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("moatless.evaluation.manager")
@@ -60,8 +62,8 @@ class EvaluationManager:
 
     async def create_evaluation(
         self,
-        flow_id: str,
-        model_id: str,
+        flow_id: str | None = None,
+        flow_config: AgenticFlow | None = None,
         evaluation_name: str | None = None,
         dataset_name: str | None = None,
         instance_ids: list[str] | None = None,
@@ -69,13 +71,19 @@ class EvaluationManager:
         """Create a new evaluation and return its ID."""
         if not dataset_name and not instance_ids:
             raise ValueError("Either dataset_name or instance_ids must be provided")
+        
+        if not flow_id and not flow_config:
+            raise ValueError("Either flow_id or flow_config must be provided")
+        
+        if flow_id and flow_config:
+            raise ValueError("Cannot provide both flow_id and flow_config")
 
         if not dataset_name:
             dataset_name = "instance_ids"
 
         if not evaluation_name:
             evaluation_name = (
-                f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{model_id}_{dataset_name}"
+                f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{dataset_name}"
             )
 
         logger.info(f"Creating evaluation: {evaluation_name}")
@@ -87,21 +95,26 @@ class EvaluationManager:
         if await self.storage.exists_in_project("evaluation.json", project_id=evaluation_name):
             raise ValueError("Evaluation already exists")
 
+        # Handle flow creation based on input
+        if flow_config:
+            # Use provided flow config
+            flow = flow_config
+            # Ensure flow has the effective_flow_id
+            flow.id = flow_id
+        else:
+            # Build flow from flow_id
+            flow = await self._flow_manager.get_flow_config(id=flow_id)
+
         evaluation = Evaluation(
             evaluation_name=evaluation_name,
             dataset_name=dataset_name,
             status=EvaluationStatus.PENDING,
             flow_id=flow_id,
-            model_id=model_id,
+            flow=flow,
             instances=[
                 EvaluationInstance(instance_id=instance_id)  # Will default to CREATED state
                 for instance_id in instance_ids
             ],
-        )
-
-        flow = await self._flow_manager.build_flow(
-            id=evaluation.flow_id,
-            model_id=evaluation.model_id,
         )
 
         await self.storage.write_to_project(
@@ -114,7 +127,8 @@ class EvaluationManager:
             swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
             repo_name = swebench_instance["repo"].split("/")[-1]
             problem_statement = (
-                f"Solve the following issue in the {repo_name} repository:\n{swebench_instance['problem_statement']}"
+                f"You're tasks is to solve an issue reported in the project {repo_name}. The repository is cloned in the directory /testbed which is the current working directory. "
+                f"The reported issue is:\n{swebench_instance['problem_statement']}"
             )
 
             root_node = Node.create_root(user_message=problem_statement)
@@ -141,7 +155,7 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
-        new_evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{evaluation.flow_id}_{evaluation.model_id}_{evaluation.dataset_name}"
+        new_evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{evaluation.flow_id}_{evaluation.dataset_name}"
         logger.info(
             f"Cloning evaluation {evaluation_name} to {new_evaluation_name} with {len(evaluation.instances)} instances, dataset {evaluation.dataset_name}"
         )
@@ -167,7 +181,7 @@ class EvaluationManager:
         started_instances = 0
 
         for instance in evaluation.instances:
-            if instance.status == InstanceStatus.COMPLETED:
+            if instance.is_evaluated():
                 continue
 
             # Start the job using the wrapper function
@@ -177,7 +191,7 @@ class EvaluationManager:
                 job_func=run_swebench_instance,
             ):
                 started_instances += 1
-                instance.status = InstanceStatus.PENDING
+                instance.start()  # This will set execution_status to QUEUED
 
         if started_instances > 0:
             # Update evaluation status if needed
@@ -202,39 +216,80 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
+        await self._sync_evaluation_status(evaluation)
+        
+        evaluation.flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
+
+        return evaluation
+    
+    async def _sync_evaluation_status(self, evaluation: Evaluation):
         if evaluation.status == EvaluationStatus.COMPLETED:
             return evaluation
-
-        if sync:
-            await self.process_evaluation_results(evaluation_name)
-
+        
         # Process the evaluation status
         evaluation_is_running = False
         evaluation_is_completed = True
+        has_updates = False
 
         for instance in evaluation.instances:
-            if instance.status == InstanceStatus.COMPLETED:
-                continue
-
-            evaluation_is_completed = False
-
+            # Skip if already fully processed
+            
+            # Get current job status from runner
             job_status = await self.runner.get_job_status(
-                project_id=evaluation_name, trajectory_id=instance.instance_id
+                project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
             )
+            
+            # Check if evaluation is still incomplete
+            if not instance.is_finished() or not instance.is_evaluated():
+                evaluation_is_completed = False
 
-            instance.job_status = job_status
-
-            if job_status in [JobStatus.RUNNING]:
+            # Check if any job is running
+            if job_status == JobStatus.RUNNING:
                 evaluation_is_running = True
-
+                
+                if instance.execution_status != ExecutionStatus.RUNNING:
+                    instance.execution_status = ExecutionStatus.RUNNING
+                    has_updates = True
+                
+            if job_status == JobStatus.PENDING:
+                if instance.execution_status != ExecutionStatus.QUEUED:
+                    instance.execution_status = ExecutionStatus.QUEUED
+                    has_updates = True
+                    
+            # Update instance if job status changed
+            if instance.job_status != job_status:
+                instance.job_status = job_status
+                await self._sync_instance_with_job_status(instance, job_status)
+                await self._process_trajectory_results(evaluation, instance)
+                has_updates = True
+            
+            # Clean up completed and evaluated jobs from Kubernetes cluster
+            if instance.is_evaluated() and job_status == JobStatus.COMPLETED:
+                try:
+                    logger.info(f"Instance {instance.instance_id} is completed and evaluated, cleaning up Kubernetes job")
+                    await self.runner.cancel_job(evaluation.evaluation_name, instance.instance_id)
+                    logger.info(f"Successfully cleaned up completed job for instance {instance.instance_id}")
+                    # Update job_status to None since we just deleted it
+                    instance.job_status = None
+                    has_updates = True
+                except Exception as e:
+                    logger.warning(f"Failed to clean up completed job for instance {instance.instance_id}: {e}")
+                
+        # Update evaluation status based on instance states
         if evaluation_is_completed:
             evaluation.status = EvaluationStatus.COMPLETED
-        elif not evaluation_is_running:
+            self._set_evaluation_completed(evaluation)
+            has_updates = True
+        elif not evaluation_is_running and evaluation.status != EvaluationStatus.PAUSED:
             evaluation.status = EvaluationStatus.PAUSED
-        else:
+            has_updates = True
+        elif evaluation_is_running and evaluation.status != EvaluationStatus.RUNNING:
             evaluation.status = EvaluationStatus.RUNNING
+            has_updates = True
+            
+        if has_updates:
+            await self._save_evaluation(evaluation)
 
-        return evaluation
 
     async def get_config(self, evaluation_name: str) -> dict:
         """Get the config for an evaluation."""
@@ -277,29 +332,51 @@ class EvaluationManager:
 
         if event.scope == "flow" and event.event_type == "started":
             instance.started_at = event.timestamp
-            instance.status = InstanceStatus.RUNNING
+            instance.mark_running()
         elif event.scope == "flow" and event.event_type == "completed":
-            await self._process_trajectory_results(evaluation, instance)
+            instance.execution_status = ExecutionStatus.COMPLETED
             instance.completed_at = event.timestamp
+            await self._process_trajectory_results(evaluation, instance)
         elif event.scope == "evaluation" and event.event_type == "started":
             instance.start_evaluating_at = event.timestamp
+            instance.mark_evaluating()
         elif event.scope == "evaluation" and event.event_type == "completed":
-            await self._process_trajectory_results(evaluation, instance)
             instance.evaluated_at = event.timestamp
+            await self._process_trajectory_results(evaluation, instance)
         elif event.event_type == "error":
-            instance.status = InstanceStatus.ERROR
-            if event.data:
-                instance.error = event.data.get("error")
-            instance.error_at = event.timestamp
+            instance.fail(event.data.get("error", "Unknown error") if event.data else "Unknown error")
 
         await self._save_evaluation(evaluation)
+
+    async def _sync_instance_with_job_status(self, instance: EvaluationInstance, job_status: JobStatus | None):
+        """Sync instance execution status with job status from runner"""
+        if job_status is None:
+            # Job no longer exists - this is expected for completed/deleted jobs
+            return
+        elif job_status == JobStatus.PENDING:
+            if instance.execution_status == ExecutionStatus.CREATED:
+                instance.start()  # Move to QUEUED
+        elif job_status == JobStatus.RUNNING:
+            if instance.execution_status in [ExecutionStatus.CREATED, ExecutionStatus.QUEUED]:
+                instance.mark_running()
+        elif job_status == JobStatus.COMPLETED:
+            if instance.execution_status not in [ExecutionStatus.COMPLETED, ExecutionStatus.ERROR]:
+                instance.execution_status = ExecutionStatus.COMPLETED
+                instance._sync_legacy_status()
+        elif job_status == JobStatus.FAILED:
+            instance.fail("Job failed in runner")
+        elif job_status == JobStatus.CANCELED:
+            instance.fail("Job was canceled")
+        elif job_status == JobStatus.STOPPED:
+            instance.fail("Job was stopped unexpectedly")
 
     async def _process_trajectory_results(
         self, evaluation: Evaluation, instance: EvaluationInstance, force_update: bool = True
     ):
         """Process the results of a trajectory and update the instance with the results."""
 
-        if instance.status == InstanceStatus.COMPLETED and not force_update:
+        if instance.is_finished() and instance.is_evaluated() and not force_update:
+            logger.info(f"Instance {instance.instance_id} is already completed and evaluated, skipping processing")
             return instance
 
         # Check if the instance information exists in storage
@@ -313,17 +390,13 @@ class EvaluationManager:
 
         try:
             await self._sync_event_timestamps(evaluation, instance)
-            flow = await AgenticFlow.from_trajectory_id(
+            flow = await self._read_flow(
                 trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
             )
+            logger.debug(f"Read flow with {len(flow.root.get_all_nodes())} nodes")
 
             instance.usage = flow.total_usage()
             instance.iterations = len(flow.root.get_all_nodes())
-
-            if not flow.is_finished():
-                instance.completed_at = None
-                instance.evaluated_at = None
-                return instance
 
             node = None
             if flow.root.discriminator_result and flow.root.discriminator_result.selected_node_id:
@@ -331,31 +404,60 @@ class EvaluationManager:
 
             if not node:
                 node = flow.root.get_last_node()
-
+                
             if node.reward:
                 instance.reward = node.reward.value
+                
+            logger.info(f"Instance {instance.instance_id} flow is finished: {flow.is_finished()}")
+            if flow.is_finished():
+                instance.execution_status = ExecutionStatus.COMPLETED
+            else:
+                
+                instance.execution_status = ExecutionStatus.CREATED
 
             if node.evaluation_result:
-                instance.resolved = node.evaluation_result.resolved
-                instance.status = InstanceStatus.RESOLVED if node.evaluation_result.resolved else InstanceStatus.FAILED
-
-            if instance.status == InstanceStatus.RESOLVED:
-                return instance
-
-            for node in flow.root.get_leaf_nodes():
-                if node.evaluation_result:
-                    if node.evaluation_result.resolved:
-                        instance.status = InstanceStatus.PARTIALLY_RESOLVED
-                        return instance
+                # Set resolution status based on evaluation
+                instance.set_resolution(node.evaluation_result.resolved)
+                logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
+            
+            if instance.resolution_status != ResolutionStatus.RESOLVED:
+                logger.info(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
+                # Check if any leaf node is resolved for partial resolution
+                for leaf_node in flow.root.get_all_nodes():
+                    if leaf_node.evaluation_result and leaf_node.evaluation_result.resolved:
+                        instance.set_resolution(False, partially_resolved=True)
+                        logger.info(f"Instance {instance.instance_id} is partially resolved")
+                        break
 
             if node.error:
-                instance.status = InstanceStatus.ERROR
-                instance.error = node.error
-                return instance
+                instance.fail(node.error)
+                logger.info(f"Instance {instance.instance_id} encountered error: {node.error}")
 
         except Exception as e:
             logger.exception(f"Error processing trajectory results for instance {instance.instance_id}")
-            return instance
+            instance.fail(str(e))
+            
+        return instance
+
+    async def _read_flow(
+        self,
+        trajectory_id: str,
+        project_id: str,
+    ) -> "AgenticFlow":
+
+        traj_dict = await self.storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
+        if not traj_dict:
+            raise ValueError("Trajectory not found")
+        
+        try:
+            flow_dict: dict | None = await self.storage.read_from_trajectory("flow.json", project_id, trajectory_id)  # type: ignore
+        except Exception:
+            flow_dict = await self.storage.read_from_project("flow.json", project_id)  # type: ignore
+
+        if not flow_dict:
+            raise ValueError("Flow settings not found")
+
+        return AgenticFlow.from_dicts(flow_dict, traj_dict)
 
     async def cancel_evaluation(self, evaluation_name: str):
         """Cancel all running jobs for an evaluation."""
@@ -392,21 +494,16 @@ class EvaluationManager:
             raise ValueError(f"Instance {instance_id} not found in evaluation {evaluation_name}")
 
         # Reset the instance state
-        if instance.status == InstanceStatus.COMPLETED:
-            # Moving from evaluated back to pending
-            instance.status = InstanceStatus.PENDING
-            instance.evaluated_at = None
-            instance.start_evaluating_at = None
-
-        elif instance.status == InstanceStatus.ERROR:
-            # Reset error state
-            instance.status = InstanceStatus.PENDING
-            instance.error = None
-            instance.error_at = None
-
-        else:
-            # For any other state, just reset to pending
-            instance.status = InstanceStatus.PENDING
+        instance.execution_status = ExecutionStatus.CREATED
+        instance.resolution_status = ResolutionStatus.PENDING
+        instance.job_status = None
+        instance.error = None
+        instance.error_at = None
+        instance.evaluated_at = None
+        instance.start_evaluating_at = None
+        instance.started_at = None
+        instance.completed_at = None
+        instance._sync_legacy_status()
 
         # If the instance was already started, cancel any existing jobs
         await self.runner.cancel_job(evaluation_name, instance_id)
@@ -424,7 +521,7 @@ class EvaluationManager:
 
     def _is_evaluation_completed(self, evaluation: Evaluation) -> bool:
         """Check if all instances in an evaluation have been evaluated."""
-        return all(instance.evaluated_at is not None for instance in evaluation.instances)
+        return all(instance.is_finished() and instance.is_evaluated() for instance in evaluation.instances)
 
     def _set_evaluation_completed(self, evaluation: Evaluation):
         """Set the evaluation status to COMPLETED."""
@@ -438,7 +535,7 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
-        logger.debug(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
+        logger.info(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:
             await self._process_trajectory_results(evaluation, instance)
 
@@ -456,11 +553,11 @@ class EvaluationManager:
     async def _save_evaluation(self, evaluation: Evaluation):
         """Save evaluation data using project storage."""
         try:
-            # Save the evaluation data using the project storage
-            # Use model_dump_json for serialization
+            eval_dump = evaluation.model_dump()
+            del eval_dump["flow"]
             await self.storage.write_to_project(
                 "evaluation.json",
-                json.loads(evaluation.model_dump_json()),
+                eval_dump,
                 project_id=evaluation.evaluation_name,
             )
 
@@ -592,55 +689,71 @@ class EvaluationManager:
             raise ValueError(f"Instance {instance_id} not found in evaluation {evaluation_name}")
 
         # Reset instance state if it was in error
-        if instance.status == InstanceStatus.ERROR:
+        if instance.execution_status == ExecutionStatus.ERROR:
             logger.info(f"Evaluation {evaluation_name} has error instance {instance_id}, resetting and retrying")
-            if instance.completed_at:
-                instance.status = InstanceStatus.COMPLETED
-                instance.start_evaluating_at = None
-                instance.evaluated_at = None
-            else:
-                instance.status = InstanceStatus.PENDING
-                instance.started_at = None
-
+            instance.execution_status = ExecutionStatus.CREATED
+            instance.resolution_status = ResolutionStatus.PENDING
             instance.error = None
             instance.error_at = None
+            instance.started_at = None
+            instance.completed_at = None
+            instance.start_evaluating_at = None
+            instance.evaluated_at = None
+            instance._sync_legacy_status()
 
         flow = await self._flow_manager.get_flow(evaluation.evaluation_name, instance.instance_id)
-        if flow.root.get_last_node() and flow.root.get_last_node().error:
-            logger.info(f"Resetting node {flow.root.get_last_node().node_id} with error")
-            flow.root.get_last_node().reset()
+        should_save = False
+        for leaf_node in flow.root.get_leaf_nodes():
+            if leaf_node.error:
+                logger.info(f"Resetting node {leaf_node.node_id} with error")
+                leaf_node.reset()
+                should_save = True
+                
+            
+        # Skip if already completed and evaluated
+        if instance.is_finished() and instance.is_evaluated():
+            finish_reason = flow.is_finished()
+            if finish_reason:
+                logger.info(f"Instance {instance_id} is already completed and evaluated, skipping: {finish_reason}")
+                return evaluation
+
+
+        # TODO: This is a hack to ignore the terminal node if it is not really terminal
+        if flow.root.get_last_node().terminal and not flow.root.get_last_node().is_terminal():
+            flow.root.get_last_node().terminal = False
+            
+            should_save = True
+
+        if should_save:
             await self._flow_manager.save_trajectory(evaluation.evaluation_name, instance.instance_id, flow)
-
-        # Skip if already evaluated
-        if instance.status == InstanceStatus.COMPLETED:
-            logger.info(f"Instance {instance_id} is already evaluated, skipping")
-            return evaluation
-
         # Start the job using the wrapper function
-        if await self.runner.start_job(
+        await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
             job_func=run_swebench_instance,
-        ):
-            logger.info(f"Started instance {instance_id} for evaluation {evaluation_name}")
+        )
+        
+        job_status = await self.runner.get_job_status(
+            project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
+        )
+        
+        instance.job_status = job_status
+        await self._sync_instance_with_job_status(instance, job_status)
+        
+        logger.info(f"Started instance {instance_id} with job status: {job_status}")
+            
+        # Update evaluation status if needed
+        if evaluation.status in [
+            EvaluationStatus.PENDING,
+            EvaluationStatus.PAUSED,
+            EvaluationStatus.ERROR,
+        ]:
+            evaluation.status = EvaluationStatus.RUNNING
+            if not evaluation.started_at:
+                evaluation.started_at = datetime.now(timezone.utc)
 
-            # Update instance status to PENDING
-            instance.status = InstanceStatus.PENDING
-
-            # Update evaluation status if needed
-            if evaluation.status in [
-                EvaluationStatus.PENDING,
-                EvaluationStatus.PAUSED,
-                EvaluationStatus.ERROR,
-            ]:
-                evaluation.status = EvaluationStatus.RUNNING
-                if not evaluation.started_at:
-                    evaluation.started_at = datetime.now(timezone.utc)
-
-            await self._save_evaluation(evaluation)
-        else:
-            logger.error(f"Failed to start instance {instance_id} for evaluation {evaluation_name}")
-
+        await self._save_evaluation(evaluation)
+        
         return evaluation
 
     async def list_evaluation_instances(self, evaluation_name: str) -> list[str]:
@@ -710,57 +823,49 @@ class EvaluationManager:
             trajectory_id=instance.instance_id,
         )
 
-        # set timestamps
-        if not instance.started_at:
-            event = next(
-                (e for e in events if e.scope == "flow" and e.event_type == "started"),
-                None,
-            )
-            if event:
+        if not events:
+            instance.last_event_timestamp = None
+            return
+
+        instance.last_event_timestamp = events[-1].timestamp
+
+        # Single pass through events to find all required timestamps
+        # Track which timestamps we still need to find
+        need_started = not instance.started_at
+        need_completed = not instance.completed_at
+        need_start_evaluating = not instance.start_evaluating_at
+        need_evaluated = not instance.evaluated_at
+
+        for event in events:
+            # Check for each timestamp we still need
+            if need_started and event.scope == "flow" and event.event_type == "started":
                 instance.started_at = event.timestamp
-
-        if not instance.completed_at:
-            event = next(
-                (e for e in events if e.scope == "flow" and e.event_type == "completed"),
-                None,
-            )
-            if event:
+                need_started = False
+            elif need_completed and event.scope == "flow" and event.event_type == "completed":
                 instance.completed_at = event.timestamp
-
-        if not instance.start_evaluating_at:
-            event = next(
-                (e for e in events if e.scope == "evaluation" and e.event_type == "started"),
-                None,
-            )
-            if event:
+                need_completed = False
+            elif need_start_evaluating and event.scope == "evaluation" and event.event_type == "started":
                 instance.start_evaluating_at = event.timestamp
-
-        if not instance.evaluated_at:
-            event = next(
-                (e for e in events if e.scope == "evaluation" and e.event_type == "completed"),
-                None,
-            )
-            if event:
+                need_start_evaluating = False
+            elif need_evaluated and event.scope == "evaluation" and event.event_type == "completed":
                 instance.evaluated_at = event.timestamp
+                need_evaluated = False
 
-    async def get_evaluation_stats(self, evaluation_name: str) -> "EvaluationStatsResponseDTO":
+            # Early termination if all timestamps are found
+            if not (need_started or need_completed or need_start_evaluating or need_evaluated):
+                break
+
+    async def get_evaluation_stats(self, evaluation_name: str) -> EvaluationStats:
         """Get comprehensive statistics for an evaluation, including only finished instances."""
-        from moatless.api.swebench.schema import EvaluationStatsResponseDTO, RepoStatsDTO
 
         evaluation = await self.get_evaluation(evaluation_name)
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
-        # Filter to only finished instances (those with evaluated_at set)
-        finished_instances = [instance for instance in evaluation.instances if instance.evaluated_at is not None]
-
-        if not finished_instances:
-            raise ValueError(f"No finished instances found in evaluation {evaluation_name}")
-
         # Calculate basic metrics
-        total_instances = len(finished_instances)
-        resolved_instances = sum(1 for instance in finished_instances if instance.resolved is True)
-        failed_instances = sum(1 for instance in finished_instances if instance.resolved is False)
+        total_instances = len(evaluation.instances)
+        resolved_instances = sum(1 for instance in evaluation.instances if instance.resolved is True)
+        failed_instances = sum(1 for instance in evaluation.instances if instance.resolved is False)
         success_rate = (resolved_instances / total_instances) * 100 if total_instances > 0 else 0
 
         # Calculate cost and token metrics
@@ -770,10 +875,13 @@ class EvaluationManager:
         total_cache_read_tokens = 0
         total_iterations = 0
         iteration_values = []
+        cost_values = []
 
-        for instance in finished_instances:
+        for instance in evaluation.instances:
             if instance.usage:
-                total_cost += instance.usage.completion_cost or 0
+                cost = instance.usage.completion_cost or 0
+                total_cost += cost
+                cost_values.append(cost)
                 total_prompt_tokens += instance.usage.prompt_tokens or 0
                 total_completion_tokens += instance.usage.completion_tokens or 0
                 total_cache_read_tokens += instance.usage.cache_read_tokens or 0
@@ -808,12 +916,30 @@ class EvaluationManager:
             else:
                 iterations_distribution["100+"] += 1
 
+        # Cost distribution with defined ranges
+        cost_ranges = ["0-0.2", "0.2-0.4", "0.4-0.6", "0.6-0.8", "0.8-1.0", "1.0+"]
+        cost_distribution = {range_name: 0 for range_name in cost_ranges}
+
+        for cost in cost_values:
+            if cost <= 0.2:
+                cost_distribution["0-0.2"] += 1
+            elif cost <= 0.4:
+                cost_distribution["0.2-0.4"] += 1
+            elif cost <= 0.6:
+                cost_distribution["0.4-0.6"] += 1
+            elif cost <= 0.8:
+                cost_distribution["0.6-0.8"] += 1
+            elif cost <= 1.0:
+                cost_distribution["0.8-1.0"] += 1
+            else:
+                cost_distribution["1.0+"] += 1
+
         # Success distribution
         success_distribution = {"resolved": resolved_instances, "failed": failed_instances}
 
         # Per-repo statistics
         repo_data = {}
-        for instance in finished_instances:
+        for instance in evaluation.instances:
             try:
                 swebench_instance = get_swebench_instance(instance.instance_id)
                 repo = swebench_instance["repo"]
@@ -834,7 +960,7 @@ class EvaluationManager:
         for repo, data in repo_data.items():
             solve_rate = (data["resolved"] / data["total"]) * 100 if data["total"] > 0 else 0
             repo_stats.append(
-                RepoStatsDTO(
+                RepoStats(
                     repo=repo,
                     total_instances=data["total"],
                     resolved_instances=data["resolved"],
@@ -846,7 +972,7 @@ class EvaluationManager:
         # Sort repo stats by solve rate descending
         repo_stats.sort(key=lambda x: x.solve_rate, reverse=True)
 
-        return EvaluationStatsResponseDTO(
+        return EvaluationStats(
             success_rate=success_rate,
             avg_iterations=avg_iterations,
             avg_cost=avg_cost,
@@ -864,5 +990,6 @@ class EvaluationManager:
             iteration_range_max=max(iteration_values) if iteration_values else 0,
             success_distribution=success_distribution,
             iterations_distribution=iterations_distribution,
+            cost_distribution=cost_distribution,
             repo_stats=repo_stats,
         )

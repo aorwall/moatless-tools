@@ -21,26 +21,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/flows", response_model=list[AgenticFlow])
-async def list_flow_configs(flow_manager: FlowManager = Depends(get_flow_manager)) -> list[AgenticFlow]:
+@router.get("/flows", response_model=list[dict])
+async def list_flow_configs(flow_manager: FlowManager = Depends(get_flow_manager)) -> list[dict]:
     """Get all flow configurations"""
-    try:
-        return flow_manager.get_all_configs()
-    except Exception as e:
-        logger.exception(f"Error listing flow configs: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list flow configurations: {str(e)}")
-
+    flows = await flow_manager.get_all_configs()
+    flow_dicts = [flow.model_dump(exclude_none=True, exclude_unset=True) for flow in flows]
+    return flow_dicts
 
 @router.post("/flows")
 async def create_flow_config_api(config: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
     """
     Create a new flow configuration.
     """
-    try:
-        logger.info(f"Creating flow config {config['id']}")
-        return await flow_manager.create_config(config)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    logger.info(f"Creating flow config {config['id']}")
+    return await flow_manager.create_config(config)
 
 
 @router.get("/flows/{config_id}", response_model=dict)
@@ -49,24 +43,20 @@ async def read_flow_config(config_id: str, flow_manager: FlowManager = Depends(g
     Get a specific flow configuration.
     """
     logger.info(f"Getting flow config for {config_id}")
-    flow = flow_manager.get_flow_config(config_id)
-    return flow.model_dump(exclude_none=True)
-
+    flow = await flow_manager.get_flow_config(config_id)
+    return flow.model_dump(exclude_none=True, exclude_unset=True)
+   
 
 @router.put("/flows/{config_id}")
 async def update_flow_config_api(config_id: str, update: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
     """
     Update a flow configuration.
     """
-    try:
-        # Ensure the ID in the URL matches the ID in the request body
-        if config_id != update["id"]:
-            raise ValueError(f"ID in URL ({config_id}) doesn't match ID in request body ({update['id']})")
+    # Ensure the ID in the URL matches the ID in the request body
+    if config_id != update["id"]:
+        raise ValueError(f"ID in URL ({config_id}) doesn't match ID in request body ({update['id']})")
 
-        logger.info(f"Updating flow config {config_id} with {update}")
-        await flow_manager.update_config(update)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    await flow_manager.update_config(update)
 
 
 @router.delete("/flows/{config_id}")
@@ -74,15 +64,10 @@ async def delete_flow_config_api(config_id: str, flow_manager: FlowManager = Dep
     """
     Delete a flow configuration.
     """
-    try:
-        logger.info(f"Deleting flow config {config_id}")
-        await flow_manager.delete_config(config_id)
-        return {"status": "success", "message": f"Flow configuration {config_id} deleted successfully"}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error deleting flow config: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete flow configuration: {str(e)}")
+    logger.info(f"Deleting flow config {config_id}")
+    await flow_manager.delete_config(config_id)
+    return {"status": "success", "message": f"Flow configuration {config_id} deleted successfully"}
+
 
 
 @router.get("/components/selectors")

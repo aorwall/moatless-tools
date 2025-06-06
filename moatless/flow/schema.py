@@ -112,6 +112,7 @@ class TrajectoryResponseDTO(BaseModel):
     status: FlowStatus
     job_status: Optional[JobStatus] = None
     resolved: Optional[bool] = None
+    flow_id: Optional[str] = None
     agent_id: Optional[str] = None
     model_id: Optional[str] = None
     events: list[TrajectoryEventDTO] = Field(default_factory=list)

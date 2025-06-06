@@ -10,8 +10,11 @@ from moatless.flow.schema import (
     TrajectoryListItem,
     TrajectoryResponseDTO,
 )
+from moatless.flow.flow import AgenticFlow
 from moatless.api.dependencies import get_flow_manager, get_storage
+from moatless.flow.search_tree import SearchTree
 from moatless.storage.base import BaseStorage
+from .schema import CreateTrajectoryRequest
 
 logger = logging.getLogger(__name__)
 
@@ -435,4 +438,37 @@ async def save_trajectory_settings(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         logger.exception(f"Error saving trajectory settings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/create")
+async def create_trajectory(
+    request: CreateTrajectoryRequest,
+    flow_manager: FlowManager = Depends(get_flow_manager),
+):
+    """Create a new trajectory with flow configuration."""
+    try:
+        # Prepare flow config if provided
+        flow_config = None
+        if request.flow_config:
+            flow_config = SearchTree.model_validate(request.flow_config)
+        
+        # Create the flow
+        flow = await flow_manager.create_flow(
+            flow_id=request.flow_id,
+            flow_config=flow_config,
+            model_id=request.model_id,
+            message=request.message,
+            trajectory_id=request.trajectory_id,
+            project_id=request.project_id,
+            metadata=request.metadata,
+        )
+        
+        # Return trajectory response
+        return flow
+    except ValueError as e:
+        logger.exception(f"Error creating trajectory: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Error creating trajectory: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

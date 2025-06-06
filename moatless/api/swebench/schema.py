@@ -4,7 +4,6 @@ from typing import Optional
 
 from moatless.completion.manager import BaseCompletionModel
 from moatless.completion.stats import Usage
-from moatless.evaluation.schema import Evaluation, EvaluationInstance, EvaluationStatusSummary
 from moatless.flow.flow import AgenticFlow
 from moatless.runner.runner import JobInfo, RunnerInfo, JobStatus
 from pydantic import BaseModel, Field
@@ -69,84 +68,12 @@ class EvaluationStatusSummaryDTO(BaseModel):
     failed: int = 0
 
 
-class EvaluationListItemDTO(BaseModel):
-    evaluation_name: str
-    dataset_name: str
-    flow_id: str
-    model_id: str
-    status: str
-    created_at: datetime
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    instance_count: int
-    status_summary: Optional[EvaluationStatusSummaryDTO] = None
-    total_cost: float = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    cached_tokens: int = 0
-    resolved_count: int = 0
-    failed_count: int = 0
-
-
-def get_instance_status(instance: EvaluationInstance, job_status: Optional[JobStatus] = None) -> str:
-    """Get the status of an instance, including resolved/failed states."""
-    if instance.resolved:
-        return "resolved"
-    elif instance.resolved is False:
-        return "failed"
-    elif job_status == JobStatus.NOT_STARTED:
-        return "not_started"
-    elif job_status:
-        return job_status.value
-    else:
-        return instance.status.value
-
-
-class EvaluationListResponseDTO(BaseModel):
-    """Response containing list of evaluations"""
-
-    evaluations: list[EvaluationListItemDTO] = Field(..., description="List of evaluations")
-
-
-class EvaluationInstanceDTO(BaseModel):
-    """DTO for evaluation instance details"""
-
-    instance_id: str
-    status: str
-    job_status: Optional[str] = None
-    resolved: Optional[bool] = None
-    error: Optional[str] = None
-    created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    start_evaluating_at: Optional[datetime] = None
-    evaluated_at: Optional[datetime] = None
-    error_at: Optional[datetime] = None
-    iterations: Optional[int] = None
-    resolved_by: Optional[int] = None
-    reward: Optional[int] = None
-    usage: Optional[Usage] = None
-
-
-class EvaluationResponseDTO(BaseModel):
-    """Response containing evaluation details"""
-
-    evaluation_name: str
-    dataset_name: str
-    status: str
-    created_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    flow: AgenticFlow
-    model: BaseCompletionModel
-    instances: list[EvaluationInstanceDTO]
-
-
 class EvaluationRequestDTO(BaseModel):
     """Request for creating an evaluation"""
 
-    flow_id: str
-    model_id: str
+    flow_id: Optional[str] = None
+    flow: Optional[dict] = None
+    model_id: Optional[str] = Field(None, description="[DEPRECATED] Use flow_id or flow_config instead")
     name: str
     num_concurrent_instances: int = 1
     dataset: Optional[str] = None
@@ -208,46 +135,3 @@ class CancelJobsResponseDTO(BaseModel):
     canceled_running_jobs: int | None = None
     message: str
 
-
-class EvaluationStatsResponseDTO(BaseModel):
-    """Comprehensive statistics for an evaluation"""
-
-    # Overall metrics
-    success_rate: float = Field(description="Success rate as percentage")
-    avg_iterations: float = Field(description="Average number of iterations")
-    avg_cost: float = Field(description="Average cost per instance")
-    avg_tokens: int = Field(description="Average total tokens per instance")
-    solved_instances_per_dollar: float = Field(description="Number of solved instances per dollar")
-    solved_percentage_per_dollar: float = Field(description="Solved percentage per dollar")
-
-    # Counts and totals
-    total_instances: int = Field(description="Total number of finished instances")
-    resolved_instances: int = Field(description="Number of resolved instances")
-    failed_instances: int = Field(description="Number of failed instances")
-
-    # Token breakdown
-    total_cost: float = Field(description="Total cost for all instances")
-    total_prompt_tokens: int = Field(description="Total prompt tokens")
-    total_completion_tokens: int = Field(description="Total completion tokens")
-    total_cache_read_tokens: int = Field(description="Total cache read tokens")
-
-    # Iteration ranges
-    iteration_range_min: int = Field(description="Minimum iterations")
-    iteration_range_max: int = Field(description="Maximum iterations")
-
-    # Distribution data
-    success_distribution: dict[str, int] = Field(description="Distribution of success vs failure")
-    iterations_distribution: dict[str, int] = Field(description="Distribution of iterations by ranges")
-
-    # Per-repo statistics
-    repo_stats: list["RepoStatsDTO"] = Field(description="Statistics per repository")
-
-
-class RepoStatsDTO(BaseModel):
-    """Statistics for a specific repository"""
-
-    repo: str = Field(description="Repository name")
-    total_instances: int = Field(description="Total instances for this repo")
-    resolved_instances: int = Field(description="Number of resolved instances")
-    failed_instances: int = Field(description="Number of failed instances")
-    solve_rate: float = Field(description="Solve rate as percentage")

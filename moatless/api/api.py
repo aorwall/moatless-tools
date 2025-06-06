@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import secrets
+import traceback
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,39 +25,24 @@ from fastapi import (
     Depends,
     Response,
 )
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from moatless.api.agents.api import router as agent_router
 from moatless.api.loop.api import router as loop_router
 from moatless.api.models.api import router as model_router
+from moatless.api.runner.api import router as runner_router
 from moatless.api.settings.api import router as settings_router
 from moatless.api.swebench.api import router as swebench_router
-from moatless.api.swebench.schema import RunnerResponseDTO, RunnerStatsDTO
 from moatless.api.trajectories.api import router as trajectory_router
-from moatless.api.trajectory.schema import TrajectoryDTO
-from moatless.api.websocket import handle_event, websocket_endpoint
-from moatless.artifacts.artifact import ArtifactListItem
-from moatless.runner.runner import BaseRunner, JobsStatusSummary, JobStatus, JobDetails
-from moatless.settings import (
-    get_storage as settings_get_storage,
-    get_event_bus as settings_get_event_bus,
-    get_runner as settings_get_runner,
-)
+
 from moatless.telemetry import setup_telemetry
 from moatless.utils.warnings import filter_external_warnings
 from moatless.workspace import Workspace
-from moatless.flow.manager import FlowManager
-from moatless.evaluation.manager import EvaluationManager
-from moatless.agent.manager import AgentConfigManager
-from moatless.completion.manager import ModelConfigManager
 from moatless.api.dependencies import (
     get_event_bus,
     get_runner,
     get_storage,
-    get_model_manager,
-    get_flow_manager,
-    get_evaluation_manager,
-    get_agent_manager,
     cleanup_resources,
 )
 
@@ -64,9 +51,7 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 # Filter warnings from external dependencies
 filter_external_warnings()
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 security = HTTPBasic()
 
@@ -97,8 +82,54 @@ async def verify_credentials(credentials: HTTPBasicCredentials = Depends(securit
     return True
 
 
+async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Global exception handler that logs errors with reference codes and returns structured error responses."""
+    # Generate a unique reference code for this error
+    error_ref = str(uuid.uuid4())[:8]
+    
+    # Extract request information for better logging
+    client_ip = request.client.host if request.client else "unknown"
+    method = request.method
+    url = str(request.url)
+    
+    # Log the full exception with context
+    logger.error(
+        f"Unhandled exception [REF: {error_ref}] - "
+        f"{method} {url} from {client_ip}: {type(exc).__name__}: {str(exc)}\n"
+        f"Traceback:\n{traceback.format_exc()}"
+    )
+    
+    # Return structured error response
+    error_response = {
+        "error": {
+            "message": str(exc),
+            "type": type(exc).__name__,
+            "reference_code": error_ref,
+            "timestamp": datetime.utcnow().isoformat() + "Z"
+        }
+    }
+    
+    # Return appropriate status code based on exception type
+    if isinstance(exc, HTTPException):
+        status_code = exc.status_code
+        error_response["error"]["message"] = exc.detail
+    else:
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+        # For non-HTTP exceptions, provide a generic message to avoid exposing internal details
+        error_response["error"]["message"] = "An internal server error occurred"
+        error_response["error"]["internal_message"] = str(exc)  # Keep original for debugging
+    
+    return JSONResponse(
+        status_code=status_code,
+        content=error_response
+    )
+
+
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
+    logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+    logging.getLogger("azure").setLevel(logging.WARNING)
+
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -187,48 +218,6 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     router = FastAPI(title="Moatless API")
 
-    # Use the websocket endpoint from the websocket module
-    router.websocket("/ws")(websocket_endpoint)
-
-    @router.get("/runner", response_model=RunnerResponseDTO)
-    async def get_runner_info(
-        runner: BaseRunner = Depends(get_runner),
-    ) -> RunnerResponseDTO:
-        """Get the runner"""
-        return RunnerResponseDTO(info=await runner.get_runner_info(), jobs=await runner.get_jobs())
-
-    @router.get("/runner/stats", response_model=RunnerStatsDTO)
-    async def get_runner_stats(
-        runner: BaseRunner = Depends(get_runner),
-    ) -> RunnerStatsDTO:
-        """Get lightweight runner stats for the status bar"""
-        runner_info = await runner.get_runner_info()
-        jobs = await runner.get_jobs()
-
-        # Count jobs by status
-        pending_jobs = sum(1 for job in jobs if job.status == JobStatus.PENDING)
-        running_jobs = sum(1 for job in jobs if job.status == JobStatus.RUNNING)
-
-        # Get active workers from runner info
-        active_workers = runner_info.data.get("ready_nodes", 0)
-        total_workers = runner_info.data.get("nodes", 0)
-
-        # Get queue size if the runner supports it
-        queue_size = 0
-        if hasattr(runner, "get_queue_size"):
-            queue_size = await runner.get_queue_size()
-
-        return RunnerStatsDTO(
-            runner_type=runner_info.runner_type,
-            status=runner_info.status,
-            active_workers=active_workers,
-            total_workers=total_workers,
-            pending_jobs=pending_jobs,
-            running_jobs=running_jobs,
-            total_jobs=len(jobs),
-            queue_size=queue_size,
-        )
-
     @router.get("/health")
     async def health_check():
         """Health check endpoint for readiness probes.
@@ -242,79 +231,21 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
             return {"status": "ok", "event_bus": True, "storage": True}
         except Exception as e:
-            logger.exception(f"Health check failed: {e}")
-            return {"status": "failed", "error": str(e)}
-
-    @router.get("/runner/jobs/summary/{project_id}", response_model=JobsStatusSummary)
-    async def get_job_status_summary(project_id: str, runner: BaseRunner = Depends(get_runner)) -> JobsStatusSummary:
-        """Get a summary of job statuses for a project"""
-        return await runner.get_job_status_summary(project_id)
-
-    @router.post("/runner/jobs/{project_id}/cancel")
-    async def cancel_jobs(project_id: str, request: Request, runner: BaseRunner = Depends(get_runner)):
-        """Cancel jobs for a project"""
-        data = (
-            await request.json()
-            if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0
-            else None
-        )
-        trajectory_id = data.get("trajectory_id") if data else None
-        await runner.cancel_job(project_id, trajectory_id)
-        return {"status": "success", "message": "Job(s) canceled successfully"}
-
-    @router.post("/runner/jobs/reset")
-    async def reset_jobs(request: Request, runner: BaseRunner = Depends(get_runner)):
-        """Reset all jobs or jobs for a specific project.
-
-        This endpoint will:
-        1. Cancel all running jobs
-        2. Clear all job history
-
-        Accepts an optional project_id in the request body to reset jobs only for that project.
-        """
-        data = (
-            await request.json()
-            if request.headers.get("content-length") and int(request.headers.get("content-length", "0")) > 0
-            else None
-        )
-        project_id = data.get("project_id") if data else None
-        success = await runner.reset_jobs(project_id)
-
-        if success:
-            return {
-                "status": "success",
-                "message": f"Jobs reset successfully{f' for project {project_id}' if project_id else ''}",
-            }
-        else:
+            # For health checks, we want to return a 503 status for failed dependencies
+            error_ref = str(uuid.uuid4())[:8]
+            logger.error(f"Health check failed [REF: {error_ref}]: {e}")
+            
             raise HTTPException(
-                status_code=400,
-                detail="Failed to reset jobs",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "status": "failed", 
+                    "error": str(e),
+                    "reference_code": error_ref
+                }
             )
-
-    @router.get("/runner/jobs/{project_id}/{trajectory_id}/details")
-    async def get_job_details(
-        project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)
-    ) -> JobDetails:
-        """Get detailed information about a job.
-
-        This endpoint returns detailed information about a job, including:
-        - Basic job information (ID, status, timestamps)
-        - Runner-specific details organized into sections
-        - Error information if the job failed
-        """
-        job_details = await runner.get_job_details(project_id, trajectory_id)
-        if not job_details:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Job details not found for project {project_id}, trajectory {trajectory_id}",
-            )
-
-        # Remove raw_data from the response to reduce payload size
-        job_details.raw_data = None
-
-        return job_details
 
     # Include model, agent, and loop configuration routers
+    router.include_router(runner_router, prefix="/runner", tags=["runner"])
     router.include_router(settings_router, prefix="/settings", tags=["settings"])
     router.include_router(model_router, prefix="/models", tags=["models"])
     router.include_router(agent_router, prefix="/agents", tags=["agents"])
@@ -324,6 +255,9 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
 
     api.mount("/api", router)
 
+    # Register global exception handler
+    api.add_exception_handler(Exception, global_exception_handler)
+
     FastAPIInstrumentor.instrument_app(api, excluded_urls="health")
 
     # Get allowed origins from environment variable or use defaults
@@ -331,7 +265,7 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
     if cors_origins_env:
         origins = cors_origins_env.split(",")
     else:
-        origins = ["http://localhost:5173"]
+        origins = ["http://localhost:5173", "http://localhost:5174"]
 
     logger.info(f"CORS allowed origins: {origins}")
 
@@ -367,6 +301,7 @@ def main():
     logger.info(f"Starting Moatless API server on {host}:{port}")
     logger.info(f"Reload: {reload}, Log level: {log_level}")
 
+    logging.basicConfig(level=logging.INFO)
     # Run the server
     uvicorn.run(
         "moatless.api.api:app",
