@@ -42,7 +42,7 @@ class ToolCallCompletionModel(BaseCompletionModel):
 
         return {
             "tools": [s.tool_schema(thoughts_in_action=self.thoughts_in_action) for s in schema],
-            "tool_choice": "required" if self.thoughts_in_action else "auto",
+            "tool_choice": "required",
         }
 
     def _create_retry_message(self, tool_call: Any, error: str):

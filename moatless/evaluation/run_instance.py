@@ -53,8 +53,7 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
         if not repo_path:
             raise ValueError("REPO_PATH is not set")
 
-        repository = GitRepository(repo_path=repo_path)
-        environment = LocalBashEnvironment(cwd=repo_path)
+        repository = GitRepository(repo_path=repo_path, shadow_mode=True)
 
         runtime = await setup_swebench_runtime()
 
@@ -70,13 +69,11 @@ async def run_swebench_instance(project_id: str, trajectory_id: str, node_id: in
             file_repo=repository,
         )
 
-        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, environment=environment)
+        workspace = Workspace(repository=repository, code_index=code_index, runtime=runtime, environment=runtime)
 
         logger.info(f"Flow created for instance {trajectory_id}")
 
         node = await flow.run(workspace=workspace, node_id=node_id)
-        if node.error:
-            raise ValueError(f"Node {node.node_id} failed with error: {node.error}")
 
         logger.info(f"Flow completed for instance {trajectory_id}")
 

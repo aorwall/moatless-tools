@@ -8,6 +8,18 @@ class AttachmentData(BaseModel):
     data: str = Field(description="Base64-encoded data URI of the attachment")
 
 
+class CreateTrajectoryRequest(BaseModel):
+    """Request for creating a new trajectory."""
+    
+    flow_id: Optional[str] = Field(None, description="ID of existing flow configuration to use")
+    flow_config: Optional[dict] = Field(None, description="Direct flow configuration to use")
+    model_id: Optional[str] = Field(None, description="Model ID to use with the flow")
+    message: str = Field(description="Initial message for the trajectory")
+    project_id: Optional[str] = Field(None, description="Project ID (defaults to 'default')")
+    trajectory_id: Optional[str] = Field(None, description="Trajectory ID (auto-generated if not provided)")
+    metadata: Optional[dict[str, Any]] = Field(None, description="Optional metadata for the trajectory")
+
+
 class StartTrajectoryRequest(BaseModel):
     agent_id: Optional[str] = Field(None, description="The agent to use for the loop")
     model_id: Optional[str] = Field(None, description="The model to use for the loop")

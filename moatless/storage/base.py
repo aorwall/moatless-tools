@@ -305,6 +305,7 @@ class BaseStorage(abc.ABC):
         trajectory_id = self._get_trajectory_id(trajectory_id)
 
         trajectory_path = f"projects/{project_id}/trajs/{trajectory_id}/{path}"
+        logger.debug(f"Reading from trajectory path: {trajectory_path} with {self.__class__.__name__}")
         return await self.read(trajectory_path)
 
     async def write_to_trajectory(

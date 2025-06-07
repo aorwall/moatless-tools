@@ -50,12 +50,16 @@ async def setup_environment():
     return storage, eventbus, flow_manager, base_dir
 
 
-async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id: str, flow_id: str, use_local_source: bool = False):
+async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id: str, litellm_model_name: str, flow_id: str, use_local_source: bool = False):
     """Run an evaluation with Docker."""
     # Set MOATLESS_DIR environment variable if not set
     if "MOATLESS_DIR" not in os.environ:
         os.environ["MOATLESS_DIR"] = str(Path("./.moatless").absolute())
         logger.info(f"Setting MOATLESS_DIR to {os.environ['MOATLESS_DIR']}")
+
+    # Validate that both model_id and litellm_model_name are not provided
+    if model_id and litellm_model_name:
+        raise ValueError("Cannot provide both model_id and litellm_model_name")
 
     storage, eventbus, flow_manager, base_dir = await setup_environment()
 
@@ -90,6 +94,7 @@ async def run_docker_evaluation(evaluation_name: str, instance_id: str, model_id
             evaluation_name=evaluation_name,
             flow_id=flow_id,
             model_id=model_id,
+            litellm_model_name=litellm_model_name,
             instance_ids=[instance_id],
             dataset_name="instance_ids",
         )
@@ -175,7 +180,13 @@ def main():
         required=True,
     )
     parser.add_argument(
-        "--model", "-m", default="gpt-4o-mini-2024-07-18", help="Model ID to use (default: gpt-4o-mini-2024-07-18)"
+        "--model", "-m", default="gpt-4o-mini-2024-07-18", help="Model ID to use (default: gpt-4o-mini-2024-07-18). For backward compatibility, same as --model-id."
+    )
+    parser.add_argument(
+        "--model-id", help="Model ID to use (replaces entire completion model configuration)"
+    )
+    parser.add_argument(
+        "--litellm-model-name", help="LiteLLM model name to use (overrides only the model field of existing completion model)"
     )
     parser.add_argument("--flow", "-f", default="simple_coding", help="Flow ID to use (default: simple_coding)")
     parser.add_argument(
@@ -188,6 +199,22 @@ def main():
 
     args = parser.parse_args()
     
+    # Handle backward compatibility and validation
+    model_id = args.model_id or args.model
+    litellm_model_name = args.litellm_model_name
+    
+    if args.model_id and args.model != "gpt-4o-mini-2024-07-18":  # Default value check
+        print("Error: Cannot specify both --model and --model-id")
+        sys.exit(1)
+    
+    if args.model_id and args.litellm_model_name:
+        print("Error: Cannot specify both --model-id and --litellm-model-name")
+        sys.exit(1)
+        
+    if args.model != "gpt-4o-mini-2024-07-18" and args.litellm_model_name:  # Using non-default --model with --litellm-model-name
+        print("Error: Cannot specify both --model and --litellm-model-name")
+        sys.exit(1)
+    
     logger.info("Loading environment variables")
     load_dotenv(".env.local")
 
@@ -195,7 +222,8 @@ def main():
         run_docker_evaluation(
             evaluation_name=args.evaluation_name,
             instance_id=args.instance_id,
-            model_id=args.model,
+            model_id=model_id,
+            litellm_model_name=litellm_model_name,
             flow_id=args.flow,
             use_local_source=args.use_local,
         )

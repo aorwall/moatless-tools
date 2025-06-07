@@ -151,7 +151,8 @@ class SearchTree(AgenticFlow):
                 self.log(logger.info, f"Node{node.node_id} finished. Returning.")
                 break
 
-        if not len(self.get_finished_nodes()):
+        finished_nodes = len(self.get_finished_nodes())
+        if not finished_nodes:
             self.log(
                 logger.warning,
                 f"Search completed with no finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
@@ -159,7 +160,7 @@ class SearchTree(AgenticFlow):
         else:
             self.log(
                 logger.info,
-                f"Search completed with {len(self.get_finished_nodes())} finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
+                f"Search completed with {finished_nodes} finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
             )
 
         if finish_reason:
@@ -358,20 +359,16 @@ class SearchTree(AgenticFlow):
             return "max_iterations"
 
         finished_nodes = self.get_finished_nodes()
-        unique_finished_parents = set()
-        for node in finished_nodes:
-            if node.parent:
-                unique_finished_parents.add(node.parent.node_id)
-
+        
         # Check max finished nodes
-        if self.max_finished_nodes and len(unique_finished_parents) >= self.max_finished_nodes:
+        if self.max_finished_nodes and len(finished_nodes) >= self.max_finished_nodes:
             return "max_finished_nodes"
 
         # Check reward threshold
         if self.reward_threshold and any(
             node.reward and node.reward.value >= self.reward_threshold for node in finished_nodes
         ):
-            if not self.min_finished_nodes or len(unique_finished_parents) >= self.min_finished_nodes:
+            if not self.min_finished_nodes or len(finished_nodes) >= self.min_finished_nodes:
                 return "reward_threshold"
 
         # Check if there are no more expandable nodes
@@ -385,8 +382,7 @@ class SearchTree(AgenticFlow):
         """Get all finished nodes in the search tree by uniqe parent node."""
 
         finished_nodes = []
-        for node in self.root.get_all_nodes():
-            # TODO: Pick finished node with highest/avg/lowest reward?
+        for node in self.root.get_leaf_nodes():
             if node.is_terminal():
                 finished_nodes.append(node)
 
@@ -451,6 +447,13 @@ class SearchTree(AgenticFlow):
 
             return super().model_validate(obj)
         return obj
+    
+    # after pydantic validation
+    @model_validator(mode="after")
+    def validate_fields(self):
+        if self.max_finished_nodes and self.min_finished_nodes and self.max_finished_nodes < self.min_finished_nodes:
+            raise ValueError("Max finished nodes must be greater than or equal to min finished nodes")
+        return self
 
     def model_dump(self, **kwargs) -> dict[str, Any]:
         """

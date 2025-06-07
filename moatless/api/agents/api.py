@@ -9,23 +9,12 @@ from moatless.agent.manager import AgentConfigManager
 from moatless.api.dependencies import get_agent_manager
 
 from .schema import (
-    ActionConfigDTO,
     ActionsResponseDTO,
-    AgentConfigDTO,
     AgentConfigsResponseDTO,
-    AgentConfigUpdateDTO,
 )
 
 logger = logging.getLogger(__name__)
 
-
-def _convert_to_dto(agent_id: str, agent: ActionAgent) -> AgentConfigDTO:
-    """Convert a config dict to a DTO."""
-    actions = [
-        ActionConfigDTO(title=action.name, properties=action.model_dump(exclude={"action_class"}))
-        for action in agent.actions
-    ]
-    return AgentConfigDTO(agent_id=agent_id, system_prompt=agent.system_prompt, actions=actions, memory=agent.memory)
 
 
 router = APIRouter()
@@ -44,7 +33,7 @@ async def list_agent_configs(agent_manager: AgentConfigManager = Depends(get_age
     configs = []
     all_agents = agent_manager.get_all_agents()
     for agent in all_agents:
-        configs.append(_convert_to_dto(agent.agent_id, agent))
+        configs.append(agent.model_dump(exclude_none=True))
     return AgentConfigsResponseDTO(configs=configs)
 
 

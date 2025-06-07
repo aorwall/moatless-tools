@@ -9,6 +9,7 @@ from swebench.harness.constants import SWEbenchInstance, NON_TEST_EXTS
 from swebench.harness.grading import get_eval_report
 from swebench.harness.test_spec.test_spec import make_test_spec, MAP_REPO_VERSION_TO_SPECS
 
+from moatless.environment.base import BaseEnvironment, EnvironmentExecutionError
 from moatless.exceptions import RuntimeError
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
@@ -19,7 +20,7 @@ from unidiff import PatchSet
 logger = logging.getLogger(__name__)
 
 
-class SweBenchLocalEnvironment(RuntimeEnvironment):
+class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
     """Environment implementation for running swebench tests and evaluations."""
 
     def __init__(
@@ -57,7 +58,30 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
 
         self._install_task = asyncio.create_task(self._run_async_installation(self._install_command))
 
-    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None) -> list[TestResult]:
+    async def execute(self, command: str, fail_on_error: bool = False) -> str:
+        """Execute a command in the environment."""
+        await self._wait_for_install()
+        stdout, return_code = await self._execute_command(command)
+        logger.info(f"Command {command} returned {return_code}")
+        logger.info(f"Output: {stdout}")
+        
+        if fail_on_error and return_code != 0:
+            raise RuntimeError(f"Command {command} failed with return code {return_code}: {stdout}")
+        
+        return stdout
+
+    async def read_file(self, path: str) -> str:
+        """Read a file from the environment."""
+        stdout, return_code = await self._execute_command(f"cat {path}")
+        return stdout
+    
+    async def write_file(self, path: str, content: str) -> None:
+        """Write content to a file in the environment."""
+        stdout, return_code = await self._execute_command(f"echo '{content}' > {path}")
+        if return_code != 0:
+            raise EnvironmentExecutionError(f"Command {f'echo {content} > {path}'} failed with return code {return_code}", return_code, stdout)
+
+    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None, timeout: int = 600) -> list[TestResult]:
         """Run tests with an optional patch and specific test files."""
         # Wait for installation to complete if it's running
         await self._wait_for_install()
@@ -83,8 +107,13 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
                 test_command = self._test_script([test_file])
                 logger.info(f"Test command: {test_command}")
 
-                stdout, return_code = await self._execute_command(test_command)
-
+                stdout, return_code = await self._execute_command(test_command, timeout=timeout)
+                
+                timed_out = return_code == -1  # -1 indicates timeout
+                
+                if timed_out:
+                    logger.warning(f"Test timed out after {timeout} seconds for file: {test_file}")
+                
                 logger.info(f"Return code: {return_code}")
                 if return_code != 0:
                     logger.warning(f"Test output: {stdout}")
@@ -100,9 +129,27 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
 
                 testbed_results = parse_log(stdout, test_spec.repo)
 
+                # Set timeout flag and ensure file_path is set for all results
                 for result in testbed_results:
                     if not result.file_path:
                         result.file_path = test_file
+                    if timed_out:
+                        result.timed_out = True
+                        # If we don't have any results but we timed out, create a basic result
+                        if result.status == TestStatus.UNKNOWN and not result.failure_output:
+                            result.failure_output = f"Test execution timed out after {timeout} seconds"
+                
+                # If no results were parsed but we ran a test (even if it timed out), create a basic result
+                if not testbed_results:
+                    from moatless.testing.schema import TestResult, TestStatus
+                    basic_result = TestResult(
+                        status=TestStatus.ERROR if timed_out else TestStatus.UNKNOWN,
+                        file_path=test_file,
+                        timed_out=timed_out,
+                        failure_output=f"Test execution timed out after {timeout} seconds" if timed_out else "No test results could be parsed from output"
+                    )
+                    testbed_results = [basic_result]
+                
                 test_results.extend(testbed_results)
 
         if patch:
@@ -216,7 +263,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
                 logger.error(f"Installation process failed: {str(e)}")
                 raise RuntimeError("Installation process failed") from e
 
-    async def _execute_command(self, command: str, cwd: Path | None = None) -> Tuple[str, int]:
+    async def _execute_command(self, command: str, cwd: Path | None = None, timeout: int | None = None) -> Tuple[str, int]:
         """Execute a shell command and return combined output and return code."""
 
         # Prepend conda activation to the command using . instead of source
@@ -235,8 +282,25 @@ class SweBenchLocalEnvironment(RuntimeEnvironment):
             stderr=asyncio.subprocess.STDOUT,  # redirect stderr to stdout
         )
 
-        stdout, _ = await process.communicate()
-        return stdout.decode(), process.returncode or 0
+        try:
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            return stdout.decode(), process.returncode or 0
+        except asyncio.TimeoutError:
+            # Kill the process if it times out
+            process.kill()
+            try:
+                await process.wait()
+            except:
+                pass
+            # Return partial output if any was captured before timeout
+            partial_output = ""
+            if process.stdout:
+                try:
+                    partial_data = await asyncio.wait_for(process.stdout.read(), timeout=1.0)
+                    partial_output = partial_data.decode()
+                except:
+                    pass
+            return partial_output, -1  # Use -1 to indicate timeout
 
     async def _apply_patch(self, patch: str) -> bool:
         """Apply a git patch to the repository."""

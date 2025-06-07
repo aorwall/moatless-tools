@@ -93,20 +93,20 @@ class AgentConfigManager:
         agents.sort(key=lambda x: x.agent_id)
         return agents
 
-    async def create_agent(self, agent: ActionAgent) -> ActionAgent:
+    async def create_agent(self, agent: dict) -> dict:
         """Create a new agent configuration."""
         logger.debug(f"Creating agent config {agent.agent_id}")
         if agent.agent_id in self._configs:
             raise ValueError(f"Agent config {agent.agent_id} already exists")
 
-        self._configs[agent.agent_id] = agent.model_dump()
+        self._configs[agent["agent_id"]] = agent
         await self._save_configs()
         return agent
 
-    async def update_agent(self, agent: ActionAgent):
+    async def update_agent(self, agent: dict):
         """Update an existing agent configuration."""
         logger.debug(f"Updating agent config {agent.agent_id}")
-        self._configs[agent.agent_id] = agent.model_dump()
+        self._configs[agent.agent_id] = agent
         await self._save_configs()
 
     async def delete_agent(self, agent_id: str):

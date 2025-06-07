@@ -95,12 +95,10 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
     logger.info(f"setup_workspace(project_id: {project_id}, trajectory_id: {trajectory_id})")
 
     storage = await get_storage()
-    shadow_mode = False
     instance_path = os.environ.get("INSTANCE_PATH")
     if instance_path:
         runtime = await setup_swebench_runtime()
         repo_path = "/testbed"
-        shadow_mode = True
     elif await storage.exists(f"projects/{project_id}/settings.json"):
         project_settings = await storage.read(f"projects/{project_id}/settings.json")
         repo_path = project_settings["repository_path"]
@@ -115,7 +113,7 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
     logger.info(f"repo_path: {repo_path}")
 
     if repo_path:
-        repository = GitRepository(repo_path=repo_path)
+        repository = GitRepository(repo_path=repo_path, shadow_mode=True)
         environment = LocalBashEnvironment(cwd=repo_path)
     else:
         repository = None
@@ -139,7 +137,6 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
         code_index=code_index,
         runtime=runtime,
         environment=environment,
-        shadow_mode=shadow_mode,
         storage=storage,
     )
 

@@ -830,3 +830,111 @@ async def test_job_exists_with_pods_fallback(kubernetes_runner, mock_k8s_api):
     # Should assume job exists for safety
     exists = await kubernetes_runner.job_exists(project_id, trajectory_id)
     assert exists
+
+
+@pytest.mark.asyncio
+async def test_pod_failure_status_unschedulable(kubernetes_runner):
+    """Test that unschedulable pods are marked as pending, not failed."""
+    # Create a mock pod that is unschedulable
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata.name = "test-pod"
+    pod.status.phase = "Pending"
+    pod.status.container_statuses = None
+    pod.status.conditions = [
+        MagicMock(
+            type="PodScheduled",
+            status="False",
+            reason="Unschedulable",
+            message="0/3 nodes are available: 3 Insufficient memory."
+        )
+    ]
+
+    status = kubernetes_runner._get_pod_failure_status(pod)
+    assert status == JobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_pod_failure_status_image_pull_error(kubernetes_runner):
+    """Test that image pull errors are marked as failed."""
+    # Create a mock pod with image pull error
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata.name = "test-pod"
+    pod.status.phase = "Pending"
+    pod.status.conditions = None
+    
+    # Create container status with waiting state
+    container_status = MagicMock(spec=V1ContainerStatus)
+    container_status.state.waiting.reason = "ErrImagePull"
+    container_status.state.waiting.message = "Failed to pull image"
+    container_status.state.terminated = None
+    container_status.state.running = None
+    
+    pod.status.container_statuses = [container_status]
+
+    status = kubernetes_runner._get_pod_failure_status(pod)
+    assert status == JobStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_pod_failure_status_scheduler_error(kubernetes_runner):
+    """Test that scheduler errors are marked as pending for retry."""
+    # Create a mock pod with scheduler error
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata.name = "test-pod"
+    pod.status.phase = "Pending"
+    pod.status.container_statuses = None
+    pod.status.conditions = [
+        MagicMock(
+            type="PodScheduled",
+            status="False",
+            reason="SchedulerError",
+            message="Internal scheduler error"
+        )
+    ]
+
+    status = kubernetes_runner._get_pod_failure_status(pod)
+    assert status == JobStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_pod_failure_status_crash_loop_backoff(kubernetes_runner):
+    """Test that CrashLoopBackOff is still marked as failed."""
+    # Create a mock pod with CrashLoopBackOff
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata.name = "test-pod"
+    pod.status.phase = "Running"  # Pod might still be in Running phase during CrashLoopBackOff
+    pod.status.conditions = None
+    
+    # Create container status with waiting state
+    container_status = MagicMock(spec=V1ContainerStatus)
+    container_status.state.waiting.reason = "CrashLoopBackOff"
+    container_status.state.waiting.message = "Back-off restarting failed container"
+    container_status.state.terminated = None
+    container_status.state.running = None
+    
+    pod.status.container_statuses = [container_status]
+
+    status = kubernetes_runner._get_pod_failure_status(pod)
+    assert status == JobStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_pod_failure_status_container_creating(kubernetes_runner):
+    """Test that ContainerCreating is marked as pending."""
+    # Create a mock pod with ContainerCreating
+    pod = MagicMock(spec=V1Pod)
+    pod.metadata.name = "test-pod"
+    pod.status.phase = "Pending"
+    pod.status.conditions = None
+    
+    # Create container status with waiting state
+    container_status = MagicMock(spec=V1ContainerStatus)
+    container_status.state.waiting.reason = "ContainerCreating"
+    container_status.state.waiting.message = "Container is being created"
+    container_status.state.terminated = None
+    container_status.state.running = None
+    
+    pod.status.container_statuses = [container_status]
+
+    status = kubernetes_runner._get_pod_failure_status(pod)
+    assert status == JobStatus.PENDING

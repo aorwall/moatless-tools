@@ -7,6 +7,7 @@ from moatless.completion.stats import Usage
 from moatless.events import BaseEvent
 from moatless.runner.runner import JobStatus
 from moatless.schema import MessageHistoryType
+from moatless.flow.flow import AgenticFlow
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,12 +22,29 @@ class DateTimeEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+class ExecutionStatus(str, Enum):
+    """Tracks the execution lifecycle of an instance"""
+    CREATED = "created"  # Instance created but not started
+    QUEUED = "queued"  # Job is queued in the runner
+    RUNNING = "running"  # Job is actively running
+    EVALUATING = "evaluating"  # Tests are being run
+    COMPLETED = "completed"  # Execution finished (may have succeeded or failed)
+    ERROR = "error"  # Execution encountered an error
+
+
+class ResolutionStatus(str, Enum):
+    """Tracks the resolution outcome of an instance"""
+    PENDING = "pending"  # Not yet evaluated
+    RESOLVED = "resolved"  # Problem was fully solved
+    FAILED = "failed"  # Problem was not solved
+    PARTIALLY_RESOLVED = "partially_resolved"  # Some test cases passed
+
+
 class InstanceStatus(str, Enum):
+    """Legacy status enum - kept for backward compatibility"""
     CREATED = "created"
     PENDING = "pending"
-    SETTING_UP = "setting_up"
     RUNNING = "running"
-    PAUSED = "paused"  # TODO: Remove this
     STOPPED = "stopped"
     COMPLETED = "completed"
     EVALUATING = "evaluating"
@@ -57,9 +75,40 @@ class EvaluationInstance(BaseModel):
     model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    status: InstanceStatus = Field(default=InstanceStatus.CREATED, description="Current status of the instance")
-    created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+    
+    # Execution tracking
+    execution_status: ExecutionStatus = Field(
+        default=ExecutionStatus.CREATED,
+        description="Current execution state of the instance"
+    )
+    job_status: Optional[JobStatus] = Field(
+        default=None, 
+        description="Status from the job runner"
+    )
+    
+    # Resolution tracking
+    resolution_status: ResolutionStatus = Field(
+        default=ResolutionStatus.PENDING,
+        description="Resolution outcome of the instance"
+    )
+    
+    # Legacy fields for backward compatibility
+    status: InstanceStatus = Field(
+        default=InstanceStatus.CREATED, 
+        description="[DEPRECATED] Use execution_status and resolution_status instead"
+    )
+    completed: bool = Field(
+        default=False, 
+        description="[DEPRECATED] Use execution_status == COMPLETED instead"
+    )
+    resolved: Optional[bool] = Field(
+        default=None, 
+        description="[DEPRECATED] Use resolution_status instead"
+    )
+    
+    # Timestamps
+    created_at: Optional[datetime] = Field(
+        default=None,
         description="When the instance was created",
     )
     queued_at: Optional[datetime] = Field(default=None, description="When the instance was queued")
@@ -67,20 +116,38 @@ class EvaluationInstance(BaseModel):
     completed_at: Optional[datetime] = Field(default=None, description="When the instance completed")
     start_evaluating_at: Optional[datetime] = Field(default=None, description="When the instance started evaluating")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
-    job_status: Optional[JobStatus] = Field(default=None, description="Status of the instance's job", exclude=True)
     error_at: Optional[datetime] = Field(default=None, description="When instance encountered an error")
+    
+    # Results
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if instance failed")
-    resolved: Optional[bool] = Field(default=None, description="Whether the instance was resolved")
     iterations: Optional[int] = Field(default=None, description="Number of iterations")
     reward: Optional[int] = Field(default=None, description="Reward of the instance")
     usage: Optional[Usage] = Field(default=None, description="Total cost of the instance")
     benchmark_result: Optional[dict[str, Any]] = Field(default=None, description="Benchmark result")
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
-
+    last_event_timestamp: Optional[datetime] = Field(default=None, description="Timestamp of the last event")
+    resolved_by: Optional[int] = Field(default=None, description="Number of agents that have resolved the evaluation")
+    
     def start(self):
-        self.status = InstanceStatus.PENDING
+        """Mark instance as queued for execution"""
+        self.execution_status = ExecutionStatus.QUEUED
         self.queued_at = datetime.now(timezone.utc)
+        self._sync_legacy_status()
+
+    def mark_running(self):
+        """Mark instance as running"""
+        self.execution_status = ExecutionStatus.RUNNING
+        if not self.started_at:
+            self.started_at = datetime.now(timezone.utc)
+        self._sync_legacy_status()
+
+    def mark_evaluating(self):
+        """Mark instance as being evaluated"""
+        self.execution_status = ExecutionStatus.EVALUATING
+        if not self.start_evaluating_at:
+            self.start_evaluating_at = datetime.now(timezone.utc)
+        self._sync_legacy_status()
 
     def complete(
         self,
@@ -89,24 +156,87 @@ class EvaluationInstance(BaseModel):
         benchmark_result: Optional[dict[str, Any]] = None,
     ):
         """Mark the instance as completed"""
-        self.status = InstanceStatus.COMPLETED
+        self.execution_status = ExecutionStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
+        
         if submission:
             self.submission = submission
+            
         if resolved is not None:
             self.resolved = resolved
+            if resolved:
+                self.resolution_status = ResolutionStatus.RESOLVED
+            else:
+                self.resolution_status = ResolutionStatus.FAILED
+                
         if self.started_at and self.completed_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
+            
         if benchmark_result:
             # Store as dict to avoid type issues
             self.benchmark_result = benchmark_result.model_dump()
+            
+        self._sync_legacy_status()
 
     def fail(self, error: str):
-        self.status = InstanceStatus.ERROR
+        """Mark instance as failed with error"""
+        self.execution_status = ExecutionStatus.ERROR
         self.completed_at = datetime.now(timezone.utc)
         self.error = error
+        self.error_at = datetime.now(timezone.utc)
         if self.started_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
+        self._sync_legacy_status()
+        
+    def set_resolution(self, resolved: bool, partially_resolved: bool = False):
+        """Set the resolution status based on evaluation results"""
+        self.resolved = resolved
+        if resolved:
+            self.resolution_status = ResolutionStatus.RESOLVED
+        elif partially_resolved:
+            self.resolution_status = ResolutionStatus.PARTIALLY_RESOLVED
+        else:
+            self.resolution_status = ResolutionStatus.FAILED
+        self._sync_legacy_status()
+
+    def _sync_legacy_status(self):
+        """Sync the legacy status field based on new status fields"""
+        # Map execution status to legacy status
+        if self.execution_status == ExecutionStatus.CREATED:
+            self.status = InstanceStatus.CREATED
+        elif self.execution_status == ExecutionStatus.QUEUED:
+            self.status = InstanceStatus.PENDING
+        elif self.execution_status == ExecutionStatus.RUNNING:
+            self.status = InstanceStatus.RUNNING
+        elif self.execution_status == ExecutionStatus.EVALUATING:
+            self.status = InstanceStatus.EVALUATING
+        elif self.execution_status == ExecutionStatus.ERROR:
+            self.status = InstanceStatus.ERROR
+        elif self.execution_status == ExecutionStatus.COMPLETED:
+            # If completed, use resolution status
+            if self.resolution_status == ResolutionStatus.RESOLVED:
+                self.status = InstanceStatus.RESOLVED
+            elif self.resolution_status == ResolutionStatus.PARTIALLY_RESOLVED:
+                self.status = InstanceStatus.PARTIALLY_RESOLVED
+            elif self.resolution_status == ResolutionStatus.FAILED:
+                self.status = InstanceStatus.FAILED
+            else:
+                self.status = InstanceStatus.COMPLETED
+        
+        # Sync completed flag
+        self.completed = self.execution_status == ExecutionStatus.COMPLETED
+
+    def is_running(self) -> bool:
+        """Check if instance is currently running"""
+        return self.execution_status in [ExecutionStatus.RUNNING, ExecutionStatus.EVALUATING]
+
+    def is_finished(self) -> bool:
+        """Check if instance execution is finished (completed or errored)"""
+        return self.execution_status in [ExecutionStatus.COMPLETED, ExecutionStatus.ERROR]
+
+    def is_evaluated(self) -> bool:
+        """Check if instance has been evaluated (resolution status determined)"""
+        return self.resolution_status != ResolutionStatus.PENDING
 
     def model_dump(self, *args, **kwargs) -> dict:
         data = super().model_dump(*args, **kwargs)
@@ -120,9 +250,11 @@ class Evaluation(BaseModel):
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
+    
+    flow: Optional[AgenticFlow] = Field(default=None, description="Flow configuration to use for the evaluation")
 
-    flow_id: str = Field(..., description="ID of the flow configuration to use for the evaluation")
-    model_id: str = Field(..., description="ID of the model to use for the evaluation")
+    flow_id: Optional[str] = Field(default=None, description="ID of the flow configuration to use for the evaluation")
+    model_id: Optional[str] = Field(default=None, description="[DEPRECATED] ID of the model to use for the evaluation")
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the evaluation was created",
@@ -142,22 +274,45 @@ class Evaluation(BaseModel):
 
     def get_summary(self) -> dict:
         """Get a summary of evaluation status and instance counts."""
-        completed = sum(1 for i in self.instances if i.status == InstanceStatus.COMPLETED)
-        running = sum(1 for i in self.instances if i.status == InstanceStatus.RUNNING)
-        evaluating = sum(1 for i in self.instances if i.status == InstanceStatus.EVALUATING)
-        evaluated = sum(1 for i in self.instances if i.status == InstanceStatus.EVALUATED)
-        pending = sum(1 for i in self.instances if i.status == InstanceStatus.PENDING)
-        errors = sum(1 for i in self.instances if i.status == InstanceStatus.ERROR)
+        # Execution status counts
+        created = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.CREATED)
+        queued = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.QUEUED)
+        running = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.RUNNING)
+        evaluating = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.EVALUATING)
+        completed = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.COMPLETED)
+        errors = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.ERROR)
+        
+        # Resolution status counts
+        resolved = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.RESOLVED)
+        failed = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.FAILED)
+        partially_resolved = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.PARTIALLY_RESOLVED)
+        pending_resolution = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.PENDING)
 
         return {
             "status": self.status,
             "error": self.error,
+            "execution_counts": {
+                "created": created,
+                "queued": queued,
+                "running": running,
+                "evaluating": evaluating,
+                "completed": completed,
+                "errors": errors,
+                "total": len(self.instances),
+            },
+            "resolution_counts": {
+                "pending": pending_resolution,
+                "resolved": resolved,
+                "failed": failed,
+                "partially_resolved": partially_resolved,
+            },
+            # Legacy counts for backward compatibility
             "counts": {
                 "completed": completed,
                 "running": running,
                 "evaluating": evaluating,
-                "evaluated": evaluated,
-                "pending": pending,
+                "evaluated": resolved + failed + partially_resolved,
+                "pending": queued,
                 "errors": errors,
                 "total": len(self.instances),
             },
@@ -168,11 +323,15 @@ class Evaluation(BaseModel):
         if isinstance(obj, dict):
             obj = obj.copy()
             obj["instances"] = [EvaluationInstance.model_validate(i) for i in obj["instances"]]
+            if "flow" in obj:
+                obj["flow"] = AgenticFlow.from_dict(obj["flow"])
         return super().model_validate(obj, **kwargs)
 
     def model_dump(self, *args, **kwargs) -> dict:
         data = super().model_dump(*args, **kwargs)
         data["instances"] = [i.model_dump(**kwargs) for i in self.instances]
+        if self.flow:
+            data["flow"] = self.flow.model_dump()
         return data
 
 
@@ -189,13 +348,66 @@ class EvaluationStatusSummary(BaseModel):
 
     model_config = ConfigDict(ser_json_timedelta="iso8601")
 
-    pending: int = Field(default=0, description="Number of pending instances")
+    # Execution status counts
+    created: int = Field(default=0, description="Number of created instances")
+    queued: int = Field(default=0, description="Number of queued instances")
     running: int = Field(default=0, description="Number of running instances")
     evaluating: int = Field(default=0, description="Number of instances being evaluated")
     completed: int = Field(default=0, description="Number of completed instances")
     error: int = Field(default=0, description="Number of instances with errors")
+    
+    # Resolution status counts
+    pending_resolution: int = Field(default=0, description="Number of instances pending resolution")
     resolved: int = Field(default=0, description="Number of resolved instances")
     failed: int = Field(default=0, description="Number of failed instances")
+    partially_resolved: int = Field(default=0, description="Number of partially resolved instances")
+    
+    # Legacy counts for backward compatibility
+    pending: int = Field(default=0, description="[DEPRECATED] Use queued instead")
+
+
+class RepoStats(BaseModel):
+    """Statistics for a specific repository"""
+
+    repo: str = Field(description="Repository name")
+    total_instances: int = Field(description="Total instances for this repo")
+    resolved_instances: int = Field(description="Number of resolved instances")
+    failed_instances: int = Field(description="Number of failed instances")
+    solve_rate: float = Field(description="Solve rate as percentage")
+
+class EvaluationStats(BaseModel):
+    """Comprehensive statistics for an evaluation"""
+
+    # Overall metrics
+    success_rate: float = Field(description="Success rate as percentage")
+    avg_iterations: float = Field(description="Average number of iterations")
+    avg_cost: float = Field(description="Average cost per instance")
+    avg_tokens: int = Field(description="Average total tokens per instance")
+    solved_instances_per_dollar: float = Field(description="Number of solved instances per dollar")
+    solved_percentage_per_dollar: float = Field(description="Solved percentage per dollar")
+
+    # Counts and totals
+    total_instances: int = Field(description="Total number of finished instances")
+    resolved_instances: int = Field(description="Number of resolved instances")
+    failed_instances: int = Field(description="Number of failed instances")
+
+    # Token breakdown
+    total_cost: float = Field(description="Total cost for all instances")
+    total_prompt_tokens: int = Field(description="Total prompt tokens")
+    total_completion_tokens: int = Field(description="Total completion tokens")
+    total_cache_read_tokens: int = Field(description="Total cache read tokens")
+
+    # Iteration ranges
+    iteration_range_min: int = Field(description="Minimum iterations")
+    iteration_range_max: int = Field(description="Maximum iterations")
+
+    # Distribution data
+    success_distribution: dict[str, int] = Field(description="Distribution of success vs failure")
+    iterations_distribution: dict[str, int] = Field(description="Distribution of iterations by ranges")
+    cost_distribution: dict[str, int] = Field(description="Distribution of costs by ranges")
+
+    # Per-repo statistics
+    repo_stats: list[RepoStats] = Field(description="Statistics per repository")
 
 
 class EvaluationSummary(BaseModel):
@@ -205,8 +417,8 @@ class EvaluationSummary(BaseModel):
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
-    flow_id: str = Field(..., description="ID of the flow configuration used")
-    model_id: str = Field(..., description="ID of the model used")
+    flow_id: Optional[str] = Field(default=None, description="ID of the flow configuration used")
+    model_id: Optional[str] = Field(default=None, description="[DEPRECATED] ID of the model used")
     status: str = Field(..., description="Status of the evaluation")
     created_at: datetime = Field(..., description="When the evaluation was created")
     started_at: Optional[datetime] = Field(default=None, description="When the evaluation started")
@@ -237,25 +449,32 @@ class EvaluationSummary(BaseModel):
         summary = EvaluationStatusSummary()
 
         for instance in evaluation.instances:
-            # Update status summary counters based on instance status
-            if instance.status == InstanceStatus.PENDING:
-                summary.pending += 1
-            elif instance.status == InstanceStatus.RUNNING:
+            # Count execution statuses
+            if instance.execution_status == ExecutionStatus.CREATED:
+                summary.created += 1
+            elif instance.execution_status == ExecutionStatus.QUEUED:
+                summary.queued += 1
+                summary.pending += 1  # Legacy compatibility
+            elif instance.execution_status == ExecutionStatus.RUNNING:
                 summary.running += 1
-            elif instance.status == InstanceStatus.EVALUATING:
+            elif instance.execution_status == ExecutionStatus.EVALUATING:
                 summary.evaluating += 1
-            elif instance.status == InstanceStatus.COMPLETED:
+            elif instance.execution_status == ExecutionStatus.COMPLETED:
                 summary.completed += 1
-            elif instance.status == InstanceStatus.ERROR:
+            elif instance.execution_status == ExecutionStatus.ERROR:
                 summary.error += 1
 
-            # Count resolved/failed instances
-            if instance.resolved is True:
+            # Count resolution statuses
+            if instance.resolution_status == ResolutionStatus.PENDING:
+                summary.pending_resolution += 1
+            elif instance.resolution_status == ResolutionStatus.RESOLVED:
                 summary.resolved += 1
                 resolved_count += 1
-            elif instance.resolved is False:
+            elif instance.resolution_status == ResolutionStatus.FAILED:
                 summary.failed += 1
                 failed_count += 1
+            elif instance.resolution_status == ResolutionStatus.PARTIALLY_RESOLVED:
+                summary.partially_resolved += 1
 
             # Add up token usage if usage exists
             if instance.usage:

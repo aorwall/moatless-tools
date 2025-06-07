@@ -333,22 +333,22 @@ def create_node_tree_item(node: Node, parent_node_id: int | None = None) -> Node
                 )
             )
 
-            # Add selection info if available
-            if hasattr(node, "selection") and node.selection:
-                reason = (
-                    f"Reason: {node.selection.reason[:100]}..."
-                    if len(node.selection.reason) > 100
-                    else f"Reason: {node.selection.reason}"
-                )
+    # Add selection info if available
+    if node.selection:
+        reason = (
+            f"Reason: {node.selection.reason[:100]}..."
+            if len(node.selection.reason) > 100
+            else f"Reason: {node.selection.reason}"
+        )
 
-                node_item.children.append(
-                    SelectionTreeItem(
-                        id=f"{node_item.id}-selection",
-                        label="Selection",
-                        detail=f"Node {node.selection.node_id} ({reason})",
-                        node_id=node_item.node_id,
-                    )
-                )
+        node_item.children.append(
+            SelectionTreeItem(
+                id=f"{node_item.id}-selection",
+                label="Selection",
+                detail=f"Node {node.selection.node_id} ({reason})",
+                node_id=node_item.node_id,
+            )
+        )
 
     if node.error:
         node_item.children.append(
