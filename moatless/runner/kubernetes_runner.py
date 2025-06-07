@@ -15,12 +15,10 @@ from moatless.runner.label_utils import (
     get_trajectory_label,
     create_resource_id,
     create_job_args,
-    sanitize_label,
 )
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
-    JobsStatusSummary,
     JobStatus,
     RunnerInfo,
     RunnerStatus,
@@ -454,12 +452,10 @@ class KubernetesRunner(BaseRunner):
         Returns:
             JobStatus.FAILED if pod is in a failed state, JobStatus.RUNNING if running, JobStatus.PENDING otherwise
         """
-        # Check pod phase first
+        # Check pod phase first for definitive states
         if pod.status.phase == "Failed":
             self.logger.info(f"Pod {pod.metadata.name} is in Failed phase")
             return JobStatus.FAILED
-        elif pod.status.phase == "Running":
-            return JobStatus.RUNNING
         elif pod.status.phase == "Succeeded":
             return JobStatus.COMPLETED
 
@@ -519,6 +515,10 @@ class KubernetesRunner(BaseRunner):
                 # Check if container is running
                 if container_status.state.running:
                     return JobStatus.RUNNING
+
+        # If we get here and pod phase is Running, it means containers are likely starting up or in transition
+        if pod.status.phase == "Running":
+            return JobStatus.RUNNING
 
         # Check for conditions that might indicate scheduling issues (but don't mark as failed immediately)
         if pod.status.conditions:

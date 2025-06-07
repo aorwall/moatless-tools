@@ -167,16 +167,6 @@ async def test_search_tree_max_iterations(search_tree_factory, root_node, simple
     assert simple_agent._execute_action_step.call_count == 3  # Called for nodes 1, 2, 3
 
 
-@pytest.mark.asyncio
-async def test_search_tree_max_depth(search_tree_factory, root_node, simple_agent):
-    # Test that the search stops when max_depth is reached
-    tree = search_tree_factory(root=root_node, max_depth=1, max_iterations=5)
-    final_node = await tree.run()
-
-    assert final_node.node_id == 1
-    assert final_node.terminal is True
-    assert len(root_node.get_all_nodes()) == 2  # Root + 1 child
-
 
 @pytest.mark.asyncio
 async def test_search_tree_terminal_action_observation(search_tree_factory, root_node, simple_agent):

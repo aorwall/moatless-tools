@@ -132,7 +132,7 @@ def test_contextfile_flow_verification():
     new_content3 = "Line 1 modified\nLine 2 modified\nLine 3 modified\n"
 
     # Initialize the mock repository with the base content
-    repo = InMemRepository({"test_file.txt": base_content})
+    repo = InMemRepository({"test_file.txt": base_content}, shadow_mode=True)
 
     context_file1 = ContextFile(content=base_content, file_path="test_file.txt", repo=repo)
 

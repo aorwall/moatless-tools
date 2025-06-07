@@ -93,6 +93,7 @@ async def test_find_function_with_mocks():
     repository = MagicMock(spec=Repository)
     repository.file_exists.return_value = True  # Ensure file exists
     repository.get_file_content.return_value = "def test_function():\n    pass"
+    repository.shadow_mode.return_value = True
 
     code_index = AsyncMock(spec=CodeIndex)
     file_context = FileContext(repo=repository)

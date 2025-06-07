@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import List, Optional, Literal, Any
+from typing import Optional, Literal, Any
 from unittest import TestResult
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -100,6 +100,19 @@ class ContextFile(BaseModel):
         self._is_new = False if repo is None else not repo.file_exists(self.file_path)
         self._cached_content = data.get("content", None)  # Store initial content if provided
 
+        # If content is provided in data, use it as base content only if it matches the repo content
+        # or if we're creating a new file context that starts with this content
+        if "content" in data and not self.was_edited:
+            # Only cache as base content if the repo doesn't exist or content matches repo content
+            if not self._repo or not self._repo.file_exists(self.file_path):
+                self._cached_base_content = data["content"]
+            else:
+                repo_content = self._repo.get_file_content(self.file_path)
+                # If the provided content is different from repo content, it means the repo was already modified
+                # In that case, we should get the original base content from somewhere else
+                if repo_content == data["content"]:
+                    self._cached_base_content = data["content"]
+
     def _add_import_span(self):
         # TODO: Initiate module or add this lazily?
         if self.module:
@@ -125,16 +138,35 @@ class ContextFile(BaseModel):
         if self._cached_base_content is not None:
             return self._cached_base_content
 
-        if not self._repo.file_exists(self.file_path):
-            original_content = ""
+        # In shadow mode or if no edits have been made, get content from repo
+        # Otherwise, if we've edited and are not in shadow mode, the repo content
+        # might have changed, so we need to use the original cached content
+        if self.shadow_mode or not self.was_edited:
+            if not self._repo.file_exists(self.file_path):
+                original_content = ""
+            else:
+                original_content = self._repo.get_file_content(self.file_path)
+
+            # Ensure original_content is a string, not None
+            if original_content is None:
+                original_content = ""
+
+            self._cached_base_content = original_content
         else:
-            original_content = self._repo.get_file_content(self.file_path)
+            # If we're not in shadow mode and we've been edited,
+            # we need to preserve the original base content
+            # This case should not happen if we properly cache base content before first edit
+            if self._cached_base_content is None:
+                # Fallback - this shouldn't happen in normal usage
+                if not self._repo.file_exists(self.file_path):
+                    original_content = ""
+                else:
+                    original_content = self._repo.get_file_content(self.file_path)
 
-        # Ensure original_content is a string, not None
-        if original_content is None:
-            original_content = ""
+                if original_content is None:
+                    original_content = ""
 
-        self._cached_base_content = original_content
+                self._cached_base_content = original_content
 
         return self._cached_base_content
 
@@ -170,7 +202,7 @@ class ContextFile(BaseModel):
             return self._cached_content
 
         base_content = self.get_base_content()
-        if self.patch and self.shadow_mode:
+        if self.patch:
             try:
                 self._cached_content = self.apply_patch_to_content(base_content, self.patch)
             except Exception as e:
@@ -191,20 +223,29 @@ class ContextFile(BaseModel):
         Returns:
             set[str]: Set of new span IDs added to context
         """
+        # Cache base content before first edit if not already cached
+        if self._cached_base_content is None and not self.was_edited:
+            self.get_base_content()  # This will cache the base content
+
         self.was_edited = True
+
+        base_content = self.get_base_content()
+        self.patch = self.generate_patch(base_content, updated_content)
 
         if not self.shadow_mode:
             logger.info(f"Saving file {self.file_path} to disk")
             self._repo.save_file(self.file_path, updated_content)
-            self._cached_content = None
-            self._cached_base_content = None  # Clear base content cache since file content changed
+            self._cached_content = updated_content  # Update cached content
+            # Don't clear base content cache when not in shadow mode since the file is persisted
 
             if isinstance(self._repo, GitRepository):
-                self.patch = self._repo.file_diff(self.file_path)
-
+                # Update patch with the actual git diff if available
+                git_patch = self._repo.file_diff(self.file_path)
+                if git_patch:
+                    self.patch = git_patch
         else:
-            base_content = self.get_base_content()
-            self.patch = self.generate_patch(base_content, updated_content)
+            # In shadow mode, update cached content to the new content
+            self._cached_content = updated_content
 
         new_span_ids = set()
 
@@ -1129,6 +1170,15 @@ class ContextFile(BaseModel):
             bool: True if the file is new, False otherwise
         """
         return self._is_new
+
+    def model_dump(self, **kwargs):
+        """Override model_dump to include shadow_mode and ensure patch is always included."""
+        dump = super().model_dump(**kwargs)
+        dump["shadow_mode"] = self.shadow_mode
+        # Always include patch field even if None
+        if "patch" not in dump:
+            dump["patch"] = self.patch
+        return dump
 
 
 class FileContext(BaseModel):
