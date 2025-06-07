@@ -157,3 +157,4 @@ class CompletionDTO(BaseModel):
     output: Optional[CompletionOutput] = None
     original_input: Optional[dict] = None
     original_output: Optional[dict] = None
+    error: Optional[str] = None

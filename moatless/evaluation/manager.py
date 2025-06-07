@@ -22,6 +22,7 @@ from moatless.eventbus.base import BaseEventBus
 from moatless.events import BaseEvent
 from moatless.flow.flow import AgenticFlow
 from moatless.flow.manager import FlowManager
+from moatless.flow.search_tree import SearchTree
 from moatless.node import EvaluationResult, Node
 from moatless.runner.runner import BaseRunner, JobStatus
 from moatless.storage.base import BaseStorage
@@ -63,6 +64,8 @@ class EvaluationManager:
     async def create_evaluation(
         self,
         flow_id: str | None = None,
+        model_id: str | None = None,
+        litellm_model_name: str | None = None,
         flow_config: AgenticFlow | None = None,
         evaluation_name: str | None = None,
         dataset_name: str | None = None,
@@ -72,12 +75,6 @@ class EvaluationManager:
         if not dataset_name and not instance_ids:
             raise ValueError("Either dataset_name or instance_ids must be provided")
         
-        if not flow_id and not flow_config:
-            raise ValueError("Either flow_id or flow_config must be provided")
-        
-        if flow_id and flow_config:
-            raise ValueError("Cannot provide both flow_id and flow_config")
-
         if not dataset_name:
             dataset_name = "instance_ids"
 
@@ -95,21 +92,14 @@ class EvaluationManager:
         if await self.storage.exists_in_project("evaluation.json", project_id=evaluation_name):
             raise ValueError("Evaluation already exists")
 
-        # Handle flow creation based on input
-        if flow_config:
-            # Use provided flow config
-            flow = flow_config
-            # Ensure flow has the effective_flow_id
-            flow.id = flow_id
-        else:
-            # Build flow from flow_id
-            flow = await self._flow_manager.get_flow_config(id=flow_id)
+        flow = await self._flow_manager.build_flow(flow_id=flow_id, model_id=model_id, litellm_model_name=litellm_model_name)
 
         evaluation = Evaluation(
             evaluation_name=evaluation_name,
             dataset_name=dataset_name,
             status=EvaluationStatus.PENDING,
             flow_id=flow_id,
+            model_id=model_id,
             flow=flow,
             instances=[
                 EvaluationInstance(instance_id=instance_id)  # Will default to CREATED state
@@ -307,7 +297,8 @@ class EvaluationManager:
 
     async def update_config(self, evaluation_name: str, config: dict):
         """Update the config for an evaluation."""
-        await self.storage.write_to_project("flow.json", config, project_id=evaluation_name)
+        flow = SearchTree.from_dict(config)
+        await self.storage.write_to_project("flow.json", flow.model_dump(), project_id=evaluation_name)
 
     @tracer.start_as_current_span("EvaluationManager._handle_event")
     async def _handle_event(self, event: BaseEvent):
@@ -408,20 +399,20 @@ class EvaluationManager:
             if node.reward:
                 instance.reward = node.reward.value
                 
-            logger.info(f"Instance {instance.instance_id} flow is finished: {flow.is_finished()}")
+            logger.debug(f"Instance {instance.instance_id} flow is finished: {flow.is_finished()}")
             if flow.is_finished():
                 instance.execution_status = ExecutionStatus.COMPLETED
             else:
                 
                 instance.execution_status = ExecutionStatus.CREATED
 
-            if node.evaluation_result:
+            if node.evaluation_result and node.evaluation_result.resolved is not None:
                 # Set resolution status based on evaluation
                 instance.set_resolution(node.evaluation_result.resolved)
                 logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
             
             if instance.resolution_status != ResolutionStatus.RESOLVED:
-                logger.info(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
+                logger.debug(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
                 # Check if any leaf node is resolved for partial resolution
                 for leaf_node in flow.root.get_all_nodes():
                     if leaf_node.evaluation_result and leaf_node.evaluation_result.resolved:
@@ -535,7 +526,7 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
-        logger.info(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
+        logger.debug(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:
             await self._process_trajectory_results(evaluation, instance)
 

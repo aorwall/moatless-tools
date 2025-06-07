@@ -33,6 +33,7 @@ class AgenticFlow(MoatlessComponent):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     id: Optional[str] = Field(default=None, description="The flow ID.")
+    description: Optional[str] = Field(default=None, description="The flow description.")
 
     project_id: Optional[str] = Field(None, description="The project ID")
     trajectory_id: Optional[str] = Field(None, description="The trajectory ID.")
@@ -251,7 +252,6 @@ class AgenticFlow(MoatlessComponent):
     def model_validate(
         cls,
         obj: Any,
-        repository: Repository | None = None,
     ):
         """Validate and reconstruct a system from a dictionary."""
         if isinstance(obj, dict):
@@ -260,13 +260,8 @@ class AgenticFlow(MoatlessComponent):
             if "agent" in obj and isinstance(obj["agent"], dict):
                 obj["agent"] = ActionAgent.from_dict(obj["agent"])
 
-            if "root" in obj:
-                obj["root"] = Node.reconstruct(obj["root"], repo=repository)
-            elif "nodes" in obj:
-                obj["root"] = Node.reconstruct(obj["nodes"], repo=repository)
-                del obj["nodes"]
-
-        return super().model_validate(obj)
+            return super().model_validate(obj)
+        return obj
 
     @classmethod
     def from_dicts(cls, settings: dict[str, Any], trajectory: dict[str, Any]) -> "AgenticFlow":

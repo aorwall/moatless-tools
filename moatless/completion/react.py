@@ -30,7 +30,7 @@ class ReActCompletionModel(JsonCompletionModel):
 
     def _get_completion_params(self, schema: list[type[ResponseSchema]]) -> dict[str, Any]:
         """Get the completion parameters for JSON completion."""
-        return {"stop": ["Observation:"]}
+        return {}
 
     def _prepare_system_prompt(
         self, system_prompt: str, response_schema: list[type[ResponseSchema]] | type[ResponseSchema]

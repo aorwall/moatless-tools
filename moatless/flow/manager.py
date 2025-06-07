@@ -10,8 +10,10 @@ from typing import Any, Dict, Optional
 from moatless.actions.list_files import ListFilesArgs
 from moatless.actions.read_files import ReadFiles, ReadFilesArgs
 from moatless.actions.view_diff import ViewDiffArgs
+from moatless.agent.manager import AgentConfigManager
 from moatless.completion.json import JsonCompletionModel
 from moatless.actions.action import CompletionModelMixin
+from moatless.completion.manager import ModelConfigManager
 from moatless.completion.react import ReActCompletionModel
 from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
@@ -44,8 +46,8 @@ class FlowManager:
         runner: BaseRunner,
         storage: BaseStorage,
         eventbus: BaseEventBus,
-        agent_manager,
-        model_manager,
+        agent_manager: AgentConfigManager,
+        model_manager: ModelConfigManager,
     ):
         self._runner = runner
         self._storage = storage
@@ -59,7 +61,10 @@ class FlowManager:
 
     async def build_flow(
         self,
-        id: str,
+        flow_id: str | None = None,
+        flow_config: AgenticFlow | None = None,
+        model_id: str | None = None,
+        litellm_model_name: str | None = None,
     ) -> AgenticFlow:
         """Create a SearchTree instance from this configuration.
 
@@ -70,10 +75,38 @@ class FlowManager:
         Returns:
             SearchTree: A configured search tree instance
         """
-        flow = await self.get_flow_config(id)
-        if not flow:
-            raise ValueError(f"Flow config {id} not found")
         
+        if not flow_id and not flow_config:
+            raise ValueError("Either flow_id or flow_config must be provided")
+        
+        if flow_id and flow_config:
+            raise ValueError("Cannot provide both flow_id and flow_config")
+
+        if flow_config:
+            flow = flow_config
+        else:
+            flow = await self.get_flow_config(flow_id)
+            if not flow:
+                raise ValueError(f"Flow config {flow_id} not found")
+        
+        if not flow.agent:
+            raise ValueError(f"Flow {flow_id} has no agent. Please create an agent first.")
+        
+        # If model_id is provided, get the model from the model manager and set it on the flow's agent
+        if model_id:
+            logger.info(f"Setting model {model_id} on flow agent")
+            completion_model = self._model_manager.create_completion_model(model_id)
+            flow.agent.completion_model = completion_model
+            flow.agent.model_id = model_id
+            
+        if not flow.agent.completion_model:
+            raise ValueError(f"Flow {flow_id} has no completion model.")
+        
+        # If litellm_model_name is provided, override just the model field of the existing completion model
+        if litellm_model_name and flow.agent.completion_model:
+            logger.info(f"Setting litellm model name {litellm_model_name} on flow agent completion model")
+            flow.agent.completion_model.model = litellm_model_name
+            
         return flow
 
     async def create_flow(
@@ -380,6 +413,8 @@ class FlowManager:
             raise ValueError(f"Flow config {id} not found")
 
         await self._storage.delete(flow_path)
+        
+    
 
     async def get_flow(self, project_id: str, trajectory_id: str | None = None) -> AgenticFlow:
         """Get a flow from a trajectory."""
