@@ -44,6 +44,11 @@ async def create_evaluation(
     if request.flow:
         flow = SearchTree.model_validate(request.flow)
     else:
+        logger.info(f"Creating evaluation for all datasets with {request.instance_ids}")
+        
+    if request.flow:
+        flow = SearchTree.model_validate(request.flow)
+    else:
         flow = None
 
     evaluation = await evaluation_manager.create_evaluation(
