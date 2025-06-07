@@ -73,7 +73,9 @@ class KubernetesRunner(BaseRunner):
         self.kubernetes_provider = kubernetes_provider or os.getenv("KUBERNETES_RUNNER_PROVIDER", "in-cluster")
         self.update_on_start = update_on_start or os.getenv("KUBERNETES_RUNNER_UPDATE_ON_START", "false") == "true"
         self.update_branch = update_branch or os.getenv("KUBERNETES_RUNNER_UPDATE_BRANCH", "main")
-        self.custom_requirements_configmap = custom_requirements_configmap or os.getenv("KUBERNETES_RUNNER_CUSTOM_REQUIREMENTS_CONFIGMAP")
+        self.custom_requirements_configmap = custom_requirements_configmap or os.getenv(
+            "KUBERNETES_RUNNER_CUSTOM_REQUIREMENTS_CONFIGMAP"
+        )
         self.image_pull_secret = image_pull_secret or os.getenv("KUBERNETES_RUNNER_IMAGE_PULL_SECRET")
         logger.info(f"Using Kubernetes provider: {self.kubernetes_provider}")
 
@@ -170,7 +172,9 @@ class KubernetesRunner(BaseRunner):
             should_update = self.update_on_start if update_on_start is None else update_on_start
             branch_to_use = self.update_branch if update_branch is None else update_branch
             requirements_configmap_to_use = (
-                self.custom_requirements_configmap if custom_requirements_configmap is None else custom_requirements_configmap
+                self.custom_requirements_configmap
+                if custom_requirements_configmap is None
+                else custom_requirements_configmap
             )
 
             job = self._create_job_object(
@@ -416,23 +420,24 @@ class KubernetesRunner(BaseRunner):
             # Check pod status to see if pods are actually in a failed state
             try:
                 pod_list = self.core_v1.list_namespaced_pod(
-                    namespace=self.namespace, 
-                    label_selector=f"job-name={job.metadata.name}"
+                    namespace=self.namespace, label_selector=f"job-name={job.metadata.name}"
                 )
-                
+
                 if pod_list.items:
                     for pod in pod_list.items:
                         pod_status = self._get_pod_failure_status(pod)
                         if pod_status == JobStatus.FAILED:
-                            self.logger.info(f"Job {job.metadata.name} has failed pod {pod.metadata.name}, marking job as failed")
+                            self.logger.info(
+                                f"Job {job.metadata.name} has failed pod {pod.metadata.name}, marking job as failed"
+                            )
                             return JobStatus.FAILED
                         elif pod_status == JobStatus.RUNNING:
                             self.logger.debug(f"Job {job.metadata.name} has running pod {pod.metadata.name}")
                             return JobStatus.RUNNING
-                            
+
             except Exception as e:
                 self.logger.warning(f"Error checking pod status for job {job.metadata.name}: {e}")
-            
+
             self.logger.debug(f"Job {job.metadata.name} is running")
             return JobStatus.RUNNING
 
@@ -465,11 +470,11 @@ class KubernetesRunner(BaseRunner):
                 if container_status.state.waiting:
                     reason = container_status.state.waiting.reason
                     message = container_status.state.waiting.message or ""
-                    
+
                     # These are permanent failure conditions that should mark the job as failed
                     permanent_failure_reasons = [
                         "ErrImagePull",
-                        "ImagePullBackOff", 
+                        "ImagePullBackOff",
                         "CreateContainerConfigError",
                         "CreateContainerError",
                         "InvalidImageName",
@@ -477,9 +482,11 @@ class KubernetesRunner(BaseRunner):
                         "ErrImageNeverPull",
                         "RegistryUnavailable",
                     ]
-                    
+
                     if reason in permanent_failure_reasons:
-                        self.logger.warning(f"Pod {pod.metadata.name} container in permanent failure state: {reason} - {message}")
+                        self.logger.warning(
+                            f"Pod {pod.metadata.name} container in permanent failure state: {reason} - {message}"
+                        )
                         return JobStatus.FAILED
                     elif reason == "CrashLoopBackOff":
                         # CrashLoopBackOff might be temporary (e.g., startup issues) or permanent
@@ -493,20 +500,22 @@ class KubernetesRunner(BaseRunner):
                         # Log unknown waiting reasons for debugging
                         self.logger.info(f"Pod {pod.metadata.name} container waiting with reason: {reason} - {message}")
                         return JobStatus.PENDING
-                
+
                 # Check if container terminated with non-zero exit code
                 if container_status.state.terminated:
                     exit_code = container_status.state.terminated.exit_code
                     reason = container_status.state.terminated.reason or "Unknown"
                     message = container_status.state.terminated.message or ""
-                    
+
                     if exit_code != 0:
-                        self.logger.warning(f"Pod {pod.metadata.name} container terminated with exit code {exit_code}: {reason} - {message}")
+                        self.logger.warning(
+                            f"Pod {pod.metadata.name} container terminated with exit code {exit_code}: {reason} - {message}"
+                        )
                         return JobStatus.FAILED
                     else:
                         self.logger.info(f"Pod {pod.metadata.name} container completed successfully")
                         return JobStatus.COMPLETED
-                
+
                 # Check if container is running
                 if container_status.state.running:
                     return JobStatus.RUNNING
@@ -517,15 +526,19 @@ class KubernetesRunner(BaseRunner):
                 if condition.type == "PodScheduled" and condition.status == "False":
                     reason = condition.reason or ""
                     message = condition.message or ""
-                    
+
                     if reason == "Unschedulable":
                         # Log detailed scheduling failure information but don't mark as failed
                         # Unschedulable is often temporary (waiting for nodes to scale, resource constraints)
-                        self.logger.info(f"Pod {pod.metadata.name} temporarily unschedulable: {message}. This may resolve when resources become available.")
+                        self.logger.info(
+                            f"Pod {pod.metadata.name} temporarily unschedulable: {message}. This may resolve when resources become available."
+                        )
                         return JobStatus.PENDING
                     elif reason == "SchedulerError":
                         # SchedulerError might be more serious but could still be temporary
-                        self.logger.warning(f"Pod {pod.metadata.name} has scheduler error: {message}. Will retry scheduling.")
+                        self.logger.warning(
+                            f"Pod {pod.metadata.name} has scheduler error: {message}. Will retry scheduling."
+                        )
                         return JobStatus.PENDING
                     else:
                         # Log unknown scheduling conditions
@@ -783,12 +796,7 @@ class KubernetesRunner(BaseRunner):
         # Add API key environment variables from current environment
         # TODO: Should be a shared secret
         for key, value in os.environ.items():
-            if (
-                key.endswith("API_KEY")
-                or key.startswith("AWS_")
-                or key.startswith("GCP_")
-                or key.startswith("AZURE_")
-            ):
+            if key.endswith("API_KEY") or key.startswith("AWS_") or key.startswith("GCP_") or key.startswith("AZURE_"):
                 env_vars.append(client.V1EnvVar(name=key, value=value))
 
         # Add OpenTelemetry context if available
@@ -840,22 +848,11 @@ class KubernetesRunner(BaseRunner):
                     name="custom-requirements",
                     config_map=client.V1ConfigMapVolumeSource(
                         name=requirements_configmap,
-                        items=[
-                            client.V1KeyToPath(
-                                key="custom_requirements.txt",
-                                path="custom_requirements.txt"
-                            )
-                        ]
-                    )
+                        items=[client.V1KeyToPath(key="custom_requirements.txt", path="custom_requirements.txt")],
+                    ),
                 )
             )
-            volume_mounts.append(
-                client.V1VolumeMount(
-                    name="custom-requirements",
-                    mount_path="/app",
-                    read_only=True
-                )
-            )
+            volume_mounts.append(client.V1VolumeMount(name="custom-requirements", mount_path="/app", read_only=True))
 
         return volumes, volume_mounts
 
@@ -927,7 +924,9 @@ class KubernetesRunner(BaseRunner):
         should_update = self.update_on_start if update_on_start is None else update_on_start
         branch_to_use = self.update_branch if update_branch is None else update_branch
 
-        self.logger.info(f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}")
+        self.logger.info(
+            f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}"
+        )
         if should_update:
             self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
             cmd += f" && /opt/moatless/docker/update-moatless.sh --branch {branch_to_use}"

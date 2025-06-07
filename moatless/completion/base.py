@@ -378,7 +378,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                         if completion_response.choices[0].message.tool_calls:
                             # TODO: Support multiple tool calls
                             tool_call_id = completion_response.choices[0].message.tool_calls[0].id
-                            
+
                         msg_dict = completion_response.choices[0].message.model_dump()
                         if "reasoning_content" in msg_dict:
                             # TODO: Is this Deepseek specific?

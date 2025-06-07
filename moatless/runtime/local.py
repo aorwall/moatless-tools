@@ -64,24 +64,28 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         stdout, return_code = await self._execute_command(command)
         logger.info(f"Command {command} returned {return_code}")
         logger.info(f"Output: {stdout}")
-        
+
         if fail_on_error and return_code != 0:
             raise RuntimeError(f"Command {command} failed with return code {return_code}: {stdout}")
-        
+
         return stdout
 
     async def read_file(self, path: str) -> str:
         """Read a file from the environment."""
         stdout, return_code = await self._execute_command(f"cat {path}")
         return stdout
-    
+
     async def write_file(self, path: str, content: str) -> None:
         """Write content to a file in the environment."""
         stdout, return_code = await self._execute_command(f"echo '{content}' > {path}")
         if return_code != 0:
-            raise EnvironmentExecutionError(f"Command {f'echo {content} > {path}'} failed with return code {return_code}", return_code, stdout)
+            raise EnvironmentExecutionError(
+                f"Command {f'echo {content} > {path}'} failed with return code {return_code}", return_code, stdout
+            )
 
-    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None, timeout: int = 600) -> list[TestResult]:
+    async def run_tests(
+        self, patch: str | None = None, test_files: list[str] | None = None, timeout: int = 600
+    ) -> list[TestResult]:
         """Run tests with an optional patch and specific test files."""
         # Wait for installation to complete if it's running
         await self._wait_for_install()
@@ -108,12 +112,12 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                 logger.info(f"Test command: {test_command}")
 
                 stdout, return_code = await self._execute_command(test_command, timeout=timeout)
-                
+
                 timed_out = return_code == -1  # -1 indicates timeout
-                
+
                 if timed_out:
                     logger.warning(f"Test timed out after {timeout} seconds for file: {test_file}")
-                
+
                 logger.info(f"Return code: {return_code}")
                 if return_code != 0:
                     logger.warning(f"Test output: {stdout}")
@@ -138,18 +142,21 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                         # If we don't have any results but we timed out, create a basic result
                         if result.status == TestStatus.UNKNOWN and not result.failure_output:
                             result.failure_output = f"Test execution timed out after {timeout} seconds"
-                
+
                 # If no results were parsed but we ran a test (even if it timed out), create a basic result
                 if not testbed_results:
                     from moatless.testing.schema import TestResult, TestStatus
+
                     basic_result = TestResult(
                         status=TestStatus.ERROR if timed_out else TestStatus.UNKNOWN,
                         file_path=test_file,
                         timed_out=timed_out,
-                        failure_output=f"Test execution timed out after {timeout} seconds" if timed_out else "No test results could be parsed from output"
+                        failure_output=f"Test execution timed out after {timeout} seconds"
+                        if timed_out
+                        else "No test results could be parsed from output",
                     )
                     testbed_results = [basic_result]
-                
+
                 test_results.extend(testbed_results)
 
         if patch:
@@ -263,7 +270,9 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                 logger.error(f"Installation process failed: {str(e)}")
                 raise RuntimeError("Installation process failed") from e
 
-    async def _execute_command(self, command: str, cwd: Path | None = None, timeout: int | None = None) -> Tuple[str, int]:
+    async def _execute_command(
+        self, command: str, cwd: Path | None = None, timeout: int | None = None
+    ) -> Tuple[str, int]:
         """Execute a shell command and return combined output and return code."""
 
         # Prepend conda activation to the command using . instead of source

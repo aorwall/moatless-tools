@@ -135,4 +135,3 @@ class CancelJobsResponseDTO(BaseModel):
     canceled_queued_jobs: int | None = None
     canceled_running_jobs: int | None = None
     message: str
-

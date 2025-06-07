@@ -24,6 +24,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 class ExecutionStatus(str, Enum):
     """Tracks the execution lifecycle of an instance"""
+
     CREATED = "created"  # Instance created but not started
     QUEUED = "queued"  # Job is queued in the runner
     RUNNING = "running"  # Job is actively running
@@ -34,6 +35,7 @@ class ExecutionStatus(str, Enum):
 
 class ResolutionStatus(str, Enum):
     """Tracks the resolution outcome of an instance"""
+
     PENDING = "pending"  # Not yet evaluated
     RESOLVED = "resolved"  # Problem was fully solved
     FAILED = "failed"  # Problem was not solved
@@ -42,6 +44,7 @@ class ResolutionStatus(str, Enum):
 
 class InstanceStatus(str, Enum):
     """Legacy status enum - kept for backward compatibility"""
+
     CREATED = "created"
     PENDING = "pending"
     RUNNING = "running"
@@ -75,37 +78,25 @@ class EvaluationInstance(BaseModel):
     model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     instance_id: str = Field(description="Unique identifier for the instance")
-    
+
     # Execution tracking
     execution_status: ExecutionStatus = Field(
-        default=ExecutionStatus.CREATED,
-        description="Current execution state of the instance"
+        default=ExecutionStatus.CREATED, description="Current execution state of the instance"
     )
-    job_status: Optional[JobStatus] = Field(
-        default=None, 
-        description="Status from the job runner"
-    )
-    
+    job_status: Optional[JobStatus] = Field(default=None, description="Status from the job runner")
+
     # Resolution tracking
     resolution_status: ResolutionStatus = Field(
-        default=ResolutionStatus.PENDING,
-        description="Resolution outcome of the instance"
+        default=ResolutionStatus.PENDING, description="Resolution outcome of the instance"
     )
-    
+
     # Legacy fields for backward compatibility
     status: InstanceStatus = Field(
-        default=InstanceStatus.CREATED, 
-        description="[DEPRECATED] Use execution_status and resolution_status instead"
+        default=InstanceStatus.CREATED, description="[DEPRECATED] Use execution_status and resolution_status instead"
     )
-    completed: bool = Field(
-        default=False, 
-        description="[DEPRECATED] Use execution_status == COMPLETED instead"
-    )
-    resolved: Optional[bool] = Field(
-        default=None, 
-        description="[DEPRECATED] Use resolution_status instead"
-    )
-    
+    completed: bool = Field(default=False, description="[DEPRECATED] Use execution_status == COMPLETED instead")
+    resolved: Optional[bool] = Field(default=None, description="[DEPRECATED] Use resolution_status instead")
+
     # Timestamps
     created_at: Optional[datetime] = Field(
         default=None,
@@ -117,7 +108,7 @@ class EvaluationInstance(BaseModel):
     start_evaluating_at: Optional[datetime] = Field(default=None, description="When the instance started evaluating")
     evaluated_at: Optional[datetime] = Field(default=None, description="When instance was evaluated")
     error_at: Optional[datetime] = Field(default=None, description="When instance encountered an error")
-    
+
     # Results
     submission: Optional[str] = Field(default=None, description="The submitted patch")
     error: Optional[str] = Field(default=None, description="Error message if instance failed")
@@ -128,7 +119,7 @@ class EvaluationInstance(BaseModel):
     duration: Optional[float] = Field(default=None, description="Time taken to evaluate in seconds")
     last_event_timestamp: Optional[datetime] = Field(default=None, description="Timestamp of the last event")
     resolved_by: Optional[int] = Field(default=None, description="Number of agents that have resolved the evaluation")
-    
+
     def start(self):
         """Mark instance as queued for execution"""
         self.execution_status = ExecutionStatus.QUEUED
@@ -158,24 +149,24 @@ class EvaluationInstance(BaseModel):
         """Mark the instance as completed"""
         self.execution_status = ExecutionStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
-        
+
         if submission:
             self.submission = submission
-            
+
         if resolved is not None:
             self.resolved = resolved
             if resolved:
                 self.resolution_status = ResolutionStatus.RESOLVED
             else:
                 self.resolution_status = ResolutionStatus.FAILED
-                
+
         if self.started_at and self.completed_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
-            
+
         if benchmark_result:
             # Store as dict to avoid type issues
             self.benchmark_result = benchmark_result.model_dump()
-            
+
         self._sync_legacy_status()
 
     def fail(self, error: str):
@@ -187,7 +178,7 @@ class EvaluationInstance(BaseModel):
         if self.started_at:
             self.duration = (self.completed_at - self.started_at).total_seconds()
         self._sync_legacy_status()
-        
+
     def set_resolution(self, resolved: bool, partially_resolved: bool = False):
         """Set the resolution status based on evaluation results"""
         self.resolved = resolved
@@ -222,7 +213,7 @@ class EvaluationInstance(BaseModel):
                 self.status = InstanceStatus.FAILED
             else:
                 self.status = InstanceStatus.COMPLETED
-        
+
         # Sync completed flag
         self.completed = self.execution_status == ExecutionStatus.COMPLETED
 
@@ -250,7 +241,7 @@ class Evaluation(BaseModel):
 
     evaluation_name: str = Field(..., description="Name of the evaluation")
     dataset_name: str = Field(..., description="Name of the dataset")
-    
+
     flow: Optional[AgenticFlow] = Field(default=None, description="Flow configuration to use for the evaluation")
 
     flow_id: Optional[str] = Field(default=None, description="ID of the flow configuration to use for the evaluation")
@@ -281,11 +272,13 @@ class Evaluation(BaseModel):
         evaluating = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.EVALUATING)
         completed = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.COMPLETED)
         errors = sum(1 for i in self.instances if i.execution_status == ExecutionStatus.ERROR)
-        
+
         # Resolution status counts
         resolved = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.RESOLVED)
         failed = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.FAILED)
-        partially_resolved = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.PARTIALLY_RESOLVED)
+        partially_resolved = sum(
+            1 for i in self.instances if i.resolution_status == ResolutionStatus.PARTIALLY_RESOLVED
+        )
         pending_resolution = sum(1 for i in self.instances if i.resolution_status == ResolutionStatus.PENDING)
 
         return {
@@ -355,13 +348,13 @@ class EvaluationStatusSummary(BaseModel):
     evaluating: int = Field(default=0, description="Number of instances being evaluated")
     completed: int = Field(default=0, description="Number of completed instances")
     error: int = Field(default=0, description="Number of instances with errors")
-    
+
     # Resolution status counts
     pending_resolution: int = Field(default=0, description="Number of instances pending resolution")
     resolved: int = Field(default=0, description="Number of resolved instances")
     failed: int = Field(default=0, description="Number of failed instances")
     partially_resolved: int = Field(default=0, description="Number of partially resolved instances")
-    
+
     # Legacy counts for backward compatibility
     pending: int = Field(default=0, description="[DEPRECATED] Use queued instead")
 
@@ -374,6 +367,7 @@ class RepoStats(BaseModel):
     resolved_instances: int = Field(description="Number of resolved instances")
     failed_instances: int = Field(description="Number of failed instances")
     solve_rate: float = Field(description="Solve rate as percentage")
+
 
 class EvaluationStats(BaseModel):
     """Comprehensive statistics for an evaluation"""

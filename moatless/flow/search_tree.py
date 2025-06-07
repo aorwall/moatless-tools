@@ -163,9 +163,6 @@ class SearchTree(AgenticFlow):
                 f"Search completed with {finished_nodes} finished nodes. {len(self.root.get_all_nodes())} nodes created. Finish reason: {finish_reason}",
             )
 
-        if finish_reason:
-            node.terminal = True
-
         if not self.root.discriminator_result and self.discriminator:
             self.root.discriminator_result = self.discriminator.select(self.get_finished_nodes())
             self.log(
@@ -282,7 +279,6 @@ class SearchTree(AgenticFlow):
 
             if self.max_depth and node.get_depth() >= self.max_depth and not node.terminal:
                 logger.info(f"Node{node.node_id}: Reached max depth {self.max_depth}. Marking as terminal.")
-                node.terminal = True
 
         if self.value_function and not node.is_duplicate and node.observation:
             current_phase.set("value_function")
@@ -359,7 +355,7 @@ class SearchTree(AgenticFlow):
             return "max_iterations"
 
         finished_nodes = self.get_finished_nodes()
-        
+
         # Check max finished nodes
         if self.max_finished_nodes and len(finished_nodes) >= self.max_finished_nodes:
             return "max_finished_nodes"
@@ -447,7 +443,7 @@ class SearchTree(AgenticFlow):
 
             return super().model_validate(obj)
         return obj
-    
+
     # after pydantic validation
     @model_validator(mode="after")
     def validate_fields(self):

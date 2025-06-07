@@ -300,13 +300,16 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
-        
+
         if self.error:
+            return True
+
+        if self.terminal:
             return True
 
         if self.action_steps and self.action_steps[-1].observation and self.action_steps[-1].observation.terminal:
             return True
-        
+
         return False
 
     def is_executed(self) -> bool:

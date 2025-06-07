@@ -103,9 +103,7 @@ async def reset_jobs(request: Request, runner: BaseRunner = Depends(get_runner))
 
 
 @router.get("/jobs/{project_id}/{trajectory_id}/details")
-async def get_job_details(
-    project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)
-) -> JobDetails:
+async def get_job_details(project_id: str, trajectory_id: str, runner: BaseRunner = Depends(get_runner)) -> JobDetails:
     """Get detailed information about a job.
 
     This endpoint returns detailed information about a job, including:
@@ -123,4 +121,4 @@ async def get_job_details(
     # Remove raw_data from the response to reduce payload size
     job_details.raw_data = None
 
-    return job_details 
+    return job_details

@@ -4,6 +4,7 @@ import pytest
 from typing import List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from moatless.actions.schema import Observation
 from moatless.agent.agent import ActionAgent
 from moatless.events import BaseEvent, FlowStartedEvent, FlowCompletedEvent, FlowErrorEvent
 from moatless.flow.flow import AgenticFlow
@@ -19,6 +20,7 @@ class TestFlowEventCallback:
     def mock_agent(self):
         agent = MagicMock(spec=ActionAgent)
         agent.workspace = MagicMock(spec=Workspace)
+        agent._workspace = MagicMock(spec=Workspace)
         agent.initialize = AsyncMock()
         agent.run = AsyncMock()
         return agent
@@ -51,7 +53,7 @@ class TestFlowEventCallback:
             # Add a mock action step that reports as executed
             step = MagicMock()
             step.is_executed.return_value = True
-            step.observation = "Test observation"
+            step.observation = Observation(message="Test observation", terminal=False)
             step.action = MagicMock()
             step.action.name = "test_action"
             node.action_steps.append(step)
@@ -105,7 +107,7 @@ class TestFlowEventCallback:
             # Add a mock action step that reports as executed
             step = MagicMock()
             step.is_executed.return_value = True
-            step.observation = "Test observation"
+            step.observation = Observation(message="Test observation", terminal=False)
             step.action = MagicMock()
             step.action.name = "test_action"
             node.action_steps.append(step)

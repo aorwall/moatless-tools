@@ -164,7 +164,6 @@ class ActionAgent(MoatlessComponent):
                     )
 
         except CompletionError as e:
-            node.terminal = True
 
             if e.completion_invocation:
                 logger.error(f"Node{node.node_id}: Build action failed with completion error: {e}")

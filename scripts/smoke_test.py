@@ -29,24 +29,23 @@ async def smoke_test(model_id: str):
     agent = ActionAgent(
         completion_model=completion_model,
         system_prompt="You are a helpful assistant that can answer questions.",
-        actions=[
-            Respond()
-        ],
+        actions=[Respond()],
     )
 
     node = Node.create_root(user_message="Hello")
     node = node.create_child(user_message="Hello")
     await agent.run(node)
     print(node.observation.message)
-    
+
     node = node.create_child(user_message="What is the capital of France?")
     await agent.run(node)
     print(node.observation.message)
-    
+
     node = node.create_child(user_message="Goodbye")
     await agent.run(node)
     print(node.observation.message)
-    
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     asyncio.run(smoke_test("claude-sonnet-4-20250514-thinking"))

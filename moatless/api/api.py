@@ -88,6 +88,7 @@ async def verify_credentials(credentials: HTTPBasicCredentials = Depends(securit
         )
     return True
 
+
 security = HTTPBasic()
 
 
@@ -121,29 +122,29 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     """Global exception handler that logs errors with reference codes and returns structured error responses."""
     # Generate a unique reference code for this error
     error_ref = str(uuid.uuid4())[:8]
-    
+
     # Extract request information for better logging
     client_ip = request.client.host if request.client else "unknown"
     method = request.method
     url = str(request.url)
-    
+
     # Log the full exception with context
     logger.error(
         f"Unhandled exception [REF: {error_ref}] - "
         f"{method} {url} from {client_ip}: {type(exc).__name__}: {str(exc)}\n"
         f"Traceback:\n{traceback.format_exc()}"
     )
-    
+
     # Return structured error response
     error_response = {
         "error": {
             "message": str(exc),
             "type": type(exc).__name__,
             "reference_code": error_ref,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": datetime.utcnow().isoformat() + "Z",
         }
     }
-    
+
     # Return appropriate status code based on exception type
     if isinstance(exc, HTTPException):
         status_code = exc.status_code
@@ -153,18 +154,14 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
         # For non-HTTP exceptions, provide a generic message to avoid exposing internal details
         error_response["error"]["message"] = "An internal server error occurred"
         error_response["error"]["internal_message"] = str(exc)  # Keep original for debugging
-    
-    return JSONResponse(
-        status_code=status_code,
-        content=error_response
-    )
+
+    return JSONResponse(status_code=status_code, content=error_response)
 
 
 def create_api(workspace: Workspace | None = None) -> FastAPI:
     """Create and initialize the API with an optional workspace"""
     logging.getLogger("LiteLLM").setLevel(logging.WARNING)
     logging.getLogger("azure").setLevel(logging.WARNING)
-
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -269,14 +266,10 @@ def create_api(workspace: Workspace | None = None) -> FastAPI:
             # For health checks, we want to return a 503 status for failed dependencies
             error_ref = str(uuid.uuid4())[:8]
             logger.error(f"Health check failed [REF: {error_ref}]: {e}")
-            
+
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail={
-                    "status": "failed", 
-                    "error": str(e),
-                    "reference_code": error_ref
-                }
+                detail={"status": "failed", "error": str(e), "reference_code": error_ref},
             )
 
     # Include model, agent, and loop configuration routers

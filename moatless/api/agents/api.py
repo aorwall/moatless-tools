@@ -16,7 +16,6 @@ from .schema import (
 logger = logging.getLogger(__name__)
 
 
-
 router = APIRouter()
 
 

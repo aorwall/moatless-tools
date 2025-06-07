@@ -396,6 +396,8 @@ class TestBaseCompletionModel:
         mock_choice1 = MagicMock()
         mock_message1 = MagicMock()
         mock_message1.content = "Invalid answer"
+        # Set reasoning_content to None (not a MagicMock)
+        mock_message1.reasoning_content = None
         mock_choice1.message = mock_message1
         mock_response1.choices = [mock_choice1]
         mock_response1.usage = {"prompt_tokens": 100, "completion_tokens": 30}
@@ -404,6 +406,8 @@ class TestBaseCompletionModel:
         mock_choice2 = MagicMock()
         mock_message2 = MagicMock()
         mock_message2.content = "Valid answer"
+        # Set reasoning_content to None (not a MagicMock)
+        mock_message2.reasoning_content = None
         mock_choice2.message = mock_message2
         mock_response2.choices = [mock_choice2]
         mock_response2.usage = {"prompt_tokens": 120, "completion_tokens": 40}

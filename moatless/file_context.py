@@ -137,7 +137,7 @@ class ContextFile(BaseModel):
         self._cached_base_content = original_content
 
         return self._cached_base_content
-    
+
     @property
     def shadow_mode(self) -> bool:
         if not self._repo:
@@ -197,6 +197,7 @@ class ContextFile(BaseModel):
             logger.info(f"Saving file {self.file_path} to disk")
             self._repo.save_file(self.file_path, updated_content)
             self._cached_content = None
+            self._cached_base_content = None  # Clear base content cache since file content changed
 
             if isinstance(self._repo, GitRepository):
                 self.patch = self._repo.file_diff(self.file_path)
@@ -1194,11 +1195,7 @@ class FileContext(BaseModel):
     ):
         if not repo and repo_dir:
             repo = FileRepository(repo_path=repo_dir)
-        instance = cls(
-            max_tokens=data.get("max_tokens", 8000),
-            repo=repo,
-            runtime=runtime
-        )
+        instance = cls(max_tokens=data.get("max_tokens", 8000), repo=repo, runtime=runtime)
         instance.load_files_from_dict(data.get("files", []), test_files=data.get("test_files", []))
         return instance
 

@@ -78,7 +78,7 @@ async def test_create_file_normalize_path(repository, file_context):
     observation = await action.execute(args, file_context)
 
     content = file_context.get_file("test/normalize.py").content
-    assert content == "# normalized path test\n"
+    assert content == "# normalized path test"
 
 
 @pytest.mark.asyncio

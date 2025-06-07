@@ -452,7 +452,7 @@ async def create_trajectory(
         flow_config = None
         if request.flow_config:
             flow_config = SearchTree.model_validate(request.flow_config)
-        
+
         # Create the flow
         flow = await flow_manager.create_flow(
             flow_id=request.flow_id,
@@ -463,7 +463,7 @@ async def create_trajectory(
             project_id=request.project_id,
             metadata=request.metadata,
         )
-        
+
         # Return trajectory response
         return flow
     except ValueError as e:

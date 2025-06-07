@@ -41,7 +41,7 @@ def parse_completion(completion_data: Dict[str, Any]) -> CompletionDTO:
     original_input = completion_data.get("original_input")
     if original_input:
         parse_input(completion_dto, original_input)
-        
+
     if "traceback_exception" in completion_data:
         completion_dto.error = str(completion_data.get("traceback_exception"))
 

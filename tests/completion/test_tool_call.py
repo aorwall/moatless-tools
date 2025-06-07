@@ -119,7 +119,7 @@ def test_get_completion_params(test_schema):
     assert "tools" in model._completion_params
     assert len(model._completion_params["tools"]) == 1
     assert model._completion_params["tools"][0]["type"] == "function"
-    assert model._completion_params["tool_choice"] == "auto"
+    assert model._completion_params["tool_choice"] == "required"
 
 
 @pytest.mark.asyncio

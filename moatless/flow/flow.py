@@ -228,10 +228,16 @@ class AgenticFlow(MoatlessComponent):
 
         nodes = self.root.get_all_nodes()
         if len(nodes) >= self.max_iterations:
-            logger.info(f"Flow {self.trajectory_id} finished due to max iterations {len(nodes)} >= {self.max_iterations}")
+            logger.info(
+                f"Flow {self.trajectory_id} finished due to max iterations {len(nodes)} >= {self.max_iterations}"
+            )
             return "max_iterations"
 
-        if nodes[-1].action_steps and nodes[-1].action_steps[-1].observation and nodes[-1].action_steps[-1].observation.terminal:
+        if (
+            nodes[-1].action_steps
+            and nodes[-1].action_steps[-1].observation
+            and nodes[-1].action_steps[-1].observation.terminal
+        ):
             logger.info(f"Flow {self.trajectory_id} finished due to terminal node {nodes[-1].node_id}")
             return "terminal"
 
@@ -335,6 +341,6 @@ class AgenticFlow(MoatlessComponent):
         data = super().model_dump(exclude={"root"})
         if self.agent:
             data["agent"] = self.agent.model_dump(**kwargs)
-            
+
         data["flow_class"] = self.get_class_name()
         return data

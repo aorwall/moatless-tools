@@ -10,7 +10,7 @@ class AttachmentData(BaseModel):
 
 class CreateTrajectoryRequest(BaseModel):
     """Request for creating a new trajectory."""
-    
+
     flow_id: Optional[str] = Field(None, description="ID of existing flow configuration to use")
     flow_config: Optional[dict] = Field(None, description="Direct flow configuration to use")
     model_id: Optional[str] = Field(None, description="Model ID to use with the flow")

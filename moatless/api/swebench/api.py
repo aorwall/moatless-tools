@@ -39,13 +39,15 @@ async def create_evaluation(
     evaluation_manager: EvaluationManager = Depends(get_evaluation_manager),
 ):
     """Create a new evaluation run for a dataset."""
-    logger.info(f"Creating evaluation for dataset {request.dataset} with flow {request.flow_id} and model {request.model_id} and litellm_model_name {request.litellm_model_name}")
-        
+    logger.info(
+        f"Creating evaluation for dataset {request.dataset} with flow {request.flow_id} and model {request.model_id} and litellm_model_name {request.litellm_model_name}"
+    )
+
     if request.flow:
         flow = SearchTree.model_validate(request.flow)
     else:
         logger.info(f"Creating evaluation for all datasets with {request.instance_ids}")
-        
+
     if request.flow:
         flow = SearchTree.model_validate(request.flow)
     else:
@@ -76,11 +78,11 @@ async def get_evaluation(
 
     if not evaluation:
         raise HTTPException(status_code=404, detail=f"Evaluation {evaluation_name} not found")
-    
+
     # TODO: Just to set resolved_by for now
     for instance in evaluation.instances:
         get_resolved_by(instance)
-    
+
     return evaluation
 
 
@@ -241,32 +243,29 @@ async def retry_instance(
 
 @router.post("/evaluations/{evaluation_name}/instances/{instance_id}/process", response_model=EvaluationInstance)
 async def process_instance_trajectory_results(
-    evaluation_name: str, 
-    instance_id: str, 
-    evaluation_manager: EvaluationManager = Depends(get_evaluation_manager)
+    evaluation_name: str, instance_id: str, evaluation_manager: EvaluationManager = Depends(get_evaluation_manager)
 ):
     """Process trajectory results for a specific instance in an evaluation."""
     # Get the evaluation
     evaluation = await evaluation_manager.get_evaluation(evaluation_name)
-    
+
     # Find the specific instance
     instance = None
     for eval_instance in evaluation.instances:
         if eval_instance.instance_id == instance_id:
             instance = eval_instance
             break
-    
+
     if not instance:
         raise HTTPException(status_code=404, detail=f"Instance {instance_id} not found in evaluation {evaluation_name}")
-    
+
     # Process trajectory results for this specific instance
     updated_instance = await evaluation_manager._process_trajectory_results(evaluation, instance, force_update=True)
-    
+
     # Save the evaluation with updated instance
     await evaluation_manager.save_evaluation(evaluation)
-    
+
     return updated_instance
-    
 
 
 @router.get("/instances", response_model=SWEBenchInstancesResponseDTO)
@@ -402,4 +401,3 @@ async def list_datasets():
 def get_resolved_by(instance: EvaluationInstance):
     moatless_instance = get_moatless_instance(instance.instance_id)
     instance.resolved_by = len(moatless_instance.get("resolved_by", []))
-

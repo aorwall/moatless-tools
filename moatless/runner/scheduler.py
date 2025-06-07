@@ -6,17 +6,14 @@ import importlib
 import os
 from collections.abc import Callable
 from datetime import datetime
-from typing import Dict, List, Optional, Type, Any, Union
+from typing import Optional, Type
 
 from moatless.runner.runner import (
     BaseRunner,
     JobInfo,
     JobStatus,
     RunnerInfo,
-    RunnerStatus,
-    JobsStatusSummary,
     JobDetails,
-    JobDetailSection,
     JobFunction,
 )
 from moatless.runner.storage.storage import JobStorage
@@ -37,6 +34,7 @@ class SchedulerRunner(BaseRunner):
         max_jobs_per_project: Optional[int] = None,
         max_total_jobs: Optional[int] = None,
         scheduler_interval_seconds: int = 5,
+        auto_cleanup_completed: bool = True,
         **runner_kwargs,
     ):
         """Initialize the scheduler runner.
@@ -48,6 +46,7 @@ class SchedulerRunner(BaseRunner):
             max_jobs_per_project: Maximum number of concurrent jobs per project
             max_total_jobs: Maximum number of total concurrent jobs
             scheduler_interval_seconds: Interval in seconds for job scheduling
+            auto_cleanup_completed: Whether to automatically clean up completed jobs from storage
             **runner_kwargs: Additional arguments to pass to the runner implementation
         """
         self.runner = runner_impl(**runner_kwargs)
@@ -57,6 +56,7 @@ class SchedulerRunner(BaseRunner):
         self.max_jobs_per_project = max_jobs_per_project or int(os.environ.get("MOATLESS_MAX_JOBS_PER_PROJECT", 0))
         self.max_total_jobs = max_total_jobs or int(os.environ.get("MOATLESS_MAX_TOTAL_JOBS", 1))
         self.scheduler_interval_seconds = scheduler_interval_seconds
+        self.auto_cleanup_completed = auto_cleanup_completed
         self.logger = logging.getLogger(__name__)
 
         # Initialize storage
@@ -90,45 +90,66 @@ class SchedulerRunner(BaseRunner):
         Returns:
             True if the job was queued successfully, False otherwise
         """
-        # Check if job already exists
-        existing_job = await self.storage.get_job(project_id, trajectory_id)
-        if existing_job:
-            job_status = await self.runner.get_job_status(project_id, trajectory_id)
+        # Validate inputs
+        if not project_id or not trajectory_id:
+            self.logger.error(f"Invalid job parameters: project_id={project_id}, trajectory_id={trajectory_id}")
+            return False
+            
+        if not job_func or not callable(job_func):
+            self.logger.error(f"Invalid job function provided for {project_id}-{trajectory_id}")
+            return False
+            
+        try:
+            # Check if job already exists
+            existing_job = await self.storage.get_job(project_id, trajectory_id)
+            if existing_job:
+                job_status = await self.runner.get_job_status(project_id, trajectory_id)
 
-            # If job already exists and is not in a terminal state, just return True
-            if job_status in [JobStatus.PENDING, JobStatus.RUNNING]:
-                self.logger.info(f"Job {project_id}-{trajectory_id} already exists with status {job_status}")
-                return True
+                # If job already exists and is not in a terminal state, just return True
+                if job_status in [JobStatus.PENDING, JobStatus.RUNNING]:
+                    self.logger.info(f"Job {project_id}-{trajectory_id} already exists with status {job_status}")
+                    return True
 
-            # If job exists but is in a terminal state, we'll re-queue it
-            self.logger.info(
-                f"Re-queueing job {project_id}-{trajectory_id} with previous status {existing_job.status} and job status {job_status}"
+                # If job exists but is in a terminal state, we'll re-queue it
+                self.logger.info(
+                    f"Re-queueing job {project_id}-{trajectory_id} with previous status {existing_job.status} and job status {job_status}"
+                )
+
+                # Remove the job from storage
+                # TODO: Just update the existing one?
+                await self.storage.remove_job(project_id, trajectory_id)
+
+            # Create job info and set it to PENDING
+            job_info = JobInfo(
+                id=f"{project_id}-{trajectory_id}",
+                status=JobStatus.PENDING,
+                project_id=project_id,
+                trajectory_id=trajectory_id,
+                enqueued_at=datetime.now(),
+                job_func=JobFunction(module=job_func.__module__, name=job_func.__name__),
+                node_id=node_id,
             )
 
-            # Remove the job from storage
-            # TODO: Just update the existing one?
-            await self.storage.remove_job(project_id, trajectory_id)
+            # Store job in storage
+            await self.storage.add_job(job_info)
 
-        # Create job info and set it to PENDING
-        job_info = JobInfo(
-            id=f"{project_id}-{trajectory_id}",
-            status=JobStatus.PENDING,
-            project_id=project_id,
-            trajectory_id=trajectory_id,
-            enqueued_at=datetime.now(),
-            job_func=JobFunction(module=job_func.__module__, name=job_func.__name__),
-        )
-
-        # Store job in storage
-        await self.storage.add_job(job_info)
-
-        # Try to start the job immediately if possible
-        try:
-            return await self._try_start_job(job_info)
+            # Try to start the job immediately if possible
+            try:
+                return await self._try_start_job(job_info)
+            except Exception as e:
+                self.logger.exception(f"Error trying to start job {project_id}-{trajectory_id}: {e}")
+                # Mark job as failed if we can't start it
+                job_info.status = JobStatus.FAILED
+                job_info.ended_at = datetime.now()
+                if not job_info.metadata:
+                    job_info.metadata = {}
+                job_info.metadata["error"] = f"Failed to start job: {str(e)}"
+                await self.storage.update_job(job_info)
+                return False
+                
         except Exception as e:
-            self.logger.exception(f"Error trying to start job {project_id}-{trajectory_id}: {e}")
-
-        return False
+            self.logger.exception(f"Unexpected error starting job {project_id}-{trajectory_id}: {e}")
+            return False
 
     async def get_jobs(self, project_id: str | None = None) -> list[JobInfo]:
         """Get a list of jobs for the given project.
@@ -141,7 +162,7 @@ class SchedulerRunner(BaseRunner):
         """
         logger.debug(f"Getting jobs for project {project_id}")
         jobs = await self.storage.get_jobs(project_id)
-        
+
         # Filter out only completed and canceled jobs (these should have been cleaned up)
         # Keep failed jobs visible for manual inspection
         # But also clean up any completed/canceled jobs that still exist in storage
@@ -154,7 +175,7 @@ class SchedulerRunner(BaseRunner):
             else:
                 # Include PENDING, RUNNING, FAILED, and other statuses
                 active_jobs.append(job)
-                
+
         return active_jobs
 
     async def cancel_job(self, project_id: str, trajectory_id: str | None = None) -> None:
@@ -204,9 +225,11 @@ class SchedulerRunner(BaseRunner):
             # Job not found in our storage, check if it exists in the underlying runner
             underlying_status = await self.runner.get_job_status(project_id, trajectory_id)
             if underlying_status is not None:
-                self.logger.warning(f"Job {project_id}-{trajectory_id} exists in kubernetes but not in scheduler storage")
+                self.logger.warning(
+                    f"Job {project_id}-{trajectory_id} exists in kubernetes but not in scheduler storage"
+                )
             return underlying_status
-            
+
         # For non-terminal jobs, sync with the underlying runner
         if job.status not in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED]:
             await self._sync_job(job)
@@ -344,6 +367,24 @@ class SchedulerRunner(BaseRunner):
             self._scheduler_running = False
             self._scheduler_task.cancel()
             self.logger.info("Stopped job scheduler")
+    
+    async def cleanup(self) -> None:
+        """Cleanup resources used by the scheduler.
+        
+        This method should be called when the scheduler is no longer needed
+        to properly cleanup the scheduler task and avoid RuntimeWarnings.
+        """
+        self.stop_scheduler()
+        
+        # Wait for the scheduler task to complete if it exists
+        if self._scheduler_task and not self._scheduler_task.done():
+            try:
+                await self._scheduler_task
+            except asyncio.CancelledError:
+                # Expected when task is cancelled
+                pass
+            except Exception as e:
+                self.logger.warning(f"Error while waiting for scheduler task to complete: {e}")
 
     async def _scheduler_loop(self) -> None:
         """Main scheduler loop that periodically tries to start queued jobs."""
@@ -396,10 +437,10 @@ class SchedulerRunner(BaseRunner):
             # Only clean up completed and canceled jobs automatically
             # Keep failed jobs for manual inspection unless explicitly canceled
             terminal_jobs = [job for job in all_jobs if job.status in [JobStatus.COMPLETED, JobStatus.CANCELED]]
-            
+
             if terminal_jobs:
                 self.logger.debug(f"Cleaning up {len(terminal_jobs)} terminal jobs from storage")
-                
+
                 for job in terminal_jobs:
                     # For completed jobs, delete from kubernetes if they still exist
                     if job.status == JobStatus.COMPLETED:
@@ -424,7 +465,7 @@ class SchedulerRunner(BaseRunner):
                                 self.logger.warning(f"Failed to delete canceled job {job.id} during cleanup: {e}")
                         await self.storage.remove_job(job.project_id, job.trajectory_id)
                         self.logger.debug(f"Removed canceled job {job.id} from storage")
-                        
+
         except Exception as e:
             self.logger.exception(f"Error cleaning up terminal jobs: {e}")
 
@@ -496,7 +537,7 @@ class SchedulerRunner(BaseRunner):
 
             else:
                 self.logger.warning(f"Runner could not start job {job.id} at this time.")
-                
+
             return success
 
         except Exception as e:
@@ -524,10 +565,17 @@ class SchedulerRunner(BaseRunner):
                 self.logger.debug("No active jobs found")
                 return
 
+            sync_count = 0
             for job in active_jobs:
-                await self._sync_job(job)
+                try:
+                    await self._sync_job(job)
+                    sync_count += 1
+                except Exception as e:
+                    self.logger.warning(f"Failed to sync job {job.id}: {e}")
+                    # Continue syncing other jobs even if one fails
 
-            self.logger.info(f"Synced {len(active_jobs)} jobs with runner")
+            if sync_count > 0:
+                self.logger.debug(f"Successfully synced {sync_count}/{len(active_jobs)} jobs with runner")
         except Exception as e:
             self.logger.exception(f"Error syncing jobs with runner: {e}")
 
@@ -537,52 +585,92 @@ class SchedulerRunner(BaseRunner):
         Args:
             job: The job info to sync
         """
-        job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
-
-        if job_status is None:
-            if job.status == JobStatus.RUNNING:
-                self.logger.warning(f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED")
-                job.status = JobStatus.STOPPED
-                job.ended_at = datetime.now()
-                if job.metadata is None:
-                    job.metadata = {}
-                job.metadata["error"] = "Job disappeared from the underlying runner while RUNNING"
-                await self.storage.update_job(job)
-            elif job.status == JobStatus.COMPLETED:
-                # Job was completed and removed from kubernetes, remove from our storage too
-                self.logger.info(f"Job {job.id} was completed and removed from kubernetes, removing from scheduler storage")
-                await self.storage.remove_job(job.project_id, job.trajectory_id)
-        elif job_status != job.status:
-            self.logger.info(f"Job {job.id} status changed from {job.status} to {job_status}")
-            job.status = job_status
+        # Validate job has required fields
+        if not job.project_id or not job.trajectory_id:
+            self.logger.error(f"Job {job.id} missing required fields for sync")
+            return
             
-            # Update timestamps based on status
-            if job_status == JobStatus.RUNNING and job.started_at is None:
-                job.started_at = datetime.now()
-            elif job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.STOPPED]:
-                if job.ended_at is None:
+        try:
+            job_status = await self.runner.get_job_status(job.project_id, job.trajectory_id)
+
+            if job_status is None:
+                if job.status == JobStatus.RUNNING:
+                    self.logger.warning(
+                        f"Job {job.id} is marked as RUNNING but doesn't exist in runner, marking as STOPPED"
+                    )
+                    job.status = JobStatus.STOPPED
                     job.ended_at = datetime.now()
-                    
-                # For completed jobs, delete them from kubernetes to clean up cluster
-                if job_status == JobStatus.COMPLETED:
-                    try:
-                        self.logger.info(f"Job {job.id} completed, deleting from kubernetes cluster")
-                        await self.runner.cancel_job(job.project_id, job.trajectory_id)
-                        self.logger.info(f"Successfully deleted completed job {job.id} from kubernetes")
-                        # Remove from our storage as well since it's completed and cleaned up
-                        await self.storage.remove_job(job.project_id, job.trajectory_id)
-                        return
-                    except Exception as e:
-                        self.logger.warning(f"Failed to delete completed job {job.id} from kubernetes: {e}")
-                        # Still update the job status even if deletion failed
+                    if job.metadata is None:
+                        job.metadata = {}
+                    job.metadata["error"] = "Job disappeared from the underlying runner while RUNNING"
+                    await self.storage.update_job(job)
+                elif job.status == JobStatus.COMPLETED:
+                    # Job was completed and removed from kubernetes, remove from our storage too
+                    self.logger.info(
+                        f"Job {job.id} was completed and removed from kubernetes, removing from scheduler storage"
+                    )
+                    await self.storage.remove_job(job.project_id, job.trajectory_id)
+            elif job_status != job.status:
+                self.logger.info(f"Job {job.id} status changed from {job.status} to {job_status}")
+                job.status = job_status
+
+                # Update timestamps based on status
+                if job_status == JobStatus.RUNNING and job.started_at is None:
+                    job.started_at = datetime.now()
+                elif job_status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.STOPPED]:
+                    if job.ended_at is None:
+                        job.ended_at = datetime.now()
+
+                    # For completed jobs, delete them from kubernetes to clean up cluster
+                    if job_status == JobStatus.COMPLETED:
+                        try:
+                            self.logger.info(f"Job {job.id} completed, deleting from kubernetes cluster")
+                            await self.runner.cancel_job(job.project_id, job.trajectory_id)
+                            self.logger.info(f"Successfully deleted completed job {job.id} from kubernetes")
+                            
+                            # Only remove from storage if auto_cleanup_completed is True
+                            if self.auto_cleanup_completed:
+                                await self.storage.remove_job(job.project_id, job.trajectory_id)
+                                return
+                        except Exception as e:
+                            self.logger.warning(f"Failed to delete completed job {job.id} from kubernetes: {e}")
+                            # Still update the job status even if deletion failed
+
+                    # For failed jobs, keep them in Kubernetes and storage for manual inspection
+                    # Only delete them when explicitly canceled through the API
+                    elif job_status == JobStatus.FAILED:
+                        self.logger.info(
+                            f"Job {job.id} failed, keeping in Kubernetes for manual inspection. Use the cancel API to delete it."
+                        )
+                        # Add error message to metadata for failed jobs
+                        if job.metadata is None:
+                            job.metadata = {}
+                        if "error" not in job.metadata:
+                            job.metadata["error"] = "Job failed in the underlying runner"
+                        # Don't delete failed jobs automatically - let them be manually inspected and canceled
+
+                await self.storage.update_job(job)
                 
-                # For failed jobs, keep them in Kubernetes and storage for manual inspection
-                # Only delete them when explicitly canceled through the API
-                elif job_status == JobStatus.FAILED:
-                    self.logger.info(f"Job {job.id} failed, keeping in Kubernetes for manual inspection. Use the cancel API to delete it.")
-                    # Don't delete failed jobs automatically - let them be manually inspected and canceled
-                    
-            await self.storage.update_job(job)
+        except Exception as e:
+            self.logger.exception(f"Error syncing job {job.id}: {e}")
+            # Don't update job status on sync errors to avoid corrupting state
+
+    async def _update_job_status(self, job: JobInfo) -> None:
+        """Update the status of a job by syncing with the underlying runner.
+        
+        This method handles the finite state machine transitions for job status updates.
+        Terminal states (COMPLETED, FAILED, CANCELED, STOPPED) cannot transition to other states.
+        
+        Args:
+            job: The job to update
+        """
+        # Don't update terminal states
+        if job.status in [JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED, JobStatus.STOPPED]:
+            self.logger.debug(f"Job {job.id} is in terminal state {job.status}, not updating")
+            return
+            
+        # Sync the job with the underlying runner
+        await self._sync_job(job)
 
     async def _cancel_job(self, project_id: str, trajectory_id: str) -> None:
         """Cancel a specific job.
@@ -599,7 +687,7 @@ class SchedulerRunner(BaseRunner):
 
         # Check for None values before calling job_exists
         if job.project_id is None or job.trajectory_id is None:
-            self.logger.warning(f"Cannot check job existence: project_id or trajectory_id is None")
+            self.logger.warning("Cannot check job existence: project_id or trajectory_id is None")
             job_exists = False
         else:
             job_exists = await self.runner.job_exists(job.project_id, job.trajectory_id)

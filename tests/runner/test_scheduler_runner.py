@@ -2,6 +2,7 @@
 
 import asyncio
 import pytest
+import pytest_asyncio
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 import logging
@@ -152,20 +153,24 @@ def mock_runner():
     return MockRunner()
 
 
-@pytest.fixture
-def scheduler(mock_runner):
+@pytest_asyncio.fixture
+async def scheduler(mock_runner):
     """Fixture to create a scheduler with mock runner."""
     # Patch the asyncio.create_task to prevent actual scheduling
     with patch("asyncio.create_task") as mock_create_task:
         # Create a scheduler with our mock runner
         scheduler = SchedulerRunner(
-            runner_impl=MockRunner, max_jobs_per_project=2, max_total_jobs=5, scheduler_interval_seconds=1
+            runner_impl=MockRunner, max_jobs_per_project=2, max_total_jobs=5, scheduler_interval_seconds=1,
+            auto_cleanup_completed=False  # Disable auto cleanup for testing
         )
 
         # Set scheduler as not running to prevent actual scheduling
         scheduler._scheduler_running = False
 
         yield scheduler
+        
+        # Cleanup the scheduler to avoid RuntimeWarnings
+        await scheduler.cleanup()
 
 
 def mock_job_func():

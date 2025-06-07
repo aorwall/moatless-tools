@@ -23,6 +23,7 @@ from moatless.index.epic_split import EpicSplitter
 # Add args as a module-level variable
 args = None
 
+
 def get_persist_dir(instance):
     return os.path.join(args.vector_store_dir, get_repo_dir_name(instance["instance_id"]))
 
@@ -55,13 +56,15 @@ def evaluate_index(code_index: CodeIndex, instance: dict):
 
         if len(expected_matches) == len(expected_changes):
             print(
-                f"Found all expected changes within a context window of {all_matching_context_window} tokens, first match at context window {any_matching_context_window}")
+                f"Found all expected changes within a context window of {all_matching_context_window} tokens, first match at context window {any_matching_context_window}"
+            )
         else:
             any_matching_context_window = min(
-                context["context_window"] for context in expected_changes if context["context_window"] is not None)
+                context["context_window"] for context in expected_changes if context["context_window"] is not None
+            )
             print(
-                f"Found {len(expected_matches)} expected changes within a context window {all_matching_context_window} tokens, first match at context window {any_matching_context_window} max context window {sum_tokens} tokens")
-
+                f"Found {len(expected_matches)} expected changes within a context window {all_matching_context_window} tokens, first match at context window {any_matching_context_window} max context window {sum_tokens} tokens"
+            )
 
     else:
         print(f"No expected changes found in context window of {sum_tokens} tokens")
@@ -69,17 +72,19 @@ def evaluate_index(code_index: CodeIndex, instance: dict):
     for change in expected_changes:
         if change["context_window"] is None:
             print(
-                f"Expected change: {change['file_path']} ({change['start_line']}-{change['end_line']}) not fund, closest match: {change.get('closest_match_lines')}")
+                f"Expected change: {change['file_path']} ({change['start_line']}-{change['end_line']}) not fund, closest match: {change.get('closest_match_lines')}"
+            )
         else:
             print(
-                f"Expected change: {change['file_path']} ({change['start_line']}-{change['end_line']}) found at context window {change['context_window']} tokens. Distance: {change['distance']}. Position: {change['position']}")
+                f"Expected change: {change['file_path']} ({change['start_line']}-{change['end_line']}) found at context window {change['context_window']} tokens. Distance: {change['distance']}. Position: {change['position']}"
+            )
 
     return expected_changes, all_matching_context_window, any_matching_context_window
 
 
 def evaluate_instance(instance_id: str) -> dict:
     instance = get_moatless_instance(instance_id)
-    
+
     code_index = CodeIndex.from_persist_dir(get_persist_dir(instance))
 
     expected_changes, all_matching_context_window, any_matching_context_window = evaluate_index(code_index, instance)
@@ -93,11 +98,12 @@ def evaluate_instance(instance_id: str) -> dict:
         "any_matching_context_window": any_matching_context_window,
     }
 
+
 def evaluate_instances(instance_ids: list[str]) -> list[dict]:
     # Get the last directory name from vector store path
     store_dir_name = os.path.basename(os.path.normpath(args.vector_store_dir))
     output_file = f"index_eval_{store_dir_name}.csv"
-    
+
     with open(output_file, "w") as f:
         f.write("instance_id,resolved_by,all_matching_context_window,any_matching_context_window\n")
 
@@ -109,12 +115,15 @@ def evaluate_instances(instance_ids: list[str]) -> list[dict]:
             print(f"Error evaluating instance {instance_id}: {e}")
             # print the traceback
             import traceback
+
             print(traceback.format_exc())
             continue
 
         results.append(result)
         with open(output_file, "a") as f:
-            f.write(f"{instance_id},{result['resolved_by']},{result['all_matching_context_window']},{result['any_matching_context_window']}\n")
+            f.write(
+                f"{instance_id},{result['resolved_by']},{result['all_matching_context_window']},{result['any_matching_context_window']}\n"
+            )
     return results
 
 
@@ -133,11 +142,7 @@ def split_and_store(instance_id):
             "**/test_*.py",
             "**/*_test.py",
         ]
-        category = (
-            "test"
-            if any(fnmatch.fnmatch(file_path, pattern) for pattern in test_patterns)
-            else "implementation"
-        )
+        category = "test" if any(fnmatch.fnmatch(file_path, pattern) for pattern in test_patterns) else "implementation"
 
         return {
             "file_path": file_path,
@@ -186,26 +191,37 @@ def split_and_store(instance_id):
 
 
 def read_store():
-
-    instance_0 = "django__django-16041" # 2022-09-09T10:07:29Z
-    instance_1 = "django__django-12325" # 2022-09-10T13:27:38Z
-    instance_2 = "django__django-12406" # 2022-09-30T08:51:16Z
+    instance_0 = "django__django-16041"  # 2022-09-09T10:07:29Z
+    instance_1 = "django__django-12325"  # 2022-09-10T13:27:38Z
+    instance_2 = "django__django-12406"  # 2022-09-30T08:51:16Z
 
     split_and_store(instance_1)
     split_and_store(instance_2)
-    docstore1 = SimpleDocumentStore.from_persist_path(os.path.join(args.vector_store_dir, get_repo_dir_name(instance_1)))
-    previous_doc_hashes = {doc_id: docstore1.get_document_hash(doc_id) for doc_id in
-                          docstore1._kvstore.get_all(collection=docstore1._metadata_collection)}
+    docstore1 = SimpleDocumentStore.from_persist_path(
+        os.path.join(args.vector_store_dir, get_repo_dir_name(instance_1))
+    )
+    previous_doc_hashes = {
+        doc_id: docstore1.get_document_hash(doc_id)
+        for doc_id in docstore1._kvstore.get_all(collection=docstore1._metadata_collection)
+    }
 
-    docstore2 = SimpleDocumentStore.from_persist_path(os.path.join(args.vector_store_dir, get_repo_dir_name(instance_2)))
-    current_doc_hashes = {doc_id: docstore2.get_document_hash(doc_id) for doc_id in docstore2._kvstore.get_all(collection=docstore2._metadata_collection)}
+    docstore2 = SimpleDocumentStore.from_persist_path(
+        os.path.join(args.vector_store_dir, get_repo_dir_name(instance_2))
+    )
+    current_doc_hashes = {
+        doc_id: docstore2.get_document_hash(doc_id)
+        for doc_id in docstore2._kvstore.get_all(collection=docstore2._metadata_collection)
+    }
 
     print(f"  Total documents: {len(current_doc_hashes)}")
 
     new_doc_ids = set(current_doc_hashes.keys()) - set(previous_doc_hashes.keys())
     removed_doc_ids = set(previous_doc_hashes.keys()) - set(current_doc_hashes.keys())
-    changed_doc_ids = {doc_id for doc_id in current_doc_hashes.keys()
-                       if doc_id in previous_doc_hashes and current_doc_hashes[doc_id] != previous_doc_hashes[doc_id]}
+    changed_doc_ids = {
+        doc_id
+        for doc_id in current_doc_hashes.keys()
+        if doc_id in previous_doc_hashes and current_doc_hashes[doc_id] != previous_doc_hashes[doc_id]
+    }
 
     print(f"  Changes from previous instance:")
     print(f"    New documents: {len(new_doc_ids)}")
@@ -220,21 +236,21 @@ def read_store():
             continue
         print(f"      Old hash: {previous_doc_hashes[doc_id]}")
         print(f"      New hash: {current_doc_hashes[doc_id]}")
-        
+
         old_doc = docstore1.get_document(doc_id)
         new_doc = docstore2.get_document(doc_id)
-        
+
         # Compare content
         content_diff = difflib.unified_diff(
             old_doc.text.splitlines(keepends=True),
             new_doc.text.splitlines(keepends=True),
-            fromfile='old_content',
-            tofile='new_content',
-            n=3  # Context lines
+            fromfile="old_content",
+            tofile="new_content",
+            n=3,  # Context lines
         )
 
         print("      Content Diff:")
-        print(''.join(content_diff))
+        print("".join(content_diff))
 
         # Compare metadata
         print("      Metadata Diff:")
@@ -254,7 +270,9 @@ def read_store():
 
     print()
 
-    vector_store = SimpleFaissVectorStore.from_persist_dir(os.path.join(args.vector_store_dir, get_repo_dir_name(instance_1)))
+    vector_store = SimpleFaissVectorStore.from_persist_dir(
+        os.path.join(args.vector_store_dir, get_repo_dir_name(instance_1))
+    )
     query_bundle = VectorStoreQuery(
         query_str="SECURE_REFERRER_POLICY setting",
         similarity_top_k=100,
@@ -265,21 +283,24 @@ def read_store():
         print(res)
     previous_doc_hashes = current_doc_hashes
 
+
 def load_dataset_instances(dataset_name: str) -> set[str]:
     """Load instance IDs from a dataset file."""
     datasets_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "datasets")
     dataset_path = os.path.join(datasets_dir, f"{dataset_name}_dataset.json")
-    
+
     if not os.path.exists(dataset_path):
         raise FileNotFoundError(f"Dataset {dataset_path} not found")
-    
+
     with open(dataset_path) as f:
         dataset = json.load(f)
         return set(dataset["instance_ids"])
 
+
 def extract_number(instance_id: str) -> int:
     """Extract the numeric portion of an instance ID for sorting."""
-    return int(instance_id.split('-')[-1])
+    return int(instance_id.split("-")[-1])
+
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate code index performance")
@@ -288,23 +309,27 @@ def main():
     parser.add_argument("--instance-ids", nargs="*", help="Specific instance IDs to evaluate")
     parser.add_argument("--prefix", help="Process all instances with this prefix")
     parser.add_argument("--dataset", help="Dataset name to load instance IDs from")
-    parser.add_argument("--mode", choices=["create", "evaluate", "split", "read"], required=True, 
-                       help="Operation mode: create index, evaluate index, split documents, or read store")
+    parser.add_argument(
+        "--mode",
+        choices=["create", "evaluate", "split", "read"],
+        required=True,
+        help="Operation mode: create index, evaluate index, split documents, or read store",
+    )
     parser.add_argument("--output", default="index_eval.csv", help="Output CSV file for evaluation results")
     parser.add_argument("--num-workers", type=int, default=4, help="Number of workers for parallel processing")
-    
+
     # Update the global args variable
     global args
     args = parser.parse_args()
-    
+
     logging.basicConfig(level=logging.INFO)
-    
+
     # Set up index settings
     index_settings = IndexSettings(
         embed_model=args.embed_model,
         dimensions=1024,
     )
-    
+
     # Get instance IDs either from direct input, prefix, or dataset
     instance_ids = []
     if args.prefix:
@@ -312,9 +337,8 @@ def main():
         all_instances = get_moatless_instances()
         # Filter by prefix and sort
         matching_instances = sorted(
-            [inst for inst in all_instances.values() 
-             if inst["instance_id"].startswith(args.prefix)],
-            key=lambda x: extract_number(x["instance_id"])
+            [inst for inst in all_instances.values() if inst["instance_id"].startswith(args.prefix)],
+            key=lambda x: extract_number(x["instance_id"]),
         )
         instance_ids = [inst["instance_id"] for inst in matching_instances]
         print(f"Found {len(instance_ids)} instances matching prefix {args.prefix}")
@@ -327,8 +351,7 @@ def main():
         except FileNotFoundError as e:
             print(str(e))
             return
-        
-    
+
     if args.mode == "create":
         if not instance_ids:
             print("Error: Must provide instance IDs or dataset for create mode")
@@ -336,23 +359,25 @@ def main():
         print(f"Will create index for {len(instance_ids)} instances")
         for instance_id in instance_ids:
             create_index(instance_id, index_settings, args.num_workers)
-    
+
     elif args.mode == "evaluate":
         if not instance_ids:
             print("Error: Must provide instance IDs or dataset for evaluate mode")
             return
         results = evaluate_instances(instance_ids)
-        
+
         # Get the last directory name from vector store path for output file
         store_dir_name = os.path.basename(os.path.normpath(args.vector_store_dir))
         output_file = f"index_eval_{store_dir_name}.csv"
-        
+
         # Write results to output file with store dir name
         with open(output_file, "w") as f:
             f.write("instance_id,resolved_by,all_matching_context_window,any_matching_context_window\n")
             for result in results:
-                f.write(f"{result['instance_id']},{result['resolved_by']},{result['all_matching_context_window']},{result['any_matching_context_window']}\n")
-    
+                f.write(
+                    f"{result['instance_id']},{result['resolved_by']},{result['all_matching_context_window']},{result['any_matching_context_window']}\n"
+                )
+
     elif args.mode == "split":
         if not instance_ids:
             print("Error: Must provide instance IDs or dataset for split mode")
@@ -362,9 +387,10 @@ def main():
                 split_and_store(instance_id)
             except Exception as e:
                 print(f"Failed to split and store {instance_id}: {e}")
-    
+
     elif args.mode == "read":
         read_store()
+
 
 if __name__ == "__main__":
     main()
