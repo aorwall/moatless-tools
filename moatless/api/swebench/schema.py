@@ -73,7 +73,8 @@ class EvaluationRequestDTO(BaseModel):
 
     flow_id: Optional[str] = None
     flow: Optional[dict] = None
-    model_id: Optional[str] = Field(None, description="[DEPRECATED] Use flow_id or flow_config instead")
+    model_id: Optional[str] = Field(None, description="ID of the model config to use")
+    litellm_model_name: Optional[str] = Field(None, description="LiteLLM model name to use")
     name: str
     num_concurrent_instances: int = 1
     dataset: Optional[str] = None
