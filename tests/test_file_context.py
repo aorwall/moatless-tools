@@ -169,7 +169,6 @@ def test_context_file_model_dump():
     assert dump["spans"] == []
     assert dump["show_all_spans"] == False
     assert dump["patch"] is None
-    assert "shadow_mode" in dump
 
     # Test with patch
     context_file.apply_changes("Modified content\n")

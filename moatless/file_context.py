@@ -1172,9 +1172,8 @@ class ContextFile(BaseModel):
         return self._is_new
 
     def model_dump(self, **kwargs):
-        """Override model_dump to include shadow_mode and ensure patch is always included."""
+        """Override model_dump to ensure patch is always included."""
         dump = super().model_dump(**kwargs)
-        dump["shadow_mode"] = self.shadow_mode
         # Always include patch field even if None
         if "patch" not in dump:
             dump["patch"] = self.patch
@@ -1275,7 +1274,6 @@ class FileContext(BaseModel):
                 show_all_spans=show_all_spans,
                 patch=file_data.get("patch"),
                 repo=self._repo,
-                shadow_mode=self.shadow_mode,
             )
 
         # Load test files
@@ -1297,8 +1295,7 @@ class FileContext(BaseModel):
         return {
             "max_tokens": self.__dict__["_max_tokens"],
             "files": files,
-            "test_files": test_files,
-            "shadow_mode": self.shadow_mode,
+            "test_files": test_files
         }
 
     @property
@@ -1338,7 +1335,6 @@ class FileContext(BaseModel):
                 spans=[],
                 show_all_spans=show_all_spans,
                 repo=self._repo,
-                shadow_mode=self.shadow_mode,
             )
             if add_extra:
                 self._files[file_path]._add_import_span()
@@ -1551,7 +1547,7 @@ class FileContext(BaseModel):
 
     def clone(self):
         dump = self.model_dump(exclude={"files": {"__all__": {"was_edited", "was_viewed"}}})
-        cloned_context = FileContext(repo=self._repo, runtime=self._runtime, shadow_mode=self.shadow_mode)
+        cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
@@ -1719,8 +1715,7 @@ class FileContext(BaseModel):
                 if new_spans:
                     diff_context._files[file_path] = ContextFile(
                         file_path=file_path,
-                        repo=self._repo,
-                        shadow_mode=self.shadow_mode,
+                        repo=self._repo
                     )
                     diff_context._files[file_path].spans.extend(
                         [span for span in current_file.spans if span.span_id in new_spans]

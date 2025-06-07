@@ -1,12 +1,12 @@
 import os
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from moatless.actions.find_function import FindFunction, FindFunctionArgs
-from moatless.benchmark.swebench import create_repository, create_index, create_index_async
-from moatless.completion import BaseCompletionModel, LLMResponseFormat
+from moatless.benchmark.swebench import create_repository, create_index_async
+from moatless.completion import BaseCompletionModel
 from moatless.evaluation.utils import get_moatless_instance
-from moatless.file_context import FileContext, ContextFile, ContextSpan
+from moatless.file_context import FileContext, ContextSpan
 from moatless.index.code_index import CodeIndex
 from moatless.index.types import SearchCodeResponse, SearchCodeHit, SpanHit
 from moatless.repository.repository import Repository
@@ -83,7 +83,7 @@ async def test_find_function():
         file_pattern="**/*.py",
     )
 
-    message = await action.execute(action_args, file_context)
+    _ = await action.execute(action_args, file_context)
 
 
 @pytest.mark.asyncio
@@ -93,7 +93,7 @@ async def test_find_function_with_mocks():
     repository = MagicMock(spec=Repository)
     repository.file_exists.return_value = True  # Ensure file exists
     repository.get_file_content.return_value = "def test_function():\n    pass"
-    repository.shadow_mode.return_value = True
+    repository.shadow_mode = True
 
     code_index = AsyncMock(spec=CodeIndex)
     file_context = FileContext(repo=repository)
@@ -131,7 +131,7 @@ async def test_find_function_with_mocks():
     context_file = file_context.add_file("test_file.py")
     context_file.spans.append(ContextSpan(span_id="test_function"))
 
-    message = await action.execute(action_args, file_context)
+    _ = await action.execute(action_args, file_context)
 
     # Verify
     code_index.find_function.assert_awaited_once_with("test_function", class_name=None, file_pattern="**/*.py")
