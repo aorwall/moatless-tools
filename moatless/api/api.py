@@ -51,7 +51,42 @@ from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 # Filter warnings from external dependencies
 filter_external_warnings()
 
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+# Filter warnings from external dependencies
+filter_external_warnings()
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
+security = HTTPBasic()
+
+
+# Basic Auth settings
+auth_enabled = os.environ.get("MOATLESS_AUTH_ENABLED", "false").lower() == "true"
+auth_username = os.environ.get("MOATLESS_AUTH_USERNAME", "admin")
+auth_password = os.environ.get("MOATLESS_AUTH_PASSWORD", "password")
+
+
+async def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    """Verify credentials for basic authentication.
+
+    Skip authentication if auth_enabled is False in settings.
+    """
+    if not auth_enabled:
+        return True
+
+    correct_username = secrets.compare_digest(credentials.username, auth_username)
+    correct_password = secrets.compare_digest(credentials.password, auth_password)
+
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return True
 
 security = HTTPBasic()
 

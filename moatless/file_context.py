@@ -1504,7 +1504,7 @@ class FileContext(BaseModel):
 
     def clone(self):
         dump = self.model_dump(exclude={"files": {"__all__": {"was_edited", "was_viewed"}}})
-        cloned_context = FileContext(repo=self._repo, runtime=self._runtime)
+        cloned_context = FileContext(repo=self._repo, runtime=self._runtime, shadow_mode=self.shadow_mode)
         cloned_context.load_files_from_dict(files=dump.get("files", []), test_files=dump.get("test_files", []))
         return cloned_context
 
