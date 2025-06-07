@@ -1,26 +1,67 @@
 #!/bin/bash
 
-# Check if dataset_file is provided
-if [ $# -lt 1 ] || [ $# -gt 2 ]; then
-    echo "Usage: $0 <dataset_file> [swegym]"
-    echo "Example: $0 moatless/evaluation/datasets/verified_mini_dataset.json"
-    echo "         $0 moatless/evaluation/datasets/verified_mini_dataset.json swegym"
+# Check if dataset_file or instance_id is provided
+if [ $# -lt 1 ] || [ $# -gt 5 ]; then
+    echo "Usage: $0 <dataset_file_or_instance_id> [swegym] [--no-push] [--no-base] [--arm]"
+    echo ""
+    echo "Arguments:"
+    echo "  dataset_file_or_instance_id: Either a JSON dataset file or a single instance ID"
+    echo "  swegym:                      Use swegym base images instead of swebench"
+    echo "  --no-push:                   Build images but don't push to registry"
+    echo "  --no-base:                   Skip building the base image"
+    echo "  --arm:                       Build for ARM64 architecture instead of x86_64"
+    echo ""
+    echo "Examples:"
+    echo "  # Build all instances from dataset file:"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json swegym"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json --no-push"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json --no-base"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json --arm"
+    echo "  $0 moatless/evaluation/datasets/verified_mini_dataset.json swegym --no-push --no-base --arm"
+    echo ""
+    echo "  # Build single instance:"
+    echo "  $0 django__django-11099"
+    echo "  $0 django__django-11099 swegym"
+    echo "  $0 django__django-11099 --no-push"
+    echo "  $0 django__django-11099 --arm"
+    echo "  $0 django__django-11099 swegym --no-base --no-push --arm"
     exit 1
 fi
 
-DATASET_FILE=$1
+DATASET_FILE_OR_INSTANCE=$1
 SWEGYM_MODE=false
+PUSH_IMAGES=true
+BUILD_BASE=true
+ARM_MODE=false
 
-if [ $# -eq 2 ] && [ "$2" = "swegym" ]; then
-    SWEGYM_MODE=true
-    echo "Running in swegym mode"
+# Parse arguments
+for arg in "$@"; do
+    if [ "$arg" = "swegym" ]; then
+        SWEGYM_MODE=true
+        echo "Running in swegym mode"
+    elif [ "$arg" = "--no-push" ]; then
+        PUSH_IMAGES=false
+        echo "Images will be built but not pushed"
+    elif [ "$arg" = "--no-base" ]; then
+        BUILD_BASE=false
+        echo "Base image will not be built (assuming it already exists)"
+    elif [ "$arg" = "--arm" ]; then
+        ARM_MODE=true
+        echo "Building for ARM64 architecture"
+    fi
+done
+
+# Set architecture-specific variables
+if [ "$ARM_MODE" = true ]; then
+    ARCH_SUFFIX="arm64"
+    DOCKER_PLATFORM="linux/arm64"
+else
+    ARCH_SUFFIX="x86_64"
+    DOCKER_PLATFORM="linux/amd64"
 fi
 
-# Check if the dataset file exists
-if [ ! -f "$DATASET_FILE" ]; then
-    echo "Error: Dataset file $DATASET_FILE not found"
-    exit 1
-fi
+echo "Building for architecture: $ARCH_SUFFIX (platform: $DOCKER_PLATFORM)"
 
 # Check if INDEX_STORE_DIR environment variable is set
 if [ -z "$INDEX_STORE_DIR" ]; then
@@ -90,49 +131,169 @@ if [ ! -d "instances" ]; then
     fi
 fi
 
-# Check if jq is installed
-if ! command -v jq &> /dev/null; then
-    echo "Error: jq is required but not installed. Please install jq with 'sudo apt-get install jq' or equivalent"
-    exit 1
+# Determine if the first argument is a dataset file or an instance ID
+if [ -f "$DATASET_FILE_OR_INSTANCE" ] && [[ "$DATASET_FILE_OR_INSTANCE" == *.json ]]; then
+    # Check if jq is installed (only needed for JSON parsing)
+    if ! command -v jq &> /dev/null; then
+        echo "Error: jq is required for parsing JSON dataset files but not installed. Please install jq with 'sudo apt-get install jq' or equivalent"
+        exit 1
+    fi
+    
+    # It's a JSON dataset file
+    echo "Processing dataset file: $DATASET_FILE_OR_INSTANCE"
+    
+    # Extract instance IDs using jq for reliable JSON parsing
+    INSTANCE_IDS=$(jq -r '.instance_ids[]? // empty' "$DATASET_FILE_OR_INSTANCE" 2>/dev/null)
+
+    # If the above format fails, try alternate JSON formats
+    if [ -z "$INSTANCE_IDS" ]; then
+        # Try another common format (array of objects with instance_id field)
+        INSTANCE_IDS=$(jq -r '.[]?.instance_id? // empty' "$DATASET_FILE_OR_INSTANCE" 2>/dev/null)
+    fi
+
+    if [ -z "$INSTANCE_IDS" ]; then
+        # Try inspecting the file structure for debugging
+        echo "Error: Could not parse instance IDs from $DATASET_FILE_OR_INSTANCE"
+        echo "File content preview:"
+        head -n 20 "$DATASET_FILE_OR_INSTANCE"
+        exit 1
+    fi
+    
+    echo "Found $(echo "$INSTANCE_IDS" | wc -l) instances to build"
+else
+    # It's a single instance ID
+    INSTANCE_IDS="$DATASET_FILE_OR_INSTANCE"
+    echo "Building single instance: $INSTANCE_IDS"
 fi
 
 # Build and push the base image first
-echo "Building base image: aorwall/moatless.swebench.base.x86_64"
-docker build --platform linux/amd64 -t aorwall/moatless.swebench.base.x86_64 -f docker/Dockerfile.base --no-cache .
+if [ "$BUILD_BASE" = true ]; then
+    BASE_IMAGE_NAME="aorwall/moatless.swebench.base.${ARCH_SUFFIX}"
+    echo "Building base image for ${ARCH_SUFFIX}: ${BASE_IMAGE_NAME}"
+    echo "Setting up buildx builder for ${ARCH_SUFFIX} builds..."
+    docker buildx create --use --name multiarch-builder --driver docker-container --platform ${DOCKER_PLATFORM} || true
+    
+    # Create architecture-specific Dockerfile.base
+    TEMP_DOCKERFILE_BASE="Dockerfile.base.temp"
+    
+    # Set the appropriate base image based on architecture
+    if [ "$ARM_MODE" = true ]; then
+        # Check if ARM-specific base image exists, otherwise use a fallback
+        BASE_SWEB_IMAGE="aorwall/sweb.base.py.arm64:latest"
+        echo "Checking if ARM base image ${BASE_SWEB_IMAGE} exists..."
+        if ! docker manifest inspect ${BASE_SWEB_IMAGE} >/dev/null 2>&1; then
+            echo "ARM base image not found, using fallback approach with ubuntu:22.04"
+            BASE_SWEB_IMAGE="ubuntu:22.04"
+            USE_FALLBACK_BASE=true
+        else
+            echo "ARM base image found: ${BASE_SWEB_IMAGE}"
+            USE_FALLBACK_BASE=false
+        fi
+    else
+        BASE_SWEB_IMAGE="aorwall/sweb.base.py.x86_64:latest"
+        USE_FALLBACK_BASE=false
+    fi
+    
+    # Create temporary Dockerfile with correct base image and UV handling
+    if [ "$USE_FALLBACK_BASE" = true ]; then
+        cat > ${TEMP_DOCKERFILE_BASE} << EOL
+FROM ${BASE_SWEB_IMAGE}
 
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to build base image"
-    exit 1
+# Install basic dependencies for fallback base
+RUN apt-get update && apt-get install -y \\
+    git \\
+    curl \\
+    python3 \\
+    python3-pip \\
+    python3-venv \\
+    build-essential \\
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Ensure the installed binary is on the PATH
+ENV PATH="/root/.local/bin/:$PATH"
+
+RUN uv python install 3.12 --managed-python
+
+RUN mkdir -p /data/nltk_data
+ENV NLTK_DATA=/data/nltk_data
+
+# Add a build arg that can be used to invalidate cache for git operations
+RUN git clone https://github.com/aorwall/moatless-tools.git -b main /opt/moatless
+RUN git clone https://github.com/aorwall/moatless-tree-search.git -b docker /opt/components
+
+COPY docker/update-moatless.sh /usr/local/bin/update-moatless.sh
+COPY docker/update-components.sh /usr/local/bin/update-components.sh
+
+ENV MOATLESS_DIR=/data/moatless
+ENV MOATLESS_COMPONENTS_PATH=/opt/components
+
+WORKDIR /opt/moatless
+
+# Install dependencies with better error handling for different architectures
+RUN --mount=type=cache,target=/root/.cache/uv \\
+    uv sync --frozen --compile-bytecode --all-extras || \\
+    (echo "Initial sync failed, trying without frozen..." && uv sync --compile-bytecode --all-extras)
+EOL
+    else
+        cat > ${TEMP_DOCKERFILE_BASE} << EOL
+FROM ${BASE_SWEB_IMAGE}
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# Ensure the installed binary is on the PATH
+ENV PATH="/root/.local/bin/:$PATH"
+
+RUN uv python install 3.12 --managed-python
+
+RUN mkdir -p /data/nltk_data
+ENV NLTK_DATA=/data/nltk_data
+
+# Add a build arg that can be used to invalidate cache for git operations
+RUN git clone https://github.com/aorwall/moatless-tools.git -b main /opt/moatless
+RUN git clone https://github.com/aorwall/moatless-tree-search.git -b docker /opt/components
+
+COPY docker/update-moatless.sh /usr/local/bin/update-moatless.sh
+COPY docker/update-components.sh /usr/local/bin/update-components.sh
+
+ENV MOATLESS_DIR=/data/moatless
+ENV MOATLESS_COMPONENTS_PATH=/opt/components
+
+WORKDIR /opt/moatless
+
+# Install dependencies with better error handling for different architectures
+RUN --mount=type=cache,target=/root/.cache/uv \\
+    uv sync --frozen --compile-bytecode --all-extras || \\
+    (echo "Initial sync failed, trying without frozen..." && uv sync --compile-bytecode --all-extras)
+EOL
+    fi
+    
+    if [ "$PUSH_IMAGES" = true ]; then
+        docker buildx build --platform ${DOCKER_PLATFORM} -t ${BASE_IMAGE_NAME} -f ${TEMP_DOCKERFILE_BASE} --push --no-cache .
+    else
+        docker buildx build --platform ${DOCKER_PLATFORM} -t ${BASE_IMAGE_NAME} -f ${TEMP_DOCKERFILE_BASE} --load --no-cache .
+    fi
+
+    # Clean up temporary file
+    rm -f ${TEMP_DOCKERFILE_BASE}
+
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to build base image"
+        exit 1
+    fi
+
+    if [ "$PUSH_IMAGES" = true ]; then
+        echo "Successfully built and pushed ${ARCH_SUFFIX} base image"
+    else
+        echo "${ARCH_SUFFIX} base image built but not pushed"
+    fi
+else
+    echo "Skipping base image build (--no-base specified)"
+    # Still ensure buildx is set up for instance builds
+    echo "Setting up buildx builder for ${ARCH_SUFFIX} builds..."
+    docker buildx create --use --name multiarch-builder --driver docker-container --platform ${DOCKER_PLATFORM} || true
 fi
-
-echo "Pushing base image: aorwall/moatless.swebench.base.x86_64"
-docker push aorwall/moatless.swebench.base.x86_64
-
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to push base image"
-    exit 1
-fi
-
-echo "Successfully built and pushed base image"
-
-# Extract instance IDs using jq for reliable JSON parsing
-INSTANCE_IDS=$(jq -r '.instance_ids[]? // empty' "$DATASET_FILE" 2>/dev/null)
-
-# If the above format fails, try alternate JSON formats
-if [ -z "$INSTANCE_IDS" ]; then
-    # Try another common format (array of objects with instance_id field)
-    INSTANCE_IDS=$(jq -r '.[]?.instance_id? // empty' "$DATASET_FILE" 2>/dev/null)
-fi
-
-if [ -z "$INSTANCE_IDS" ]; then
-    # Try inspecting the file structure for debugging
-    echo "Error: Could not parse instance IDs from $DATASET_FILE"
-    echo "File content preview:"
-    head -n 20 "$DATASET_FILE"
-    exit 1
-fi
-
-echo "Found $(echo "$INSTANCE_IDS" | wc -l) instances to build"
 
 # Create directory for temporary files
 mkdir -p .moatless_index_store
@@ -157,16 +318,17 @@ for INSTANCE_ID in $INSTANCE_IDS; do
     # Set base image name based on mode
     if [ "$SWEGYM_MODE" = true ]; then
         DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_s_/g' | tr '[:upper:]' '[:lower:]')
-        DOCKER_BASE_PREFIX="xingyaoww/sweb.eval.x86_64."
+        DOCKER_BASE_PREFIX="xingyaoww/sweb.eval.${ARCH_SUFFIX}."
     else
         DOCKER_BASE_IMAGE=$(echo $INSTANCE_ID | sed 's/__/_1776_/g' | tr '[:upper:]' '[:lower:]')
-        DOCKER_BASE_PREFIX="swebench/sweb.eval.x86_64."
+        DOCKER_BASE_PREFIX="swebench/sweb.eval.${ARCH_SUFFIX}."
     fi
 
     # Create the target image name in the required format - using first part before __
-    DOCKER_TARGET_IMAGE=$(echo "aorwall/sweb.eval.x86_64.${INSTANCE_ID%%__*}_moatless_${INSTANCE_ID#*__}" | tr '[:upper:]' '[:lower:]')
+    DOCKER_TARGET_IMAGE=$(echo "aorwall/sweb.eval.${ARCH_SUFFIX}.${INSTANCE_ID%%__*}_moatless_${INSTANCE_ID#*__}" | tr '[:upper:]' '[:lower:]')
 
     # Create temporary Dockerfile
+    BASE_IMAGE_NAME="aorwall/moatless.swebench.base.${ARCH_SUFFIX}"
     cat > Dockerfile.temp << EOL
 FROM ${DOCKER_BASE_PREFIX}$DOCKER_BASE_IMAGE
 
@@ -174,8 +336,8 @@ WORKDIR /opt/moatless
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Copy libraries and moatless directory from base image
-COPY --from=aorwall/moatless.swebench.base.x86_64 /root/.local/share/uv /root/.local/share/uv
-COPY --from=aorwall/moatless.swebench.base.x86_64 /opt/moatless /opt/moatless
+COPY --from=${BASE_IMAGE_NAME} /root/.local/share/uv /root/.local/share/uv
+COPY --from=${BASE_IMAGE_NAME} /opt/moatless /opt/moatless
 
 # Git configuration
 RUN git config --global --add safe.directory /testbed
@@ -207,7 +369,7 @@ EOL
 
     # Build the Docker image
     echo "Building Docker image: ${DOCKER_TARGET_IMAGE}"
-    docker build --platform linux/amd64 -t ${DOCKER_TARGET_IMAGE} -f Dockerfile.temp .
+    docker build --platform ${DOCKER_PLATFORM} -t ${DOCKER_TARGET_IMAGE} -f Dockerfile.temp .
     
     if [ $? -ne 0 ]; then
         echo "Error: Failed to build image for $INSTANCE_ID"
@@ -215,19 +377,28 @@ EOL
     fi
 
     # Push the Docker image
-    echo "Pushing Docker image: ${DOCKER_TARGET_IMAGE}"
-    docker push ${DOCKER_TARGET_IMAGE}
-    
-    if [ $? -ne 0 ]; then
-        echo "Error: Failed to push image for $INSTANCE_ID"
-        exit 1
+    if [ "$PUSH_IMAGES" = true ]; then
+        echo "Pushing Docker image: ${DOCKER_TARGET_IMAGE}"
+        docker push ${DOCKER_TARGET_IMAGE}
+        
+        if [ $? -ne 0 ]; then
+            echo "Error: Failed to push image for $INSTANCE_ID"
+            exit 1
+        else
+            echo "Successfully built and pushed image for $INSTANCE_ID"
+        fi
     else
-        echo "Successfully built and pushed image for $INSTANCE_ID"
+        echo "Image for $INSTANCE_ID built but not pushed"
     fi
 done
 
 # Clean up temporary files
 rm -f Dockerfile.temp
+rm -f Dockerfile.base.temp
 rm -rf .moatless_index_store
 
-echo "All instances processed" 
+if [ "$PUSH_IMAGES" = true ]; then
+    echo "All instances processed and images pushed"
+else
+    echo "All instances processed (images built but not pushed)"
+fi 

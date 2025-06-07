@@ -72,16 +72,6 @@ async def get_event_bus() -> BaseEventBus:
             _event_bus = await settings.get_event_bus()
             logger.info(f"Event bus initialized for worker {WORKER_ID}")
 
-            # Import here to avoid circular imports
-            from moatless.api.websocket import handle_event
-
-            # Only subscribe if not already subscribed
-            subscription_key = f"{handle_event.__qualname__}:{WORKER_ID}"
-            if subscription_key not in _event_subscriptions:
-                await _event_bus.subscribe(handle_event)
-                _event_subscriptions.add(subscription_key)
-                logger.info(f"Worker {WORKER_ID} subscribed to handle_event")
-
     return _event_bus
 
 
@@ -223,20 +213,9 @@ async def cleanup_resources():
     logger.info(f"Cleaning up resources for worker {WORKER_ID}...")
 
     # Unsubscribe from events
-    if _event_bus:
-        # Import here to avoid circular imports
-        from moatless.api.websocket import handle_event
-
-        subscription_key = f"{handle_event.__qualname__}:{WORKER_ID}"
-        if subscription_key in _event_subscriptions:
-            await _event_bus.unsubscribe(handle_event)
-            _event_subscriptions.remove(subscription_key)
-            logger.info(f"Worker {WORKER_ID} unsubscribed from handle_event")
-
-        # Also close the event bus connection
-        if hasattr(_event_bus, "close"):
-            await _event_bus.close()
-            logger.info(f"Event bus closed for worker {WORKER_ID}")
+    if _event_bus and hasattr(_event_bus, "close"):
+        await _event_bus.close()
+        logger.info(f"Event bus closed for worker {WORKER_ID}")
 
     # Reset all references
     _storage = None

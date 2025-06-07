@@ -10,8 +10,10 @@ from typing import Any, Dict, Optional
 from moatless.actions.list_files import ListFilesArgs
 from moatless.actions.read_files import ReadFiles, ReadFilesArgs
 from moatless.actions.view_diff import ViewDiffArgs
+from moatless.agent.manager import AgentConfigManager
 from moatless.completion.json import JsonCompletionModel
 from moatless.actions.action import CompletionModelMixin
+from moatless.completion.manager import ModelConfigManager
 from moatless.completion.react import ReActCompletionModel
 from moatless.context_data import get_trajectory_dir
 from moatless.environment.local import LocalBashEnvironment
@@ -44,10 +46,9 @@ class FlowManager:
         runner: BaseRunner,
         storage: BaseStorage,
         eventbus: BaseEventBus,
-        agent_manager,
-        model_manager,
+        agent_manager: AgentConfigManager,
+        model_manager: ModelConfigManager,
     ):
-        self._configs = {}
         self._runner = runner
         self._storage = storage
         self._eventbus = eventbus
@@ -55,12 +56,15 @@ class FlowManager:
         self._model_manager = model_manager
 
     async def initialize(self):
-        await self._load_configs()
+        """Initialize the flow manager and migrate legacy configs if needed."""
+        await self._migrate_legacy_config()
 
     async def build_flow(
         self,
-        id: str,
-        model_id: str,
+        flow_id: str | None = None,
+        flow_config: AgenticFlow | None = None,
+        model_id: str | None = None,
+        litellm_model_name: str | None = None,
     ) -> AgenticFlow:
         """Create a SearchTree instance from this configuration.
 
@@ -71,165 +75,114 @@ class FlowManager:
         Returns:
             SearchTree: A configured search tree instance
         """
-        # Create expander if not specified
+        
+        if not flow_id and not flow_config:
+            raise ValueError("Either flow_id or flow_config must be provided")
+        
+        if flow_id and flow_config:
+            raise ValueError("Cannot provide both flow_id and flow_config")
 
-        flow = self.get_flow_config(id)
-        if not flow:
-            raise ValueError(f"Flow config {id} not found")
-
+        if flow_config:
+            flow = flow_config
+        else:
+            flow = await self.get_flow_config(flow_id)
+            if not flow:
+                raise ValueError(f"Flow config {flow_id} not found")
+        
         if not flow.agent:
-            if not flow.agent_id:
-                raise ValueError(f"Flow config {id} has no agent")
-
-            flow.agent = self._agent_manager.get_agent(agent_id=flow.agent_id)
-            if not flow.agent:
-                raise ValueError(f"Agent {flow.agent_id} not found")
-
+            raise ValueError(f"Flow {flow_id} has no agent. Please create an agent first.")
+        
+        # If model_id is provided, get the model from the model manager and set it on the flow's agent
+        if model_id:
+            logger.info(f"Setting model {model_id} on flow agent")
+            completion_model = self._model_manager.create_completion_model(model_id)
+            flow.agent.completion_model = completion_model
+            flow.agent.model_id = model_id
+            
         if not flow.agent.completion_model:
-            if not model_id:
-                raise ValueError(f"Flow config {id} has no model")
-
-            flow.agent.completion_model = self._model_manager.create_completion_model(model_id)
-
-        json_completion_model = JsonCompletionModel(
-            model=flow.agent.completion_model.model,
-            temperature=0.0,
-            max_tokens=flow.agent.completion_model.max_tokens,
-            timeout=flow.agent.completion_model.timeout,
-            few_shot_examples=flow.agent.completion_model.few_shot_examples,
-            headers=flow.agent.completion_model.headers,
-            params=flow.agent.completion_model.params,
-            merge_same_role_messages=flow.agent.completion_model.merge_same_role_messages,
-            message_cache=flow.agent.completion_model.message_cache,
-            model_base_url=flow.agent.completion_model.model_base_url,
-            model_api_key=flow.agent.completion_model.model_api_key,
-        )
-
-        for action in flow.agent.actions:
-            if isinstance(action, CompletionModelMixin) and not action.completion_model:
-                action.completion_model = json_completion_model.clone()
-
-        if (
-            hasattr(flow, "value_function")
-            and hasattr(flow.value_function, "completion_model")
-            and not flow.value_function.completion_model
-        ):
-            flow.value_function.completion_model = json_completion_model.clone()
-
+            raise ValueError(f"Flow {flow_id} has no completion model.")
+        
+        # If litellm_model_name is provided, override just the model field of the existing completion model
+        if litellm_model_name and flow.agent.completion_model:
+            logger.info(f"Setting litellm model name {litellm_model_name} on flow agent completion model")
+            flow.agent.completion_model.model = litellm_model_name
+            
         return flow
 
     async def create_flow(
         self,
-        id: str,
-        model_id: str,
+        flow_id: str | None = None,
+        flow_config: AgenticFlow | None = None,
+        model_id: str | None = None,
         message: str | None = None,
         trajectory_id: str | None = None,
         project_id: str | None = None,
         persist_dir: str | None = None,
         metadata: dict[str, Any] | None = None,
         **kwargs,
-    ) -> AgenticFlow:
+    ) -> dict:
         """Create a SearchTree instance from this configuration.
 
         Args:
-            root_node: Optional root node for the search tree. If not provided,
-                      the tree will need to be initialized with a root node later.
+            flow_id: ID of an existing flow configuration to use
+            flow_config: Direct flow configuration to use (takes precedence over flow_id)
+            model_id: Model ID to use with the flow
+            message: Initial message for the trajectory
+            trajectory_id: Optional trajectory ID (will generate one if not provided)
+            project_id: Optional project ID (defaults to "default")
+            persist_dir: Optional directory to persist the flow
+            metadata: Optional metadata for the flow
+            **kwargs: Additional arguments
 
         Returns:
-            SearchTree: A configured search tree instance
+            AgenticFlow: A configured flow instance
         """
+        # Validate inputs
+        if not flow_id and not flow_config:
+            raise ValueError("Either flow_id or flow_config must be provided")
+        
+        if flow_id and flow_config:
+            raise ValueError("Cannot provide both flow_id and flow_config")
+
         # Create expander if not specified
-
-        config = self.get_flow_config(id)
-        if not config:
-            raise ValueError(f"Flow config {id} not found")
-
-        agent = self._agent_manager.get_agent(agent_id=config.agent_id)
-        completion_model = self._model_manager.create_completion_model(model_id)
-        agent.completion_model = completion_model
-
-        json_completion_model = JsonCompletionModel(
-            model=completion_model.model,
-            temperature=0.0,
-            max_tokens=completion_model.max_tokens,
-            timeout=completion_model.timeout,
-            few_shot_examples=completion_model.few_shot_examples,
-            headers=completion_model.headers,
-            params=completion_model.params,
-            merge_same_role_messages=completion_model.merge_same_role_messages,
-            thoughts_in_action=completion_model.thoughts_in_action,
-            disable_thoughts=completion_model.disable_thoughts,
-            message_cache=completion_model.message_cache,
-            model_base_url=completion_model.model_base_url,
-            model_api_key=completion_model.model_api_key,
-        )
-
-        for action in agent.actions:
-            if isinstance(action, CompletionModelMixin):
-                action.completion_model = json_completion_model.clone()
-
-        if hasattr(config.value_function, "completion_model") and not config.value_function.completion_model:
-            config.value_function.completion_model = json_completion_model.clone()
+        if flow_config:
+            # Use provided flow config
+            config = flow_config
+            # Ensure the flow has an ID for persistence
+            if not config.id:
+                if flow_id:
+                    config.id = flow_id
+                else:
+                    config.id = "custom_flow"
+        else:
+            # Load existing flow config
+            config = await self.get_flow_config(flow_id)
+            if not config:
+                raise ValueError(f"Flow config {flow_id} not found")
 
         if not project_id:
             project_id = "default"
 
         if not trajectory_id:
             trajectory_id = str(uuid.uuid4())
+        
+        node = Node.create_root(
+            user_message=message,
+        )
 
-        if config.flow_type == "loop":
-            flow = AgenticLoop.create(
-                message=message,
-                trajectory_id=trajectory_id,
-                project_id=project_id,
-                agent=agent,
-                max_iterations=config.max_iterations,
-                max_cost=config.max_cost,
-                persist_dir=persist_dir,
-                metadata=metadata,
-                shadow_mode=False,
-                **kwargs,
-            )
-        elif config.flow_type == "tree":
-            expander = config.expander or Expander(max_expansions=config.max_expansions)
+        trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
+        
+        trajectory_data = {
+            "trajectory_id": trajectory_id,
+            "project_id": project_id,
+            "nodes": node.dump_as_list(exclude_none=True, exclude_unset=True),
+            "metadata": metadata,
+        }
 
-            if hasattr(config.value_function, "model_id") and not config.value_function.model_id:
-                config.value_function.model_id = model_id
-
-            if hasattr(config.feedback_generator, "model_id") and not config.feedback_generator.model_id:
-                config.feedback_generator.model_id = model_id
-
-            if hasattr(config.discriminator, "model_id") and not config.discriminator.model_id:
-                config.discriminator.model_id = model_id
-
-            if hasattr(config.selector, "model_id") and not config.selector.model_id:
-                config.selector.model_id = model_id
-
-            flow = SearchTree.create(
-                message=message,
-                trajectory_id=trajectory_id,
-                project_id=project_id,
-                agent=agent,
-                selector=config.selector,
-                expander=expander,
-                value_function=config.value_function,
-                feedback_generator=config.feedback_generator,
-                discriminator=config.discriminator,
-                max_iterations=config.max_iterations,
-                max_expansions=config.max_expansions or 1,
-                max_cost=config.max_cost,
-                min_finished_nodes=config.min_finished_nodes,
-                max_finished_nodes=config.max_finished_nodes,
-                reward_threshold=config.reward_threshold,
-                max_depth=config.max_depth,
-                persist_dir=persist_dir,
-                metadata=metadata,
-                **kwargs,
-            )
-
-        await self.save_trajectory(project_id, trajectory_id, flow)
-
-        return flow
+        await self._storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
+        await self._storage.write(f"{trajectory_path}/flow.json", config.model_dump())
+        
+        return trajectory_data
 
     async def create_loop(
         self,
@@ -270,7 +223,7 @@ class FlowManager:
                 action.completion_model = extra_completion_model.clone()
 
         if repository_path:
-            repository = GitRepository(repo_path=repository_path)
+            repository = GitRepository(repo_path=repository_path, shadow_mode=True)
             environment = LocalBashEnvironment(cwd=repository_path)
 
             workspace = Workspace(repository=repository, environment=environment)
@@ -283,7 +236,6 @@ class FlowManager:
             agent=agent,
             max_iterations=50,
             max_cost=1.0,
-            shadow_mode=False,
             **kwargs,
         )
 
@@ -302,120 +254,183 @@ class FlowManager:
 
         return loop
 
-    def _get_config_path(self) -> Path:
-        """Get the path to the config file."""
-        return get_moatless_dir() / "flows.json"
+    def _get_flow_config_path(self, flow_id: str) -> str:
+        """Get the path to a specific flow config file."""
+        return f"flows/{flow_id}.json"
 
     def _get_global_config_path(self) -> Path:
         """Get the path to the global config file."""
         return Path(__file__).parent / "flows.json"
 
-    async def _load_configs(self):
-        """Load configurations from JSON file."""
+    async def _migrate_legacy_config(self):
+        """Migrate from legacy flows.json to individual flow files if needed."""
         try:
-            configs = await self._storage.read("flows.json")
+            # Check if old flows.json exists
+            legacy_configs = await self._storage.read("flows.json")
+            if isinstance(legacy_configs, list) and legacy_configs:
+                logger.info(f"Migrating {len(legacy_configs)} legacy flow configs to individual files")
+                
+                # Save each config as individual file
+                for config in legacy_configs:
+                    if "id" in config:
+                        flow_path = self._get_flow_config_path(config["id"])
+                        await self._storage.write(flow_path, config)
+                        logger.debug(f"Migrated flow config {config['id']}")
+                
+                # Remove legacy file after successful migration
+                # Note: We don't delete here to be safe, but could add deletion if needed
+                logger.info("Legacy flow configs migrated successfully")
         except KeyError:
-            logger.warning("No flow configs found")
-            configs = []
-
-        # Copy global config to local path if it doesn't exist
-        if not configs:
+            # No legacy config exists, try to copy global config
             try:
                 global_path = self._get_global_config_path()
                 if global_path.exists():
                     with open(global_path) as f:
                         global_config = json.load(f)
-                        await self._storage.write("flows.json", global_config)
-                    logger.info("Copied global config to local path")
+                        if isinstance(global_config, list):
+                            for config in global_config:
+                                if "id" in config:
+                                    flow_path = self._get_flow_config_path(config["id"])
+                                    await self._storage.write(flow_path, config)
+                    logger.info("Copied global config to individual flow files")
                 else:
-                    logger.info("No global tree configs found")
+                    logger.info("No global flow configs found")
             except Exception as e:
-                logger.error(f"Failed to copy global tree configs: {e}")
-
-        logger.info(f"Loading {len(configs)} flow configs")
-        for config in configs:
-            try:
-                self._configs[config["id"]] = config
-                logger.debug(f"Loaded flow config {config['id']}")
-            except Exception:
-                logger.exception(f"Failed to load flow config {config['id']}")
-
-    async def _save_configs(self):
-        """Save configurations to JSON file."""
-        path = self._get_config_path()
-        try:
-            configs = list(self._configs.values())
-            await self._storage.write("flows.json", configs)
+                logger.error(f"Failed to copy global flow configs: {e}")
         except Exception as e:
-            logger.error(f"Failed to save flow configs: {e}")
+            logger.error(f"Failed to migrate legacy flow configs: {e}")
 
-    def get_flow_config(self, id: str) -> AgenticFlow:
+    async def get_flow_config(self, id: str) -> AgenticFlow:
         """Get a flow configuration by ID."""
         logger.debug(f"Getting flow config {id}")
 
-        if id in self._configs:
-            config = self._configs[id]
-            # Ensure the id is set in the config
-            config["id"] = id
-            return AgenticFlow.from_dict(config)
-        else:
-            logger.error(f"Flow config {id} not found. Available configs: {list(self._configs.keys())}")
-            raise ValueError(f"Flow config {id} not found. Available configs: {list(self._configs.keys())}")
+        flow_path = self._get_flow_config_path(id)
+        
+        try:
+            config = await self._storage.read(flow_path)
+            if isinstance(config, dict):
+                # Ensure the id is set in the config
+                config["id"] = id
+                return AgenticFlow.from_dict(config)
+            else:
+                raise ValueError(f"Invalid config format for flow {id}")
+        except KeyError:
+            logger.info(f"Flow config {id} not found. Migrating legacy configs if needed.")
+            # Try to migrate legacy configs if needed
+            await self._migrate_legacy_config()
+            
+            # Try reading again after migration
+            try:
+                config = await self._storage.read(flow_path)
+                if isinstance(config, dict):
+                    config["id"] = id
+                    return AgenticFlow.from_dict(config)
+                else:
+                    raise ValueError(f"Invalid config format for flow {id}")
+            except KeyError:
+                available_flows = await self._list_available_flows()
+                logger.error(f"Flow config {id} not found. Available configs: {available_flows}")
+                raise ValueError(f"Flow config {id} not found. Available configs: {available_flows}")
 
-    def get_all_configs(self) -> list[AgenticFlow]:
+    async def _list_available_flows(self) -> list[str]:
+        """List all available flow configuration IDs."""
+        try:
+            flow_paths = await self._storage.list_paths("flows/")
+            flow_ids = []
+            for path in flow_paths:
+                if path.endswith(".json"):
+                    # Extract flow ID from path like "flows/my_flow.json"
+                    flow_id = path.split("/")[-1].replace(".json", "")
+                    flow_ids.append(flow_id)
+            return sorted(flow_ids)
+        except Exception as e:
+            logger.error(f"Error listing flow configs: {e}")
+            return []
+
+    async def get_all_configs(self) -> list[AgenticFlow]:
         """Get all flow configurations."""
 
         configs = []
-        for config in self._configs.values():
+        flow_ids = await self._list_available_flows()
+        
+        for flow_id in flow_ids:
             try:
-                configs.append(AgenticFlow.from_dict(config))
+                config = await self.get_flow_config(flow_id)
+                configs.append(config)
             except Exception as e:
-                logger.exception(f"Failed to load flow config {config['id']}: {e}")
+                logger.exception(f"Failed to load flow config {flow_id}: {e}")
 
         configs.sort(key=lambda x: x.id)
         return configs
 
     async def create_config(self, config: dict):
         """Create a new flow configuration."""
+        
+        if not config.get("id"):
+            raise ValueError("Config must have an 'id' field")
 
-        flow = AgenticFlow.from_dict(config)
-        logger.debug(f"Creating flow config {flow.id}")
-        if flow.id in self._configs:
+        flow = SearchTree.from_dict(config)
+        logger.info(f"Creating flow config {flow.id}")
+        
+        
+        flow_path = self._get_flow_config_path(flow.id)
+        
+        # Check if flow already exists
+        if await self._storage.exists(flow_path):
             raise ValueError(f"Flow config {flow.id} already exists")
 
-        self._configs[flow.id] = flow.model_dump()
-        await self._save_configs()
-        return self._configs[flow.id]
+        flow_data = flow.model_dump()
+        await self._storage.write(flow_path, flow_data)
+        return flow_data
 
     async def update_config(self, config: dict):
         """Update an existing flow configuration."""
-        logger.debug(f"Updating flow config {config['id']}")
-        if config["id"] not in self._configs:
-            raise ValueError(f"Flow config {config['id']} not found")
+        flow_id = config.get("id")
+        if not flow_id:
+            raise ValueError("Config must have an 'id' field")
+            
+        logger.debug(f"Updating flow config {flow_id}")
+        
+        # To verify the config is valid, we need to convert it to an AgenticFlow object
+        flow = SearchTree.model_validate(config)
+        
+        flow_path = self._get_flow_config_path(flow_id)
+        
+        # Check if flow exists
+        if not await self._storage.exists(flow_path):
+            raise ValueError(f"Flow config {flow_id} not found")
 
-        self._configs[config["id"]] = config
-        await self._save_configs()
+        await self._storage.write(flow_path, flow.model_dump())
 
     async def delete_config(self, id: str):
         """Delete a flow configuration."""
         logger.debug(f"Deleting flow config {id}")
-        if id not in self._configs:
+        
+        flow_path = self._get_flow_config_path(id)
+        
+        # Check if flow exists
+        if not await self._storage.exists(flow_path):
             raise ValueError(f"Flow config {id} not found")
 
-        del self._configs[id]
-        await self._save_configs()
+        await self._storage.delete(flow_path)
+        
+    
 
-    async def get_flow(self, project_id: str, trajectory_id: str) -> AgenticFlow:
+    async def get_flow(self, project_id: str, trajectory_id: str | None = None) -> AgenticFlow:
         """Get a flow from a trajectory."""
-        await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
+        if trajectory_id:
+            await self._storage.assert_exists_in_trajectory("trajectory.json", project_id, trajectory_id)
 
-        trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
-        try:
-            settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
-        except Exception:
-            settings_data = await self._storage.read_from_project("flow.json", project_id)
+        if trajectory_id:
+            trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
+            try:
+                settings_data = await self._storage.read_from_trajectory("flow.json", project_id, trajectory_id)
+            except Exception:
+                settings_data = await self._storage.read_from_project("flow.json", project_id)
 
-        return AgenticFlow.from_dicts(settings_data, trajectory_data)
+            return AgenticFlow.from_dicts(settings_data, trajectory_data)
+        else:
+            return AgenticFlow.from_dict(await self._storage.read_from_project("flow.json", project_id))
 
     def get_trajectory_status(self, flow: AgenticFlow, job_status: JobStatus) -> FlowStatus:
         if job_status == JobStatus.RUNNING:
@@ -460,6 +475,7 @@ class FlowManager:
             return TrajectoryResponseDTO(
                 trajectory_id=flow.trajectory_id,
                 project_id=flow.project_id,
+                flow_id=flow.id,
                 status=self.get_trajectory_status(flow, job_status),
                 job_status=job_status,
                 resolved=resolved,
@@ -474,7 +490,7 @@ class FlowManager:
     async def list_trajectories(self, project_id: str | None = None) -> list:
         """Get all trajectories."""
 
-        raise NotImplementedError("Not implemented yet")
+        return []
 
     async def start_trajectory(self, project_id: str, trajectory_id: str):
         """Start a trajectory."""
@@ -609,11 +625,16 @@ class FlowManager:
         await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
 
         return node
+    
 
     async def get_trajectory_settings(self, project_id: str, trajectory_id: str) -> dict:
         """Get the settings for a trajectory."""
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
-        return await self._storage.read(f"{trajectory_path}/flow.json")
+        result = await self._storage.read(f"{trajectory_path}/flow.json")
+        if isinstance(result, dict):
+            return result
+        else:
+            raise ValueError(f"Invalid trajectory settings format for {trajectory_id}")
 
     def get_trajectory_path(self, project_id: str, trajectory_id: str) -> Path:
         """Get the trajectory file path for a run."""
@@ -766,13 +787,19 @@ class FlowManager:
 
         trajectory_data = await self._storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
 
-        return Node.from_dict(trajectory_data)
+        node = Node.from_dict(trajectory_data)
+        logger.info(f"Read trajectory node {node.node_id} with {len(node.get_all_nodes())} children")
+        return node
 
     async def read_project_settings(self, project_id: str) -> dict | None:
         if not await self._storage.exists(f"projects/{project_id}/flow.json"):
             return None
 
-        return await self._storage.read(f"projects/{project_id}/flow.json")
+        result = await self._storage.read(f"projects/{project_id}/flow.json")
+        if isinstance(result, dict):
+            return result
+        else:
+            raise ValueError(f"Invalid project settings format for {project_id}")
 
     async def save_project(self, project_id: str, settings: dict):
         await self._storage.write(f"projects/{project_id}/flow.json", settings)

@@ -72,7 +72,6 @@ class ContextFile(BaseModel):
         description="List of context spans associated with this file.",
     )
     show_all_spans: bool = Field(False, description="Flag to indicate whether to display all context spans.")
-    shadow_mode: bool = Field(default=True)
 
     was_edited: bool = Field(default=False, exclude=True)
     was_viewed: bool = Field(default=False, exclude=True)
@@ -138,6 +137,12 @@ class ContextFile(BaseModel):
         self._cached_base_content = original_content
 
         return self._cached_base_content
+    
+    @property
+    def shadow_mode(self) -> bool:
+        if not self._repo:
+            return False
+        return self._repo.shadow_mode
 
     @property
     def module(self) -> Module | None:
@@ -1126,7 +1131,6 @@ class ContextFile(BaseModel):
 
 
 class FileContext(BaseModel):
-    shadow_mode: bool = Field(default=True, description="Set to true to not write changes to disk.")
     show_code_blocks: bool = Field(
         False,
         description="Whether to show the parsed code blocks in the response or just the line span.",
@@ -1193,11 +1197,16 @@ class FileContext(BaseModel):
         instance = cls(
             max_tokens=data.get("max_tokens", 8000),
             repo=repo,
-            runtime=runtime,
-            shadow_mode=data.get("shadow_mode", True),
+            runtime=runtime
         )
         instance.load_files_from_dict(data.get("files", []), test_files=data.get("test_files", []))
         return instance
+
+    @property
+    def shadow_mode(self) -> bool:
+        if not self._repo:
+            return False
+        return self._repo.shadow_mode
 
     def load_files_from_dict(self, files: list[dict], test_files: list[dict] | None = None):
         """

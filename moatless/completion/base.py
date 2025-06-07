@@ -378,8 +378,13 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                         if completion_response.choices[0].message.tool_calls:
                             # TODO: Support multiple tool calls
                             tool_call_id = completion_response.choices[0].message.tool_calls[0].id
+                            
+                        msg_dict = completion_response.choices[0].message.model_dump()
+                        if "reasoning_content" in msg_dict:
+                            # TODO: Is this Deepseek specific?
+                            del msg_dict["reasoning_content"]
 
-                        messages.append(completion_response.choices[0].message.model_dump())
+                        messages.append(msg_dict)
 
                         if e.retry_messages:
                             logger.warning(f"Post validation failed with retry messages: {e.retry_messages}")

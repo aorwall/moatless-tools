@@ -29,6 +29,7 @@ class TestResult(BaseModel):
     method: Optional[str] = None
     failure_output: Optional[str] = None
     stacktrace: List[TraceItem] = Field(default_factory=list, description="List of stack trace items")
+    timed_out: bool = Field(default=False, description="Whether the test timed out during execution")
 
     @model_validator(mode="before")
     def convert_status_to_enum(cls, values):
@@ -50,7 +51,6 @@ class TestFile(BaseModel):
 
         Args:
             test_files: List of TestFile objects containing test results
-            file_paths: Optional list of file paths to include in the summary
 
         Returns:
             str: Summary string of test results
@@ -70,23 +70,32 @@ class TestFile(BaseModel):
             file_failure_count = sum(1 for r in file_results if r.status == TestStatus.FAILED)
             file_error_count = sum(1 for r in file_results if r.status == TestStatus.ERROR)
             file_skipped_count = sum(1 for r in file_results if r.status == TestStatus.SKIPPED)
+            file_timeout_count = sum(1 for r in file_results if r.timed_out)
             file_passed_count = len(file_results) - file_failure_count - file_error_count - file_skipped_count
 
             # Add to per-file summary
+            summary_parts = [f"{file_passed_count} passed", f"{file_failure_count} failed", f"{file_error_count} errors", f"{file_skipped_count} skipped"]
+            if file_timeout_count > 0:
+                summary_parts.append(f"{file_timeout_count} timed out")
+            
             per_file_summary.append(
-                f"* {test_file.file_path}: {file_passed_count} passed, {file_failure_count} failed, {file_error_count} errors, {file_skipped_count} skipped"
+                f"* {test_file.file_path}: {', '.join(summary_parts)}"
             )
 
         # Calculate overall stats
         failure_count = sum(1 for r in all_results if r.status == TestStatus.FAILED)
         error_count = sum(1 for r in all_results if r.status == TestStatus.ERROR)
         skipped_count = sum(1 for r in all_results if r.status == TestStatus.SKIPPED)
+        timeout_count = sum(1 for r in all_results if r.timed_out)
         passed_count = len(all_results) - failure_count - error_count - skipped_count
 
         # Combine per-file summary with overall summary
         if failure_count + error_count + skipped_count + passed_count > 0:
             summary = "\n".join(per_file_summary)
-            summary += f"\n\nTotal: {passed_count} passed, {failure_count} failed, {error_count} errors, {skipped_count} skipped."
+            total_parts = [f"{passed_count} passed", f"{failure_count} failed", f"{error_count} errors", f"{skipped_count} skipped"]
+            if timeout_count > 0:
+                total_parts.append(f"{timeout_count} timed out")
+            summary += f"\n\nTotal: {', '.join(total_parts)}."
         else:
             summary = ""
 
@@ -124,6 +133,10 @@ class TestFile(BaseModel):
                     attributes = ""
                     if result.file_path:
                         attributes += f"{result.file_path}"
+                    
+                    # Add timeout indicator if the test timed out
+                    if result.timed_out:
+                        attributes += " (TIMED OUT)"
 
                     # Handle long failure output
                     if len(result.failure_output) > max_chars_per_test:

@@ -26,24 +26,29 @@ def parse_completion(completion_data: Dict[str, Any]) -> CompletionDTO:
     )
 
     # Parse from original_response if it exists
-    original_response = completion_data.get("original_response")
+    original_response = completion_data.get("original_response") or completion_data.get("original_response_obj")
     if original_response:
+        if isinstance(original_response, str):
+            completion_dto.output = CompletionOutput(content=original_response)
         # Handle Anthropic format
         if "content" in original_response:
-            parse_anthropic_response(completion_dto, original_response)
+            completion_dto.output = parse_anthropic_response(completion_dto, original_response)
         # Handle OpenAI format
         elif "choices" in original_response:
-            parse_openai_response(completion_dto, original_response)
+            completion_dto.output = parse_openai_response(completion_dto, original_response)
 
     # Parse original input if available
     original_input = completion_data.get("original_input")
     if original_input:
         parse_input(completion_dto, original_input)
+        
+    if "traceback_exception" in completion_data:
+        completion_dto.error = str(completion_data.get("traceback_exception"))
 
     return completion_dto
 
 
-def parse_anthropic_response(completion_dto: CompletionDTO, response: Dict[str, Any]) -> None:
+def parse_anthropic_response(completion_dto: CompletionDTO, response: Dict[str, Any]) -> CompletionOutput:
     """Parse Anthropic style response.
 
     Args:
@@ -61,10 +66,10 @@ def parse_anthropic_response(completion_dto: CompletionDTO, response: Dict[str, 
                 tool_calls = []
             tool_calls.append(ToolCall(name=content_block.get("name", ""), arguments=content_block.get("input", {})))
 
-    completion_dto.output = CompletionOutput(content=output_content, tool_calls=tool_calls)
+    return CompletionOutput(content=output_content, tool_calls=tool_calls)
 
 
-def parse_openai_response(completion_dto: CompletionDTO, response: Dict[str, Any]) -> None:
+def parse_openai_response(completion_dto: CompletionDTO, response: Dict[str, Any]) -> CompletionOutput:
     """Parse OpenAI style response.
 
     Args:
@@ -88,7 +93,7 @@ def parse_openai_response(completion_dto: CompletionDTO, response: Dict[str, Any
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse tool call arguments: {function.get('arguments')}")
 
-        completion_dto.output = CompletionOutput(content=output_content, tool_calls=tool_calls)
+        return CompletionOutput(content=output_content, tool_calls=tool_calls)
 
 
 def parse_input(completion_dto: CompletionDTO, input_data: Dict[str, Any]) -> None:

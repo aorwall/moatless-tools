@@ -104,7 +104,7 @@ Before running the evaluation, you'll need:
 Before running the full evaluation, you can verify your setup running a simple SWE-Bench instance.
 
 ```bash
-python3 scripts/docker_run.py  --model gpt-4o-mini-2024-07-18 --instance-id django__django-11099 --evaluation-name testing_setup
+uv run python scripts/docker_run.py  --flow swebench_tools --model-id gpt-4o-mini-2024-07-18 --instance-id django__django-11099 --evaluation-name testing_setup
 ```
 
 The script will run the model against a sample SWE-Bench instance
@@ -120,28 +120,41 @@ python3 scripts/run_evaluation.py  --model gpt-4o-mini-2024-07-18 --dataset-spli
 ```
 
 Required arguments:
-- `--model`: Model to use for evaluation (e.g., 'claude-3-5-sonnet-20241022', 'gpt-4o')
-- `--flow`: Flow to use for evaluation (defaults to "tool_coding")
 - `--dataset-split`: Dataset split to use
 - `--evaluation-name`: Name of the evaluation
-- `--num-paralllel-jobs`: Number of parallell jobs
 
+Optional arguments:
+- `--model`: Model to use for evaluation (default: gpt-4o-mini-2024-07-18, equivalent to --model-id)
+- `--model-id`: Model configuration ID to use (replaces entire model configuration)
+- `--litellm-model-name`: LiteLLM model name to override (keeps other model settings)
+- `--flow`: Flow to use for evaluation (defaults to "simple_coding")
+- `--num-parallel-jobs`: Number of parallel jobs (default: 1)
 
 ## Flows 
 Available flows that can be specified with the `--flow` argument:
 
-| Flow ID | Description | Best Suited For |
-|---------|-------------|-----------------|
-| tool_coding | Flow using tool calls to the LLM | Models with native support for tool calls |
-| react_coding | Flow using ReACT format instead of tool calls | Open source models without native support for tool calls |
-| tool_thinking_blocks | Flow using tool calls with adjusted prompt for reasoning | Reasoning models |
+| Flow ID | Format | Best Suited For | Default Model |
+|---------|--------|-----------------|---------------|
+| swebench_tools | Function calling | Models with native function calling support | gpt-4o-mini-2024-07-18 |
+| swebench_tools_and_reasoning | Function calling | Reasoning models with native function calling support | claude-sonnet-4-20250514 |
+| swebench_react | ReACT | Open source models without native function calling support | openrouter/mistralai/devstral-small |
+| swebench_react_reasoning | ReACT | Reasoning models without function calling support | openrouter/deepseek/deepseek-r1-0528 |
 
-## Verified Models
+## Model Configuration
+
+Both evaluation scripts support flexible model configuration through the following options:
+
+### Model Options
+
+- `--model-id`: Specify a complete model configuration ID. This replaces the entire completion model configuration including temperature, max tokens, and all other settings.
+- `--litellm-model-name`: Override only the [LiteLLM model name](https://docs.litellm.ai/docs/providers) while keeping all other completion model settings (temperature, max tokens, etc.) from the flow or model configuration.
+
+### Verified Models
 
 Default model configurations are provided for verified models. Note that other models may work but have not been extensively tested. 
 Verified models are models that have been tested and found to work with the [Verified Mini subset](https://huggingface.co/datasets/MariusHobbhahn/swe-bench-verified-mini) of the SWE-Bench dataset.
 
-When specifying just the `--model` argument, the following configurations are used:
+When specifying just the `--model-id` argument, the following configurations are used:
 
 | Model | Response Format | Message History | Thoughts in Action | Verified Mini |
 |-------|----------------|-----------------|-------------------|---------------|
@@ -170,10 +183,16 @@ Available dataset splits that can be specified with the `--dataset-split` argume
 
 ## Example usage
 ```bash
-# Run evaluation with Claude 4 Sonnet with the Verified Mini dataset and the tool calling flow
+# Run evaluation with Claude 3.5 Sonnet using complete model configuration
 python3 scripts/run_evaluation.py \
-  --model claude-4-sonnet-20241022 \
-  --flow tool_coding \
+  --model-id claude-3-5-sonnet-20241022 \
+  --flow swebench_tools_and_reasoning \
   --dataset-split verified_mini \
-  --num-paralllel-jobs 5
-```
+  --num-parallel-jobs 5
+
+# Run evaluation overriding just the model name while keeping flow's model settings
+python3 scripts/run_evaluation.py \
+  --litellm-model-name openrouter/qwen/qwen-2.5-coder-32b-instruct \
+  --flow swebench_react \
+  --dataset-split verified_mini \
+  --num-parallel-jobs 5

@@ -1,4 +1,5 @@
 from typing import Any
+import logging
 
 from moatless.storage.base import BaseStorage
 from pydantic import BaseModel, Field, PrivateAttr
@@ -14,11 +15,12 @@ from moatless.index.code_index import CodeIndex
 from moatless.repository.repository import Repository
 from moatless.runtime.runtime import RuntimeEnvironment
 
+logger = logging.getLogger(__name__)
+
 
 class Workspace(BaseModel):
     artifacts: list[Artifact] = Field(default_factory=list)
     artifact_handlers: dict[str, ArtifactHandler] = Field(default_factory=dict, exclude=True)
-    shadow_mode: bool = Field(default=True, description="If true, the workspace will not be persisted")
 
     _repository: Repository | None = PrivateAttr(default=None)
     _code_index: CodeIndex | None = PrivateAttr(default=None)
@@ -47,6 +49,7 @@ class Workspace(BaseModel):
         self._repository = repository
         self._code_index = code_index
         self._runtime = runtime
+        
 
     @property
     def repository(self) -> Repository:

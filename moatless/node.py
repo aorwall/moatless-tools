@@ -268,9 +268,9 @@ class Node(BaseModel):
         self.user_message = value
 
     @classmethod
-    def create_root(cls, user_message: str, shadow_mode: bool = True, **kwargs):
+    def create_root(cls, user_message: str, **kwargs):
         """Create a root node with a unique ID."""
-        file_context = FileContext(shadow_mode=shadow_mode)
+        file_context = FileContext()
         return cls(node_id=0, user_message=user_message, file_context=file_context, **kwargs)
 
     @classmethod
@@ -292,7 +292,7 @@ class Node(BaseModel):
 
     def expanded_count(self) -> int:
         """Get the number of expanded children."""
-        return len([child for child in self.children])
+        return len(self.children)
 
     def is_fully_expanded(self) -> bool:
         """Check if all possible actions have been tried and executed from this node."""
@@ -300,8 +300,14 @@ class Node(BaseModel):
 
     def is_terminal(self) -> bool:
         """Determine if the current state is a terminal state."""
+        
+        if self.error:
+            return True
 
-        return self.terminal
+        if self.action_steps and self.action_steps[-1].observation and self.action_steps[-1].observation.terminal:
+            return True
+        
+        return False
 
     def is_executed(self) -> bool:
         """Determine if the node is executed"""
@@ -750,7 +756,7 @@ class Node(BaseModel):
         node_list = []
 
         for node in nodes:
-            node_data = node.model_dump(exclude={"parent", "children"}, **kwargs)
+            node_data = node.model_dump(exclude={"parent", "children"}, mode="json", **kwargs)
             node_data["parent_id"] = node.parent.node_id if node.parent is not None else None
             node_list.append(node_data)
 
