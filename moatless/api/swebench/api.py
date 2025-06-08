@@ -42,12 +42,7 @@ async def create_evaluation(
     logger.info(
         f"Creating evaluation for dataset {request.dataset} with flow {request.flow_id} and model {request.model_id} and litellm_model_name {request.litellm_model_name}"
     )
-
-    if request.flow:
-        flow = SearchTree.model_validate(request.flow)
-    else:
-        logger.info(f"Creating evaluation for all datasets with {request.instance_ids}")
-
+    
     if request.flow:
         flow = SearchTree.model_validate(request.flow)
     else:
@@ -55,11 +50,11 @@ async def create_evaluation(
 
     evaluation = await evaluation_manager.create_evaluation(
         dataset_name=request.dataset,
+        instance_ids=request.instance_ids,
         flow_id=request.flow_id,
         flow_config=flow,
         model_id=request.model_id,
         litellm_model_name=request.litellm_model_name,
-        instance_ids=request.instance_ids,
     )
 
     return evaluation

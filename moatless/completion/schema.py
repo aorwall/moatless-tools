@@ -362,6 +362,18 @@ class ResponseSchema(BaseModel):
                 if len(all_jsons) > 1:
                     logger.warning(f"Found multiple JSON objects, using the first one. All found: {all_jsons}")
                 message = all_jsons[0]
+            else:
+                # If no valid JSON was found, check if it's due to invalid escape sequences
+                try:
+                    json.loads(message_str)
+                except json.JSONDecodeError as e:
+                    if "Invalid \\escape" in str(e):
+                        raise ValueError(
+                            f"JSON contains invalid escape sequences. Please properly escape backslashes in your JSON. "
+                            f"For example, use '\\\\' instead of '\\' in string values. Error: {e}"
+                        )
+                    else:
+                        raise ValueError(f"Invalid JSON format: {e}")
 
             # Normalize line endings
             if isinstance(message, str):
@@ -439,6 +451,44 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
     Returns a tuple of (selected_json_dict, all_found_json_dicts).
     """
 
+    def fix_json_escape_sequences(json_str: str) -> str:
+        """Fix common JSON escape sequence issues that occur in LLM responses."""
+        import re
+        
+        # Fix the specific issue: r'{...}' patterns where \' is invalid
+        # This happens when LLMs generate regex patterns with single quotes
+        # Replace r\' with r' (removing the backslash before single quote)
+        json_str = re.sub(r"r\\(['\"])", r"r\1", json_str)
+        
+        # Fix other common escape issues:
+        # Replace unescaped backslashes in string values (but not already escaped ones)
+        # This is a more conservative approach that only fixes obvious issues
+        
+        # Fix single backslashes that aren't part of valid escape sequences
+        # Valid JSON escape sequences: \" \\ \/ \b \f \n \r \t \uXXXX
+        valid_escapes = r'["\\\/bfnrt]|u[0-9a-fA-F]{4}'
+        
+        # Find strings in JSON and fix invalid escapes within them
+        def fix_string_escapes(match):
+            quote = match.group(1)  # Opening quote
+            content = match.group(2)  # String content
+            closing_quote = match.group(3)  # Closing quote
+            
+            # Fix backslashes that aren't followed by valid escape sequences
+            fixed_content = re.sub(
+                r'\\(?!' + valid_escapes + r')',
+                r'\\\\',
+                content
+            )
+            
+            return quote + fixed_content + closing_quote
+        
+        # Match JSON strings (handling escaped quotes within strings)
+        string_pattern = r'(")([^"\\]*(?:\\.[^"\\]*)*)(")|(\'([^\'\\]*(?:\\.[^\'\\]*)*)\')'
+        json_str = re.sub(string_pattern, fix_string_escapes, json_str)
+        
+        return json_str
+
     def clean_json_string(json_str: str) -> str:
         # Remove single-line comments and clean control characters
         lines = []
@@ -465,13 +515,14 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
             if end == -1:
                 break
             potential_json = clean_json_string(message[start:end].strip())
+            potential_json = fix_json_escape_sequences(potential_json)
             try:
                 json_dict = json.loads(potential_json)
                 # Validate that this is a complete, non-truncated JSON object
                 if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):
                     all_found_jsons.append(json_dict)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse JSON block after escape fix: {e}")
             current_pos = end + 3
 
         if all_found_jsons:
@@ -491,6 +542,7 @@ def extract_json_from_message(message: str) -> tuple[dict | str, list[dict]]:
             for end in range(len(message), start, -1):
                 try:
                     potential_json = clean_json_string(message[start:end])
+                    potential_json = fix_json_escape_sequences(potential_json)
                     json_dict = json.loads(potential_json)
                     # Validate that this is a complete, non-truncated JSON object
                     if isinstance(json_dict, dict) and all(isinstance(k, str) for k in json_dict.keys()):

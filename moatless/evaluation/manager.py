@@ -91,8 +91,10 @@ class EvaluationManager:
             raise ValueError("Evaluation already exists")
 
         flow = await self._flow_manager.build_flow(
-            flow_id=flow_id, model_id=model_id, litellm_model_name=litellm_model_name
+            flow_id=flow_id, flow_config=flow_config, model_id=model_id, litellm_model_name=litellm_model_name
         )
+        
+        model_id = flow.agent.completion_model.model
 
         evaluation = Evaluation(
             evaluation_name=evaluation_name,
@@ -155,10 +157,11 @@ class EvaluationManager:
             logger.info(f"Cloning evaluation {evaluation_name} with {len(instance_ids)} instances")
         else:
             instance_ids = None
+            
+        flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
 
         return await self.create_evaluation(
-            evaluation.flow_id,
-            evaluation.model_id,
+            flow_config=flow,
             evaluation_name=new_evaluation_name,
             dataset_name=evaluation.dataset_name,
             instance_ids=instance_ids,
@@ -208,7 +211,11 @@ class EvaluationManager:
 
         await self._sync_evaluation_status(evaluation)
 
-        evaluation.flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
+        try:
+            evaluation.flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
+        except Exception as e:
+            logger.error(f"Failed to get flow for evaluation {evaluation_name}: {e}")
+            evaluation.flow = None
 
         return evaluation
 

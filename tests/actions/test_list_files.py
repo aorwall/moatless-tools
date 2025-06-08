@@ -2,7 +2,7 @@ import os
 import tempfile
 import pytest
 import subprocess
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, MagicMock
 
 from moatless.actions.list_files import ListFiles, ListFilesArgs
 from moatless.file_context import FileContext
@@ -213,7 +213,7 @@ async def test_list_files_nonexistent_directory(list_files_action, file_context,
     assert isinstance(result, Observation)
     assert result.message is not None
     assert "Error" in result.message
-    assert "No such directory" in result.message
+    assert "Directory nonexistent does not exist" in result.message
 
 
 @pytest.mark.asyncio
@@ -249,6 +249,7 @@ async def test_list_files_environment_failure_fallback(list_files_action, file_c
     # Mock the repository's list_directory method
     mock_repo = MagicMock(spec=FileRepository)
     mock_repo.list_directory.return_value = {"directories": ["fallback_dir"], "files": ["fallback_file.txt"]}
+    mock_repo.shadow_mode = False
 
     # Keep a reference to the original repository
     original_repo = list_files_action._workspace.repository
@@ -408,8 +409,119 @@ async def test_max_results_limit(list_files_action, file_context, temp_repo):
     assert total_items <= 5
 
     # If git is available, files and directories in result may be limited to what's in git
-    git_available = "respecting .gitignore" in result.message
     is_limited = len(result.properties.get("directories", [])) + len(result.properties.get("files", [])) >= 5
 
     if is_limited:
         assert "Results limited to 5" in result.message
+
+
+@pytest.mark.asyncio
+async def test_directories_prioritized_over_files(list_files_action, file_context, temp_repo):
+    """Test that directories are shown before files until max_results is reached."""
+    # Create multiple directories and files
+    for i in range(10):
+        os.makedirs(os.path.join(temp_repo, f"dir_{i}"), exist_ok=True)
+        with open(os.path.join(temp_repo, f"file_{i}.txt"), "w") as f:
+            f.write(f"Content {i}")
+
+    # Add to git to make them visible
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add test files"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+
+    # Execute with a limit that's less than total items
+    args = ListFilesArgs(directory="", recursive=False, max_results=8, thoughts="Testing directory prioritization")
+    result = await list_files_action.execute(args, file_context)
+
+    # Split result into lines and get items
+    lines = result.message.split("\n")
+    dir_lines = [line for line in lines if line.startswith("📁 ")]
+    file_lines = [line for line in lines if line.startswith("📄 ")]
+
+    # If we have more than 8 directories, only directories should be shown
+    if len(result.properties.get("directories", [])) >= 8:
+        assert len(file_lines) == 0, "When enough directories exist, no files should be shown"
+    else:
+        # Otherwise, all directories should be shown first, then files
+        total_dirs = len(result.properties.get("directories", []))
+        total_files = len(result.properties.get("files", []))
+        assert total_dirs + total_files <= 8, "Total items should not exceed max_results"
+        
+        # All directories should appear before any files in the message
+        if dir_lines and file_lines:
+            last_dir_index = max(i for i, line in enumerate(lines) if line.startswith("📁 "))
+            first_file_index = min(i for i, line in enumerate(lines) if line.startswith("📄 "))
+            assert last_dir_index < first_file_index, "All directories should appear before files"
+
+
+@pytest.mark.asyncio
+async def test_hidden_directories_excluded(list_files_action, file_context, temp_repo):
+    """Test that directories starting with '.' are hidden by default."""
+    # Create directories starting with '.' and regular directories
+    os.makedirs(os.path.join(temp_repo, ".hidden_dir"), exist_ok=True)
+    os.makedirs(os.path.join(temp_repo, ".another_hidden"), exist_ok=True)
+    os.makedirs(os.path.join(temp_repo, "visible_dir"), exist_ok=True)
+    
+    # Create some files in these directories
+    with open(os.path.join(temp_repo, ".hidden_dir", "hidden_file.txt"), "w") as f:
+        f.write("Hidden content")
+    with open(os.path.join(temp_repo, "visible_dir", "visible_file.txt"), "w") as f:
+        f.write("Visible content")
+
+    # Add to git (though they might be ignored by .gitignore)
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add test dirs"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+
+    # Execute listing
+    args = ListFilesArgs(directory="", recursive=False, thoughts="Testing hidden directory exclusion")
+    result = await list_files_action.execute(args, file_context)
+
+    # Check that hidden directories are not shown
+    assert ".hidden_dir" not in result.message, "Hidden directories starting with '.' should not be shown"
+    assert ".another_hidden" not in result.message, "Hidden directories starting with '.' should not be shown"
+    assert "visible_dir" in result.message, "Regular directories should be shown"
+
+    # Also check properties
+    directories = result.properties.get("directories", [])
+    assert ".hidden_dir" not in directories, "Hidden directories should not be in properties"
+    assert ".another_hidden" not in directories, "Hidden directories should not be in properties"
+    assert "visible_dir" in directories, "Regular directories should be in properties"
+
+
+@pytest.mark.asyncio
+async def test_recursive_hidden_directories_excluded(list_files_action, file_context, temp_repo):
+    """Test that hidden directories are excluded in recursive mode too."""
+    # Create nested structure with hidden directories
+    os.makedirs(os.path.join(temp_repo, "parent", ".hidden_subdir"), exist_ok=True)
+    os.makedirs(os.path.join(temp_repo, "parent", "visible_subdir"), exist_ok=True)
+    
+    # Create some files
+    with open(os.path.join(temp_repo, "parent", ".hidden_subdir", "file.txt"), "w") as f:
+        f.write("Hidden content")
+    with open(os.path.join(temp_repo, "parent", "visible_subdir", "file.txt"), "w") as f:
+        f.write("Visible content")
+
+    # Add to git
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add nested test dirs"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+
+    # Execute recursive listing
+    args = ListFilesArgs(directory="parent", recursive=True, thoughts="Testing recursive hidden directory exclusion")
+    result = await list_files_action.execute(args, file_context)
+
+    # Check that hidden subdirectories are not shown
+    assert ".hidden_subdir" not in result.message, "Hidden subdirectories should not be shown in recursive mode"
+    assert "visible_subdir" in result.message, "Regular subdirectories should be shown in recursive mode"
+
+    # Also check properties
+    directories = result.properties.get("directories", [])
+    hidden_dirs = [d for d in directories if ".hidden_subdir" in d]
+    assert len(hidden_dirs) == 0, "No hidden directories should be in properties for recursive listing"

@@ -1,6 +1,5 @@
 from pydantic import ConfigDict, Field
 import logging
-import subprocess
 from typing import List
 
 from moatless.actions.action import Action
@@ -10,7 +9,6 @@ from moatless.actions.schema import (
 )
 from moatless.completion.schema import FewShotExample
 from moatless.file_context import FileContext
-from moatless.environment.local import LocalBashEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +111,11 @@ class ListFiles(Action):
             raise RuntimeError("No environment set")
         else:
             local_env = self.workspace.environment
+            
+        if file_context.shadow_mode:
+            patch = file_context.generate_git_patch()
+        else:
+            patch = None
 
         try:
             # Generate directory path for commands
@@ -180,8 +183,8 @@ class ListFiles(Action):
             try:
                 # Execute commands to get directories and files
                 try:
-                    dirs_output = await local_env.execute(dirs_command)
-                    files_output = await local_env.execute(files_command)
+                    dirs_output = await local_env.execute(dirs_command, patch=patch)
+                    files_output = await local_env.execute(files_command, patch=patch)
 
                 except Exception as e:
                     # Check if it's a "no such file or directory" error
@@ -230,16 +233,16 @@ class ListFiles(Action):
                                     # Strip the parent directory part to get just the name
                                     dir_name = rel_path.replace(f"{dir_path}/", "")
                                     if dir_name:  # Skip if empty after replacement
-                                        # Skip if the directory name should be ignored
-                                        if any(
+                                        # Skip if the directory name should be ignored or starts with '.'
+                                        if dir_name.startswith('.') or any(
                                             dir_name == ignored_dir or dir_name.startswith(f"{ignored_dir}/")
                                             for ignored_dir in self.ignored_dirs
                                         ):
                                             continue
                                         directories.append(dir_name)
                                 else:
-                                    # Skip if the directory name should be ignored
-                                    if any(
+                                    # Skip if the directory name should be ignored or starts with '.'
+                                    if rel_path.startswith('.') or any(
                                         rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
                                         for ignored_dir in self.ignored_dirs
                                     ):
@@ -247,11 +250,17 @@ class ListFiles(Action):
                                     directories.append(rel_path)
                             else:
                                 # For recursive, show full relative paths
-                                # Skip if the directory path should be ignored
-                                if any(
-                                    rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
-                                    for ignored_dir in self.ignored_dirs
-                                ):
+                                # Skip if the directory path should be ignored or any component starts with '.'
+                                path_components = rel_path.split('/')
+                                should_skip = (
+                                    rel_path.startswith('.') or 
+                                    any(component.startswith('.') for component in path_components) or
+                                    any(
+                                        rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
+                                        for ignored_dir in self.ignored_dirs
+                                    )
+                                )
+                                if should_skip:
                                     continue
                                 directories.append(rel_path)
 
@@ -265,8 +274,15 @@ class ListFiles(Action):
                         else:
                             rel_path = line
 
-                        # Skip if the file is in an ignored directory
-                        if any(f"/{ignored_dir}/" in f"/{rel_path}/" for ignored_dir in self.ignored_dirs):
+                        # Skip if the file is in an ignored directory or hidden directory, or if the file itself starts with a dot
+                        path_components = rel_path.split('/')
+                        file_name = path_components[-1]  # Get the actual file name
+                        should_skip_file = (
+                            any(f"/{ignored_dir}/" in f"/{rel_path}/" for ignored_dir in self.ignored_dirs) or
+                            any(component.startswith('.') for component in path_components[:-1]) or  # Check dirs
+                            file_name.startswith('.')  # Also check if the file name itself starts with a dot
+                        )
+                        if should_skip_file:
                             continue
 
                         if rel_path:
@@ -283,20 +299,18 @@ class ListFiles(Action):
                                 # For recursive, show full relative paths
                                 files.append(rel_path)
 
-                # Apply max_results limit, divided between directories and files
+                # Apply max_results limit, prioritizing directories over files
                 total_results = list_files_args.max_results
                 if len(directories) + len(files) > total_results:
-                    # Distribute the results proportionally
-                    total_items = len(directories) + len(files)
-                    dir_ratio = len(directories) / total_items
-                    file_ratio = len(files) / total_items
-
-                    # Calculate how many results to allocate to each type
-                    max_dirs = min(len(directories), max(1, int(total_results * dir_ratio)))
-                    max_files = min(len(files), total_results - max_dirs)
-
-                    directories = directories[:max_dirs]
-                    files = files[:max_files]
+                    # Prioritize directories first, then files with remaining slots
+                    if len(directories) >= total_results:
+                        # If we have enough directories to fill max_results, only show directories
+                        directories = directories[:total_results]
+                        files = []
+                    else:
+                        # Show all directories, then files with remaining slots
+                        remaining_slots = total_results - len(directories)
+                        files = files[:remaining_slots]
 
                 # Create a result object
                 result = {
@@ -317,11 +331,11 @@ class ListFiles(Action):
                     if file_context._repo and hasattr(file_context._repo, "list_directory"):
                         raw_result = file_context._repo.list_directory(list_files_args.directory)
 
-                        # Filter out ignored directories
+                        # Filter out ignored directories and directories starting with '.'
                         filtered_dirs = [
                             d
                             for d in raw_result.get("directories", [])
-                            if not any(
+                            if not d.startswith('.') and not any(
                                 d == ignored_dir or d.startswith(f"{ignored_dir}/") for ignored_dir in self.ignored_dirs
                             )
                         ]

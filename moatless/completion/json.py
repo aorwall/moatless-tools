@@ -93,6 +93,6 @@ Make sure to return an instance of the JSON, not the schema itself.""")
             logger.info(f"JSON response: {response}")
             return [response], None, None
 
-        except (ValidationError, json.JSONDecodeError) as e:
+        except (ValidationError, json.JSONDecodeError, ValueError) as e:
             logger.warning(f"JSON validation failed with error: {e}")
             raise CompletionRetryError(f"The response was invalid. Fix these errors:\n{e}") from e

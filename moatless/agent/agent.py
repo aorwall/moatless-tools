@@ -54,6 +54,7 @@ class ActionAgent(MoatlessComponent):
         default_factory=MessageHistoryGenerator,
         description="Message history generator to be used for generating completions",
     )
+    shadow_mode: bool = Field(True, description="Set to true to not persist changes done by the agent.")
 
     _action_map: dict[type[ActionArguments], Action] = PrivateAttr(default_factory=dict)
     _workspace: Workspace | None = PrivateAttr(default=None)
@@ -315,6 +316,13 @@ class ActionAgent(MoatlessComponent):
             raise RuntimeError("Completion model not set")
 
         self._workspace = workspace
+        
+        try:
+            self.workspace.repository.shadow_mode = self.shadow_mode
+        except ValueError:
+            # Repository not set, skip setting shadow_mode
+            pass
+            
         for action in self.actions:
             await action.initialize(workspace)
 

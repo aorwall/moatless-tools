@@ -244,6 +244,7 @@ class ContextFile(BaseModel):
                 if git_patch:
                     self.patch = git_patch
         else:
+            logger.info(f"Updating cached content for {self.file_path}")
             # In shadow mode, update cached content to the new content
             self._cached_content = updated_content
 
@@ -1214,6 +1215,15 @@ class FileContext(BaseModel):
         if "_max_tokens" not in self.__dict__:
             self.__dict__["_max_tokens"] = data.get("max_tokens", 8000)
 
+    def __setattr__(self, name: str, value):
+        """Override __setattr__ to handle private attributes properly."""
+        if name in ("_files", "_test_files", "_max_tokens"):
+            # Handle the private attributes that are managed via __dict__
+            self.__dict__[name] = value
+        else:
+            # Use normal Pydantic attribute setting for other attributes
+            super().__setattr__(name, value)
+
     @classmethod
     def from_dir(cls, repo_dir: str, max_tokens: int = 8000):
         from moatless.repository.file import FileRepository
@@ -1351,6 +1361,25 @@ class FileContext(BaseModel):
     def remove_file(self, file_path: str):
         if file_path in self._files:
             del self._files[file_path]
+
+    def remove_files(self, file_paths: list[str]) -> dict[str, bool]:
+        """
+        Remove multiple files from the file context.
+        
+        Args:
+            file_paths: List of file paths to remove from context
+            
+        Returns:
+            dict: Dictionary mapping file paths to removal success (True if removed, False if not found)
+        """
+        removal_results = {}
+        for file_path in file_paths:
+            if file_path in self._files:
+                del self._files[file_path]
+                removal_results[file_path] = True
+            else:
+                removal_results[file_path] = False
+        return removal_results
 
     def exists(self, file_path: str):
         return file_path in self._files
