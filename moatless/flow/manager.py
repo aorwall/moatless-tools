@@ -258,10 +258,6 @@ class FlowManager:
         """Get the path to a specific flow config file."""
         return f"flows/{flow_id}.json"
 
-    def _get_global_config_path(self) -> Path:
-        """Get the path to the global config file."""
-        return Path(__file__).parent / "flows.json"
-
     async def _migrate_legacy_config(self):
         """Migrate from legacy flows.json to individual flow files if needed."""
         try:
@@ -282,21 +278,7 @@ class FlowManager:
                 logger.info("Legacy flow configs migrated successfully")
         except KeyError:
             # No legacy config exists, try to copy global config
-            try:
-                global_path = self._get_global_config_path()
-                if global_path.exists():
-                    with open(global_path) as f:
-                        global_config = json.load(f)
-                        if isinstance(global_config, list):
-                            for config in global_config:
-                                if "id" in config:
-                                    flow_path = self._get_flow_config_path(config["id"])
-                                    await self._storage.write(flow_path, config)
-                    logger.info("Copied global config to individual flow files")
-                else:
-                    logger.info("No global flow configs found")
-            except Exception as e:
-                logger.error(f"Failed to copy global flow configs: {e}")
+            logger.info("No legacy flow configs found")
         except Exception as e:
             logger.error(f"Failed to migrate legacy flow configs: {e}")
 
