@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from typing import TypeVar, Optional, Union, Type, List
 
-from moatless.context_data import current_project_id, current_trajectory_id
+from moatless.context_data import current_project_id, current_trajectory_id, current_node_id
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +225,7 @@ class BaseStorage(abc.ABC):
             raise ValueError("No trajectory ID provided and no trajectory context set")
 
         return trajectory_id_context
+    
 
     async def read_from_project(self, path: str, project_id: Optional[str] = None) -> dict | list[dict] | str:
         """
@@ -373,3 +374,14 @@ class BaseStorage(abc.ABC):
             trajectory_id = self._get_trajectory_id()
 
         return f"projects/{project_id}/trajs/{trajectory_id}"
+
+    def get_node_path(self) -> str:
+        project_id = self._get_project_id()
+        
+        trajectory_id = self._get_trajectory_id()
+        node_id = current_node_id.get()
+        
+        if node_id:
+            return f"projects/{project_id}/trajs/{trajectory_id}/nodes/{node_id}"
+        else:
+            return f"projects/{project_id}/trajs/{trajectory_id}"

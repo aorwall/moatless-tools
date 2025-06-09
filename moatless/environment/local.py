@@ -29,7 +29,7 @@ class LocalBashEnvironment(BaseEnvironment):
         self.env = env
         self.shell = shell
 
-    async def execute(self, command: str, fail_on_error: bool = False) -> str:
+    async def execute(self, command: str, fail_on_error: bool = False, patch: str | None = None) -> str:
         """
         Execute a command on the local machine.
 
@@ -45,7 +45,6 @@ class LocalBashEnvironment(BaseEnvironment):
         """
         try:
             logger.info(f"$ {command}")
-
             # Prepare environment variables
             process_env = os.environ.copy()
             if self.env:

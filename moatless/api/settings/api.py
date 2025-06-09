@@ -28,6 +28,7 @@ async def list_flow_configs(flow_manager: FlowManager = Depends(get_flow_manager
     flow_dicts = [flow.model_dump(exclude_none=True, exclude_unset=True) for flow in flows]
     return flow_dicts
 
+
 @router.post("/flows")
 async def create_flow_config_api(config: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
     """
@@ -45,7 +46,7 @@ async def read_flow_config(config_id: str, flow_manager: FlowManager = Depends(g
     logger.info(f"Getting flow config for {config_id}")
     flow = await flow_manager.get_flow_config(config_id)
     return flow.model_dump(exclude_none=True, exclude_unset=True)
-   
+
 
 @router.put("/flows/{config_id}")
 async def update_flow_config_api(config_id: str, update: dict, flow_manager: FlowManager = Depends(get_flow_manager)):
@@ -67,7 +68,6 @@ async def delete_flow_config_api(config_id: str, flow_manager: FlowManager = Dep
     logger.info(f"Deleting flow config {config_id}")
     await flow_manager.delete_config(config_id)
     return {"status": "success", "message": f"Flow configuration {config_id} deleted successfully"}
-
 
 
 @router.get("/components/selectors")

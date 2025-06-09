@@ -102,7 +102,6 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
     elif await storage.exists(f"projects/{project_id}/settings.json"):
         project_settings = await storage.read(f"projects/{project_id}/settings.json")
         repo_path = project_settings["repository_path"]
-        index_store_dir = f"{repo_path}/.moatless/index"
         runtime = None
 
     elif os.environ.get("REPO_PATH"):
@@ -119,8 +118,10 @@ async def setup_workspace(project_id: str, trajectory_id: str) -> Workspace:
         repository = None
         environment = None
 
-    if not index_store_dir and os.environ.get("INDEX_STORE_DIR"):
+    if os.environ.get("INDEX_STORE_DIR"):
         index_store_dir = os.environ.get("INDEX_STORE_DIR")
+    else:
+        index_store_dir = None
 
     if index_store_dir:
         logger.info(f"Using index store dir: {index_store_dir}")

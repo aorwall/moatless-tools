@@ -80,7 +80,7 @@ class ReadFile(Action):
 
     args_schema = ReadFileArgs
 
-    max_lines: int = Field(100, description="The maximum number of lines to read from the file.")
+    max_lines: int = Field(200, description="The maximum number of lines to read from the file.")
 
     async def execute(self, args: ReadFileArgs, file_context: FileContext | None = None) -> Observation:
         if file_context is None:

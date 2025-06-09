@@ -15,6 +15,7 @@ from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.testing.python.parser_registry import parse_log
 from moatless.testing.schema import TestResult
+from moatless.context_data import current_node_id
 from unidiff import PatchSet
 
 logger = logging.getLogger(__name__)
@@ -52,36 +53,61 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         self._install_command = specs.get("install")
 
         if self.swebench_instance["repo"] == "sphinx-doc/sphinx":
-            self._install_after_patch = False
+            self._install_after_patch = True
         else:
             self._install_after_patch = False
 
         self._install_task = asyncio.create_task(self._run_async_installation(self._install_command))
 
-    async def execute(self, command: str, fail_on_error: bool = False) -> str:
+    async def execute(self, command: str, fail_on_error: bool = False, patch: str | None = None) -> str:
         """Execute a command in the environment."""
         await self._wait_for_install()
-        stdout, return_code = await self._execute_command(command)
-        logger.info(f"Command {command} returned {return_code}")
-        logger.info(f"Output: {stdout}")
-        
-        if fail_on_error and return_code != 0:
-            raise RuntimeError(f"Command {command} failed with return code {return_code}: {stdout}")
-        
+        try:
+            
+            if patch:
+                await self._apply_patch(patch)
+                    
+                if self._install_after_patch and self._install_command:
+                    logger.info(f"Installing after patch with command: {self._install_command}")
+                    stdout, return_code = await self._execute_command(self._install_command)
+                    logger.info(f"Installation output: {stdout} {return_code}")
+            
+            stdout, return_code = await self._execute_command(command)
+            logger.info(f"Command {command} returned {return_code}")
+            logger.info(f"Output: {stdout}")
+
+            # Save execution log
+            if self.storage:
+                await self._save_execution_log(command, patch, stdout, return_code)
+
+            if fail_on_error and return_code != 0:
+                raise EnvironmentExecutionError(message=f"Command {command} failed with return code {return_code}: {stdout}", stderr=stdout, return_code=return_code)
+
+        except Exception as e:
+            logger.error(f"Error executing command {command}: {e}")
+            raise e
+        finally:
+            if patch:
+                await self._reset_repository()
+
         return stdout
 
     async def read_file(self, path: str) -> str:
         """Read a file from the environment."""
         stdout, return_code = await self._execute_command(f"cat {path}")
         return stdout
-    
+
     async def write_file(self, path: str, content: str) -> None:
         """Write content to a file in the environment."""
         stdout, return_code = await self._execute_command(f"echo '{content}' > {path}")
         if return_code != 0:
-            raise EnvironmentExecutionError(f"Command {f'echo {content} > {path}'} failed with return code {return_code}", return_code, stdout)
+            raise EnvironmentExecutionError(
+                f"Command {f'echo {content} > {path}'} failed with return code {return_code}", return_code, stdout
+            )
 
-    async def run_tests(self, patch: str | None = None, test_files: list[str] | None = None, timeout: int = 600) -> list[TestResult]:
+    async def run_tests(
+        self, patch: str | None = None, test_files: list[str] | None = None, timeout: int = 600
+    ) -> list[TestResult]:
         """Run tests with an optional patch and specific test files."""
         # Wait for installation to complete if it's running
         await self._wait_for_install()
@@ -108,12 +134,12 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                 logger.info(f"Test command: {test_command}")
 
                 stdout, return_code = await self._execute_command(test_command, timeout=timeout)
-                
+
                 timed_out = return_code == -1  # -1 indicates timeout
-                
+
                 if timed_out:
                     logger.warning(f"Test timed out after {timeout} seconds for file: {test_file}")
-                
+
                 logger.info(f"Return code: {return_code}")
                 if return_code != 0:
                     logger.warning(f"Test output: {stdout}")
@@ -121,11 +147,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                     logger.debug(f"Test output: {stdout}")
 
                 if self.storage:
-                    trajectory_key = self.storage.get_trajectory_path()
-                    datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-                    log_path = f"{trajectory_key}/logs/{datetime_str}_test_run.log"
-                    await self.storage.write_raw(log_path, stdout)
-                    logger.info(f"Test log saved to {log_path}")
+                    await self._save_execution_log(test_command, patch, stdout, return_code)
 
                 testbed_results = parse_log(stdout, test_spec.repo)
 
@@ -138,18 +160,21 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                         # If we don't have any results but we timed out, create a basic result
                         if result.status == TestStatus.UNKNOWN and not result.failure_output:
                             result.failure_output = f"Test execution timed out after {timeout} seconds"
-                
+
                 # If no results were parsed but we ran a test (even if it timed out), create a basic result
                 if not testbed_results:
                     from moatless.testing.schema import TestResult, TestStatus
+
                     basic_result = TestResult(
                         status=TestStatus.ERROR if timed_out else TestStatus.UNKNOWN,
                         file_path=test_file,
                         timed_out=timed_out,
-                        failure_output=f"Test execution timed out after {timeout} seconds" if timed_out else "No test results could be parsed from output"
+                        failure_output=f"Test execution timed out after {timeout} seconds"
+                        if timed_out
+                        else "No test results could be parsed from output",
                     )
                     testbed_results = [basic_result]
-                
+
                 test_results.extend(testbed_results)
 
         if patch:
@@ -263,7 +288,9 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                 logger.error(f"Installation process failed: {str(e)}")
                 raise RuntimeError("Installation process failed") from e
 
-    async def _execute_command(self, command: str, cwd: Path | None = None, timeout: int | None = None) -> Tuple[str, int]:
+    async def _execute_command(
+        self, command: str, cwd: Path | None = None, timeout: int | None = None
+    ) -> Tuple[str, int]:
         """Execute a shell command and return combined output and return code."""
 
         # Prepend conda activation to the command using . instead of source
@@ -515,10 +542,88 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         #    eval_commands.append(specs["install"])
         eval_commands += [
             reset_tests_command,
-            apply_test_patch_command,
+            apply_test_patch_command]
+        
+        if self._install_after_patch and self._install_command:
+            eval_commands += [self._install_command]
+        
+        eval_commands += [
             f": '{START_TEST_OUTPUT}'",
             test_command,
             f": '{END_TEST_OUTPUT}'",
             reset_tests_command,  # Revert tests after done, leave the repo in the same state as before
         ]
         return eval_commands
+
+    async def _save_execution_log(self, command: str, patch: str | None, output: str, return_code: int) -> None:
+        """Save execution log for the command."""
+        try:
+            trajectory_path = self.storage.get_trajectory_path()
+            datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            
+            # Create a smart filename with command snippet and return code
+            command_snippet = self._create_command_snippet(command)
+            filename = f"{datetime_str}_{command_snippet}_rc{return_code}.log"
+            
+            log_dir = f"{trajectory_path}/logs"
+            
+            node_id = current_node_id.get()
+            if node_id:
+                log_dir = f"{log_dir}/node_{node_id}"
+                
+            log_path = f"{log_dir}/{filename}"
+            
+            # Create log content
+            log_content = f"Command: {command}\n"
+            log_content += f"Return Code: {return_code}\n"
+            if patch:
+                log_content += f"Patch Applied: Yes\n"
+                log_content += f"Patch Content:\n{patch}\n"
+                log_content += "=" * 80 + "\n"
+            else:
+                log_content += "Patch Applied: No\n"
+            log_content += f"Output:\n{output}\n"
+            
+            await self.storage.write_raw(log_path, log_content)
+            logger.info(f"Execution log saved to {log_path}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save execution log: {e}")
+
+    def _create_command_snippet(self, command: str) -> str:
+        """Create a smart snippet of the command for the filename."""
+        # Remove conda activation commands and bash wrapper
+        clean_command = command
+        if ". /opt/miniconda3/bin/activate && conda activate testbed && " in command:
+            clean_command = command.replace(". /opt/miniconda3/bin/activate && conda activate testbed && ", "")
+        
+        # Take first meaningful part of command
+        parts = clean_command.split()
+        if not parts:
+            return "empty"
+        
+        # Use first command word and some arguments, but keep it short
+        snippet_parts = []
+        char_count = 0
+        max_chars = 30  # Keep filename reasonable
+        
+        for part in parts[:4]:  # Take at most 4 parts
+            if char_count + len(part) > max_chars:
+                break
+            snippet_parts.append(part)
+            char_count += len(part) + 1  # +1 for space
+        
+        snippet = "_".join(snippet_parts)
+        
+        # Clean up for filename safety
+        safe_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-."
+        snippet = "".join(c if c in safe_chars else "_" for c in snippet)
+        
+        # Remove consecutive underscores
+        while "__" in snippet:
+            snippet = snippet.replace("__", "_")
+        
+        # Trim underscores from start/end
+        snippet = snippet.strip("_")
+        
+        return snippet[:30]  # Ensure max length

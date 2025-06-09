@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-This script checks if Maven is installed on the system and 
+This script checks if Maven is installed on the system and
 tests the Maven parser with sample Maven output.
 """
 
@@ -22,13 +22,9 @@ def check_maven_installed():
     """Check if Maven is installed on the system."""
     try:
         result = subprocess.run(
-            ["mvn", "--version"], 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE,
-            text=True,
-            check=False
+            ["mvn", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False
         )
-        
+
         if result.returncode == 0:
             print("Maven is installed:")
             print(result.stdout.splitlines()[0])
@@ -45,7 +41,7 @@ def check_maven_installed():
 def test_maven_parser():
     """Test the Maven parser with sample Maven output."""
     print("\nTesting Maven parser with sample output...")
-    
+
     # Sample Maven output
     sample_output = """
 [INFO] Scanning for projects...
@@ -93,21 +89,21 @@ java.lang.NullPointerException
 [INFO] Finished at: 2023-05-15T14:32:45-07:00
 [INFO] ------------------------------------------------------------------------
 """
-    
+
     parser = MavenParser()
     test_results = parser.parse_test_output(sample_output)
-    
+
     # Print the test results
     print(f"Found {len(test_results)} test results:")
-    
+
     # Count by status
     passed = sum(1 for r in test_results if r.status == TestStatus.PASSED)
     failed = sum(1 for r in test_results if r.status == TestStatus.FAILED)
     errors = sum(1 for r in test_results if r.status == TestStatus.ERROR)
     skipped = sum(1 for r in test_results if r.status == TestStatus.SKIPPED)
-    
+
     print(f"Passed: {passed}, Failed: {failed}, Errors: {errors}, Skipped: {skipped}")
-    
+
     # Print details of each test
     for i, result in enumerate(test_results):
         print(f"\nTest Result {i+1}:")
@@ -122,53 +118,48 @@ java.lang.NullPointerException
 def test_real_maven_project():
     """Test the Maven parser with real output from tm-api project."""
     print("\nTesting Maven parser with real output from tm-api project...")
-    
+
     # Test files from the user query
     test_files = [
         "src/test/java/se/frankpenny/tm/core/services/BeneficialOwnerServiceTest.java",
-        "src/test/java/se/frankpenny/tm/core/services/OrganizationServiceTest.java"
+        "src/test/java/se/frankpenny/tm/core/services/OrganizationServiceTest.java",
     ]
-    
+
     # Path to the tm-api project
     tm_api_path = "/Users/albert/repos/fp/tm-api"
-    
+
     if not os.path.exists(tm_api_path):
         print(f"Error: Project path {tm_api_path} does not exist.")
         return
-    
+
     parser = MavenParser()
-    
+
     # Process each test file
     for test_file in test_files:
         print(f"\nProcessing test file: {test_file}")
-        
+
         # Extract class name from file path
         file_without_ext = test_file[:-5]  # Remove ".java"
-        
+
         # Handle common source directories
         for prefix in ["src/test/java/", "src/main/java/", "src/it/java/"]:
             if file_without_ext.startswith(prefix):
-                file_without_ext = file_without_ext[len(prefix):]
+                file_without_ext = file_without_ext[len(prefix) :]
                 break
-        
+
         # Convert / to . for package name
         class_name = file_without_ext.replace("/", ".")
-        
+
         # Build Maven test command
         command = f"cd {tm_api_path} && mvn test -Dtest={class_name}"
         print(f"Running command: {command}")
-        
+
         try:
             # Run the Maven test
             process = subprocess.run(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False
+                command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False
             )
-            
+
             # Capture output regardless of success/failure
             # Combine stdout and stderr for better error detection
             output = process.stdout
@@ -177,7 +168,7 @@ def test_real_maven_project():
                     output += "\n" + process.stderr
                 else:
                     output = process.stderr
-            
+
             # Check for failure
             if process.returncode != 0:
                 print(f"Command failed with return code {process.returncode}")
@@ -186,18 +177,18 @@ def test_real_maven_project():
             
             # Parse the test output
             test_results = parser.parse_test_output(output, test_file)
-            
+
             # Print the test results
             print(f"Found {len(test_results)} test results:")
-            
+
             # Count by status
             passed = sum(1 for r in test_results if r.status == TestStatus.PASSED)
             failed = sum(1 for r in test_results if r.status == TestStatus.FAILED)
             errors = sum(1 for r in test_results if r.status == TestStatus.ERROR)
             skipped = sum(1 for r in test_results if r.status == TestStatus.SKIPPED)
-            
+
             print(f"Passed: {passed}, Failed: {failed}, Errors: {errors}, Skipped: {skipped}")
-            
+
             # Print details of each test
             for i, result in enumerate(test_results):
                 print(f"\nTest Result {i+1}:")
@@ -207,14 +198,14 @@ def test_real_maven_project():
                 print(f"  Method: {result.method}")
                 if result.failure_output:
                     print(f"  Failure Output: {result.failure_output[:200]}...")
-            
+
             # Special debug output to see what's being parsed
             if len(test_results) == 0:
                 print("\nNo test results found. Here's a sample of the output to debug:")
                 print("-" * 50)
                 print(output[:500] + "..." if len(output) > 500 else output)
                 print("-" * 50)
-        
+
         except Exception as e:
             print(f"Error running Maven test: {str(e)}")
 
@@ -223,13 +214,13 @@ def main():
     """Main function."""
     print("Maven Test Runner and Parser Checker")
     print("====================================")
-    
+
     # Check if Maven is installed
     maven_installed = check_maven_installed()
-    
+
     # Test the Maven parser with sample output
     test_maven_parser()
-    
+
     # Test with real output if Maven is installed
     if maven_installed:
         test_real_maven_project()
@@ -240,4 +231,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main() 
+    main()

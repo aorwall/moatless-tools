@@ -33,7 +33,7 @@ def main():
     parser.add_argument("--repo-dir", required=True, help="Directory code base to ingest")
     parser.add_argument("--index-store-dir", required=False, help="Directory to store vector index file")
     parser.add_argument("--embed-model", default="voyage-code-3", help="Embedding model to use")
-    
+
     args = parser.parse_args()
 
     # Load environment variables
@@ -43,6 +43,7 @@ def main():
     index_settings = IndexSettings(embed_model=args.embed_model, dimensions=1024, language="java")
 
     ingest_repo(args.repo_dir, index_settings)
+
 
 if __name__ == "__main__":
     main()

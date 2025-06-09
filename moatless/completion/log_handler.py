@@ -63,23 +63,22 @@ class LogHandler(CustomLogger):
             logger.exception(f"Failed to write log to {log_path}. Data: {data}")
 
     async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
-    
         response_key = "async_complete_streaming_response"
         if response_key not in kwargs:
             response_key = "original_response"
-            
+
         original_response = kwargs.get(response_key)
 
         if not original_response:
             logger.warning(f"No {response_key} found in kwargs with keys: {kwargs.keys()}")
-            
+
             if response_obj:
                 original_response = response_obj
             else:
                 original_response = f"Couldn't find LLM response. No {response_key} found in LiteLLM completion kwargs with keys: {kwargs.keys()}"
-            
+
         original_response = self.parse_response(original_response)
-         
+
         if "additional_args" in kwargs and kwargs.get("additional_args").get("complete_input_dict"):
             original_input = kwargs.get("additional_args").get("complete_input_dict")
         else:
@@ -87,7 +86,7 @@ class LogHandler(CustomLogger):
                 "messages": kwargs.get("input", []),
                 **kwargs.get("optional_params", {}),
             }
-            
+
         data = {
             "start_time": start_time,
             "end_time": end_time,
@@ -133,11 +132,11 @@ class LogHandler(CustomLogger):
     def parse_response(self, original_response):
         if not original_response:
             return None
-        
+
         if hasattr(original_response, "__class__") and original_response.__class__.__name__ == "coroutine":
             logger.warning(f"Got coroutine in original_response, converting to string")
             original_response = str(original_response)
-        
+
         if isinstance(original_response, str):
             try:
                 cleaned_response = original_response.replace("\\\\", "\\")

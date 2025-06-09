@@ -106,7 +106,7 @@ class DockerRunner(BaseRunner):
         logger.info(f"  - Network: {self.network_name}")
         logger.info(f"  - Host architecture: {'ARM64' if self.is_arm64 else 'AMD64'}")
         logger.info(f"  - Image architecture: {self.architecture}")
-        
+
         # Log platform strategy
         if self.is_arm64 and self.architecture == "x86_64":
             logger.info(f"  - Platform strategy: Will use --platform=linux/amd64 for x86_64 images on ARM64 host")
@@ -114,7 +114,7 @@ class DockerRunner(BaseRunner):
             logger.info(f"  - Platform strategy: Will use --platform=linux/arm64 for native ARM64 images")
         else:
             logger.info(f"  - Platform strategy: Will use Docker default platform")
-            
+
         if self.memory_limit:
             logger.info(f"  - Memory limit: {self.memory_limit}")
         if self.memory_swap_limit:
@@ -213,7 +213,7 @@ class DockerRunner(BaseRunner):
                 "INSTANCE_PATH=/data/instance.json",
                 "VIRTUAL_ENV=",  # Empty value tells UV to ignore virtual environments
                 "UV_NO_VENV=1",  # Tell UV explicitly not to use venv
-                #"HTTPBIN_URL=http://httpbin.moatless.ai/", # This is to use a more stable httpbin server in psf/request instances
+                # "HTTPBIN_URL=http://httpbin.moatless.ai/", # This is to use a more stable httpbin server in psf/request instances
             ]
 
             # Add components path environment variable only if components are configured
@@ -304,7 +304,9 @@ class DockerRunner(BaseRunner):
             should_update = self.update_on_start and not self.moatless_source_dir
             branch_to_use = self.update_branch
 
-            self.logger.info(f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}")
+            self.logger.info(
+                f"Should update: {should_update}, update_on_start: {self.update_on_start}, update_branch: {self.update_branch}"
+            )
             if should_update:
                 self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
                 run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
@@ -701,7 +703,7 @@ class DockerRunner(BaseRunner):
             JobStatus enum value
         """
         self.logger.debug(f"Parsing container status: {status}, {running}, {exit_code}")
-        
+
         # First check if container is running - either by status or running flag
         if status == "running" or running.lower() == "true":
             return JobStatus.RUNNING
@@ -949,30 +951,30 @@ class DockerRunner(BaseRunner):
 
     def _convert_localhost_url(self, url: str) -> str:
         """Convert localhost URLs to be accessible from Docker containers.
-        
+
         Args:
             url: The URL to convert
-            
+
         Returns:
             Converted URL that can be accessed from within Docker containers
         """
         if not url:
             return url
-            
+
         # Pattern to match localhost or 127.0.0.1 in URLs
-        localhost_pattern = r'(redis://|http://|https://|)(?:localhost|127\.0\.0\.1)(:[\d]+)?(/.*)?'
-        
+        localhost_pattern = r"(redis://|http://|https://|)(?:localhost|127\.0\.0\.1)(:[\d]+)?(/.*)?"
+
         match = re.match(localhost_pattern, url, re.IGNORECASE)
         if not match:
             return url
-            
+
         protocol, port, path = match.groups()
         port = port or ""
         path = path or ""
-        
+
         # Use host.docker.internal which works on Docker Desktop and newer Docker versions
         # This is the most portable solution across different platforms
         converted_url = f"{protocol}host.docker.internal{port}{path}"
-        
+
         logger.info(f"Converted localhost URL '{url}' to '{converted_url}' for Docker container access")
         return converted_url

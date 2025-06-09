@@ -19,8 +19,6 @@ class SemanticSearchArgs(SearchBaseArgs):
 
     This is the most flexible search when you:
     - Don't know exact function/class names
-    - Want to find similar implementations
-    - Need to discover related code
     - Want to explore how certain features are implemented
     """
 

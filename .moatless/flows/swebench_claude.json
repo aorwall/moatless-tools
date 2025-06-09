@@ -1,0 +1,150 @@
+{
+  "id": "swebench_claude",
+  "description": "SWE-bench flow using structured tool calling with Claude Sonnet 4 and built-in reasoning capabilities.  (Copy)",
+  "agent": {
+    "agent_id": null,
+    "model_id": "claude-sonnet-4-20250514-thinking",
+    "description": null,
+    "completion_model": {
+      "model_id": "claude-sonnet-4-20250514-thinking",
+      "model": "claude-sonnet-4-20250514",
+      "temperature": 1.0,
+      "max_tokens": 32000,
+      "timeout": 180.0,
+      "model_base_url": null,
+      "model_api_key": null,
+      "metadata": null,
+      "message_cache": true,
+      "thoughts_in_action": false,
+      "disable_thoughts": false,
+      "few_shot_examples": false,
+      "headers": {
+        "anthropic-beta": "interleaved-thinking-2025-05-14"
+      },
+      "params": {
+        "thinking": {
+          "type": "enabled",
+          "budget_tokens": 24000
+        }
+      },
+      "merge_same_role_messages": false,
+      "completion_model_class": "moatless.completion.tool_call.ToolCallCompletionModel"
+    },
+    "system_prompt": "\nYou are an autonomous AI assistant that fixes code issues. You cannot communicate with the user - only use available tools.\n\n## Core Decision Flow\n\n### 1. Understand the Issue\nRead the user's message completely. Extract:\n- Specific files/functions mentioned \u2192 Go directly to those\n- Error messages/stack traces \u2192 Search for exact text\n- General descriptions \u2192 Use SemanticSearch for concepts\n\n### 2. Find the Code\n**Make multiple tool calls in one response:**\n- Use `GrepTool` for exact text (error messages, function names)\n- Use `SemanticSearch` for concepts and understanding\n- Read all relevant files together with multiple `ReadFile` calls\n\n**Stop searching when you've found:**\n- The code causing the error\n- Related code that needs to change\n- Existing tests for that code\n\n### 3. Understand or Reproduce?\n**Can you fix it from reading the code?**\n- Yes \u2192 Go to step 4\n- No \u2192 Create a minimal script with `CreateFile` + `execute=True` to reproduce the issue\n\n### 4. Fix the Code\nMake all necessary changes in one response:\n- Use `StringReplace` for modifications\n- Use `CreateFile` for new files\n- Keep changes minimal and focused\n\n### 5. Verify the Fix\n**Find and run ALL related tests:**\n- Search for test files (patterns vary: `test_*.py`, `*_test.py`, `tests/` dirs)\n- Use `RunTests` for all test files at once (concise output)\n- Use `RunPythonScript` only if you need verbose debugging output\n\n**Tests fail?** \u2192 Return to step 3 or 4\n**Tests pass?** \u2192 Continue to step 6\n\n### 6. Complete\n- Use `Cleanup` to remove all temporary debug files\n- Call `Finish` with summary of changes and test results\n\n## Key Principles\n\n- **Batch Operations**: Multiple tool calls per response, not one at a time\n- **Direct Path**: If files are specified, go straight there\n- **Minimal Changes**: Fix only what's broken\n- **Test Everything**: Find and run all related tests before finishing\n- **Clean Up**: Remove debug files only at the very end\n\n## Remember\n- `CreateFile` with `execute=True` creates AND runs the file immediately\n- `RunPythonScript` runs existing files only\n- `GrepTool` is for exact text matches\n- `SemanticSearch` is for concepts and understanding",
+    "actions": [
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.append_string.AppendString"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.cleanup_context.CleanupContext"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.create_python_file.CreatePythonFile"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.glob.GlobTool"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.grep_tool.GrepTool"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "ignored_dirs": [
+          ".git",
+          ".cursor",
+          ".mvn",
+          ".venv"
+        ],
+        "action_class": "moatless.actions.list_files.ListFiles"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "max_lines": 100,
+        "action_class": "moatless.actions.read_file.ReadFile"
+      },
+      {
+        "is_terminal": true,
+        "hidden": false,
+        "action_class": "moatless.actions.reject.Reject"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.run_python_script.RunPythonScript"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "max_output_tokens": 4000,
+        "action_class": "moatless.actions.run_tests.RunTests"
+      },
+      {
+        "completion_model": null,
+        "is_terminal": false,
+        "hidden": false,
+        "max_search_tokens": 2000,
+        "max_identify_tokens": 8000,
+        "max_identify_prompt_tokens": 16000,
+        "max_hits": 10,
+        "add_extra_context": false,
+        "use_identifier": false,
+        "action_class": "moatless.actions.semantic_search.SemanticSearch"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "auto_correct_indentation": true,
+        "action_class": "moatless.actions.string_replace.StringReplace"
+      },
+      {
+        "is_terminal": false,
+        "hidden": false,
+        "action_class": "moatless.actions.verified_finish.VerifiedFinish"
+      }
+    ],
+    "memory": {
+      "max_tokens": 0,
+      "max_tokens_per_observation": null,
+      "include_file_context": true,
+      "include_git_patch": true,
+      "thoughts_in_action": false,
+      "memory_class": "moatless.message_history.message_history.MessageHistoryGenerator"
+    },
+    "shadow_mode": true,
+    "agent_class": "moatless.agent.agent.ActionAgent"
+  },
+  "metadata": {},
+  "max_iterations": 200,
+  "max_cost": 1.5,
+  "selector": {
+    "selector_class": "moatless.selector.simple.SimpleSelector"
+  },
+  "expander": {
+    "max_expansions": 1,
+    "auto_expand_root": false,
+    "expander_class": "moatless.expander.expander.Expander"
+  },
+  "value_function": {
+    "value_function_class": "moatless.value_function.swebench.SwebenchValueFunction"
+  },
+  "feedback_generator": null,
+  "discriminator": null,
+  "max_expansions": 1,
+  "min_finished_nodes": 1,
+  "max_finished_nodes": 1,
+  "reward_threshold": 0.0,
+  "max_depth": 200,
+  "flow_class": "moatless.flow.search_tree.SearchTree"
+}

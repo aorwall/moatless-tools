@@ -75,10 +75,10 @@ class FlowManager:
         Returns:
             SearchTree: A configured search tree instance
         """
-        
+
         if not flow_id and not flow_config:
             raise ValueError("Either flow_id or flow_config must be provided")
-        
+
         if flow_id and flow_config:
             raise ValueError("Cannot provide both flow_id and flow_config")
 
@@ -88,25 +88,25 @@ class FlowManager:
             flow = await self.get_flow_config(flow_id)
             if not flow:
                 raise ValueError(f"Flow config {flow_id} not found")
-        
+
         if not flow.agent:
             raise ValueError(f"Flow {flow_id} has no agent. Please create an agent first.")
-        
+
         # If model_id is provided, get the model from the model manager and set it on the flow's agent
         if model_id:
             logger.info(f"Setting model {model_id} on flow agent")
             completion_model = self._model_manager.create_completion_model(model_id)
             flow.agent.completion_model = completion_model
             flow.agent.model_id = model_id
-            
+
         if not flow.agent.completion_model:
             raise ValueError(f"Flow {flow_id} has no completion model.")
-        
+
         # If litellm_model_name is provided, override just the model field of the existing completion model
         if litellm_model_name and flow.agent.completion_model:
             logger.info(f"Setting litellm model name {litellm_model_name} on flow agent completion model")
             flow.agent.completion_model.model = litellm_model_name
-            
+
         return flow
 
     async def create_flow(
@@ -140,7 +140,7 @@ class FlowManager:
         # Validate inputs
         if not flow_id and not flow_config:
             raise ValueError("Either flow_id or flow_config must be provided")
-        
+
         if flow_id and flow_config:
             raise ValueError("Cannot provide both flow_id and flow_config")
 
@@ -165,13 +165,13 @@ class FlowManager:
 
         if not trajectory_id:
             trajectory_id = str(uuid.uuid4())
-        
+
         node = Node.create_root(
             user_message=message,
         )
 
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
-        
+
         trajectory_data = {
             "trajectory_id": trajectory_id,
             "project_id": project_id,
@@ -181,7 +181,7 @@ class FlowManager:
 
         await self._storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
         await self._storage.write(f"{trajectory_path}/flow.json", config.model_dump())
-        
+
         return trajectory_data
 
     async def create_loop(
@@ -269,14 +269,14 @@ class FlowManager:
             legacy_configs = await self._storage.read("flows.json")
             if isinstance(legacy_configs, list) and legacy_configs:
                 logger.info(f"Migrating {len(legacy_configs)} legacy flow configs to individual files")
-                
+
                 # Save each config as individual file
                 for config in legacy_configs:
                     if "id" in config:
                         flow_path = self._get_flow_config_path(config["id"])
                         await self._storage.write(flow_path, config)
                         logger.debug(f"Migrated flow config {config['id']}")
-                
+
                 # Remove legacy file after successful migration
                 # Note: We don't delete here to be safe, but could add deletion if needed
                 logger.info("Legacy flow configs migrated successfully")
@@ -305,7 +305,7 @@ class FlowManager:
         logger.debug(f"Getting flow config {id}")
 
         flow_path = self._get_flow_config_path(id)
-        
+
         try:
             config = await self._storage.read(flow_path)
             if isinstance(config, dict):
@@ -318,7 +318,7 @@ class FlowManager:
             logger.info(f"Flow config {id} not found. Migrating legacy configs if needed.")
             # Try to migrate legacy configs if needed
             await self._migrate_legacy_config()
-            
+
             # Try reading again after migration
             try:
                 config = await self._storage.read(flow_path)
@@ -352,7 +352,7 @@ class FlowManager:
 
         configs = []
         flow_ids = await self._list_available_flows()
-        
+
         for flow_id in flow_ids:
             try:
                 config = await self.get_flow_config(flow_id)
@@ -365,16 +365,15 @@ class FlowManager:
 
     async def create_config(self, config: dict):
         """Create a new flow configuration."""
-        
+
         if not config.get("id"):
             raise ValueError("Config must have an 'id' field")
 
         flow = SearchTree.from_dict(config)
         logger.info(f"Creating flow config {flow.id}")
-        
-        
+
         flow_path = self._get_flow_config_path(flow.id)
-        
+
         # Check if flow already exists
         if await self._storage.exists(flow_path):
             raise ValueError(f"Flow config {flow.id} already exists")
@@ -388,14 +387,14 @@ class FlowManager:
         flow_id = config.get("id")
         if not flow_id:
             raise ValueError("Config must have an 'id' field")
-            
+
         logger.debug(f"Updating flow config {flow_id}")
-        
+
         # To verify the config is valid, we need to convert it to an AgenticFlow object
         flow = SearchTree.model_validate(config)
-        
+
         flow_path = self._get_flow_config_path(flow_id)
-        
+
         # Check if flow exists
         if not await self._storage.exists(flow_path):
             raise ValueError(f"Flow config {flow_id} not found")
@@ -405,16 +404,14 @@ class FlowManager:
     async def delete_config(self, id: str):
         """Delete a flow configuration."""
         logger.debug(f"Deleting flow config {id}")
-        
+
         flow_path = self._get_flow_config_path(id)
-        
+
         # Check if flow exists
         if not await self._storage.exists(flow_path):
             raise ValueError(f"Flow config {id} not found")
 
         await self._storage.delete(flow_path)
-        
-    
 
     async def get_flow(self, project_id: str, trajectory_id: str | None = None) -> AgenticFlow:
         """Get a flow from a trajectory."""
@@ -625,7 +622,6 @@ class FlowManager:
         await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
 
         return node
-    
 
     async def get_trajectory_settings(self, project_id: str, trajectory_id: str) -> dict:
         """Get the settings for a trajectory."""

@@ -70,11 +70,11 @@ def create_dataset_index(
 
     # Create the index
     index = []
-    
+
     # Create instances directory if it doesn't exist
     instances_dir = "instances"
     os.makedirs(instances_dir, exist_ok=True)
-    
+
     for instance_id, info in instance_map.items():
         instance = info["instance"]
         index_entry = {
@@ -90,7 +90,7 @@ def create_dataset_index(
             "resolved_by": instance.get("resolved_by", []),
         }
         index.append(index_entry)
-        
+
         # Save individual instance as JSON file
         instance_path = os.path.join(instances_dir, f"{instance_id}.json")
         with open(instance_path, "w") as f:

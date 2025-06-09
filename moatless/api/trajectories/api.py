@@ -165,15 +165,8 @@ async def resume_trajectory(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Resume a trajectory."""
-    try:
-        await flow_manager.resume_trajectory(project_id, trajectory_id, request)
-        return {"status": "success", "message": f"Resumed trajectory {trajectory_id}"}
-    except ValueError as e:
-        logger.exception(f"Error resuming trajectory: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error resuming trajectory: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    await flow_manager.resume_trajectory(project_id, trajectory_id, request)
+    return {"status": "success", "message": f"Resumed trajectory {trajectory_id}"}
 
 
 @router.post("/{project_id}/{trajectory_id}/execute")
@@ -184,15 +177,8 @@ async def execute_node(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Execute a run."""
-    try:
-        return await flow_manager.execute_node(project_id, trajectory_id, request.node_id)
-    except ValueError as e:
-        logger.exception(f"Error executing node: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error executing node: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
+    return await flow_manager.execute_node(project_id, trajectory_id, request.node_id)
+   
 
 @router.get("/{project_id}/{trajectory_id}/tree")
 async def get_node_tree(
@@ -452,7 +438,7 @@ async def create_trajectory(
         flow_config = None
         if request.flow_config:
             flow_config = SearchTree.model_validate(request.flow_config)
-        
+
         # Create the flow
         flow = await flow_manager.create_flow(
             flow_id=request.flow_id,
@@ -463,7 +449,7 @@ async def create_trajectory(
             project_id=request.project_id,
             metadata=request.metadata,
         )
-        
+
         # Return trajectory response
         return flow
     except ValueError as e:

@@ -74,14 +74,12 @@ class EvaluationManager:
         """Create a new evaluation and return its ID."""
         if not dataset_name and not instance_ids:
             raise ValueError("Either dataset_name or instance_ids must be provided")
-        
+
         if not dataset_name:
             dataset_name = "instance_ids"
 
         if not evaluation_name:
-            evaluation_name = (
-                f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{dataset_name}"
-            )
+            evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{dataset_name}"
 
         logger.info(f"Creating evaluation: {evaluation_name}")
 
@@ -92,7 +90,11 @@ class EvaluationManager:
         if await self.storage.exists_in_project("evaluation.json", project_id=evaluation_name):
             raise ValueError("Evaluation already exists")
 
-        flow = await self._flow_manager.build_flow(flow_id=flow_id, model_id=model_id, litellm_model_name=litellm_model_name)
+        flow = await self._flow_manager.build_flow(
+            flow_id=flow_id, flow_config=flow_config, model_id=model_id, litellm_model_name=litellm_model_name
+        )
+        
+        model_id = flow.agent.completion_model.model
 
         evaluation = Evaluation(
             evaluation_name=evaluation_name,
@@ -113,31 +115,43 @@ class EvaluationManager:
             project_id=evaluation.evaluation_name,
         )
 
-        for instance in evaluation.instances:
-            swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
-            repo_name = swebench_instance["repo"].split("/")[-1]
-            problem_statement = (
-                f"You're tasks is to solve an issue reported in the project {repo_name}. The repository is cloned in the directory /testbed which is the current working directory. "
-                f"The reported issue is:\n{swebench_instance['problem_statement']}"
-            )
-
-            root_node = Node.create_root(user_message=problem_statement)
-
-            trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
-            trajectory_data = {
-                "trajectory_id": instance.instance_id,
-                "project_id": evaluation.evaluation_name,
-                "nodes": root_node.dump_as_list(exclude_none=True, exclude_unset=True),
-                "metadata": {
-                    "instance_id": instance.instance_id,
-                },
-            }
-
-            await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
-
+        await self._create_trajectories(evaluation)
+        
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
         return evaluation
+    
+    
+    async def _create_trajectories(self, evaluation: Evaluation):
+        for instance in evaluation.instances:
+            await self._create_trajectory(evaluation, instance)
+    
+    async def _create_trajectory(self, evaluation: Evaluation, instance: EvaluationInstance):
+        if await self.storage.exists_in_trajectory("trajectory.json", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id):
+            logger.info(f"Trajectory {instance.instance_id} already exists, skipping")
+            return
+        
+        swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
+        repo_name = swebench_instance["repo"].split("/")[-1]
+        problem_statement = (
+            f"You're tasks is to solve an issue reported in the project {repo_name}. The repository is cloned in the directory /testbed which is the current working directory. "
+            f"The reported issue is:\n{swebench_instance['problem_statement']}"
+        )
+
+        root_node = Node.create_root(user_message=problem_statement)
+
+        trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
+        trajectory_data = {
+            "trajectory_id": instance.instance_id,
+            "project_id": evaluation.evaluation_name,
+            "nodes": root_node.dump_as_list(exclude_none=True, exclude_unset=True),
+            "metadata": {
+                "instance_id": instance.instance_id,
+            },
+        }
+
+        await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
+
 
     async def clone_evaluation(self, evaluation_name: str) -> Evaluation:
         """Clone an existing evaluation."""
@@ -155,10 +169,11 @@ class EvaluationManager:
             logger.info(f"Cloning evaluation {evaluation_name} with {len(instance_ids)} instances")
         else:
             instance_ids = None
+            
+        flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
 
         return await self.create_evaluation(
-            evaluation.flow_id,
-            evaluation.model_id,
+            flow_config=flow,
             evaluation_name=new_evaluation_name,
             dataset_name=evaluation.dataset_name,
             instance_ids=instance_ids,
@@ -207,15 +222,19 @@ class EvaluationManager:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
         await self._sync_evaluation_status(evaluation)
-        
-        evaluation.flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
+
+        try:
+            evaluation.flow = await self._flow_manager.get_flow(project_id=evaluation.evaluation_name)
+        except Exception as e:
+            logger.error(f"Failed to get flow for evaluation {evaluation_name}: {e}")
+            evaluation.flow = None
 
         return evaluation
-    
+
     async def _sync_evaluation_status(self, evaluation: Evaluation):
         if evaluation.status == EvaluationStatus.COMPLETED:
             return evaluation
-        
+
         # Process the evaluation status
         evaluation_is_running = False
         evaluation_is_completed = True
@@ -223,12 +242,12 @@ class EvaluationManager:
 
         for instance in evaluation.instances:
             # Skip if already fully processed
-            
+
             # Get current job status from runner
             job_status = await self.runner.get_job_status(
                 project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
             )
-            
+
             # Check if evaluation is still incomplete
             if not instance.is_finished() or not instance.is_evaluated():
                 evaluation_is_completed = False
@@ -236,27 +255,29 @@ class EvaluationManager:
             # Check if any job is running
             if job_status == JobStatus.RUNNING:
                 evaluation_is_running = True
-                
+
                 if instance.execution_status != ExecutionStatus.RUNNING:
                     instance.execution_status = ExecutionStatus.RUNNING
                     has_updates = True
-                
+
             if job_status == JobStatus.PENDING:
                 if instance.execution_status != ExecutionStatus.QUEUED:
                     instance.execution_status = ExecutionStatus.QUEUED
                     has_updates = True
-                    
+
             # Update instance if job status changed
             if instance.job_status != job_status:
                 instance.job_status = job_status
                 await self._sync_instance_with_job_status(instance, job_status)
                 await self._process_trajectory_results(evaluation, instance)
                 has_updates = True
-            
+
             # Clean up completed and evaluated jobs from Kubernetes cluster
             if instance.is_evaluated() and job_status == JobStatus.COMPLETED:
                 try:
-                    logger.info(f"Instance {instance.instance_id} is completed and evaluated, cleaning up Kubernetes job")
+                    logger.info(
+                        f"Instance {instance.instance_id} is completed and evaluated, cleaning up Kubernetes job"
+                    )
                     await self.runner.cancel_job(evaluation.evaluation_name, instance.instance_id)
                     logger.info(f"Successfully cleaned up completed job for instance {instance.instance_id}")
                     # Update job_status to None since we just deleted it
@@ -264,7 +285,7 @@ class EvaluationManager:
                     has_updates = True
                 except Exception as e:
                     logger.warning(f"Failed to clean up completed job for instance {instance.instance_id}: {e}")
-                
+
         # Update evaluation status based on instance states
         if evaluation_is_completed:
             evaluation.status = EvaluationStatus.COMPLETED
@@ -276,10 +297,9 @@ class EvaluationManager:
         elif evaluation_is_running and evaluation.status != EvaluationStatus.RUNNING:
             evaluation.status = EvaluationStatus.RUNNING
             has_updates = True
-            
+
         if has_updates:
             await self._save_evaluation(evaluation)
-
 
     async def get_config(self, evaluation_name: str) -> dict:
         """Get the config for an evaluation."""
@@ -381,9 +401,7 @@ class EvaluationManager:
 
         try:
             await self._sync_event_timestamps(evaluation, instance)
-            flow = await self._read_flow(
-                trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name
-            )
+            flow = await self._read_flow(trajectory_id=instance.instance_id, project_id=evaluation.evaluation_name)
             logger.debug(f"Read flow with {len(flow.root.get_all_nodes())} nodes")
 
             instance.usage = flow.total_usage()
@@ -395,22 +413,28 @@ class EvaluationManager:
 
             if not node:
                 node = flow.root.get_last_node()
-                
+
             if node.reward:
                 instance.reward = node.reward.value
-                
+
             logger.debug(f"Instance {instance.instance_id} flow is finished: {flow.is_finished()}")
             if flow.is_finished():
                 instance.execution_status = ExecutionStatus.COMPLETED
             else:
-                
                 instance.execution_status = ExecutionStatus.CREATED
 
             if node.evaluation_result and node.evaluation_result.resolved is not None:
                 # Set resolution status based on evaluation
                 instance.set_resolution(node.evaluation_result.resolved)
                 logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
+                
             
+            if node.evaluation_result and node.evaluation_result.details:
+                p2p_failues = node.evaluation_result.details.get("tests_status", {}).get("PASS_TO_PASS", {}).get("failure", [])
+                logger.info(f"Instance {instance.instance_id} p2p failures: {p2p_failues}")
+                if p2p_failues and not "p2p_failures" in instance.issues:
+                    instance.issues.append("p2p_failures")
+                    
             if instance.resolution_status != ResolutionStatus.RESOLVED:
                 logger.debug(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
                 # Check if any leaf node is resolved for partial resolution
@@ -427,7 +451,7 @@ class EvaluationManager:
         except Exception as e:
             logger.exception(f"Error processing trajectory results for instance {instance.instance_id}")
             instance.fail(str(e))
-            
+
         return instance
 
     async def _read_flow(
@@ -435,11 +459,10 @@ class EvaluationManager:
         trajectory_id: str,
         project_id: str,
     ) -> "AgenticFlow":
-
         traj_dict = await self.storage.read_from_trajectory("trajectory.json", project_id, trajectory_id)
         if not traj_dict:
             raise ValueError("Trajectory not found")
-        
+
         try:
             flow_dict: dict | None = await self.storage.read_from_trajectory("flow.json", project_id, trajectory_id)  # type: ignore
         except Exception:
@@ -525,6 +548,18 @@ class EvaluationManager:
         evaluation = await self._load_evaluation(evaluation_name)
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
+        
+        try:
+            if evaluation.dataset_name:
+                instance_ids = self.get_dataset_instance_ids(evaluation.dataset_name)
+                for instance_id in instance_ids:
+                    if not any(instance.instance_id == instance_id for instance in evaluation.instances):
+                        logger.info(f"Instance {instance_id} not found in evaluation {evaluation_name}, creating")
+                        instance = EvaluationInstance(instance_id=instance_id)
+                        evaluation.instances.append(instance)
+                        await self._create_trajectory(evaluation, instance)
+        except Exception as e:
+            logger.error(f"Error processing evaluation results for {evaluation_name}: {e}")
 
         logger.debug(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:
@@ -699,8 +734,7 @@ class EvaluationManager:
                 logger.info(f"Resetting node {leaf_node.node_id} with error")
                 leaf_node.reset()
                 should_save = True
-                
-            
+
         # Skip if already completed and evaluated
         if instance.is_finished() and instance.is_evaluated():
             finish_reason = flow.is_finished()
@@ -708,31 +742,25 @@ class EvaluationManager:
                 logger.info(f"Instance {instance_id} is already completed and evaluated, skipping: {finish_reason}")
                 return evaluation
 
-
-        # TODO: This is a hack to ignore the terminal node if it is not really terminal
-        if flow.root.get_last_node().terminal and not flow.root.get_last_node().is_terminal():
-            flow.root.get_last_node().terminal = False
-            
-            should_save = True
-
         if should_save:
             await self._flow_manager.save_trajectory(evaluation.evaluation_name, instance.instance_id, flow)
+
         # Start the job using the wrapper function
         await self.runner.start_job(
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
             job_func=run_swebench_instance,
         )
-        
+
         job_status = await self.runner.get_job_status(
             project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id
         )
-        
+
         instance.job_status = job_status
         await self._sync_instance_with_job_status(instance, job_status)
-        
+
         logger.info(f"Started instance {instance_id} with job status: {job_status}")
-            
+
         # Update evaluation status if needed
         if evaluation.status in [
             EvaluationStatus.PENDING,
@@ -744,7 +772,7 @@ class EvaluationManager:
                 evaluation.started_at = datetime.now(timezone.utc)
 
         await self._save_evaluation(evaluation)
-        
+
         return evaluation
 
     async def list_evaluation_instances(self, evaluation_name: str) -> list[str]:

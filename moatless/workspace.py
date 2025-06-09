@@ -49,7 +49,6 @@ class Workspace(BaseModel):
         self._repository = repository
         self._code_index = code_index
         self._runtime = runtime
-        
 
     @property
     def repository(self) -> Repository:

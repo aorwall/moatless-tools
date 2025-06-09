@@ -1,9 +1,8 @@
 # type: ignore
 """Tests for the KubernetesRunner implementation."""
 
-import asyncio
-from datetime import datetime, timedelta, timezone
-from typing import AsyncGenerator, Callable
+from datetime import datetime, timezone
+from typing import AsyncGenerator, Callable, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,10 +18,9 @@ from kubernetes.client import (
     V1ContainerState,
     V1ContainerStateTerminated,
     V1ContainerStatus,
-    V1PodCondition,
 )
 from moatless.runner.kubernetes_runner import KubernetesRunner
-from moatless.runner.runner import BaseRunner, JobInfo, JobStatus, RunnerStatus
+from moatless.runner.runner import JobInfo, JobStatus, RunnerStatus
 from moatless.runner.label_utils import create_resource_id
 
 
@@ -124,6 +122,7 @@ class TestKubernetesRunner(KubernetesRunner):
         node_id: int = None,
         update_on_start: bool = False,
         update_branch: str = "docker",
+        custom_requirements_configmap: Optional[str] = None,
     ) -> client.V1Job:
         """Create a mock kubernetes job object."""
         # Create a mock job with the minimum required fields
@@ -583,8 +582,6 @@ async def test_get_job_logs(kubernetes_runner, mock_k8s_api):
     # Setup test data
     project_id = "test-project"
     trajectory_id = "test-trajectory"
-    expected_job_id = kubernetes_runner._job_id(project_id, trajectory_id)
-    expected_namespace = kubernetes_runner.namespace
 
     # Create pod list with one pod
     pod_list = MagicMock()
@@ -603,7 +600,7 @@ async def test_get_job_logs(kubernetes_runner, mock_k8s_api):
     # Verify log retrieval
     assert logs == "Test log output"
     core_api.list_namespaced_pod.assert_called_once()
-    core_api.read_namespaced_pod_log.assert_called_once_with(name="test-pod", namespace=expected_namespace)
+    core_api.read_namespaced_pod_log.assert_called_once_with(name="test-pod", namespace=kubernetes_runner.namespace)
 
     # Test with no pods
     core_api.list_namespaced_pod.reset_mock()
@@ -748,7 +745,6 @@ async def test_get_job_status_summary(kubernetes_runner, mock_k8s_api):
 
     # Setup job list
     project_id = "test-project"
-    expected_namespace = kubernetes_runner.namespace
 
     job_list = MagicMock()
     job_list.items = [
