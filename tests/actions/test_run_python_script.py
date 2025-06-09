@@ -135,20 +135,140 @@ class TestRunPythonScriptAction:
 
     def test_args_schema_validation(self):
         """Test that the RunPythonScriptArgs schema validates correctly."""
-        # Test valid args
+        # Test valid args with defaults
         args = RunPythonScriptArgs(script_path="test.py")
         assert args.script_path == "test.py"
         assert args.args == []
         assert args.timeout == 30
+        assert args.max_output_tokens == 2000
 
-        # Test args with parameters
-        args = RunPythonScriptArgs(script_path="script.py", args=["--verbose", "input.txt"], timeout=120)
+        # Test args with all parameters
+        args = RunPythonScriptArgs(
+            script_path="script.py", 
+            args=["--verbose", "input.txt"], 
+            timeout=120,
+            max_output_tokens=5000
+        )
         assert args.script_path == "script.py"
         assert args.args == ["--verbose", "input.txt"]
         assert args.timeout == 120
+        assert args.max_output_tokens == 5000
 
     def test_action_name(self):
         """Test that the action has the correct name."""
         action = RunPythonScript()
         assert action.name == "RunPythonScript"
         assert RunPythonScript.get_name() == "RunPythonScript"
+
+    @pytest.mark.asyncio
+    async def test_output_truncation_large_output(self, file_context, workspace):
+        """Test that large outputs are truncated based on token count."""
+        # Create a large output that exceeds token limit
+        large_output = "This is a test line.\n" * 1000  # Should exceed 2000 tokens
+        workspace.environment.execute.return_value = large_output
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute with default max_output_tokens (2000)
+        args = RunPythonScriptArgs(script_path="large_output_script.py")
+        result = await action.execute(args, file_context)
+
+        # Verify output was truncated
+        assert "Python output:" in result.message
+        assert "[Output truncated at 2000 tokens" in result.message
+        assert "Please revise the script to show less output" in result.message
+        assert result.properties.get("fail_reason") == "truncated"
+        # The result should be shorter than the original
+        assert len(result.message) < len(f"Python output:\n{large_output}")
+
+    @pytest.mark.asyncio
+    async def test_output_truncation_small_output(self, file_context, workspace):
+        """Test that small outputs are not truncated."""
+        # Create a small output that should not be truncated
+        small_output = "Hello, World!\nThis is a small output."
+        workspace.environment.execute.return_value = small_output
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute with default max_output_tokens
+        args = RunPythonScriptArgs(script_path="small_output_script.py")
+        result = await action.execute(args, file_context)
+
+        # Verify output was not truncated
+        assert "Python output:" in result.message
+        assert small_output in result.message
+        assert "Output truncated" not in result.message
+        assert result.properties.get("fail_reason") is None
+
+    @pytest.mark.asyncio
+    async def test_output_truncation_custom_limit(self, file_context, workspace):
+        """Test that custom token limits work correctly."""
+        # Create medium-sized output
+        medium_output = "Test line\n" * 100
+        workspace.environment.execute.return_value = medium_output
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute with very low max_output_tokens
+        args = RunPythonScriptArgs(script_path="medium_script.py", max_output_tokens=50)
+        result = await action.execute(args, file_context)
+
+        # Verify output was truncated according to custom limit
+        assert "Python output:" in result.message
+        assert "[Output truncated at 50 tokens" in result.message
+        assert result.properties.get("fail_reason") == "truncated"
+
+    @pytest.mark.asyncio
+    async def test_error_output_truncation(self, file_context, workspace):
+        """Test that error outputs are also truncated."""
+        # Create large error output
+        large_error = "Error: " + "Long error message. " * 500
+        workspace.environment.execute.side_effect = EnvironmentExecutionError(
+            "Script failed", return_code=1, stderr=large_error
+        )
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute with default max_output_tokens
+        args = RunPythonScriptArgs(script_path="error_script.py")
+        result = await action.execute(args, file_context)
+
+        # Verify error output was truncated
+        assert "Python output:" in result.message
+        assert "[Error output truncated at 2000 tokens" in result.message
+        assert result.properties.get("fail_reason") == "execution_error_truncated"
+
+    def test_truncate_output_by_tokens_method(self):
+        """Test the _truncate_output_by_tokens method directly."""
+        action = RunPythonScript()
+        
+        # Test with empty output
+        result, was_truncated = action._truncate_output_by_tokens("", 100)
+        assert result == ""
+        assert not was_truncated
+
+        # Test with small output (should not be truncated)
+        small_text = "Hello World"
+        result, was_truncated = action._truncate_output_by_tokens(small_text, 100)
+        assert result == small_text
+        assert not was_truncated
+
+        # Test with large single line (should be truncated)
+        large_single_line = "word " * 1000
+        result, was_truncated = action._truncate_output_by_tokens(large_single_line, 10)
+        assert was_truncated
+        assert len(result) < len(large_single_line)
+
+        # Test with multiple lines (should be truncated by lines)
+        large_multiline = "Test line\n" * 100
+        result, was_truncated = action._truncate_output_by_tokens(large_multiline, 50)
+        assert was_truncated
+        assert result.count('\n') < large_multiline.count('\n')
