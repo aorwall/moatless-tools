@@ -45,7 +45,6 @@ class LocalBashEnvironment(BaseEnvironment):
         """
         try:
             logger.info(f"$ {command}")
-
             # Prepare environment variables
             process_env = os.environ.copy()
             if self.env:

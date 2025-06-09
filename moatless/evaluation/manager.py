@@ -115,31 +115,43 @@ class EvaluationManager:
             project_id=evaluation.evaluation_name,
         )
 
-        for instance in evaluation.instances:
-            swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
-            repo_name = swebench_instance["repo"].split("/")[-1]
-            problem_statement = (
-                f"You're tasks is to solve an issue reported in the project {repo_name}. The repository is cloned in the directory /testbed which is the current working directory. "
-                f"The reported issue is:\n{swebench_instance['problem_statement']}"
-            )
-
-            root_node = Node.create_root(user_message=problem_statement)
-
-            trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
-            trajectory_data = {
-                "trajectory_id": instance.instance_id,
-                "project_id": evaluation.evaluation_name,
-                "nodes": root_node.dump_as_list(exclude_none=True, exclude_unset=True),
-                "metadata": {
-                    "instance_id": instance.instance_id,
-                },
-            }
-
-            await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
-
+        await self._create_trajectories(evaluation)
+        
         await self._save_evaluation(evaluation)
         logger.info(f"Evaluation created: {evaluation_name} with {len(evaluation.instances)} instances")
         return evaluation
+    
+    
+    async def _create_trajectories(self, evaluation: Evaluation):
+        for instance in evaluation.instances:
+            await self._create_trajectory(evaluation, instance)
+    
+    async def _create_trajectory(self, evaluation: Evaluation, instance: EvaluationInstance):
+        if await self.storage.exists_in_trajectory("trajectory.json", project_id=evaluation.evaluation_name, trajectory_id=instance.instance_id):
+            logger.info(f"Trajectory {instance.instance_id} already exists, skipping")
+            return
+        
+        swebench_instance = get_swebench_instance(instance_id=instance.instance_id)
+        repo_name = swebench_instance["repo"].split("/")[-1]
+        problem_statement = (
+            f"You're tasks is to solve an issue reported in the project {repo_name}. The repository is cloned in the directory /testbed which is the current working directory. "
+            f"The reported issue is:\n{swebench_instance['problem_statement']}"
+        )
+
+        root_node = Node.create_root(user_message=problem_statement)
+
+        trajectory_path = self.storage.get_trajectory_path(evaluation.evaluation_name, instance.instance_id)
+        trajectory_data = {
+            "trajectory_id": instance.instance_id,
+            "project_id": evaluation.evaluation_name,
+            "nodes": root_node.dump_as_list(exclude_none=True, exclude_unset=True),
+            "metadata": {
+                "instance_id": instance.instance_id,
+            },
+        }
+
+        await self.storage.write(f"{trajectory_path}/trajectory.json", trajectory_data)
+
 
     async def clone_evaluation(self, evaluation_name: str) -> Evaluation:
         """Clone an existing evaluation."""
@@ -529,6 +541,18 @@ class EvaluationManager:
         evaluation = await self._load_evaluation(evaluation_name)
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
+        
+        try:
+            if evaluation.dataset_name:
+                instance_ids = self.get_dataset_instance_ids(evaluation.dataset_name)
+                for instance_id in instance_ids:
+                    if not any(instance.instance_id == instance_id for instance in evaluation.instances):
+                        logger.info(f"Instance {instance_id} not found in evaluation {evaluation_name}, creating")
+                        instance = EvaluationInstance(instance_id=instance_id)
+                        evaluation.instances.append(instance)
+                        await self._create_trajectory(evaluation, instance)
+        except Exception as e:
+            logger.error(f"Error processing evaluation results for {evaluation_name}: {e}")
 
         logger.debug(f"Processing evaluation results for {evaluation_name} with {len(evaluation.instances)} instances")
         for instance in evaluation.instances:

@@ -17,12 +17,7 @@ logger = logging.getLogger(__name__)
 class CreatePythonFileArgs(ActionArguments):
     """
     Create a new Python file with specified content and optionally execute it.
-
-    Notes:
-    * Cannot be used if the specified path already exists
-    * Will create parent directories if they don't exist
-    * File content should include proper indentation and formatting
-    * If execute is True, the file will be run after creation using Python
+    If execute is True, the file will be run after creation using Python
     """
 
     path: str = Field(..., description="Path where the new Python file should be created")

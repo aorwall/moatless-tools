@@ -146,7 +146,8 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                 else:
                     logger.debug(f"Test output: {stdout}")
 
-
+                if self.storage:
+                    await self._save_execution_log(test_command, patch, stdout, return_code)
 
                 testbed_results = parse_log(stdout, test_spec.repo)
 
