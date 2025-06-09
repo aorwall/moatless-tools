@@ -1,8 +1,7 @@
 import logging
 import re
 import shlex
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from pydantic import ConfigDict, Field
 
@@ -293,11 +292,11 @@ class GrepTool(Action):
             msg = f"No matches found for regex pattern '{args.pattern}'"
             if args.include:
                 msg += f" in files matching '{args.include}'"
-            return Observation.create(message=msg)
+            return Observation.create(message=msg, properties={"fail_reason": "no_matches"})
 
         # Parse grep output lines
         matches = []
-        file_matches = {}
+        file_matches: Dict[str, List[Dict[str, Any]]] = {}
 
         for line in output.strip().split('\n'):
             if not line.strip():
@@ -349,10 +348,7 @@ class GrepTool(Action):
             properties={
                 "total_matches": len(matches),
                 "total_files": len(file_matches),
-                "matches": matches[:args.max_results],  # Ensure we don't exceed max
-                "max_results": args.max_results,
-                "pattern": args.pattern,
-                "include": args.include,
+                "max_results": args.max_results
             },
         )
 
