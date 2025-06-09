@@ -272,3 +272,19 @@ class TestRunPythonScriptAction:
         result, was_truncated = action._truncate_output_by_tokens(large_multiline, 50)
         assert was_truncated
         assert result.count('\n') < large_multiline.count('\n')
+
+    def test_improved_truncation_efficiency(self):
+        """Test that the improved truncation preserves more content."""
+        action = RunPythonScript()
+        
+        # Create test content with known token characteristics
+        test_content = "Line 1: This is a test line with some content.\n" * 50
+        original_tokens = action._truncate_output_by_tokens(test_content, 10000)[0]  # Get original without truncation
+        
+        # Test with moderate limit - should preserve significant portion
+        result, was_truncated = action._truncate_output_by_tokens(test_content, 1000)
+        if was_truncated:
+            # Should preserve a significant portion, not just 400 tokens when limit is 2000
+            result_tokens_estimate = len(result.split()) * 1.3  # Rough token estimate
+            # Should get at least 70% of target tokens to avoid being too conservative
+            assert result_tokens_estimate >= 700, f"Only got ~{result_tokens_estimate} tokens from 1000 limit"

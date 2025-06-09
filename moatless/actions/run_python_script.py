@@ -44,28 +44,45 @@ class RunPythonScript(Action):
         if token_count <= max_tokens:
             return output, False
         
-        # Binary search to find the right truncation point
+        # Try to preserve as much content as possible while staying under the limit
         lines = output.split('\n')
+        
         if len(lines) <= 1:
-            # If it's a single line, truncate by characters
+            # Single line - use more aggressive character-based truncation
             chars_per_token = len(output) / token_count
-            target_chars = int(max_tokens * chars_per_token * 0.9)  # 90% to be safe
+            # Use 95% of the limit to be conservative but not overly so
+            target_chars = int(max_tokens * chars_per_token * 0.95)
             truncated = output[:target_chars]
             return truncated, True
         
-        # Binary search on lines
+        # Multi-line - use binary search to find optimal line truncation point
         left, right = 0, len(lines)
         best_result = ""
+        best_line_count = 0
         
-        while left < right:
-            mid = (left + right + 1) // 2
+        while left <= right:
+            mid = (left + right) // 2
             partial_output = '\n'.join(lines[:mid])
+            partial_tokens = count_tokens(partial_output, model)
             
-            if count_tokens(partial_output, model) <= max_tokens:
+            if partial_tokens <= max_tokens:
                 best_result = partial_output
-                left = mid
+                best_line_count = mid
+                left = mid + 1
             else:
                 right = mid - 1
+        
+        # If we couldn't fit any complete lines, fall back to character truncation of first few lines
+        if best_line_count == 0 and lines:
+            # Take first few lines and truncate by characters
+            first_few_lines = '\n'.join(lines[:min(3, len(lines))])
+            if count_tokens(first_few_lines, model) > max_tokens:
+                # Even first few lines are too much, truncate by characters
+                chars_per_token = len(first_few_lines) / count_tokens(first_few_lines, model)
+                target_chars = int(max_tokens * chars_per_token * 0.95)
+                return first_few_lines[:target_chars], True
+            else:
+                return first_few_lines, True
         
         return best_result, True
 
