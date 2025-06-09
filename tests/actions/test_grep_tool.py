@@ -733,9 +733,9 @@ async def test_grep_single_file_output_parsing(grep_tool_action, file_context, t
     # Mock the environment to return single file format output (like when searching a specific file)
     async def mock_execute_single_file_format(self, command, fail_on_error=False, patch=None):
         if "test_single_file.py" in command:
-            # Simulate grep output when searching a specific file (no file path prefix)
-            return """1:class TestClass:
-3:class AnotherClass:"""
+            # Simulate grep output when searching a specific file (with -H flag, includes filename)
+            return """test_single_file.py:1:class TestClass:
+test_single_file.py:3:class AnotherClass:"""
         return ""
 
     with patch.object(LocalBashEnvironment, "execute", mock_execute_single_file_format):

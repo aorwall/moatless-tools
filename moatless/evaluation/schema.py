@@ -120,6 +120,8 @@ class EvaluationInstance(BaseModel):
     last_event_timestamp: Optional[datetime] = Field(default=None, description="Timestamp of the last event")
     resolved_by: Optional[int] = Field(default=None, description="Number of agents that have resolved the evaluation")
 
+    issues: List[str] = Field(default_factory=list, description="Issues in the instance")
+
     def start(self):
         """Mark instance as queued for execution"""
         self.execution_status = ExecutionStatus.QUEUED

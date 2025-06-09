@@ -116,6 +116,26 @@ def test_django_5():
     assert len(result[0].stacktrace) == 0
 
 
+
+def test_django_6():
+    """Test parsing Django output with traceback"""
+    with open(_get_test_data_path("django_output_6.txt")) as f:
+        log = f.read()
+
+    result = parse_log(log, "django/django")
+
+    assert len(result) == 89
+    
+    failed = [r for r in result if r.status == TestStatus.FAILED]
+    assert len(failed) == 5
+
+    for fail in failed:
+        print(fail.failure_output)
+
+    for i, res in enumerate(result):
+        print(f"{i} {res.name}")
+    
+
 def test_django_error():
     """Test parsing Django output with error traceback"""
     stacktrace = """Traceback (most recent call last):

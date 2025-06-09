@@ -53,7 +53,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         self._install_command = specs.get("install")
 
         if self.swebench_instance["repo"] == "sphinx-doc/sphinx":
-            self._install_after_patch = False
+            self._install_after_patch = True
         else:
             self._install_after_patch = False
 
@@ -542,7 +542,12 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         #    eval_commands.append(specs["install"])
         eval_commands += [
             reset_tests_command,
-            apply_test_patch_command,
+            apply_test_patch_command]
+        
+        if self._install_after_patch and self._install_command:
+            eval_commands += [self._install_command]
+        
+        eval_commands += [
             f": '{START_TEST_OUTPUT}'",
             test_command,
             f": '{END_TEST_OUTPUT}'",

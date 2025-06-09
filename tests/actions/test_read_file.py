@@ -62,9 +62,10 @@ async def test_read_entire_file(read_file_action, file_context, temp_repo):
     assert "line1" in result.message
     assert "line99" in result.message
     assert "line100" in result.message
-    assert "line101" not in result.message  # Should be truncated at 100 lines
+    assert "line149" in result.message
+    assert "line150" not in result.message  # Should be truncated at 200 lines
     assert result.summary is not None
-    assert "Read first 100 lines" in result.summary
+    assert "Read first 149 lines" in result.summary
 
     # Verify file was added to context
     context_file = file_context.get_file("test.txt")
@@ -106,13 +107,12 @@ async def test_read_with_truncation(read_file_action, file_context, temp_repo):
     # Assert
     assert isinstance(result, Observation)
     assert result.message is not None
-    assert "```test.txt lines 1-100" in result.message
+    assert "```test.txt lines 1-150" in result.message
     assert "line1" in result.message
-    assert "line100" in result.message
-    assert "line101" not in result.message
-    assert "truncated at 100 lines" in result.message
+    assert "line149" in result.message
+    assert "line150" not in result.message
     assert result.summary is not None
-    assert "Read lines 1-100" in result.summary
+    assert "Read lines 1-150" in result.summary
 
     # Verify lines were added to context
     context_file = file_context.get_file("test.txt")

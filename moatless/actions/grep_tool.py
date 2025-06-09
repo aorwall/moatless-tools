@@ -216,9 +216,10 @@ class GrepTool(Action):
             # Use find to get matching files, then grep them
             # This approach is more reliable than mixing grep's --include with complex patterns
             find_pattern = self._convert_glob_to_find_pattern(args.include)
+            exclusions = self._get_find_exclusions()
 
             # Build find command to get list of files
-            find_cmd = f"find . -type f {find_pattern} -print0"
+            find_cmd = f"find . -type f {find_pattern}{exclusions} -print0"
 
             # Pipe to xargs + grep for efficient processing
             # Using -print0 and xargs -0 handles filenames with spaces
@@ -229,6 +230,9 @@ class GrepTool(Action):
 
     def _is_specific_file(self, pattern: str) -> bool:
         """Check if the pattern refers to a specific file (no wildcards)."""
+        # Directory paths ending with '/' should not be treated as specific files
+        if pattern.endswith('/'):
+            return False
         return not any(char in pattern for char in ['*', '?', '[', ']'])
 
     def _convert_glob_to_find_pattern(self, glob_pattern: str) -> str:
@@ -256,6 +260,18 @@ class GrepTool(Action):
                     conditions = [f"-name '{prefix}{ext.strip()}{suffix}'" for ext in ext_list]
                     return f"\\( {' -o '.join(conditions)} \\)"
             return f"-name '{glob_pattern}'"
+
+    def _get_find_exclusions(self) -> str:
+        """Get find command exclusions for file types that should be ignored."""
+        exclusions = [
+            "! -path '*/.git/*'",
+            "! -path '*/.venv/*'",
+            "! -path '*/__pycache__/*'",
+            "! -path '*/node_modules/*'",
+            "! -name '*.log'",
+            "! -name '*.tmp'",
+        ]
+        return f" {' '.join(exclusions)}"
 
     async def _execute_grep(self, cmd: str, env, patch, args: GrepToolArgs) -> str:
         """Execute the grep command and handle common errors."""
@@ -396,3 +412,15 @@ class GrepTool(Action):
             message += f"\nNote: Results limited to {args.max_results} matches. More matches may exist."
 
         return message
+
+    @classmethod
+    def get_evaluation_criteria(cls, trajectory_length: int | None = None) -> list[str]:
+        """Get evaluation criteria specific to grep search operations."""
+        evaluation_criteria = super().get_evaluation_criteria(trajectory_length)
+        evaluation_criteria.extend([
+            "Pattern Quality: Evaluate if the regex pattern is well-constructed and likely to find relevant matches.",
+            "Search Scope Appropriateness: Check if the file include patterns effectively narrow down the search to relevant files.",
+            "Relevance of Search Results: Assess whether the grep results are directly related to the problem and useful for making progress.",
+            "Pattern Specificity: Ensure the search pattern is neither too broad (overwhelming results) nor too narrow (missing relevant matches).",
+        ])
+        return evaluation_criteria

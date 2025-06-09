@@ -427,7 +427,14 @@ class EvaluationManager:
                 # Set resolution status based on evaluation
                 instance.set_resolution(node.evaluation_result.resolved)
                 logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
-
+                
+            
+            if node.evaluation_result and node.evaluation_result.details:
+                p2p_failues = node.evaluation_result.details.get("tests_status", {}).get("PASS_TO_PASS", {}).get("failure", [])
+                logger.info(f"Instance {instance.instance_id} p2p failures: {p2p_failues}")
+                if p2p_failues and not "p2p_failures" in instance.issues:
+                    instance.issues.append("p2p_failures")
+                    
             if instance.resolution_status != ResolutionStatus.RESOLVED:
                 logger.debug(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
                 # Check if any leaf node is resolved for partial resolution
