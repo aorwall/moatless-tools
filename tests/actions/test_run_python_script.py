@@ -140,7 +140,7 @@ class TestRunPythonScriptAction:
         assert args.script_path == "test.py"
         assert args.args == []
         assert args.timeout == 30
-        assert args.max_output_tokens == 2000
+        assert args.max_output_tokens == 4000
 
         # Test args with all parameters
         args = RunPythonScriptArgs(
@@ -171,13 +171,13 @@ class TestRunPythonScriptAction:
         action = RunPythonScript()
         await action.initialize(workspace)
 
-        # Execute with default max_output_tokens (2000)
+        # Execute with default max_output_tokens (4000)
         args = RunPythonScriptArgs(script_path="large_output_script.py")
         result = await action.execute(args, file_context)
 
         # Verify output was truncated
         assert "Python output:" in result.message
-        assert "[Output truncated at 2000 tokens" in result.message
+        assert "[Output truncated at 4000 tokens" in result.message
         assert "Please revise the script to show less output" in result.message
         assert result.properties.get("fail_reason") == "truncated"
         # The result should be shorter than the original
@@ -227,8 +227,8 @@ class TestRunPythonScriptAction:
     @pytest.mark.asyncio
     async def test_error_output_truncation(self, file_context, workspace):
         """Test that error outputs are also truncated."""
-        # Create large error output
-        large_error = "Error: " + "Long error message. " * 500
+        # Create large error output that will exceed 4000 tokens
+        large_error = "Error: " + "Long error message. " * 2000
         workspace.environment.execute.side_effect = EnvironmentExecutionError(
             "Script failed", return_code=1, stderr=large_error
         )
@@ -243,7 +243,7 @@ class TestRunPythonScriptAction:
 
         # Verify error output was truncated
         assert "Python output:" in result.message
-        assert "[Error output truncated at 2000 tokens" in result.message
+        assert "[Error output truncated at 4000 tokens" in result.message
         assert result.properties.get("fail_reason") == "execution_error_truncated"
 
     def test_truncate_output_by_tokens_method(self):
@@ -288,3 +288,101 @@ class TestRunPythonScriptAction:
             result_tokens_estimate = len(result.split()) * 1.3  # Rough token estimate
             # Should get at least 70% of target tokens to avoid being too conservative
             assert result_tokens_estimate >= 700, f"Only got ~{result_tokens_estimate} tokens from 1000 limit"
+
+    def test_strip_ansi_codes(self):
+        """Test that ANSI color codes and terminal sequences are properly stripped."""
+        action = RunPythonScript()
+        
+        # Test empty string
+        assert action._strip_ansi_codes("") == ""
+        
+        # Test plain text (should remain unchanged)
+        plain_text = "This is plain text without any formatting"
+        assert action._strip_ansi_codes(plain_text) == plain_text
+        
+        # Test text with color codes
+        colored_text = "\033[31mRed text\033[0m and \033[32mgreen text\033[0m"
+        expected = "Red text and green text"
+        assert action._strip_ansi_codes(colored_text) == expected
+        
+        # Test text with cursor movement
+        cursor_text = "Loading\033[K\rProgress: 50%"
+        expected = "LoadingProgress: 50%"
+        assert action._strip_ansi_codes(cursor_text) == expected
+        
+        # Test Sphinx-like output with decorations
+        sphinx_output = """
+\033[1m=== Building HTML ===\033[0m
+Running Sphinx v3.5.0+/82ef497a8
+\033[33mWARNING:\033[0m while setting up extension sphinx.addnodes: node class 'meta' is already registered
+building [mo]: targets for 0 po files that are out of date
+building [html]: targets for 2 source files that are out of date
+\033[32mupdating environment:\033[0m [new config] 2 added, 0 changed, 0 removed
+"""
+        expected_sphinx = """
+=== Building HTML ===
+Running Sphinx v3.5.0+/82ef497a8
+WARNING: while setting up extension sphinx.addnodes: node class 'meta' is already registered
+building [mo]: targets for 0 po files that are out of date
+building [html]: targets for 2 source files that are out of date
+updating environment: [new config] 2 added, 0 changed, 0 removed
+"""
+        assert action._strip_ansi_codes(sphinx_output).strip() == expected_sphinx.strip()
+        
+        # Test complex ANSI sequences
+        complex_ansi = "\033[1;31mBold Red\033[0m \033[4;34mUnderlined Blue\033[0m \033[7mInverted\033[0m"
+        expected = "Bold Red Underlined Blue Inverted"
+        assert action._strip_ansi_codes(complex_ansi) == expected
+        
+        # Test progress bar style output
+        progress = "Progress: [##########          ] 50%\r"
+        expected_progress = "Progress: [##########          ] 50%"
+        assert action._strip_ansi_codes(progress) == expected_progress
+
+    @pytest.mark.asyncio
+    async def test_execute_with_ansi_codes(self, file_context, workspace):
+        """Test that ANSI codes are stripped from execution output."""
+        # Mock script output with ANSI color codes
+        colored_output = "\033[32m✓ Test passed\033[0m\n\033[31m✗ Test failed\033[0m"
+        workspace.environment.execute.return_value = colored_output
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute the action
+        args = RunPythonScriptArgs(script_path="colored_script.py")
+        result = await action.execute(args, file_context)
+
+        # Verify ANSI codes were stripped
+        assert "Python output:" in result.message
+        assert "✓ Test passed" in result.message
+        assert "✗ Test failed" in result.message
+        # Ensure no ANSI codes remain
+        assert "\033[" not in result.message
+        assert "\x1b[" not in result.message
+
+    @pytest.mark.asyncio
+    async def test_execute_with_ansi_codes_in_error(self, file_context, workspace):
+        """Test that ANSI codes are stripped from error output."""
+        # Mock error with ANSI color codes
+        colored_error = "\033[31mERROR:\033[0m Module not found\n\033[33mWARNING:\033[0m Deprecated function"
+        workspace.environment.execute.side_effect = EnvironmentExecutionError(
+            "Script failed", return_code=1, stderr=colored_error
+        )
+
+        # Create and initialize the action
+        action = RunPythonScript()
+        await action.initialize(workspace)
+
+        # Execute the action
+        args = RunPythonScriptArgs(script_path="error_script.py")
+        result = await action.execute(args, file_context)
+
+        # Verify ANSI codes were stripped from error
+        assert "Python output:" in result.message
+        assert "ERROR: Module not found" in result.message
+        assert "WARNING: Deprecated function" in result.message
+        # Ensure no ANSI codes remain
+        assert "\033[" not in result.message
+        assert "\x1b[" not in result.message

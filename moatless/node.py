@@ -517,6 +517,11 @@ class Node(BaseModel):
         self.terminal = False
         self.is_duplicate = False
         self.error = None
+        self.evaluation_result = None
+        self.thinking_blocks = None
+        self.thoughts = None
+        self.completions = {}
+        self.reward = None
         if self.parent and self.parent.file_context:
             self.file_context = self.parent.file_context.clone()
         self.children = []

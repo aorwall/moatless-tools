@@ -88,7 +88,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
             raise e
         finally:
             if patch:
-                await self._reset_repository()
+                await self.reset_modified_files(patch)
 
         return stdout
 
@@ -420,23 +420,6 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
         return True
 
-    async def _reset_repository(self) -> bool:
-        """Reset the git repository to its original state."""
-        reset_commands = [
-            "git clean -fd",
-            f"git reset --hard {self.swebench_instance['base_commit']}",
-        ]
-
-        reset_commands = "\n".join(reset_commands)
-
-        stdout, return_code = await self._execute_command(reset_commands)
-
-        if return_code != 0:
-            logger.error(f"Failed to reset repository: {stdout}")
-            return False
-
-        return True
-
     def _test_script(self, test_files: list[str]) -> str:
         directives = [d for d in test_files if not any(d.endswith(ext) for ext in NON_TEST_EXTS)]
 
@@ -458,9 +441,12 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
     async def reset_modified_files(self, patch: str):
         modified_files = self.get_modified_files(patch)
-        logger.info(f"Resetting modified files: {modified_files}")
+        # Filter to only reset .py files, excluding setup/config files
+        ignored_files = {'setup.py', 'pyproject.toml', 'setup.cfg', 'tox.ini'}
+        modified_files = [f for f in modified_files if f not in ignored_files]
+        logger.info(f"Resetting modified Python files: {modified_files}")
 
-        # Reset only the modified files to their base state
+        # Reset only the modified .py files to their base state
         for modified_file in modified_files:
             reset_command = f"git checkout {self.swebench_instance['base_commit']} {modified_file}"
             stdout, return_code = await self._execute_command(reset_command)

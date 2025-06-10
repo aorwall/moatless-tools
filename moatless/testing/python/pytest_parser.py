@@ -210,6 +210,46 @@ class PyTestParser(TestOutputParser):
                 error_type = "Syntax Error"
 
             test_results.append(create_generic_error_result(log, error_type))
+        
+        # If we have no test results, try to parse the summary line
+        if not test_results:
+            # Look for pytest summary patterns like "X passed", "X failed", etc.
+            summary_pattern = re.compile(r"(\d+)\s+(passed|failed|skipped|xfailed|xpassed|error)", re.IGNORECASE)
+            summary_matches = summary_pattern.findall(log)
+            
+            if summary_matches:
+                # Create a single test result representing the overall test run
+                # Find the predominant status - if any failed/error, use that; otherwise use passed
+                has_failures = False
+                total_tests = 0
+                status_counts = {}
+                
+                for count_str, status_str in summary_matches:
+                    count = int(count_str)
+                    total_tests += count
+                    status_str_upper = status_str.upper()
+                    
+                    if status_str_upper in ["FAILED", "ERROR"]:
+                        has_failures = True
+                    
+                    status_counts[status_str_upper] = count
+                
+                # Determine overall status
+                if "ERROR" in status_counts and status_counts["ERROR"] > 0:
+                    overall_status = TestStatus.ERROR
+                elif "FAILED" in status_counts and status_counts["FAILED"] > 0:
+                    overall_status = TestStatus.FAILED
+                else:
+                    overall_status = TestStatus.PASSED
+                
+                # Create a summary result
+                test_results.append(TestResult(
+                    status=overall_status,
+                    name=f"Test Summary ({total_tests} tests)",
+                    file_path=file_path,
+                    method=None,
+                    failure_output=None
+                ))
 
         return test_results
 

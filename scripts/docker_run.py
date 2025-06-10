@@ -197,7 +197,7 @@ def main():
         "--litellm-model-name",
         help="LiteLLM model name to use (overrides only the model field of existing completion model)",
     )
-    parser.add_argument("--flow", "-f", default="simple_coding", help="Flow ID to use (default: simple_coding)")
+    parser.add_argument("--flow", "-f",  help="Flow ID to use")
     parser.add_argument(
         "--use-local",
         "-l",

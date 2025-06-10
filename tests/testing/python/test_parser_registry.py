@@ -386,6 +386,42 @@ def test_sphinx_1():
     assert "ImportError" in errored[0].failure_output
 
 
+def test_sphinx_2():
+    """Test parsing sphinx output with failures"""
+    with open(_get_test_data_path("sphinx_output_2.txt")) as f:
+        log = f.read()
+
+    result = parse_log(log, "sphinx-doc/sphinx")
+
+    # The PyTestParser only parses the test summary section, which only shows failed tests
+    # It doesn't parse the individual dots for passed tests
+    assert len(result) == 1
+
+    # Check failed test
+    failed = [r for r in result if r.status == TestStatus.FAILED]
+    assert len(failed) == 1
+    assert failed[0].name == "tests/test_ext_napoleon_docstring.py::TestNumpyDocstring::test_token_type_invalid assert (2 == 1)"
+    assert failed[0].file_path == "tests/test_ext_napoleon_docstring.py"
+    assert failed[0].method == "TestNumpyDocstring.test_token_type_invalid"
+    assert failed[0].failure_output
+    assert "assert (2 == 1)" in failed[0].failure_output
+    assert "assert len(warnings) == 1 and all(match_re.match(w) for w in warnings)" in failed[0].failure_output
+
+
+
+def test_sphinx_3():
+    """Test parsing sphinx output with all tests passing"""
+    with open(_get_test_data_path("sphinx_output_3.txt")) as f:
+        log = f.read()
+
+    result = parse_log(log, "sphinx-doc/sphinx")
+    
+    # The parser should now recognize the summary line "11 passed, 26 warnings in 2.88s"
+    assert len(result) == 1
+    assert result[0].status == TestStatus.PASSED
+    assert "11 tests" in result[0].name
+
+
 def test_sympy_1():
     """Test parsing sympy output with failures and errors"""
     with open(_get_test_data_path("sympy_output_1.txt")) as f:

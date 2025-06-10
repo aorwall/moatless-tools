@@ -18,7 +18,7 @@ from moatless.runner.runner import (
 )
 from moatless.runner.storage.storage import JobStorage
 from moatless.runner.storage.memory import InMemoryJobStorage
-from moatless.runner.storage.redis import RedisJobStorage
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ class SchedulerRunner(BaseRunner):
         if storage_type == "redis":
             if not redis_url:
                 raise ValueError("Redis URL is required for Redis storage")
+            from moatless.runner.storage.redis import RedisJobStorage
             self.storage = RedisJobStorage(redis_url)
         else:
             self.storage = InMemoryJobStorage()
