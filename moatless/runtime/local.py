@@ -441,7 +441,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
     async def reset_modified_files(self, patch: str):
         modified_files = self.get_modified_files(patch)
-        # Filter to only reset .py files, excluding setup/config files
+        # Make sure to not reset files changes in pre_install phase
         ignored_files = {'setup.py', 'pyproject.toml', 'setup.cfg', 'tox.ini'}
         modified_files = [f for f in modified_files if f not in ignored_files]
         logger.info(f"Resetting modified Python files: {modified_files}")

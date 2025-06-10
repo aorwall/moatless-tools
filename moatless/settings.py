@@ -128,8 +128,8 @@ async def get_event_bus() -> BaseEventBus:
 
                 _event_bus = RedisEventBus(redis_url=os.environ.get("REDIS_URL"), storage=storage)
             except Exception as e:
-                logger.error(f"Failed to initialize event bus and runner: {e}")
-                raise e
+                logger.error(f"Failed to initialize event bus and runner. Using local event bus instead. Error: {e}")
+                _event_bus = LocalEventBus(storage=storage)
         else:
             logger.info("Use Local Event Bus")
             _event_bus = LocalEventBus(storage=storage)
