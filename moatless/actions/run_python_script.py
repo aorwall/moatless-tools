@@ -1,3 +1,4 @@
+import re
 from pydantic import ConfigDict, Field
 
 from moatless.actions.action import Action
@@ -86,6 +87,23 @@ class RunPythonScript(Action):
         
         return best_result, True
 
+    def _strip_ansi_codes(self, text: str) -> str:
+        """
+        Strip ANSI color codes and terminal sequences from text.
+        
+        This removes common ANSI escape sequences including:
+        - Color codes (\033[31m, \033[0m, etc.)
+        - Cursor movement (\033[K, \r, etc.)
+        - Bold, underline, and other formatting
+        """
+        if not text:
+            return text
+            
+        # ANSI escape sequence pattern - matches \033[ or \x1b[ followed by any characters until 'm'
+        # Also matches common terminal control characters like \r
+        ansi_pattern = r'\033\[[0-9;]*[mK]|\x1b\[[0-9;]*[mK]|\r'
+        return re.sub(ansi_pattern, '', text)
+
     async def execute(self, args: ActionArguments, file_context: FileContext | None = None) -> Observation:
         """Execute a Python script and return its output."""
         if not isinstance(args, RunPythonScriptArgs):
@@ -109,8 +127,11 @@ class RunPythonScript(Action):
 
             output = await self.workspace.environment.execute(command, patch=patch, fail_on_error=True)
 
+            # Strip ANSI codes from output
+            clean_output = self._strip_ansi_codes(output)
+
             # Truncate output if it exceeds max_output_tokens
-            truncated_output, was_truncated = self._truncate_output_by_tokens(output, args.max_output_tokens)
+            truncated_output, was_truncated = self._truncate_output_by_tokens(clean_output, args.max_output_tokens)
             
             message = f"Python output:\n{truncated_output}"
             properties = {}
@@ -120,8 +141,11 @@ class RunPythonScript(Action):
 
             return Observation.create(message=message, properties=properties)
         except EnvironmentExecutionError as e:
+            # Strip ANSI codes from error output
+            clean_error = self._strip_ansi_codes(e.stderr)
+            
             # Also truncate error output
-            truncated_error, was_truncated = self._truncate_output_by_tokens(e.stderr, args.max_output_tokens)
+            truncated_error, was_truncated = self._truncate_output_by_tokens(clean_error, args.max_output_tokens)
             
             message = f"Python output:\n{truncated_error}"
             properties = {"fail_reason": "execution_error"}

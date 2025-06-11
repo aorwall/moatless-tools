@@ -140,7 +140,7 @@ class TestRunPythonScriptAction:
         assert args.script_path == "test.py"
         assert args.args == []
         assert args.timeout == 30
-        assert args.max_output_tokens == 4000
+        assert args.max_output_tokens == 2000
 
         # Test args with all parameters
         args = RunPythonScriptArgs(
@@ -171,13 +171,13 @@ class TestRunPythonScriptAction:
         action = RunPythonScript()
         await action.initialize(workspace)
 
-        # Execute with default max_output_tokens (4000)
+        # Execute with default max_output_tokens (2000)
         args = RunPythonScriptArgs(script_path="large_output_script.py")
         result = await action.execute(args, file_context)
 
         # Verify output was truncated
         assert "Python output:" in result.message
-        assert "[Output truncated at 4000 tokens" in result.message
+        assert "[Output truncated at 2000 tokens" in result.message
         assert "Please revise the script to show less output" in result.message
         assert result.properties.get("fail_reason") == "truncated"
         # The result should be shorter than the original
@@ -243,7 +243,7 @@ class TestRunPythonScriptAction:
 
         # Verify error output was truncated
         assert "Python output:" in result.message
-        assert "[Error output truncated at 4000 tokens" in result.message
+        assert "[Error output truncated at 2000 tokens" in result.message
         assert result.properties.get("fail_reason") == "execution_error_truncated"
 
     def test_truncate_output_by_tokens_method(self):
