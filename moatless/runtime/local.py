@@ -300,7 +300,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
         bash_command = f'bash -l -c "{command}"'
 
-        logger.debug(f"Executing command: {bash_command} in {cwd}")
+        logger.info(f"Executing command: {bash_command} in {cwd} with timeout {timeout}")
         process = await asyncio.create_subprocess_shell(
             bash_command,
             cwd=str(self.repo_path),
