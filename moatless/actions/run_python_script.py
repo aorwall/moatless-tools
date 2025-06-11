@@ -19,7 +19,7 @@ class RunPythonScriptArgs(ActionArguments):
 
     script_path: str = Field(..., description="Path to the Python script to execute")
     args: list[str] = Field(default=[], description="Command line arguments to pass to the script")
-    timeout: int = Field(default=180, description="Timeout in seconds for script execution")
+    timeout: int = Field(default=30, description="Timeout in seconds for script execution")
     max_output_tokens: int = Field(default=2000, description="Maximum number of tokens to return in output")
 
     model_config = ConfigDict(title="RunPythonScript")

@@ -59,7 +59,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
         self._install_task = asyncio.create_task(self._run_async_installation(self._install_command))
 
-    async def execute(self, command: str, fail_on_error: bool = False, patch: str | None = None) -> str:
+    async def execute(self, command: str, fail_on_error: bool = False, patch: str | None = None, timeout: int = 600) -> str:
         """Execute a command in the environment."""
         await self._wait_for_install()
         try:
@@ -72,7 +72,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
                     stdout, return_code = await self._execute_command(self._install_command)
                     logger.info(f"Installation output: {stdout} {return_code}")
             
-            stdout, return_code = await self._execute_command(command)
+            stdout, return_code = await self._execute_command(command, timeout=timeout)
             logger.info(f"Command {command} returned {return_code}")
             logger.info(f"Output: {stdout}")
 
