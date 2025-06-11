@@ -107,7 +107,7 @@ class RunPythonScript(Action):
             else:
                 patch = None
 
-            output = await self.workspace.environment.execute(command, patch=patch, fail_on_error=True, timeout=args.timeout)
+            output = await self.workspace.environment.execute(command, patch=patch, fail_on_error=True)
 
             # Truncate output if it exceeds max_output_tokens
             truncated_output, was_truncated = self._truncate_output_by_tokens(output, args.max_output_tokens)

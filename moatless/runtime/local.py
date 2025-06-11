@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import signal
 from datetime import datetime
 from pathlib import Path
 from typing import Tuple
@@ -14,7 +15,7 @@ from moatless.exceptions import RuntimeError
 from moatless.runtime.runtime import RuntimeEnvironment
 from moatless.storage.base import BaseStorage
 from moatless.testing.python.parser_registry import parse_log
-from moatless.testing.schema import TestResult
+from moatless.testing.schema import TestResult, TestStatus
 from moatless.context_data import current_node_id
 from unidiff import PatchSet
 
@@ -163,8 +164,6 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
 
                 # If no results were parsed but we ran a test (even if it timed out), create a basic result
                 if not testbed_results:
-                    from moatless.testing.schema import TestResult, TestStatus
-
                     basic_result = TestResult(
                         status=TestStatus.ERROR if timed_out else TestStatus.UNKNOWN,
                         file_path=test_file,
@@ -307,27 +306,50 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
             env=os.environ.copy(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,  # redirect stderr to stdout
+            start_new_session=True  # Create new process group for proper cleanup
         )
 
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
             return stdout.decode(), process.returncode or 0
         except asyncio.TimeoutError:
-            # Kill the process if it times out
-            process.kill()
+            # Kill the entire process group to ensure all child processes are terminated
             try:
-                await process.wait()
-            except:
+                # Use process group ID (negative PID) to kill all processes in the group
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                # Process already dead
                 pass
+            except AttributeError:
+                # Fallback for systems without killpg
+                process.kill()
+            
+            try:
+                await asyncio.wait_for(process.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                # Force kill if still not dead
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+                
             # Return partial output if any was captured before timeout
             partial_output = ""
             if process.stdout:
                 try:
                     partial_data = await asyncio.wait_for(process.stdout.read(), timeout=1.0)
                     partial_output = partial_data.decode()
-                except:
+                except Exception:
                     pass
-            return partial_output, -1  # Use -1 to indicate timeout
+            
+            # Add timeout message to the output
+            timeout_msg = f"\n\n[ERROR] Command execution timed out after {timeout} seconds\n"
+            combined_output = partial_output + timeout_msg
+            
+            logger.warning(f"Command timed out after {timeout} seconds: {command}")
+            return combined_output, -1  # Use -1 to indicate timeout
 
     async def _apply_patch(self, patch: str) -> bool:
         """Apply a git patch to the repository."""
@@ -517,8 +539,8 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
         eval_commands += [
             f"git config --global --add safe.directory {repo_directory}",  # for nonroot user
             f"cd {repo_directory}",
-            f"which python",
-            f"python --version",
+            "which python",
+            "python --version",
             # This is just informational, so we have a record
             "git status",
             "git show",
@@ -563,7 +585,7 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
             log_content = f"Command: {command}\n"
             log_content += f"Return Code: {return_code}\n"
             if patch:
-                log_content += f"Patch Applied: Yes\n"
+                log_content += "Patch Applied: Yes\n"
                 log_content += f"Patch Content:\n{patch}\n"
                 log_content += "=" * 80 + "\n"
             else:
