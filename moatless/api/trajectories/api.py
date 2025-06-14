@@ -74,14 +74,7 @@ async def get_trajectory_logs(
     Returns:
         The log file contents
     """
-    try:
-        return await flow_manager.get_trajectory_logs(project_id, trajectory_id, file_name)
-    except ValueError as e:
-        logger.exception(f"Error getting trajectory logs: {str(e)}")
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error getting trajectory logs: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await flow_manager.get_trajectory_logs(project_id, trajectory_id, file_name)
 
 
 @router.get("/{project_id}/{trajectory_id}/events")
@@ -146,15 +139,9 @@ async def retry_trajectory(
     flow_manager: FlowManager = Depends(get_flow_manager),
 ):
     """Reset and restart a trajectory by removing all children from the root node."""
-    try:
-        await flow_manager.retry_trajectory(project_id, trajectory_id)
-        return {"status": "success", "message": f"Retried trajectory {trajectory_id}"}
-    except ValueError as e:
-        logger.exception(f"Error retrying trajectory: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error retrying trajectory: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    await flow_manager.retry_trajectory(project_id, trajectory_id)
+    return {"status": "success", "message": f"Retried trajectory {trajectory_id}"}
+
 
 
 @router.post("/{project_id}/{trajectory_id}/resume")
@@ -226,14 +213,7 @@ async def get_node_evaluation_files(
     Returns:
         A dictionary mapping file names to file contents
     """
-    try:
-        return await flow_manager.get_node_evaluation_files(project_id, trajectory_id, node_id)
-    except ValueError as e:
-        logger.exception(f"Error getting node evaluation files: {str(e)}")
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        logger.exception(f"Error getting node evaluation files: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+    return await flow_manager.get_node_evaluation_files(project_id, trajectory_id, node_id)
 
 
 @router.get("/{project_id}/{trajectory_id}/chat-messages")

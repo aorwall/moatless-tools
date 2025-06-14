@@ -80,8 +80,7 @@ class EvaluationManager:
 
         if not evaluation_name:
             evaluation_name = f"eval_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{flow_id}_{dataset_name}"
-
-        logger.info(f"Creating evaluation: {evaluation_name}")
+            logger.info(f"Use generated evaluation name: {evaluation_name}")
 
         if not instance_ids:
             instance_ids = self.get_dataset_instance_ids(dataset_name)
@@ -178,6 +177,80 @@ class EvaluationManager:
             dataset_name=evaluation.dataset_name,
             instance_ids=instance_ids,
         )
+
+    async def add_instances_to_evaluation(self, evaluation_name: str, instance_ids: list[str]) -> Evaluation:
+        """Add new instances to an existing evaluation."""
+        evaluation = await self._load_evaluation(evaluation_name)
+        if not evaluation:
+            raise ValueError(f"Evaluation {evaluation_name} not found")
+
+        # Find existing instance IDs
+        existing_instance_ids = {instance.instance_id for instance in evaluation.instances}
+        
+        # Filter out instances that already exist
+        new_instance_ids = [instance_id for instance_id in instance_ids if instance_id not in existing_instance_ids]
+        
+        if not new_instance_ids:
+            logger.info(f"All provided instances already exist in evaluation {evaluation_name}")
+            return evaluation
+        
+        logger.info(f"Adding {len(new_instance_ids)} new instances to evaluation {evaluation_name}")
+        
+        # Create new EvaluationInstance objects
+        new_instances = [EvaluationInstance(instance_id=instance_id) for instance_id in new_instance_ids]
+        
+        # Add them to the evaluation
+        evaluation.instances.extend(new_instances)
+        
+        # Create trajectories for the new instances
+        for instance in new_instances:
+            await self._create_trajectory(evaluation, instance)
+        
+        # Save the updated evaluation
+        await self._save_evaluation(evaluation)
+        
+        logger.info(f"Successfully added {len(new_instances)} instances to evaluation {evaluation_name}")
+        return evaluation
+
+    async def add_dataset_to_evaluation(self, evaluation_name: str, dataset_name: str) -> Evaluation:
+        """Add all instances from a dataset to an existing evaluation."""
+        evaluation = await self._load_evaluation(evaluation_name)
+        if not evaluation:
+            raise ValueError(f"Evaluation {evaluation_name} not found")
+
+        try:
+            # Get all instance IDs from the dataset
+            dataset_instance_ids = self.get_dataset_instance_ids(dataset_name)
+        except ValueError as e:
+            raise ValueError(f"Dataset {dataset_name} not found: {str(e)}")
+        
+        # Find existing instance IDs
+        existing_instance_ids = {instance.instance_id for instance in evaluation.instances}
+        
+        # Filter out instances that already exist
+        new_instance_ids = [instance_id for instance_id in dataset_instance_ids if instance_id not in existing_instance_ids]
+        
+        if not new_instance_ids:
+            logger.info(f"All instances from dataset {dataset_name} already exist in evaluation {evaluation_name}")
+            return evaluation
+        
+        logger.info(f"Adding {len(new_instance_ids)} instances from dataset {dataset_name} to evaluation {evaluation_name}")
+        
+        # Create new EvaluationInstance objects
+        new_instances = [EvaluationInstance(instance_id=instance_id) for instance_id in new_instance_ids]
+        
+        # Add them to the evaluation
+        evaluation.instances.extend(new_instances)
+        
+        # Create trajectories for the new instances
+        for instance in new_instances:
+            await self._create_trajectory(evaluation, instance)
+        
+        # Save the updated evaluation
+        await self._save_evaluation(evaluation)
+        
+        logger.info(f"Successfully added {len(new_instances)} instances from dataset {dataset_name} to evaluation {evaluation_name}")
+        return evaluation
 
     @tracer.start_as_current_span("EvaluationManager.start_evaluation")
     async def start_evaluation(self, evaluation_name: str) -> Evaluation:
@@ -396,7 +469,8 @@ class EvaluationManager:
             project_id=evaluation.evaluation_name,
             trajectory_id=instance.instance_id,
         ):
-            logger.warning(f"Instance {instance.instance_id} not found in storage {self.storage}")
+            logger.warning(f"Instance {instance.instance_id} not found in storage {self.storage}, will create it")
+            await self._create_trajectory(evaluation, instance)
             return instance
 
         try:
@@ -416,6 +490,11 @@ class EvaluationManager:
 
             if node.reward:
                 instance.reward = node.reward.value
+                
+            if len(node.get_all_nodes()) > 1:
+                # TODO: Second created nod is the best indication on start time...
+                instance.started_at = node.get_all_nodes()[1].timestamp
+                instance.completed_at = flow.root.get_all_nodes()[-1].timestamp
 
             logger.debug(f"Instance {instance.instance_id} flow is finished: {flow.is_finished()}")
             if flow.is_finished():
@@ -423,17 +502,19 @@ class EvaluationManager:
             else:
                 instance.execution_status = ExecutionStatus.CREATED
 
-            if node.evaluation_result and node.evaluation_result.resolved is not None:
-                # Set resolution status based on evaluation
-                instance.set_resolution(node.evaluation_result.resolved)
-                logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
+            if node.evaluation_result:
+                if node.evaluation_result.resolved is not None:
+                    # Set resolution status based on evaluation
+                    instance.set_resolution(node.evaluation_result.resolved)
+                    logger.info(f"Instance {instance.instance_id} resolution: {instance.resolution_status}")
                 
-            
-            if node.evaluation_result and node.evaluation_result.details:
-                p2p_failues = node.evaluation_result.details.get("tests_status", {}).get("PASS_TO_PASS", {}).get("failure", [])
-                logger.info(f"Instance {instance.instance_id} p2p failures: {p2p_failues}")
-                if p2p_failues and not "p2p_failures" in instance.issues:
-                    instance.issues.append("p2p_failures")
+                if node.evaluation_result.details:
+                    p2p_failues = node.evaluation_result.details.get("tests_status", {}).get("PASS_TO_PASS", {}).get("failure", [])
+                    if p2p_failues and not "p2p_failures" in instance.issues:
+                        instance.issues.append("p2p_failures")
+                
+                logger.info(f"Instance {instance.instance_id} evaluated at: {node.evaluation_result.end_time}")
+                instance.evaluated_at = node.evaluation_result.end_time
                     
             if instance.resolution_status != ResolutionStatus.RESOLVED:
                 logger.debug(f"Instance {instance.instance_id} and node {node.node_id} has no evaluation result")
@@ -729,14 +810,18 @@ class EvaluationManager:
 
         flow = await self._flow_manager.get_flow(evaluation.evaluation_name, instance.instance_id)
         should_save = False
+        evaluated = False
         for leaf_node in flow.root.get_leaf_nodes():
             if leaf_node.error:
                 logger.info(f"Resetting node {leaf_node.node_id} with error")
                 leaf_node.reset()
                 should_save = True
+            
+            if leaf_node.evaluation_result:
+                evaluated = True
 
         # Skip if already completed and evaluated
-        if instance.is_finished() and instance.is_evaluated():
+        if instance.is_finished() and evaluated:
             finish_reason = flow.is_finished()
             if finish_reason:
                 logger.info(f"Instance {instance_id} is already completed and evaluated, skipping: {finish_reason}")
@@ -881,10 +966,11 @@ class EvaluationManager:
         if not evaluation:
             raise ValueError(f"Evaluation {evaluation_name} not found")
 
+        instances = [i for i in evaluation.instances if i.is_finished()]
         # Calculate basic metrics
-        total_instances = len(evaluation.instances)
-        resolved_instances = sum(1 for instance in evaluation.instances if instance.resolved is True)
-        failed_instances = sum(1 for instance in evaluation.instances if instance.resolved is False)
+        total_instances = len(instances)
+        resolved_instances = sum(1 for instance in instances if instance.resolved is True)
+        failed_instances = sum(1 for instance in instances if instance.resolved is False)
         success_rate = (resolved_instances / total_instances) * 100 if total_instances > 0 else 0
 
         # Calculate cost and token metrics
@@ -896,7 +982,7 @@ class EvaluationManager:
         iteration_values = []
         cost_values = []
 
-        for instance in evaluation.instances:
+        for instance in instances:
             if instance.usage:
                 cost = instance.usage.completion_cost or 0
                 total_cost += cost
@@ -958,7 +1044,7 @@ class EvaluationManager:
 
         # Per-repo statistics
         repo_data = {}
-        for instance in evaluation.instances:
+        for instance in instances:
             try:
                 swebench_instance = get_swebench_instance(instance.instance_id)
                 repo = swebench_instance["repo"]

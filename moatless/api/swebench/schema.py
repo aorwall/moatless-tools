@@ -81,6 +81,18 @@ class EvaluationRequestDTO(BaseModel):
     instance_ids: Optional[list[str]] = None
 
 
+class AddInstancesRequestDTO(BaseModel):
+    """Request for adding instances to an existing evaluation"""
+
+    instance_ids: list[str] = Field(..., description="List of instance IDs to add to the evaluation")
+
+
+class AddDatasetRequestDTO(BaseModel):
+    """Request for adding a dataset to an existing evaluation"""
+
+    dataset_name: str = Field(..., description="Name of the dataset to add to the evaluation")
+
+
 class DatasetDTO(BaseModel):
     """DTO for dataset information"""
 

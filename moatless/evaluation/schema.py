@@ -122,6 +122,25 @@ class EvaluationInstance(BaseModel):
 
     issues: List[str] = Field(default_factory=list, description="Issues in the instance")
 
+    def _calculate_duration(self, start_time: Optional[datetime], end_time: Optional[datetime]) -> Optional[float]:
+        """Safely calculate duration between two datetime objects, handling timezone differences"""
+        if not start_time or not end_time:
+            return None
+            
+        # Ensure both datetimes have the same timezone awareness
+        if start_time.tzinfo is None and end_time.tzinfo is not None:
+            # start_time is naive, end_time is aware - assume start_time is UTC
+            start_time = start_time.replace(tzinfo=timezone.utc)
+        elif start_time.tzinfo is not None and end_time.tzinfo is None:
+            # start_time is aware, end_time is naive - assume end_time is UTC
+            end_time = end_time.replace(tzinfo=timezone.utc)
+        elif start_time.tzinfo is None and end_time.tzinfo is None:
+            # Both are naive - leave as is
+            pass
+        # If both are aware, they can be subtracted directly
+        
+        return (end_time - start_time).total_seconds()
+
     def start(self):
         """Mark instance as queued for execution"""
         self.execution_status = ExecutionStatus.QUEUED
@@ -162,8 +181,9 @@ class EvaluationInstance(BaseModel):
             else:
                 self.resolution_status = ResolutionStatus.FAILED
 
+        # Use the safe duration calculation method
         if self.started_at and self.completed_at:
-            self.duration = (self.completed_at - self.started_at).total_seconds()
+            self.duration = self._calculate_duration(self.started_at, self.completed_at)
 
         if benchmark_result:
             # Store as dict to avoid type issues
@@ -177,8 +197,9 @@ class EvaluationInstance(BaseModel):
         self.completed_at = datetime.now(timezone.utc)
         self.error = error
         self.error_at = datetime.now(timezone.utc)
-        if self.started_at:
-            self.duration = (self.completed_at - self.started_at).total_seconds()
+        # Use the safe duration calculation method
+        if self.started_at and self.completed_at:
+            self.duration = self._calculate_duration(self.started_at, self.completed_at)
         self._sync_legacy_status()
 
     def set_resolution(self, resolved: bool, partially_resolved: bool = False):

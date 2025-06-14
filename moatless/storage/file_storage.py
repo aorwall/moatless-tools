@@ -90,6 +90,9 @@ class FileStorage(BaseStorage):
         file_path = self._get_path(path)
         if not file_path.exists():
             raise KeyError(f"No data found for path: {path}")
+        
+        if file_path.is_dir():
+            raise ValueError(f"Path {path} is a directory, not a file")
 
         async with aiofiles.open(str(file_path), "r", encoding="utf-8") as f:
             return await f.read()

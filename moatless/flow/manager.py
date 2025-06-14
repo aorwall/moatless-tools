@@ -602,6 +602,7 @@ class FlowManager:
 
         trajectory_path = self._storage.get_trajectory_path(project_id, trajectory_id)
         await self._storage.write(f"{trajectory_path}/trajectory.json", agentic_flow.get_trajectory_data())
+        logger.info(f"Reset node {node_id} in trajectory {trajectory_id}, saved to {trajectory_path}/trajectory.json")
 
         return node
 
@@ -699,9 +700,14 @@ class FlowManager:
         else:
             # Otherwise return the most recent log file
             current_file = log_files[0]
-
-        log_content = await self._storage.read(current_file)
+        
         current_file_name = current_file.split("/")[-1]
+        try:
+            log_content = await self._storage.read(current_file)
+            
+        except Exception as e:
+            logger.exception(f"Error reading log file {current_file}: {e}")
+            log_content = f"Error reading log file {current_file}: {e}"
 
         return {"logs": log_content, "files": file_list, "current_file": current_file_name}
 
@@ -736,10 +742,21 @@ class FlowManager:
             except Exception as e:
                 logger.exception(f"Error parsing completion: {e}")
                 # Still add a basic DTO with original data for debugging
+                
+                if isinstance(raw_completion.get("original_input"), str):
+                    original_input = { "content": raw_completion.get("original_input") }
+                else:
+                    original_input = raw_completion.get("original_input")
+
+                if isinstance(raw_completion.get("original_response"), str):
+                    original_output = { "content": raw_completion.get("original_response") }
+                else:
+                    original_output = raw_completion.get("original_response")
+
                 completions.append(
                     CompletionDTO(
-                        original_input=raw_completion.get("original_input"),
-                        original_output=raw_completion.get("original_response"),
+                        original_input=original_input,
+                        original_output=original_output,
                     )
                 )
 

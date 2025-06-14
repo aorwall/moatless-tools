@@ -16,6 +16,8 @@ from moatless.flow.flow import AgenticFlow
 from moatless.flow.search_tree import SearchTree
 
 from .schema import (
+    AddDatasetRequestDTO,
+    AddInstancesRequestDTO,
     DatasetDTO,
     DatasetsResponseDTO,
     EvaluationRequestDTO,
@@ -34,13 +36,11 @@ router = APIRouter()
 @router.post("/evaluations", response_model=Evaluation)
 async def create_evaluation(
     request: EvaluationRequestDTO,
-    model_manager: ModelConfigManager = Depends(get_model_manager),
-    flow_manager: FlowManager = Depends(get_flow_manager),
     evaluation_manager: EvaluationManager = Depends(get_evaluation_manager),
 ):
     """Create a new evaluation run for a dataset."""
     logger.info(
-        f"Creating evaluation for dataset {request.dataset} with flow {request.flow_id} and model {request.model_id} and litellm_model_name {request.litellm_model_name}"
+        f"Creating evaluation {request.name} for dataset {request.dataset} with flow {request.flow_id} and model {request.model_id} and litellm_model_name {request.litellm_model_name}"
     )
     
     if request.flow:
@@ -49,6 +49,7 @@ async def create_evaluation(
         flow = None
 
     evaluation = await evaluation_manager.create_evaluation(
+        evaluation_name=request.name,
         dataset_name=request.dataset,
         instance_ids=request.instance_ids,
         flow_id=request.flow_id,
@@ -217,6 +218,40 @@ async def cancel_evaluation_jobs(
 
     except Exception as e:
         logger.exception(f"Failed to cancel jobs: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/evaluations/{evaluation_name}/instances", response_model=Evaluation)
+async def add_instances_to_evaluation(
+    evaluation_name: str,
+    request: AddInstancesRequestDTO,
+    evaluation_manager: EvaluationManager = Depends(get_evaluation_manager),
+):
+    """Add new instances to an existing evaluation."""
+    try:
+        evaluation = await evaluation_manager.add_instances_to_evaluation(evaluation_name, request.instance_ids)
+        return evaluation
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Failed to add instances to evaluation: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/evaluations/{evaluation_name}/dataset", response_model=Evaluation)
+async def add_dataset_to_evaluation(
+    evaluation_name: str,
+    request: AddDatasetRequestDTO,
+    evaluation_manager: EvaluationManager = Depends(get_evaluation_manager),
+):
+    """Add all instances from a dataset to an existing evaluation."""
+    try:
+        evaluation = await evaluation_manager.add_dataset_to_evaluation(evaluation_name, request.dataset_name)
+        return evaluation
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"Failed to add dataset to evaluation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -309,10 +309,40 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
             start_new_session=True  # Create new process group for proper cleanup
         )
 
+        # Use a more robust timeout approach
+        if timeout is None:
+            # No timeout specified, wait indefinitely
+            stdout, _ = await process.communicate()
+            return stdout.decode(), process.returncode or 0
+        
+        # Implement dual timeout mechanism for robustness
+        # Create a task for process.communicate()
+        comm_task = asyncio.create_task(process.communicate())
+        
+        # Also create a backup timer that will forcefully kill the process
+        async def backup_killer():
+            await asyncio.sleep(timeout)
+            if not comm_task.done():
+                logger.warning(f"Backup timeout triggered after {timeout} seconds, forcefully killing process")
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except Exception as e:
+                    logger.error(f"Error in backup killer: {e}")
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+        
+        killer_task = asyncio.create_task(backup_killer())
+        
         try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
+            # Use wait_for as primary timeout mechanism
+            stdout, _ = await asyncio.wait_for(comm_task, timeout=timeout)
+            killer_task.cancel()  # Cancel backup killer if we finish normally
             return stdout.decode(), process.returncode or 0
         except asyncio.TimeoutError:
+            # Ensure the backup killer has a chance to run
+            await asyncio.sleep(0.1)
             # Kill the entire process group to ensure all child processes are terminated
             try:
                 # Use process group ID (negative PID) to kill all processes in the group
@@ -349,6 +379,14 @@ class SweBenchLocalEnvironment(RuntimeEnvironment, BaseEnvironment):
             combined_output = partial_output + timeout_msg
             
             logger.warning(f"Command timed out after {timeout} seconds: {command}")
+            
+            # Cancel the backup killer task
+            killer_task.cancel()
+            try:
+                await killer_task
+            except asyncio.CancelledError:
+                pass
+            
             return combined_output, -1  # Use -1 to indicate timeout
 
     async def _apply_patch(self, patch: str) -> bool:
