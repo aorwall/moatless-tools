@@ -8,7 +8,7 @@ from moatless.events import BaseEvent
 from moatless.runner.runner import JobStatus
 from moatless.schema import MessageHistoryType
 from moatless.flow.flow import AgenticFlow
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -121,6 +121,14 @@ class EvaluationInstance(BaseModel):
     resolved_by: Optional[int] = Field(default=None, description="Number of agents that have resolved the evaluation")
 
     issues: List[str] = Field(default_factory=list, description="Issues in the instance")
+
+    @field_validator('created_at', 'queued_at', 'started_at', 'completed_at', 'start_evaluating_at', 'evaluated_at', 'error_at', 'last_event_timestamp', mode='before')
+    @classmethod
+    def validate_timestamps(cls, v):
+        """Handle invalid timestamp values by keeping them as None to avoid parsing errors"""
+        if v is None or v == "None" or (isinstance(v, str) and v.strip() == ""):
+            return None
+        return v
 
     def _calculate_duration(self, start_time: Optional[datetime], end_time: Optional[datetime]) -> Optional[float]:
         """Safely calculate duration between two datetime objects, handling timezone differences"""
