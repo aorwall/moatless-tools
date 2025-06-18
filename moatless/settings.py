@@ -1,9 +1,14 @@
 import logging
 import os
+from typing import Type
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    def load_dotenv(*args, **kwargs):
+        """Fallback no-op if python-dotenv is missing."""
+        return False
 
-from litellm import Type
 from moatless.eventbus.base import BaseEventBus
 from moatless.eventbus.local_bus import LocalEventBus
 from moatless.runner.asyncio_runner import AsyncioRunner

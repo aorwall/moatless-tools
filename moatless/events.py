@@ -2,7 +2,12 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+try:
+    from pydantic import BaseModel, Field, field_validator
+    PYDANTIC_V2 = True
+except ImportError:  # pragma: no cover - support pydantic v1
+    from pydantic import BaseModel, Field, validator as field_validator
+    PYDANTIC_V2 = False
 
 logger = logging.getLogger(__name__)
 
@@ -19,12 +24,19 @@ class BaseEvent(BaseModel):
 
     model_config = {"ser_json_timedelta": "iso8601", "json_encoders": {datetime: lambda dt: dt.isoformat()}}
 
-    @field_validator("timestamp", mode="before")
-    @classmethod
-    def parse_datetime(cls, value):
-        if isinstance(value, str):
-            return datetime.fromisoformat(value)
-        return value
+    if PYDANTIC_V2:
+        @field_validator("timestamp", mode="before")
+        @classmethod
+        def parse_datetime(cls, value):
+            if isinstance(value, str):
+                return datetime.fromisoformat(value)
+            return value
+    else:  # pragma: no cover - support pydantic v1
+        @field_validator("timestamp", pre=True)
+        def parse_datetime(cls, value):
+            if isinstance(value, str):
+                return datetime.fromisoformat(value)
+            return value
 
     @classmethod
     def from_dict(cls, data: dict) -> "BaseEvent":

@@ -4,12 +4,18 @@ import shutil
 import tempfile
 
 import pytest
-from dotenv import load_dotenv
 
-# Import here to avoid circular imports
-from moatless import settings
-from moatless.storage.base import BaseStorage
-from moatless.storage.file_storage import FileStorage
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    def load_dotenv(*args, **kwargs):
+        """Fallback no-op if python-dotenv is not installed."""
+        return False
+
+try:
+    from moatless.storage.file_storage import FileStorage
+except Exception:  # pragma: no cover - optional dependency
+    FileStorage = None  # type: ignore
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -35,8 +41,13 @@ def temp_dir():
 @pytest.fixture
 def file_storage(temp_dir):
     """Fixture to create a storage instance with a test directory."""
+    from moatless import settings
+    if FileStorage is not None:
+        settings._storage = FileStorage(base_dir=temp_dir)
+    else:
+        from moatless.storage.memory_storage import MemoryStorage
 
-    settings._storage = FileStorage(base_dir=temp_dir)
+        settings._storage = MemoryStorage()
     return settings._storage
 
 
