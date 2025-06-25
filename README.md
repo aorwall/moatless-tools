@@ -6,8 +6,7 @@ _For the implementation used in the paper [SWE-Search: Enhancing Software Agents
 ## SWE-Bench
 I use the [SWE-bench benchmark](https://www.swebench.com/) as a way to verify my ideas. 
 
-* [Claude 3.5 Sonnet v20241022 evaluation results](https://experiments.moatless.ai/evaluations/20250113_claude_3_5_sonnet_20241022_temp_0_0_iter_20_fmt_tool_call_hist_messages_lite) - 39% solve rate, 2.7 resolved instances per dollar
-* [Deepseek V3](https://experiments.moatless.ai/evaluations/20250111_deepseek_chat_v3_temp_0_0_iter_20_fmt_react_hist_react) - 30.7% solve rate, 24 resolved instances per dollar
+* Claude 4 Sonnet - 70.8% solve rate, $0.63 per instance.
 
 # Try it out
 
