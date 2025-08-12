@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_IGNORED_DIRS = [".git", ".cursor", ".mvn", ".venv"]
 
 
+def sort_breadth_first(paths):
+    """Sort paths breadth-first: by depth (number of slashes), then alphabetically."""
+    return sorted(paths, key=lambda path: (path.count('/'), path))
+
+
 class ListFilesArgs(ActionArguments):
     """List files and directories in a specified directory."""
 
@@ -154,13 +159,15 @@ class ListFiles(Action):
                     else:
                         files_command = "git ls-files --directory | grep -v '/' | sort"
 
-                # Command for directories (git doesn't track directories, so we use find)
+                # Command for directories (git doesn't track directories, so we use find with git check-ignore)
+                # Use grep to filter out target directory, then check each remaining directory
                 if list_files_args.recursive:
-                    dirs_command = f"find {target_dir} -xdev -type d | sort | xargs -I{{}} bash -c 'git check-ignore {{}} > /dev/null || echo {{}}'"
+                    # Filter out the target directory upfront, then check git ignore status
+                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
                 else:
-                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{target_dir}$' | sort | xargs -I{{}} bash -c 'git check-ignore {{}} > /dev/null || echo {{}}'"
+                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
             else:
@@ -314,7 +321,7 @@ class ListFiles(Action):
 
                 # Create a result object
                 result = {
-                    "directories": sorted(directories),
+                    "directories": sort_breadth_first(directories),
                     "files": sorted(files),
                     "total_dirs": len(directories),
                     "total_files": len(files),
@@ -347,7 +354,10 @@ class ListFiles(Action):
                             if not any(f"/{ignored_dir}/" in f"/{f}/" for ignored_dir in self.ignored_dirs)
                         ]
 
-                        result = {"directories": filtered_dirs, "files": filtered_files}
+                        result = {
+                            "directories": sort_breadth_first(filtered_dirs), 
+                            "files": sorted(filtered_files)
+                        }
                     else:
                         return Observation.create(
                             message=f"Error listing directory: {str(e)}",

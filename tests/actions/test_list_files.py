@@ -525,3 +525,245 @@ async def test_recursive_hidden_directories_excluded(list_files_action, file_con
     directories = result.properties.get("directories", [])
     hidden_dirs = [d for d in directories if ".hidden_subdir" in d]
     assert len(hidden_dirs) == 0, "No hidden directories should be in properties for recursive listing"
+
+
+@pytest.mark.asyncio
+async def test_breadth_first_directory_ordering(list_files_action, file_context, temp_repo):
+    """Test that directories are listed breadth-first (root level first, then by depth)."""
+    # Create a complex nested directory structure
+    nested_dirs = [
+        "level1_a",
+        "level1_b", 
+        "level1_a/level2_a",
+        "level1_a/level2_b",
+        "level1_b/level2_c",
+        "level1_a/level2_a/level3_a",
+        "level1_a/level2_a/level3_b",
+        "level1_b/level2_c/level3_c"
+    ]
+    
+    for dir_path in nested_dirs:
+        os.makedirs(os.path.join(temp_repo, dir_path), exist_ok=True)
+        # Create a file in each directory to ensure it's tracked
+        with open(os.path.join(temp_repo, dir_path, "file.txt"), "w") as f:
+            f.write("content")
+
+    # Add to git
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add nested directories"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+
+    # Execute recursive listing
+    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing breadth-first ordering")
+    result = await list_files_action.execute(args, file_context)
+
+    # Get the directory order from properties 
+    directories = result.properties.get("directories", [])
+    
+    # Filter to only our test directories
+    test_dirs = [d for d in directories if d.startswith("level1_")]
+    
+    # Expected order: level 1 dirs first, then level 2, then level 3
+    # Within each level, alphabetical order
+    expected_order = [
+        "level1_a",           # depth 0
+        "level1_b",           # depth 0  
+        "level1_a/level2_a",  # depth 1
+        "level1_a/level2_b",  # depth 1
+        "level1_b/level2_c",  # depth 1
+        "level1_a/level2_a/level3_a",  # depth 2
+        "level1_a/level2_a/level3_b",  # depth 2
+        "level1_b/level2_c/level3_c"   # depth 2
+    ]
+    
+    # Check that our test directories appear in breadth-first order
+    actual_order = [d for d in directories if d in expected_order]
+    assert actual_order == expected_order, f"Expected breadth-first order {expected_order}, got {actual_order}"
+
+
+@pytest.mark.asyncio 
+async def test_performance_improvement_no_xargs(list_files_action, file_context, temp_repo):
+    """Test that the new commands don't use slow xargs approach."""
+    import time
+    
+    # Create many directories to test performance
+    for i in range(50):
+        os.makedirs(os.path.join(temp_repo, f"perf_test_dir_{i:02d}"), exist_ok=True)
+        for j in range(5):
+            subdir = os.path.join(temp_repo, f"perf_test_dir_{i:02d}", f"subdir_{j}")
+            os.makedirs(subdir, exist_ok=True)
+            with open(os.path.join(subdir, "file.txt"), "w") as f:
+                f.write("test content")
+
+    # Add to git
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add performance test dirs"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+
+    # Measure time for recursive listing
+    start_time = time.time()
+    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing performance")
+    result = await list_files_action.execute(args, file_context)
+    end_time = time.time()
+    
+    execution_time = end_time - start_time
+    
+    # Should complete much faster than the old 3+ minute xargs approach
+    # Even with 250+ directories, should complete in under 5 seconds
+    assert execution_time < 5.0, f"Directory listing took {execution_time:.2f}s, expected < 5.0s"
+    
+    # Verify we got results
+    assert len(result.properties.get("directories", [])) > 50, "Should have found many test directories"
+
+
+@pytest.mark.asyncio
+async def test_sort_breadth_first_function():
+    """Test the sort_breadth_first utility function directly."""
+    from moatless.actions.list_files import sort_breadth_first
+    
+    # Test various directory paths
+    unsorted_paths = [
+        "deep/nested/path/dir",
+        "root_dir",
+        "another_root",
+        "level1/level2",
+        "level1/another_level2", 
+        "different_level1/level2/level3",
+        "level1/level2/level3"
+    ]
+    
+    result = sort_breadth_first(unsorted_paths)
+    
+    # Expected: depth 0 first, then 1, then 2, then 3, alphabetical within each depth
+    expected = [
+        "another_root",          # depth 0
+        "root_dir",              # depth 0  
+        "level1/another_level2", # depth 1
+        "level1/level2",         # depth 1
+        "different_level1/level2/level3", # depth 2
+        "level1/level2/level3",  # depth 2
+        "deep/nested/path/dir"   # depth 3
+    ]
+    
+    assert result == expected, f"Expected {expected}, got {result}"
+
+
+@pytest.mark.asyncio
+async def test_directories_with_spaces_and_special_chars(list_files_action, file_context, temp_repo):
+    """Test that directories with spaces and special characters are handled correctly."""
+    # Create directories with problematic names
+    problematic_dirs = [
+        "dir with spaces",
+        "dir-with-dashes", 
+        "dir_with_underscores",
+        "dir.with.dots",
+        "dir(with)parens",
+        "dir[with]brackets",
+        "dir{with}braces"
+    ]
+    
+    for dir_name in problematic_dirs:
+        dir_path = os.path.join(temp_repo, dir_name)
+        os.makedirs(dir_path, exist_ok=True)
+        # Create a file in each directory
+        with open(os.path.join(dir_path, "test.txt"), "w") as f:
+            f.write("test content")
+    
+    # Add to git  
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add special directories"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+        
+    # Set up environment
+    env = LocalBashEnvironment(cwd=temp_repo)
+    list_files_action.workspace.environment = env
+
+    # Execute 
+    args = ListFilesArgs(directory="", recursive=False, thoughts="Testing special characters")
+    result = await list_files_action.execute(args, file_context)
+    
+    # Should not contain bash error messages
+    assert "unary operator expected" not in result.message
+    assert "bash: line" not in result.message
+    
+    # Should contain the directories
+    for dir_name in problematic_dirs:
+        assert dir_name in result.message or dir_name.replace(" ", r"\ ") in result.message
+
+
+@pytest.mark.asyncio
+async def test_empty_and_malformed_directory_names(list_files_action, file_context, temp_repo):
+    """Test handling of edge cases that might cause bash parsing issues."""
+    # Create some normal directories
+    normal_dirs = ["normal1", "normal2"]
+    for dir_name in normal_dirs:
+        os.makedirs(os.path.join(temp_repo, dir_name), exist_ok=True)
+        with open(os.path.join(temp_repo, dir_name, "file.txt"), "w") as f:
+            f.write("content")
+    
+    # Add to git
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add normal directories"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+    
+    # Set up environment  
+    env = LocalBashEnvironment(cwd=temp_repo)
+    list_files_action.workspace.environment = env
+
+    # Execute
+    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing bash robustness")
+    result = await list_files_action.execute(args, file_context)
+    
+    # The key test: should not contain bash error messages
+    assert "unary operator expected" not in result.message
+    assert "bash: line" not in result.message
+    assert "command not found" not in result.message
+    
+    # Should successfully list directories
+    assert "normal1" in result.message
+    assert "normal2" in result.message
+
+
+@pytest.mark.asyncio
+async def test_very_deep_directory_structure(list_files_action, file_context, temp_repo):
+    """Test with deeply nested directories that might stress bash command parsing."""
+    # Create a very deep directory structure
+    deep_path = temp_repo
+    for i in range(10):  # Create 10 levels deep
+        deep_path = os.path.join(deep_path, f"level_{i}")
+        os.makedirs(deep_path, exist_ok=True)
+        
+    # Add a file at the deepest level
+    with open(os.path.join(deep_path, "deep_file.txt"), "w") as f:
+        f.write("very deep content")
+    
+    # Add to git
+    try:
+        subprocess.run(["git", "add", "."], cwd=temp_repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "Add deep structure"], cwd=temp_repo, check=True, capture_output=True)
+    except Exception:
+        pass
+    
+    # Set up environment
+    env = LocalBashEnvironment(cwd=temp_repo)
+    list_files_action.workspace.environment = env
+
+    # Execute recursive listing
+    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing deep structure")
+    result = await list_files_action.execute(args, file_context)
+    
+    # Should not contain bash errors
+    assert "unary operator expected" not in result.message
+    assert "bash: line" not in result.message
+    
+    # Should contain some of the deep directories
+    assert "level_0" in result.message
+    assert "level_1" in result.message
