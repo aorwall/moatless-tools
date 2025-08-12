@@ -14,7 +14,7 @@ import numpy as np
 from fsspec.implementations.local import LocalFileSystem
 from llama_index.core.bridge.pydantic import PrivateAttr
 from llama_index.core.schema import BaseNode
-from llama_index.core.vector_stores.simple import _build_metadata_filter_fn
+from llama_index.core.vector_stores.simple import build_metadata_filter_fn
 from llama_index.core.vector_stores.types import (
     DEFAULT_PERSIST_DIR,
     BasePydanticVectorStore,
@@ -172,7 +172,7 @@ class SimpleFaissVectorStore(BasePydanticVectorStore):
             similarity_top_k (int): top k most similar nodes
 
         """
-        query_filter_fn = _build_metadata_filter_fn(lambda node_id: self._data.metadata_dict[node_id], query.filters)
+        query_filter_fn = build_metadata_filter_fn(lambda node_id: self._data.metadata_dict[node_id], query.filters)
 
         query_embedding = cast(list[float], query.query_embedding)
         query_embedding_np = np.array(query_embedding, dtype="float32")[np.newaxis, :]
