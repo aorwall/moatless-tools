@@ -271,6 +271,9 @@ class DockerRunner(BaseRunner):
             elif effective_memory_limit:
                 # If memory limit is set but swap limit is not, default to twice the memory limit
                 cmd.extend(["--memory-swap", effective_memory_limit])
+            
+            # Add ulimit for file descriptors to prevent "Too many open files" errors
+            cmd.extend(["--ulimit", "nofile=65536:65536"])
 
             # Add Docker labels for easier container identification and querying
             job_labels = create_labels(project_id, trajectory_id)
@@ -292,6 +295,9 @@ class DockerRunner(BaseRunner):
             if self.moatless_source_dir:
                 logger.info(f"Mounting {self.moatless_source_dir}:/opt/moatless/moatless")
                 cmd.extend(["-v", f"{self.moatless_source_dir}:/opt/moatless/moatless"])
+                # Also mount the lockfile to ensure dependency compatibility
+                cmd.extend(["-v", f"{self.moatless_source_dir}/uv.lock:/opt/moatless/uv.lock"])
+                cmd.extend(["-v", f"{self.moatless_source_dir}/pyproject.toml:/opt/moatless/pyproject.toml"])
                 cmd.extend(["-e", "PYTHONPATH=/opt/moatless/moatless:$PYTHONPATH"])
 
             args = create_job_args(project_id, trajectory_id, job_func, node_id)
@@ -311,6 +317,10 @@ class DockerRunner(BaseRunner):
                 self.logger.info(f"Will run update-moatless.sh with branch {branch_to_use}")
                 run_command += f"/opt/moatless/docker/update-moatless.sh --branch {branch_to_use} && "
 
+            # If using local source, sync dependencies first (not frozen) to use local lockfile
+            if self.moatless_source_dir:
+                run_command += "cd /opt/moatless && uv sync --compile-bytecode --all-extras && "
+            
             # Add the main job command
             run_command += f"date '+%Y-%m-%d %H:%M:%S' && echo 'Starting job at ' $(date '+%Y-%m-%d %H:%M:%S') && uv run - <<EOF\n{args}\nEOF"
 
