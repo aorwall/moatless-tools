@@ -119,6 +119,10 @@ class BaseCompletionModel(MoatlessComponent, ABC):
         default=False,
         description="Whether to merge messages with the same role into a single message as this is required by models like Deepseek-R1",
     )
+    reasoning_effort: Optional[str] = Field(
+        default=None,
+        description="The reasoning effort level for the completion (e.g., 'low', 'medium', 'high')",
+    )
 
     _response_schema: Optional[list[type[ResponseSchema]]] = PrivateAttr(default=None)
     _system_prompt: Optional[str] = PrivateAttr(default=None)
@@ -484,15 +488,20 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     if "claude" in self.model:
                         self._inject_prompt_caching(messages)
 
-                    response = await litellm.acompletion(
-                        model=self.model,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        messages=messages,
-                        metadata=self.metadata or {},
-                        timeout=self.timeout,
+                    completion_kwargs = {
+                        "model": self.model,
+                        "max_tokens": self.max_tokens,
+                        "temperature": self.temperature,
+                        "messages": messages,
+                        "metadata": self.metadata or {},
+                        "timeout": self.timeout,
                         **self._completion_params,
-                    )
+                    }
+                    
+                    if self.reasoning_effort:
+                        completion_kwargs["reasoning_effort"] = self.reasoning_effort
+                    
+                    response = await litellm.acompletion(**completion_kwargs)
 
                     if invocation.current_attempt:
                         invocation.current_attempt.update_from_response(response, self.model)
