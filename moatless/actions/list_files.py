@@ -143,6 +143,9 @@ class ListFiles(Action):
                 ignore_dirs = "|".join([f"^{d}$" for d in self.ignored_dirs])
                 ignore_pattern = f" | grep -v -E '{ignore_dirs}'"
 
+            # Escape the target directory for use in regex patterns
+            escaped_target_dir = target_dir.replace(".", r"\.")
+
             # Build the appropriate find command based on recursion setting and git availability
             if git_available:
                 # Use git commands when git is available to respect .gitignore
@@ -163,11 +166,11 @@ class ListFiles(Action):
                 # Use grep to filter out target directory, then check each remaining directory
                 if list_files_args.recursive:
                     # Filter out the target directory upfront, then check git ignore status
-                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
+                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{escaped_target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
                 else:
-                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
+                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{escaped_target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
             else:
@@ -182,7 +185,7 @@ class ListFiles(Action):
                 else:
                     # List only immediate files and directories using find with maxdepth
                     # -xdev: don't cross filesystem boundaries
-                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{target_dir}$' | sort"
+                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{escaped_target_dir}$' | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
                     files_command = f"find {target_dir} -xdev -maxdepth 1 -type f | sort"
