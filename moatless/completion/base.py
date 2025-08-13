@@ -499,6 +499,7 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     }
                     
                     if self.reasoning_effort:
+                        completion_kwargs["allowed_openai_params"] = ["reasoning_effort"]
                         completion_kwargs["reasoning_effort"] = self.reasoning_effort
                     
                     response = await litellm.acompletion(**completion_kwargs)
