@@ -178,7 +178,7 @@ class ListFiles(Action):
                 if list_files_args.recursive:
                     # Get all files and directories recursively using find
                     # -xdev: don't cross filesystem boundaries
-                    dirs_command = f"find {target_dir} -xdev -type d | sort"
+                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{escaped_target_dir}$' | sort"
                     if ignore_pattern:
                         dirs_command += ignore_pattern
                     files_command = f"find {target_dir} -xdev -type f | sort"
