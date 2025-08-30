@@ -166,11 +166,21 @@ class ListFiles(Action):
                 # Use grep to filter out target directory, then check each remaining directory
                 if list_files_args.recursive:
                     # Filter out the target directory upfront, then check git ignore status
-                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{escaped_target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
+                    # Suppress stderr from git check-ignore to avoid fatal messages leaking into output
+                    dirs_command = (
+                        f"find {target_dir} -xdev -type d | "
+                        f"grep -v '^{escaped_target_dir}$' | "
+                        f"while read -r dir; do git check-ignore \"$dir/\" >/dev/null 2>&1 || echo \"$dir\"; done | sort"
+                    )
                     if ignore_pattern:
                         dirs_command += ignore_pattern
                 else:
-                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{escaped_target_dir}$' | while read -r dir; do git check-ignore \"$dir/\" >/dev/null || echo \"$dir\"; done | sort"
+                    # Suppress stderr from git check-ignore to avoid fatal messages leaking into output
+                    dirs_command = (
+                        f"find {target_dir} -xdev -maxdepth 1 -type d | "
+                        f"grep -v '^{escaped_target_dir}$' | "
+                        f"while read -r dir; do git check-ignore \"$dir/\" >/dev/null 2>&1 || echo \"$dir\"; done | sort"
+                    )
                     if ignore_pattern:
                         dirs_command += ignore_pattern
             else:
