@@ -66,6 +66,8 @@ class EvaluationManager:
         flow_id: str | None = None,
         model_id: str | None = None,
         litellm_model_name: str | None = None,
+        model_base_url: str | None = None,
+        model_api_key: str | None = None,
         flow_config: AgenticFlow | None = None,
         evaluation_name: str | None = None,
         dataset_name: str | None = None,
@@ -90,7 +92,8 @@ class EvaluationManager:
             raise ValueError("Evaluation already exists")
 
         flow = await self._flow_manager.build_flow(
-            flow_id=flow_id, flow_config=flow_config, model_id=model_id, litellm_model_name=litellm_model_name
+            flow_id=flow_id, flow_config=flow_config, model_id=model_id, litellm_model_name=litellm_model_name,
+            model_base_url=model_base_url, model_api_key=model_api_key
         )
         
         model_id = flow.agent.completion_model.model
