@@ -1,6 +1,7 @@
 from pydantic import ConfigDict, Field
 import logging
 from typing import List
+import shlex
 
 from moatless.actions.action import Action
 from moatless.actions.schema import (
@@ -14,11 +15,6 @@ logger = logging.getLogger(__name__)
 
 # Default directories to always ignore
 DEFAULT_IGNORED_DIRS = [".git", ".cursor", ".mvn", ".venv"]
-
-
-def sort_breadth_first(paths):
-    """Sort paths breadth-first: by depth (number of slashes), then alphabetically."""
-    return sorted(paths, key=lambda path: (path.count('/'), path))
 
 
 class ListFilesArgs(ActionArguments):
@@ -136,201 +132,82 @@ class ListFiles(Action):
                 # If the command fails, assume git is not available
                 git_available = False
 
-            # Create the ignore_pattern for find commands
-            ignore_pattern = ""
-            if self.ignored_dirs:
-                # Create a pattern to exclude specified directories
-                ignore_dirs = "|".join([f"^{d}$" for d in self.ignored_dirs])
-                ignore_pattern = f" | grep -v -E '{ignore_dirs}'"
+            # Legacy variables no longer needed due to clearer builders
+            # (kept minimal changes to surrounding logic)
 
-            # Escape the target directory for use in regex patterns
-            escaped_target_dir = target_dir.replace(".", r"\.")
-
-            # Build the appropriate find command based on recursion setting and git availability
+            # Build the commands using helpers for clarity
             if git_available:
-                # Use git commands when git is available to respect .gitignore
-                if list_files_args.recursive:
-                    # For recursive mode with gitignore
-                    if dir_path:
-                        files_command = f"cd {target_dir} && git ls-files | sort"
-                    else:
-                        files_command = "git ls-files | sort"
-                else:
-                    # For non-recursive mode with gitignore
-                    if dir_path:
-                        files_command = f"cd {target_dir} && git ls-files --directory | grep -v '/' | sort"
-                    else:
-                        files_command = "git ls-files --directory | grep -v '/' | sort"
-
-                # Command for directories (git doesn't track directories, so we use find with git check-ignore)
-                # Use grep to filter out target directory, then check each remaining directory
-                if list_files_args.recursive:
-                    # Filter out the target directory upfront, then check git ignore status
-                    # Suppress stderr from git check-ignore to avoid fatal messages leaking into output
-                    dirs_command = (
-                        f"find {target_dir} -xdev -type d | "
-                        f"grep -v '^{escaped_target_dir}$' | "
-                        f"while read -r dir; do git check-ignore \"$dir/\" >/dev/null 2>&1 || echo \"$dir\"; done | sort"
-                    )
-                    if ignore_pattern:
-                        dirs_command += ignore_pattern
-                else:
-                    # Suppress stderr from git check-ignore to avoid fatal messages leaking into output
-                    dirs_command = (
-                        f"find {target_dir} -xdev -maxdepth 1 -type d | "
-                        f"grep -v '^{escaped_target_dir}$' | "
-                        f"while read -r dir; do git check-ignore \"$dir/\" >/dev/null 2>&1 || echo \"$dir\"; done | sort"
-                    )
-                    if ignore_pattern:
-                        dirs_command += ignore_pattern
+                dirs_command, files_command = build_git_commands(dir_path, target_dir, list_files_args.recursive, self.ignored_dirs)
             else:
-                # Use regular find when git is not available
-                if list_files_args.recursive:
-                    # Get all files and directories recursively using find
-                    # -xdev: don't cross filesystem boundaries
-                    dirs_command = f"find {target_dir} -xdev -type d | grep -v '^{escaped_target_dir}$' | sort"
-                    if ignore_pattern:
-                        dirs_command += ignore_pattern
-                    files_command = f"find {target_dir} -xdev -type f | sort"
-                else:
-                    # List only immediate files and directories using find with maxdepth
-                    # -xdev: don't cross filesystem boundaries
-                    dirs_command = f"find {target_dir} -xdev -maxdepth 1 -type d | grep -v '^{escaped_target_dir}$' | sort"
-                    if ignore_pattern:
-                        dirs_command += ignore_pattern
-                    files_command = f"find {target_dir} -xdev -maxdepth 1 -type f | sort"
+                dirs_command, files_command = build_fs_commands(dir_path, target_dir, list_files_args.recursive, self.ignored_dirs)
 
             try:
                 # Execute commands to get directories and files
                 try:
-                    dirs_output = await local_env.execute(dirs_command, patch=patch)
+                    # Execute commands to get directories and files
+                    if dirs_command is not None:
+                        dirs_output = await local_env.execute(dirs_command, patch=patch)
+                    else:
+                        dirs_output = ""
                     files_output = await local_env.execute(files_command, patch=patch)
 
                 except Exception as e:
                     # Check if it's a "no such file or directory" error
                     if "No such file or directory" in str(e):
                         return Observation.create(
-                            message=f"Error listing directory: No such directory '{list_files_args.directory}'",
+                            message=f"Error: Directory {list_files_args.directory} does not exist",
                             properties={"fail_reason": "directory_not_found"},
                         )
                     raise  # Re-raise if it's a different error
 
-                # Process directory results
-                directories = []
-                # Check for common error patterns in command output
-                no_such_file_error = False
-                for cmd_output in [dirs_output, files_output]:
-                    if cmd_output and "No such file or directory" in cmd_output:
-                        no_such_file_error = True
-                        break
-
-                if no_such_file_error:
+                # Process directory results (helpers for clarity)
+                directories: list[str] = []
+                if (dirs_output and "No such file or directory" in dirs_output) or (
+                    files_output and "No such file or directory" in files_output
+                ):
                     return Observation.create(
-                        message=f"Error listing directory: No such directory '{list_files_args.directory}'",
+                        message=f"Error: Directory {list_files_args.directory} does not exist",
                         properties={"fail_reason": "directory_not_found"},
                     )
 
                 for line in dirs_output.strip().split("\n"):
-                    if line.strip():
-                        # Convert path to relative format
-                        if line.startswith("./"):
-                            rel_path = line[2:]
-                        else:
-                            rel_path = line
-
-                        # Skip if the directory should be ignored (relative path)
-                        if any(
-                            rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
-                            for ignored_dir in self.ignored_dirs
-                        ):
+                    rel_path = normalize_rel(line.strip())
+                    if not rel_path or rel_path == dir_path:
+                        continue
+                    if not list_files_args.recursive:
+                        dir_name = rel_path.replace(f"{dir_path}/", "") if dir_path else rel_path
+                        if not dir_name or should_skip_dir(dir_name, self.ignored_dirs):
                             continue
+                        directories.append(dir_name)
+                    else:
+                        if should_skip_dir(rel_path, self.ignored_dirs):
+                            continue
+                        directories.append(rel_path)
 
-                        # For recursive listing, filter out the target directory itself
-                        if rel_path and rel_path != dir_path:
-                            if not list_files_args.recursive:
-                                # For non-recursive, show only the directory name
-                                if dir_path:
-                                    # Strip the parent directory part to get just the name
-                                    dir_name = rel_path.replace(f"{dir_path}/", "")
-                                    if dir_name:  # Skip if empty after replacement
-                                        # Skip if the directory name should be ignored or starts with '.'
-                                        if dir_name.startswith('.') or any(
-                                            dir_name == ignored_dir or dir_name.startswith(f"{ignored_dir}/")
-                                            for ignored_dir in self.ignored_dirs
-                                        ):
-                                            continue
-                                        directories.append(dir_name)
-                                else:
-                                    # Skip if the directory name should be ignored or starts with '.'
-                                    if rel_path.startswith('.') or any(
-                                        rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
-                                        for ignored_dir in self.ignored_dirs
-                                    ):
-                                        continue
-                                    directories.append(rel_path)
-                            else:
-                                # For recursive, show full relative paths
-                                # Skip if the directory path should be ignored or any component starts with '.'
-                                path_components = rel_path.split('/')
-                                should_skip = (
-                                    rel_path.startswith('.') or 
-                                    any(component.startswith('.') for component in path_components) or
-                                    any(
-                                        rel_path == ignored_dir or rel_path.startswith(f"{ignored_dir}/")
-                                        for ignored_dir in self.ignored_dirs
-                                    )
-                                )
-                                if should_skip:
-                                    continue
-                                directories.append(rel_path)
-
-                # Process file results
-                files = []
+                # Process file results (helpers for clarity)
+                files: list[str] = []
                 for line in files_output.strip().split("\n"):
-                    if line.strip():
-                        # Convert path to relative format
-                        if line.startswith("./"):
-                            rel_path = line[2:]
+                    rel_path = normalize_rel(line.strip())
+                    if not rel_path or should_skip_file(rel_path, self.ignored_dirs):
+                        continue
+
+                    if not list_files_args.recursive:
+                        if dir_path:
+                            remainder = rel_path.replace(f"{dir_path}/", "", 1)
+                            if remainder and "/" not in remainder:
+                                files.append(remainder)
                         else:
-                            rel_path = line
-
-                        # Skip if the file is in an ignored directory or hidden directory, or if the file itself starts with a dot
-                        path_components = rel_path.split('/')
-                        file_name = path_components[-1]  # Get the actual file name
-                        should_skip_file = (
-                            any(f"/{ignored_dir}/" in f"/{rel_path}/" for ignored_dir in self.ignored_dirs) or
-                            any(component.startswith('.') for component in path_components[:-1]) or  # Check dirs
-                            file_name.startswith('.')  # Also check if the file name itself starts with a dot
-                        )
-                        if should_skip_file:
-                            continue
-
-                        if rel_path:
-                            if not list_files_args.recursive:
-                                # For non-recursive, show only the file name
-                                if dir_path:
-                                    # Strip the parent directory part to get just the name
-                                    file_name = rel_path.replace(f"{dir_path}/", "")
-                                    if file_name:  # Skip if empty after replacement
-                                        files.append(file_name)
-                                else:
-                                    files.append(rel_path)
-                            else:
-                                # For recursive, show full relative paths
+                            if "/" not in rel_path:
                                 files.append(rel_path)
+                    else:
+                        if dir_path:
+                            if rel_path.startswith(f"{dir_path}/"):
+                                files.append(rel_path[len(dir_path) + 1 :])
+                        else:
+                            files.append(rel_path)
 
                 # Apply max_results limit, prioritizing directories over files
-                total_results = list_files_args.max_results
-                if len(directories) + len(files) > total_results:
-                    # Prioritize directories first, then files with remaining slots
-                    if len(directories) >= total_results:
-                        # If we have enough directories to fill max_results, only show directories
-                        directories = directories[:total_results]
-                        files = []
-                    else:
-                        # Show all directories, then files with remaining slots
-                        remaining_slots = total_results - len(directories)
-                        files = files[:remaining_slots]
+                directories, files, _ = apply_limits(directories, files, list_files_args.max_results)
 
                 # Create a result object
                 result = {
@@ -439,3 +316,129 @@ class ListFiles(Action):
             "Git Integration: Confirm if .gitignore patterns are respected when git is available in the workspace.",
             "Directory Filtering: Check if specified directories are properly ignored in the output.",
         ]
+
+
+def normalize_rel(path: str) -> str:
+    """Convert './a/b' -> 'a/b' and normalize simple cases."""
+    if path.startswith("./"):
+        return path[2:]
+    return path
+
+
+def is_hidden_segment(segments: list[str]) -> bool:
+    return any(seg.startswith(".") for seg in segments)
+
+
+def should_skip_dir(rel_path: str, ignored_dirs: list[str]) -> bool:
+    if not rel_path:
+        return True
+    if rel_path in ignored_dirs or any(rel_path.startswith(f"{d}/") for d in ignored_dirs):
+        return True
+    if rel_path.startswith("."):
+        return True
+    parts = rel_path.split("/")
+    if is_hidden_segment(parts):
+        return True
+    return False
+
+
+def should_skip_file(rel_path: str, ignored_dirs: list[str]) -> bool:
+    if not rel_path:
+        return True
+    parts = rel_path.split("/")
+    base = parts[-1]
+    # In ignored dir
+    if any(f"/{ignored_dir}/" in f"/{rel_path}/" for ignored_dir in ignored_dirs):
+        return True
+    # Hidden dir or hidden file
+    if is_hidden_segment(parts[:-1]) or base.startswith("."):
+        return True
+    return False
+
+
+def apply_limits(directories: list[str], files: list[str], max_results: int) -> tuple[list[str], list[str], dict]:
+    """Prioritize directories when enforcing max_results."""
+    total_dirs = len(directories)
+    total_files = len(files)
+    if total_dirs + total_files <= max_results:
+        return directories, files, {
+            "total_dirs": total_dirs,
+            "total_files": total_files,
+            "results_limited": False,
+        }
+
+    if total_dirs >= max_results:
+        return directories[: max_results], [], {
+            "total_dirs": total_dirs,
+            "total_files": total_files,
+            "results_limited": True,
+        }
+
+    remaining = max_results - total_dirs
+    return directories, files[:remaining], {
+        "total_dirs": total_dirs,
+        "total_files": total_files,
+        "results_limited": True,
+    }
+
+
+def _ignored_prune_expr(ignored_dirs: list[str]) -> str:
+    if not ignored_dirs:
+        return ""
+    names = " -o ".join([f"-name {shlex.quote(d)}" for d in ignored_dirs])
+    # Wrap in grouping for -prune usage
+    return f"\( {names} \) -prune -o"
+
+
+def build_fs_commands(dir_path: str, target_dir: str, recursive: bool, ignored_dirs: list[str]) -> tuple[str, str]:
+    td = shlex.quote(target_dir)
+    prune = _ignored_prune_expr(ignored_dirs)
+    if recursive:
+        # All directories (excluding the root itself via -mindepth 1)
+        dirs_cmd = f"find {td} -xdev -mindepth 1 -type d"
+        if prune:
+            dirs_cmd = f"find {td} -xdev {prune} -mindepth 1 -type d -print | sort"
+        else:
+            dirs_cmd = f"{dirs_cmd} | sort"
+        files_cmd = f"find {td} -xdev -type f | sort"
+    else:
+        # Immediate children only
+        dirs_cmd = f"find {td} -xdev -maxdepth 1 -mindepth 1 -type d"
+        if prune:
+            dirs_cmd = f"find {td} -xdev -maxdepth 1 -mindepth 1 {prune} -type d -print | sort"
+        else:
+            dirs_cmd = f"{dirs_cmd} | sort"
+        files_cmd = f"find {td} -xdev -maxdepth 1 -type f | sort"
+    return dirs_cmd, files_cmd
+
+
+def build_git_commands(dir_path: str, target_dir: str, recursive: bool, ignored_dirs: list[str]) -> tuple[str, str]:
+    # Files via git to respect .gitignore
+    if dir_path:
+        files_cmd = f"git ls-files --cached --others --exclude-standard -- {shlex.quote(dir_path)}/** | sort"
+    else:
+        files_cmd = "git ls-files --cached --others --exclude-standard | sort"
+
+    # Directories using find, then filter through git check-ignore
+    td = shlex.quote(target_dir)
+    prune = _ignored_prune_expr(ignored_dirs)
+    if recursive:
+        base_find = f"find {td} -xdev -mindepth 1 -type d"
+        if prune:
+            base_find = f"find {td} -xdev {prune} -mindepth 1 -type d -print"
+    else:
+        base_find = f"find {td} -xdev -maxdepth 1 -mindepth 1 -type d"
+        if prune:
+            base_find = f"find {td} -xdev -maxdepth 1 -mindepth 1 {prune} -type d -print"
+
+    # Keep the existing behavior: check each dir with git check-ignore
+    dirs_cmd = (
+        f"{base_find} | while read -r dir; do git check-ignore \"$dir/\" >/dev/null 2>&1 || echo \"$dir\"; done | sort"
+    )
+
+    return dirs_cmd, files_cmd
+
+
+def sort_breadth_first(paths):
+    """Sort paths breadth-first: by depth (number of slashes), then alphabetically."""
+    return sorted(paths, key=lambda path: (path.count('/'), path))
