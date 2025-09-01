@@ -65,6 +65,8 @@ class FlowManager:
         flow_config: AgenticFlow | None = None,
         model_id: str | None = None,
         litellm_model_name: str | None = None,
+        model_base_url: str | None = None,
+        model_api_key: str | None = None,
     ) -> AgenticFlow:
         """Create a SearchTree instance from this configuration.
 
@@ -81,6 +83,10 @@ class FlowManager:
 
         if flow_id and flow_config:
             raise ValueError("Cannot provide both flow_id and flow_config")
+
+        # Set temporary attributes for model configuration
+        self._temp_model_base_url = model_base_url
+        self._temp_model_api_key = model_api_key
 
         if flow_config:
             flow = flow_config
@@ -106,6 +112,16 @@ class FlowManager:
         if litellm_model_name and flow.agent.completion_model:
             logger.info(f"Setting litellm model name {litellm_model_name} on flow agent completion model")
             flow.agent.completion_model.model = litellm_model_name
+
+        # If model_base_url is provided, override the base URL
+        if hasattr(self, '_temp_model_base_url') and self._temp_model_base_url and flow.agent.completion_model:
+            logger.info(f"Setting model base URL {self._temp_model_base_url} on flow agent completion model")
+            flow.agent.completion_model.model_base_url = self._temp_model_base_url
+
+        # If model_api_key is provided, override the API key
+        if hasattr(self, '_temp_model_api_key') and self._temp_model_api_key and flow.agent.completion_model:
+            logger.info(f"Setting model API key on flow agent completion model")
+            flow.agent.completion_model.model_api_key = self._temp_model_api_key
 
         return flow
 

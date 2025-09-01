@@ -56,6 +56,8 @@ async def run_docker_evaluation(
     model_id: str,
     litellm_model_name: str,
     flow_id: str,
+    model_base_url: str = None,
+    model_api_key: str = None,
     use_local_source: bool = False,
 ):
     """Run an evaluation with Docker."""
@@ -102,6 +104,8 @@ async def run_docker_evaluation(
             flow_id=flow_id,
             model_id=model_id,
             litellm_model_name=litellm_model_name,
+            model_base_url=model_base_url,
+            model_api_key=model_api_key,
             instance_ids=[instance_id],
             dataset_name="instance_ids",
         )
@@ -197,6 +201,14 @@ def main():
         "--litellm-model-name",
         help="LiteLLM model name to use (overrides only the model field of existing completion model)",
     )
+    parser.add_argument(
+        "--model-base-url",
+        help="Base URL for the model API (e.g., http://localhost:1234/v1 for LM Studio)",
+    )
+    parser.add_argument(
+        "--model-api-key",
+        help="API key for the model (can be dummy value for local models)",
+    )
     parser.add_argument("--flow", "-f",  help="Flow ID to use")
     parser.add_argument(
         "--use-local",
@@ -209,21 +221,15 @@ def main():
     args = parser.parse_args()
 
     # Handle backward compatibility and validation
-    model_id = args.model_id or args.model
+    model_id = args.model_id or (args.model if args.model != "gpt-4o-mini-2024-07-18" else None)
     litellm_model_name = args.litellm_model_name
 
     if args.model_id and args.model != "gpt-4o-mini-2024-07-18":  # Default value check
         print("Error: Cannot specify both --model and --model-id")
         sys.exit(1)
 
-    if args.model_id and args.litellm_model_name:
+    if model_id and args.litellm_model_name:
         print("Error: Cannot specify both --model-id and --litellm-model-name")
-        sys.exit(1)
-
-    if (
-        args.model != "gpt-4o-mini-2024-07-18" and args.litellm_model_name
-    ):  # Using non-default --model with --litellm-model-name
-        print("Error: Cannot specify both --model and --litellm-model-name")
         sys.exit(1)
 
     logger.info("Loading environment variables")
@@ -235,6 +241,8 @@ def main():
             instance_id=args.instance_id,
             model_id=model_id,
             litellm_model_name=litellm_model_name,
+            model_base_url=args.model_base_url,
+            model_api_key=args.model_api_key,
             flow_id=args.flow,
             use_local_source=args.use_local,
         )
