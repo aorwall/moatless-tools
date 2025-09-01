@@ -18,11 +18,19 @@ class LogHandler(CustomLogger):
         super().__init__()
         self._storage = storage
 
-    async def _get_log_path(self, filename: str | None = None):
+    async def _get_log_path(
+        self,
+        filename: str | None = None,
+        node_id_override: int | None = None,
+        action_step_override: int | None = None,
+        phase_override: str | None = None,
+    ):
         now = datetime.now()
-        node_id = current_node_id.get()
-        action_step = current_action_step.get()
-        phase = current_phase.get()
+        node_id = node_id_override if node_id_override is not None else current_node_id.get()
+        action_step = (
+            action_step_override if action_step_override is not None else current_action_step.get()
+        )
+        phase = phase_override if phase_override is not None else current_phase.get()
 
         trajectory_key = self._storage.get_trajectory_path()
 
@@ -54,11 +62,35 @@ class LogHandler(CustomLogger):
 
         return log_path
 
-    async def _write_to_file_async(self, data: dict):
-        log_path = await self._get_log_path()
+    async def _write_to_file_async(
+        self,
+        data: dict,
+        node_id_override: int | None = None,
+        action_step_override: int | None = None,
+        phase_override: str | None = None,
+    ):
+        log_path = await self._get_log_path(
+            node_id_override=node_id_override,
+            action_step_override=action_step_override,
+            phase_override=phase_override,
+        )
 
         try:
             await self._storage.write(path=log_path, data=data)
+            # Explicit info log to trace saved location and context
+            try:
+                resolved_node = node_id_override if node_id_override is not None else current_node_id.get()
+                resolved_step = (
+                    action_step_override if action_step_override is not None else current_action_step.get()
+                )
+                resolved_phase = phase_override if phase_override is not None else current_phase.get()
+                logger.debug(
+                    f"Saved completion log to {log_path} "
+                    f"(node={resolved_node}, action_step={resolved_step}, phase={resolved_phase})"
+                )
+            except Exception:
+                # Don't let logging issues affect flow
+                pass
         except Exception as e:
             logger.exception(f"Failed to write log to {log_path}. Data: {data}")
 
@@ -101,7 +133,31 @@ class LogHandler(CustomLogger):
         if "exception" in kwargs:
             data["exception"] = self._handle_kwargs_item(kwargs["exception"])
 
-        await self._write_to_file_async(data)
+        # Derive node context from LiteLLM metadata
+        node_id_override = None
+        action_step_override = None
+        phase_override = None
+
+        try:
+            litellm_params = kwargs.get("litellm_params", {})
+            if isinstance(litellm_params, dict):
+                meta = litellm_params.get("metadata", {})
+                if isinstance(meta, dict):
+                    if isinstance(meta.get("node_id"), int):
+                        node_id_override = meta.get("node_id")
+                    if isinstance(meta.get("action_step"), int):
+                        action_step_override = meta.get("action_step")
+                    if isinstance(meta.get("phase"), str):
+                        phase_override = meta.get("phase")
+        except Exception:
+            pass
+
+        await self._write_to_file_async(
+            data,
+            node_id_override=node_id_override,
+            action_step_override=action_step_override,
+            phase_override=phase_override,
+        )
 
     async def async_log_failure_event(self, kwargs, response_obj, start_time, end_time):
         logger.warning(f"Processing failure event for node {current_node_id.get()}")

@@ -148,10 +148,8 @@ async def test_list_files_subdirectory(list_files_action, file_context, temp_rep
     assert "Contents of directory 'src/components'" in result.message
     assert "📄 Button.js" in result.message
     assert "📄 Card.js" in result.message
-    # If git is available, this should be ignored due to .gitignore pattern
-    # If git is not available, this will be shown
-    if "respecting .gitignore" in result.message:
-        assert "📄 Card_ignored.js" not in result.message
+    # Card_ignored.js should be shown since we no longer use git integration
+    assert "📄 Card_ignored.js" in result.message
     assert "index.ts" not in result.message  # File not in this directory
     assert "utils" not in result.message  # Not showing directories from parent
 
@@ -357,27 +355,33 @@ async def test_list_files_symlinks(list_files_action, file_context, temp_repo):
 
 
 @pytest.mark.asyncio
-async def test_git_respects_gitignore(list_files_action, file_context, temp_repo):
-    """Test that git integration respects .gitignore patterns."""
+async def test_hidden_files_behavior(list_files_action, file_context, temp_repo):
+    """Test that hidden files and directories are properly handled."""
     # Set up environment
     env = LocalBashEnvironment(cwd=temp_repo)
     list_files_action.workspace.environment = env
 
-    # Execute
-    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing .gitignore respect")
+    # Execute with show_hidden=False (default)
+    args = ListFilesArgs(directory="", recursive=True, thoughts="Testing hidden file behavior")
     result = await list_files_action.execute(args, file_context)
 
-    # Check if git is available (look for the indicator in the message)
-    if "respecting .gitignore" in result.message:
-        # Git is available, so .gitignore should be respected
-        assert "📁 ignored_dir" not in result.message
-        assert "ignored_file.txt" not in result.message
-        assert "debug.log" not in result.message
-        assert "Card_ignored.js" not in result.message
-    else:
-        # Git is not available, so these might be shown
-        # We skip assertions in this case
-        pytest.skip("Git not available in test environment")
+    # Hidden directories should not be shown by default
+    assert "📁 .git" not in result.message
+    assert "📁 .venv" not in result.message
+    # But regular directories should be shown
+    assert "📁 src" in result.message
+    assert "📁 tests" in result.message
+    
+    # Execute with show_hidden=True
+    args = ListFilesArgs(directory="", recursive=True, show_hidden=True, thoughts="Testing show hidden files")
+    result = await list_files_action.execute(args, file_context)
+    
+    # .git and .venv should still be excluded even with show_hidden=True
+    assert "📁 .git" not in result.message
+    assert "📁 .venv" not in result.message
+    # Regular directories should still be shown
+    assert "📁 src" in result.message
+    assert "📁 tests" in result.message
 
 
 @pytest.mark.asyncio

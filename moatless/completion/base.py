@@ -26,6 +26,11 @@ from moatless.completion.schema import (
 from moatless.completion.stats import CompletionAttempt, CompletionInvocation
 from moatless.component import MoatlessComponent
 from moatless.exceptions import CompletionRejectError, CompletionRuntimeError
+from moatless.context_data import (
+    current_node_id,
+    current_action_step,
+    current_phase,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
@@ -488,16 +493,31 @@ class BaseCompletionModel(MoatlessComponent, ABC):
                     if "claude" in self.model:
                         self._inject_prompt_caching(messages)
 
+                    # Build LiteLLM metadata: model-level + node context
+                    request_metadata = dict(self.metadata or {})
+                    try:
+                        node_ctx = current_node_id.get()
+                        if node_ctx is not None:
+                            request_metadata["node_id"] = node_ctx
+                        step_ctx = current_action_step.get()
+                        if step_ctx is not None:
+                            request_metadata["action_step"] = step_ctx
+                        phase_ctx = current_phase.get()
+                        if phase_ctx is not None:
+                            request_metadata["phase"] = phase_ctx
+                    except Exception:
+                        pass
+
                     completion_kwargs = {
                         "model": self.model,
                         "max_tokens": self.max_tokens,
                         "temperature": self.temperature,
                         "messages": messages,
-                        "metadata": self.metadata or {},
+                        "metadata": request_metadata,
                         "timeout": self.timeout,
                         **self._completion_params,
                     }
-                    
+
                     if self.reasoning_effort:
                         completion_kwargs["allowed_openai_params"] = ["reasoning_effort"]
                         completion_kwargs["reasoning_effort"] = self.reasoning_effort
